@@ -1,6 +1,6 @@
 # stackchan-infra
 
-**A fully self-hosted voice stack for the M5Stack [StackChan](https://github.com/m5stack/StackChan).** Goal: the robot talks without phoning anywhere you don't control. Open-source firmware on the robot, [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) for voice I/O, a small FastAPI bridge to whatever LLM agent you want as the brain. Device firmware, ASR, session state, and persona live on your own hardware. LLM and TTS are pluggable — the reference config uses a cloud LLM (OpenRouter) and EdgeTTS for low-friction setup, but both have local drop-in alternatives (Ollama, Piper) so a 100% offline deployment is possible with no code changes to the stack.
+**A fully self-hosted voice stack for the M5Stack [StackChan](https://github.com/m5stack/StackChan).** Goal: the robot talks without phoning anywhere you don't control. Open-source firmware on the robot, [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) for voice I/O, a small FastAPI bridge to whatever LLM agent you want as the brain. Device firmware, ASR, session state, and persona live on your own hardware. LLM and TTS are pluggable — the reference config uses a cloud LLM (OpenRouter) and local Piper TTS, but both are pluggable — swap in Ollama for the LLM or EdgeTTS for cloud voices, so a 100% offline deployment is possible with no code changes to the stack.
 
 **A hackable starting point, not a product.** The defaults here are *one* working configuration — a default persona (named after the hardware; you set your own name via the `<ROBOT_NAME>` placeholder), [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) as the brain, Qwen3-30B via OpenRouter as the LLM — but every seam is swappable. Fork it, rip out what you don't want, wire in your own agent / LLM / TTS / persona. No releases, no support, no roadmap — just a working wiring diagram you can adapt to your own StackChan.
 
@@ -8,6 +8,8 @@ Reference deployment in this repo:
 - **Hardware**: M5Stack StackChan (CoreS3 + servo kit), firmware built from `m5stack/StackChan`.
 - **Brain**: ZeroClaw on a Raspberry Pi.
 - **Voice I/O**: xiaozhi-esp32-server on Docker (Unraid here, but single-host works too).
+
+> **Known limitations (pre-v1.0).** This repo is under active development and has not been field-tested by outside users. Known issues: first-audio latency is ~5s (dominated by the cloud LLM round-trip), firmware LED state colours have a race condition, servo motion can be startlingly fast, and the custom-providers layout requires manual directory creation if you're not using `make setup`. Child-safety guardrails are active but have not been red-teamed over voice (only HTTP). See [`docs/child-safety.md`](./docs/child-safety.md) for details. File issues at [GitHub Issues](../../issues).
 
 ---
 
@@ -80,7 +82,7 @@ flowchart LR
             VAD["SileroVAD"]
             ASR["FunASR<br/>SenseVoiceSmall"]
             LLM["ZeroClawLLM<br/>(custom provider)"]
-            TTS["EdgeTTS<br/>en-AU-WilliamNeural"]
+            TTS["TTS<br/>(LocalPiper default,<br/>EdgeTTS available)"]
         end
     end
 
@@ -92,7 +94,7 @@ flowchart LR
 
     SC -->|"WebSocket<br/>Xiaozhi protocol"| XZ
     XZ --- VAD & ASR & LLM & TTS
-    LLM -->|"HTTP POST<br/>/api/message"| Bridge
+    LLM -->|"HTTP POST<br/>/api/message/stream"| Bridge
     Bridge -->|"JSON-RPC 2.0<br/>over stdio (ACP)"| ZC
     ZC -.->|"LLM API call"| Cloud
     ZC -->|"stdout JSON-RPC"| Bridge
@@ -125,7 +127,7 @@ sequenceDiagram
     SC->>XZ: audio frames (WebSocket)
     XZ->>XZ: SileroVAD detects speech end<br/>(700ms silence)
     XZ->>XZ: FunASR → transcribed text
-    XZ->>Br: POST /api/message<br/>{"content": "what's the weather?", ...}
+    XZ->>Br: POST /api/message/stream<br/>{"content": "what's the weather?", ...}
     Br->>ZC: session/new + session/prompt<br/>(ACP over stdio)
     ZC->>LLM: chat completion
     LLM-->>ZC: "😊 Looks sunny..."
@@ -152,6 +154,7 @@ flowchart TB
         UA2["models/SenseVoiceSmall/<br/>(model.pt + configs)"]
         UA3["custom-providers/zeroclaw/<br/>(zeroclaw.py + __init__.py)"]
         UA3b["custom-providers/edge_stream/<br/>(edge_stream.py + __init__.py)"]
+        UA3d["custom-providers/piper_local/<br/>(piper_local.py + __init__.py)"]
         UA3c["custom-providers/asr/fun_local.py<br/>(patched ASR — language key)"]
         UA4["tmp/<br/>(TTS audio scratch)"]
         UA5["repo/<br/>(git clone, reference only)"]
@@ -175,9 +178,11 @@ Container volume mounts:
 |---|---|---|
 | `data/.config.yaml` | `/opt/xiaozhi-esp32-server/data/.config.yaml` | Config override (read-only mount) |
 | `models/SenseVoiceSmall/` | `/opt/xiaozhi-esp32-server/models/SenseVoiceSmall/` | ASR weights |
+| `models/piper/` | `/opt/xiaozhi-esp32-server/models/piper/` | Piper TTS voice models (`.onnx` + `.json`) |
 | `tmp/` | `/opt/xiaozhi-esp32-server/tmp/` | Scratch |
-| `custom-providers/zeroclaw/` | `/opt/xiaozhi-esp32-server/core/providers/llm/zeroclaw/` | Custom LLM provider |
-| `custom-providers/edge_stream/` | `/opt/xiaozhi-esp32-server/core/providers/tts/edge_stream/` | Custom streaming TTS provider |
+| `custom-providers/zeroclaw/` | `/opt/xiaozhi-esp32-server/core/providers/llm/zeroclaw/` | Custom LLM provider (directory mount) |
+| `custom-providers/edge_stream/edge_stream.py` | `/opt/xiaozhi-esp32-server/core/providers/tts/edge_stream.py` | Streaming EdgeTTS provider (file mount) |
+| `custom-providers/piper_local/piper_local.py` | `/opt/xiaozhi-esp32-server/core/providers/tts/piper_local.py` | Local Piper TTS provider (file mount) |
 | `custom-providers/asr/fun_local.py` | `/opt/xiaozhi-esp32-server/core/providers/asr/fun_local.py` | Patched FunASR — adds `language` config key so SenseVoiceSmall can be pinned to English |
 
 ---
@@ -234,7 +239,7 @@ curl http://<RPI_IP>:8080/health
 ```
 
 ### Changing voice
-Edit `data/.config.yaml` → `TTS.EdgeTTS.voice` (or `TTS.StreamingEdgeTTS.voice`) on Unraid. Any Microsoft Edge Neural voice ID works (e.g. `en-US-AvaNeural`, `ja-JP-NanamiNeural`). Restart the container.
+The default TTS is `LocalPiper` (offline, runs inside the container). To change the Piper voice, edit `TTS.LocalPiper.voice` and the corresponding `model_path` / `config_path` in `data/.config.yaml`. To switch to cloud EdgeTTS instead, set `selected_module.TTS: EdgeTTS` and edit `TTS.EdgeTTS.voice` (any Microsoft Edge Neural voice ID works, e.g. `en-US-AvaNeural`). Restart the container after changes.
 
 ### Changing persona (the robot's personality)
 Primary source: ZeroClaw's own system prompt in `<RPI_ZEROCLAW_CFG>` on the RPi. The `prompt:` key in `data/.config.yaml` is a secondary hint that the bridge passes to ZeroClaw as context, but ZeroClaw's own prompt wins.
@@ -252,13 +257,17 @@ Primary source: ZeroClaw's own system prompt in `<RPI_ZEROCLAW_CFG>` on the RPi.
 | File | Deployed to | Purpose |
 |---|---|---|
 | `bridge.py` | RPi `<RPI_BRIDGE_PATH>/bridge.py` | FastAPI HTTP→ZeroClaw translator (ACP over stdio) |
+| `bridge/requirements.txt` | bare-metal venv | Pinned Python deps for the bridge (fastapi, uvicorn, pydantic) |
 | `zeroclaw-bridge.service` | RPi `/etc/systemd/system/` | systemd unit for bridge |
-| `zeroclaw.py` | Unraid `custom-providers/zeroclaw/zeroclaw.py` | xiaozhi LLM provider |
-| `zeroclaw__init__.py` | Unraid (as `__init__.py`) | Python package marker |
-| `edge_stream.py` | Unraid `custom-providers/edge_stream/edge_stream.py` | Streaming EdgeTTS provider |
-| `edge_stream__init__.py` | Unraid (as `__init__.py`) | Python package marker |
-| `fun_local.py` | Unraid `custom-providers/asr/fun_local.py` | Patched FunASR provider (adds `language` config key) |
+| `custom-providers/zeroclaw/zeroclaw.py` | Unraid `core/providers/llm/zeroclaw/zeroclaw.py` | xiaozhi LLM provider — proxies to the ZeroClaw bridge |
+| `custom-providers/zeroclaw/__init__.py` | Unraid `core/providers/llm/zeroclaw/__init__.py` | Python package marker |
+| `custom-providers/edge_stream/edge_stream.py` | Unraid `core/providers/tts/edge_stream.py` | Streaming EdgeTTS provider |
+| `custom-providers/edge_stream/__init__.py` | Unraid (not currently mounted) | Python package marker |
+| `custom-providers/piper_local/piper_local.py` | Unraid `core/providers/tts/piper_local.py` | Local Piper TTS provider (offline alternative to EdgeTTS) |
+| `custom-providers/piper_local/__init__.py` | Unraid (not currently mounted) | Python package marker |
+| `custom-providers/asr/fun_local.py` | Unraid `core/providers/asr/fun_local.py` | Patched FunASR provider (adds `language` config key) |
 | `.config.yaml` | Unraid `data/.config.yaml` | xiaozhi-server config override |
+| `.env.example` | reference only | Documented environment variables with defaults |
 | `docker-compose.yml` | Unraid `<UNRAID_XIAOZHI_PATH>` | Container definition |
 
 These are the canonical working copies. The deployed files on the servers

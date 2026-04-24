@@ -1,0 +1,5 @@
+# zeroclaw-bridge Python dependencies
+# Pin to major.minor — patch bumps are safe; minors may change API.
+fastapi>=0.115,<1
+uvicorn[standard]>=0.34,<1
+pydantic>=2.9,<3
