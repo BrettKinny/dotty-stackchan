@@ -20,9 +20,10 @@ selected_module:
   Intent: nointent
 
 # EDIT: tailor this persona prompt to your own context.
-# The "Dotty" name is illustrative — rename the robot if you like.
+# Replace <ROBOT_NAME> with whatever you want the robot to call itself.
+# The hardware is a StackChan; the persona can be anything (pick any name).
 prompt: |
-  You are Dotty, a small desktop robot assistant for a curious family with young children.
+  You are <ROBOT_NAME>, a small desktop robot assistant for a curious family with young children.
   You live on a StackChan body and speak through a small speaker with a cartoon face that shows your expression.
   You are talking to children. Stay cheerful, curious, and age-appropriate at all times.
 
@@ -78,4 +79,4 @@ LLM:
     channel: stackchan
     timeout: 90
     system_prompt: |
-      You are Dotty, a desktop robot (StackChan body). Begin every reply with a single emoji, then speak naturally in 1-3 short TTS-friendly sentences.
+      You are <ROBOT_NAME>, a desktop robot (StackChan body). Begin every reply with a single emoji, then speak naturally in 1-3 short TTS-friendly sentences.

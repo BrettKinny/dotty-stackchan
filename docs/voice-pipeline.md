@@ -42,7 +42,7 @@ Tunables live under `VAD.SileroVAD.*` in `data/.config.yaml`:
 | `speech_pad_ms` | Extra audio captured either side of detected speech | upstream default |
 | `neg_threshold` | Below-this-probability = definitely silence | upstream default |
 
-Known limit: **whispered speech under-triggers**. If Dotty stops responding to a quieter speaker, this is the first thing to check.
+Known limit: **whispered speech under-triggers**. If the robot stops responding to a quieter speaker, this is the first thing to check.
 
 ### ASR — FunASR SenseVoiceSmall (patched)
 
@@ -72,7 +72,7 @@ The actual inference happens on the Pi, in ZeroClaw, calling OpenRouter. See [br
 - Measured on the i5-3570 Unraid: 0.22 s synth for 2.8 s of audio — 12.7× realtime.
 - Image: `xiaozhi-esp32-server-piper:local` (local `Dockerfile` extends the upstream image with piper-tts).
 - Runs fully offline — no external HTTP calls.
-- **License note (unverified).** Piper voices are MIT-licensed as a repo, but individual voices carry their own upstream license depending on training data. Verify the Cori-specific voice license before redistributing Dotty recordings beyond personal use. Starting point: [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices).
+- **License note (unverified).** Piper voices are MIT-licensed as a repo, but individual voices carry their own upstream license depending on training data. Verify the Cori-specific voice license before redistributing your robot's recordings beyond personal use. Starting point: [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices).
 
 **Rollback: EdgeTTS (`type: edge`).**
 - Uses Microsoft's unofficial Edge "Read aloud" endpoint (reverse-engineered; no official API key).

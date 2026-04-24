@@ -69,7 +69,7 @@ OpenRouter pricing changes often — values below are most recently observed per
 | FunASR / SenseVoiceSmall | Check the HF card | Weights license varies. |
 | SileroVAD | MIT | — |
 | Piper engine | MIT | — |
-| Piper voices | MIT repo, per-voice varies | `en_GB-cori-medium` license — verify before redistributing Dotty outputs. |
+| Piper voices | MIT repo, per-voice varies | `en_GB-cori-medium` license — verify before redistributing your robot's outputs. |
 | EdgeTTS | N/A — reverse-engineered | Microsoft can cut it off at any time. No support. |
 | xiaozhi-esp32 firmware | See repo | Modify and redistribute per upstream. |
 | xiaozhi-esp32-server | See repo | Same. |

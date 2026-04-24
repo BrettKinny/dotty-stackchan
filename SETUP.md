@@ -1,7 +1,7 @@
-# First-Boot Setup — Bringing Up Dotty
+# First-Boot Setup — Bringing Up Your StackChan
 
 Step-by-step for taking a fresh M5Stack StackChan from the box to a working,
-fully-self-hosted Dotty. The backend (xiaozhi-server on Unraid, ZeroClaw
+fully-self-hosted voice robot. The backend (xiaozhi-server on Unraid, ZeroClaw
 bridge on the RPi) is assumed to already be deployed — if you're starting
 fresh, skim `README.md` first.
 
@@ -47,7 +47,7 @@ The StackChan ships from M5Stack with **stock firmware** that:
 There is **no SoftAP captive portal** in stock firmware (some older
 third-party xiaozhi builds had one; the shipped firmware does not).
 
-To run Dotty **fully self-hosted** (no phone-app account, no vendor cloud,
+To run the StackChan **fully self-hosted** (no phone-app account, no vendor cloud,
 your own xiaozhi-server as the endpoint), you need to **reflash the device
 with firmware built from the open source tree**.
 
@@ -179,7 +179,7 @@ If the device isn't on the list after 60s:
    - A `ZeroClawLLM` call (hits the bridge)
    - A TTS line with the response text
    - Face animation changes to match the leading emoji
-4. Dotty speaks. If you hear audio but no face change, check that the
+4. The robot speaks. If you hear audio but no face change, check that the
    response starts with one of: 😊 😆 😢 😮 🤔 😠 😐 😍 😴.
 
 Expected first-audio latency: **~2–4s** after you stop speaking. If it's
@@ -199,7 +199,7 @@ All of these are edits to `data/.config.yaml` on Unraid followed by
 | "It waits forever after I stop talking" | lower `min_silence_duration_ms` to 400 | same |
 | "I don't like the voice" | change `voice:` to any Edge Neural voice | `data/.config.yaml` → TTS.EdgeTTS / StreamingEdgeTTS |
 | "Responses are too long" | add "Keep replies under 20 words." to the persona | `data/.config.yaml` → `prompt:` block |
-| "Dotty's too slow" | switch LLM model | `<RPI_ZEROCLAW_CFG>` on RPi → `default_model` |
+| "Too slow to reply" | switch LLM model | `<RPI_ZEROCLAW_CFG>` on RPi → `default_model` |
 | "No facial expression change" | check response actually starts with a supported emoji (tail logs) | — |
 
 ---
@@ -242,7 +242,7 @@ It just isn't what M5Stack ships today.
 - **Tail voice pipeline**: `ssh <UNRAID_USER>@<UNRAID_IP> 'docker logs -f xiaozhi-esp32-server'`
 - **Tail bridge**: `ssh <RPI_USER>@<RPI_IP> 'sudo journalctl -u zeroclaw-bridge -f'`
 - **Smoke test end-to-end**: `curl -X POST http://<RPI_IP>:8080/api/message -H 'content-type: application/json' -d '{"content":"test"}'`
-- **ZeroClaw's web UI** (for tweaking Dotty's agent persona directly):
+- **ZeroClaw's web UI** (for tweaking the agent persona directly):
   `ssh -L 42617:127.0.0.1:42617 <RPI_USER>@<RPI_IP>` then open
   http://localhost:42617 in a browser — pair with the code printed by
   `sudo <RPI_ZEROCLAW_BIN> gateway get-paircode`.

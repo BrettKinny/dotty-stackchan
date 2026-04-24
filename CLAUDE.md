@@ -1,13 +1,13 @@
-# StackChan Infrastructure (Dotty)
+# StackChan Infrastructure
 
 ## What This Is
 
-Infrastructure config for **Dotty**, a desktop robot assistant. The hardware is an M5Stack **StackChan** body; the AI persona (the agent identity ZeroClaw runs) is **Dotty**. Voice I/O routes through a self-hosted xiaozhi-esp32-server, AI brain is ZeroClaw on the RPi. No cloud AI services — fully self-hosted except for EdgeTTS.
+A self-hosted voice stack for the M5Stack **StackChan** desktop robot. Hardware is the StackChan body; the agent persona (what ZeroClaw runs) is configurable — this repo ships a default that uses the hardware name, swap in anything you want via the `<ROBOT_NAME>` placeholder. Voice I/O routes through a self-hosted xiaozhi-esp32-server; brain is ZeroClaw on the RPi. No cloud AI services — fully self-hosted except for EdgeTTS (replaceable with local Piper).
 
 ## Architecture
 
 ```
-StackChan hardware → Dotty (persona)
+StackChan hardware → configured persona
   │
   │  ESP32-S3, xiaozhi firmware (built from m5stack/StackChan source)
   │  WiFi / WebSocket (Xiaozhi protocol)
@@ -22,7 +22,7 @@ xiaozhi-esp32-server (Docker on Unraid)
 zeroclaw-bridge (FastAPI on RPi, runs as root)
   │  JSON-RPC 2.0 over stdio to a long-running `zeroclaw acp` child
   ▼
-ZeroClaw (Dotty's brain, on RPi)
+ZeroClaw (the brain, on RPi)
 ```
 
 See `README.md` for the full visual architecture and message-flow diagrams.
@@ -69,7 +69,7 @@ The LLM response MUST start with an emoji. The xiaozhi firmware parses it into a
 😊=smile 😆=laugh 😢=sad 😮=surprise 🤔=thinking 😠=angry 😐=neutral 😍=love 😴=sleepy
 
 Three layers enforce this:
-1. **ZeroClaw's own agent prompt** (Dotty persona) — primary source
+1. **ZeroClaw's own agent prompt** (the configured persona) — primary source
 2. **xiaozhi-server top-level `prompt:`** in `data/.config.yaml` — gets injected as system message
 3. **Bridge fallback** (`_ensure_emoji_prefix` in `bridge.py`) — if the first non-whitespace char isn't a non-ASCII symbol, prepends 😐 before returning.
 

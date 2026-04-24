@@ -1,11 +1,13 @@
-# Dotty — StackChan Infrastructure
+# stackchan-infra
 
-Self-hosted voice pipeline for **Dotty**, a desktop robot assistant.
-Hardware: M5Stack **StackChan** running firmware built from `m5stack/StackChan`.
-Brain: **ZeroClaw** running on a Raspberry Pi.
-Voice I/O: **xiaozhi-esp32-server** on Unraid.
+**A fully self-hosted voice stack for the M5Stack [StackChan](https://github.com/m5stack/StackChan).** Goal: the robot talks without phoning anywhere you don't control. Open-source firmware on the robot, [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) for voice I/O, a small FastAPI bridge to whatever LLM agent you want as the brain. Device firmware, ASR, session state, and persona live on your own hardware. LLM and TTS are pluggable — the reference config uses a cloud LLM (OpenRouter) and EdgeTTS for low-friction setup, but both have local drop-in alternatives (Ollama, Piper) so a 100% offline deployment is possible with no code changes to the stack.
 
-Everything except EdgeTTS runs on the local LAN — no cloud AI account required.
+**A hackable starting point, not a product.** The defaults here are *one* working configuration — a default persona (named after the hardware; you set your own name via the `<ROBOT_NAME>` placeholder), [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) as the brain, Qwen3-30B via OpenRouter as the LLM — but every seam is swappable. Fork it, rip out what you don't want, wire in your own agent / LLM / TTS / persona. No releases, no support, no roadmap — just a working wiring diagram you can adapt to your own StackChan.
+
+Reference deployment in this repo:
+- **Hardware**: M5Stack StackChan (CoreS3 + servo kit), firmware built from `m5stack/StackChan`.
+- **Brain**: ZeroClaw on a Raspberry Pi.
+- **Voice I/O**: xiaozhi-esp32-server on Docker (Unraid here, but single-host works too).
 
 ---
 
@@ -27,7 +29,7 @@ This README covers deployment. For what the stack *is* underneath — hardware s
 
 | Component | Host | Notes |
 |---|---|---|
-| Dotty (hardware) | ESP32-S3 on the desk | Firmware built from `m5stack/StackChan` (see `SETUP.md`) |
+| StackChan (device) | ESP32-S3 on the desk | Firmware built from `m5stack/StackChan` (see `SETUP.md`) |
 | xiaozhi-esp32-server | Unraid (`<UNRAID_IP>`) | Docker, ports 8000 + 8003 |
 | zeroclaw-bridge | RPi (`<RPI_IP>`) | FastAPI on port 8080, systemd |
 | ZeroClaw daemon | RPi (`<RPI_IP>`) | `<RPI_ZEROCLAW_BIN>` |
@@ -52,6 +54,7 @@ This repo uses placeholders in place of real IPs, usernames, and filesystem path
 | `<RPI_ZEROCLAW_BIN>` | Absolute path to the `zeroclaw` binary on the Pi (cargo default: `/root/.cargo/bin/zeroclaw`). |
 | `<RPI_ZEROCLAW_CFG>` | ZeroClaw config file path (default: `/root/.zeroclaw/config.toml`). |
 | `<YOUR_NAME>` | Your name / org, used in the persona prompt in `.config.yaml`. |
+| `<ROBOT_NAME>` | Name the robot introduces itself as, referenced in the persona prompt in `.config.yaml`. Any string — pick whatever you want. The default example uses the hardware name ("StackChan"). |
 
 Port numbers (`8000`, `8003`, `8080`, `18789`, `42617`) are product-generic and should not be changed unless you also reconfigure the respective services.
 
@@ -68,7 +71,7 @@ Files you will definitely need to edit before first run:
 ```mermaid
 flowchart LR
     subgraph Desk["Desk (LAN WiFi)"]
-        SC["Dotty<br/>M5Stack StackChan<br/>ESP32-S3"]
+        SC["M5Stack StackChan<br/>ESP32-S3"]
     end
 
     subgraph Unraid["Unraid — &lt;UNRAID_IP&gt;"]
@@ -83,7 +86,7 @@ flowchart LR
 
     subgraph RPi["Raspberry Pi — &lt;RPI_IP&gt;"]
         Bridge["zeroclaw-bridge<br/>FastAPI :8080<br/>systemd unit"]
-        ZC["ZeroClaw daemon<br/>(Dotty persona)"]
+        ZC["ZeroClaw daemon<br/>(agent persona)"]
         Cloud["(OpenRouter / GLM / ...)"]
     end
 
@@ -101,7 +104,7 @@ flowchart LR
 ### Why this shape?
 
 - **xiaozhi-server handles audio** (ASR + TTS) because the StackChan firmware already speaks its WebSocket protocol. Minimal firmware work.
-- **ZeroClaw is the brain** because it has the tools, memory, channels, and LLM routing already set up. Dotty is just another way to reach the same agent.
+- **ZeroClaw is the brain** because it has the tools, memory, channels, and LLM routing already set up. The StackChan is just another way to reach the same agent.
 - **A small bridge lives in between** because ZeroClaw's gateway HTTP API only *reads* session state. The bridge talks to ZeroClaw via the Agent Client Protocol (JSON-RPC 2.0 over stdio) against a long-running `zeroclaw acp` child.
 
 ---
@@ -112,7 +115,7 @@ flowchart LR
 sequenceDiagram
     autonumber
     participant User as User
-    participant SC as Dotty (StackChan)
+    participant SC as StackChan
     participant XZ as xiaozhi-server
     participant Br as zeroclaw-bridge
     participant ZC as ZeroClaw
@@ -161,7 +164,7 @@ flowchart TB
         RA1["bridge.py"]
         RA2[".venv/<br/>(fastapi + uvicorn)"]
         RB["/etc/systemd/system/<br/>zeroclaw-bridge.service"]
-        RC["~/.zeroclaw/<br/>(Dotty agent config)"]
+        RC["~/.zeroclaw/<br/>(agent persona config)"]
         RA --> RA1 & RA2
     end
 ```
@@ -233,7 +236,7 @@ curl http://<RPI_IP>:8080/health
 ### Changing voice
 Edit `data/.config.yaml` → `TTS.EdgeTTS.voice` (or `TTS.StreamingEdgeTTS.voice`) on Unraid. Any Microsoft Edge Neural voice ID works (e.g. `en-US-AvaNeural`, `ja-JP-NanamiNeural`). Restart the container.
 
-### Changing persona (Dotty's personality)
+### Changing persona (the robot's personality)
 Primary source: ZeroClaw's own system prompt in `<RPI_ZEROCLAW_CFG>` on the RPi. The `prompt:` key in `data/.config.yaml` is a secondary hint that the bridge passes to ZeroClaw as context, but ZeroClaw's own prompt wins.
 
 ### Changing VAD sensitivity
@@ -265,13 +268,13 @@ should match — if they drift, redeploy from here.
 
 ## Troubleshooting
 
-**"Bridge unreachable" or "(no response)" in Dotty's voice.**
+**"Bridge unreachable" or "(no response)" in the robot's voice.**
 The xiaozhi-server couldn't reach the bridge. Check `systemctl status zeroclaw-bridge` on the RPi and `curl http://<RPI_IP>:8080/health` from anywhere on the LAN.
 
 **xiaozhi-server won't start, log says `ModuleNotFoundError`.**
 Check the container logs for the actual missing module. The image ships with most deps but the streaming TTS provider uses `pydub` and `edge-tts` — if they're missing, add them via the compose file or bake a custom image.
 
-**StackChan/Dotty connects but never responds.**
+**StackChan connects but never responds.**
 Open a test page in your browser: copy `repo/main/xiaozhi-server/test/test_page.html` locally and point its WS URL at `ws://<UNRAID_IP>:8000/xiaozhi/v1/`. If the browser page works but the device doesn't, the device has the wrong OTA URL — re-enter it in the device's Advanced Options.
 
 **No facial expression change on the robot.**

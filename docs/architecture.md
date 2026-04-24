@@ -12,11 +12,11 @@
 
 | Actor | Host | Role | Process |
 |---|---|---|---|
-| **StackChan (Dotty)** | Desk | Captures audio, plays audio, renders face, runs MCP tools for head/LED/camera | ESP32-S3 firmware built from `m5stack/StackChan` |
+| **StackChan** | Desk | Captures audio, plays audio, renders face, runs MCP tools for head/LED/camera | ESP32-S3 firmware built from `m5stack/StackChan` |
 | **xiaozhi-esp32-server** | Unraid | VAD → ASR → LLM (proxy) → TTS pipeline, emotion dispatch, OTA | Docker container |
 | **ZeroClawLLM custom provider** | Unraid (inside container) | Translates xiaozhi's LLM-provider interface to an HTTP POST | Python, mounted via volume |
 | **zeroclaw-bridge** | RPi | Accepts HTTP POSTs, spawns/holds a `zeroclaw acp` child, speaks ACP JSON-RPC to it | FastAPI + uvicorn under systemd |
-| **ZeroClaw daemon** | RPi | The Dotty persona — runs the agent loop, calls the LLM, consults `SOUL.md`/`IDENTITY.md`/`MEMORY.md` | Rust binary (`zeroclaw acp`) |
+| **ZeroClaw daemon** | RPi | The configured persona — runs the agent loop, calls the LLM, consults `SOUL.md`/`IDENTITY.md`/`MEMORY.md` | Rust binary (`zeroclaw acp`) |
 | **OpenRouter** | Cloud | Routes LLM calls to Qwen3-30B-A3B-Instruct-2507 | External |
 
 ## Data flow (single utterance)
@@ -25,7 +25,7 @@
 sequenceDiagram
     autonumber
     participant User
-    participant SC as Dotty<br/>(StackChan)
+    participant SC as StackChan
     participant XZ as xiaozhi-server<br/>(Unraid)
     participant Br as zeroclaw-bridge<br/>(RPi)
     participant ZC as ZeroClaw<br/>(RPi)
@@ -53,7 +53,7 @@ See [protocols.md](./protocols.md) for every wire format referenced above.
 ## Why this shape
 
 - **Audio lives with Unraid** because the StackChan firmware already speaks the Xiaozhi WS protocol; xiaozhi-esp32-server is the matching server. Putting the brain next to the mic would require us to reimplement that protocol, and we'd still need a voice server.
-- **The brain lives with the Pi** because ZeroClaw already has memory, tools, persona, channels, LLM routing wired up. Dotty is just another channel into the same agent.
+- **The brain lives with the Pi** because ZeroClaw already has memory, tools, persona, channels, LLM routing wired up. The StackChan is just another channel into the same agent.
 - **A bridge lives between them** because ZeroClaw's HTTP API is observational; to *prompt* a running agent you have to use ACP (JSON-RPC 2.0 over stdio) against a `zeroclaw acp` child. The bridge is a tiny FastAPI adapter that does exactly that.
 - **The seam is a custom xiaozhi LLM provider** (`zeroclaw.py`, mounted into the container). xiaozhi-server thinks it's calling a local Python LLM class; the class just does an HTTP POST to `<RPI_IP>:8080/api/message`. That means we could swap ZeroClaw for anything HTTP-serviceable without touching xiaozhi.
 

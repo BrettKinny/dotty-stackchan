@@ -1,6 +1,6 @@
-# Docs — Dotty / StackChan tech reference
+# Docs — StackChan tech reference
 
-Curated reference for the Dotty voice robot stack. The top-level `README.md`
+Curated reference for the StackChan voice robot stack. The top-level `README.md`
 covers *how to deploy it*; these docs cover *what it is underneath* — hardware,
 protocols, upstream model facts, and capabilities we aren't yet using.
 

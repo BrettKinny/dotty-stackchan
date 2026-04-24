@@ -3,7 +3,7 @@
 ## TL;DR
 
 - **Xiaozhi WebSocket protocol** — between device and xiaozhi-server. Opus audio + JSON control frames. Supports MCP over JSON-RPC 2.0 in-band. Canonical spec: `github.com/78/xiaozhi-esp32/blob/main/docs/websocket.md`.
-- **Emotion channel** — 21 upstream emotion identifiers; the server picks one from the LLM's leading emoji and emits a separate `llm`-type frame. Dotty uses a 9-emoji subset.
+- **Emotion channel** — 21 upstream emotion identifiers; the server picks one from the LLM's leading emoji and emits a separate `llm`-type frame. This stack uses a 9-emoji subset.
 - **MCP over WS** — the device acts as an MCP server; xiaozhi-server calls `tools/list` and `tools/call` against it. Tool names use dotted namespaces like `self.audio_speaker.set_volume`.
 - **Agent Client Protocol (ACP)** — JSON-RPC 2.0 over stdio between the FastAPI bridge and `zeroclaw acp`. Zed-originated spec, maintained at `agentclientprotocol.com`.
 
@@ -133,7 +133,7 @@ Server emits a dedicated `llm`-type frame:
 
 `text` contains the emoji character; `emotion` contains the identifier. The TTS frame that follows has the emoji **stripped** from its text so the speaker doesn't try to read it aloud.
 
-### Dotty's emoji allowlist
+### Default emoji allowlist
 
 `bridge.py` enforces a 9-emoji subset:
 
@@ -220,7 +220,7 @@ Device signals MCP support in `hello.features.mcp = true`. Server then queries t
 - `McpServer::AddTool` — regular tool, exposed to `tools/list` by default. Available to the AI.
 - `McpServer::AddUserOnlyTool` — hidden from the default `tools/list`. Requires `withUserTools: true`. For privileged actions the LLM shouldn't trigger (e.g. reboot).
 
-See [hardware.md](./hardware.md#on-device-mcp-tools-dottys-hand-holds) for Dotty's 11-tool surface.
+See [hardware.md](./hardware.md#on-device-mcp-tools) for the default 11-tool MCP surface.
 
 <a id="acp"></a>
 ## ACP — Agent Client Protocol

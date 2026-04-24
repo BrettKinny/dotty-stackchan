@@ -1,4 +1,4 @@
-# Hardware — M5Stack StackChan (Dotty's body)
+# Hardware — M5Stack StackChan
 
 ## TL;DR
 
@@ -63,7 +63,7 @@ Three related codebases — do not confuse them:
 
 Our pipeline uses `m5stack/StackChan` because it comes with the robot-body integration (servos, avatar rendering, LED patterns, MCP tools mapped to peripherals) already done. `78/xiaozhi-esp32` is the upstream *protocol* reference — the voice channel speaks the same WebSocket protocol regardless.
 
-## On-device MCP tools (Dotty's hand-holds)
+## On-device MCP tools
 
 The device acts as an **MCP server** — after the WS `hello` handshake, it advertises its tools to xiaozhi-server via `tools/list` (JSON-RPC 2.0 inside `type: mcp` messages). See [protocols.md](./protocols.md#mcp-tools-over-ws) for the exact wire format.
 
@@ -89,7 +89,7 @@ Per `tasks.md`, the live firmware advertises **11 tools**. The mapping below is 
 
 ## Peripherals the firmware could expose but doesn't (per current observation)
 
-These are real hardware features with no documented MCP tool on Dotty today. See [latent-capabilities.md](./latent-capabilities.md#hardware-unused) for prioritization.
+These are real hardware features with no documented MCP tool in the default firmware today. See [latent-capabilities.md](./latent-capabilities.md#hardware-unused) for prioritization.
 
 | Peripheral | Capability | Why it'd matter |
 |---|---|---|

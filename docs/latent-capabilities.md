@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-- Every row below is something the **hardware, voice pipeline, or brain already supports** but that Dotty's current deployment **doesn't use**. It's raw material for the backlog.
+- Every row below is something the **hardware, voice pipeline, or brain already supports** but that the current deployment **doesn't use**. It's raw material for the backlog.
 - Organised by where the capability lives: hardware, voice pipeline, brain.
 - Each row ends with a cross-reference: existing `tasks.md` item, or flagged as a **new-task candidate** if no backlog entry exists yet.
 - Treat this as a menu, not a plan — some are cheap wins, others are complex.
@@ -42,7 +42,7 @@ Features xiaozhi-esp32-server supports upstream that aren't turned on or surface
 | **PowerMem** | Dual-layer short-term + summarized memory (currently ZeroClaw owns memory) | Low | Would overlap with ZeroClaw's memory — probably don't |
 | **Intent router** (`function_call` mode) | Route simple commands (turn off lights, set timer) without round-tripping to the LLM | Medium | **New-task candidate** |
 | **RagFlow knowledge base** | Retrieval-augmented responses against a household doc store | Low | **New-task candidate** |
-| **Multi-device routing** | Run Dotty as one of several voice surfaces on the same ZeroClaw brain | Low | Needs the full-module deployment (DB-backed) |
+| **Multi-device routing** | Run the StackChan as one of several voice surfaces on the same ZeroClaw brain | Low | Needs the full-module deployment (DB-backed) |
 | **Piper streaming synthesis** | Lower first-audio latency than the current batch synthesis | Medium | `tasks.md` → "Reduce first-audio latency" |
 | **ffmpeg post-processing on TTS** | Robot-voice character via ring modulator / bitcrush / vocoder | Medium | `tasks.md` → "TTS provider swap — robot-sounding voice" |
 
@@ -63,7 +63,7 @@ ZeroClaw + Qwen3 + OpenRouter features that could be wired into the bridge.
 | **OpenRouter latency/cost dashboard** | Observability beyond the local `state/costs.jsonl` | Low | Already available — just point a browser at it |
 | **OpenRouter failover / multi-model** | A/B a smaller faster model for voice turns specifically | Medium | `tasks.md` → "Reduce first-audio latency" (smaller model for voice) |
 | **ZeroClaw cost/trace surfacing** | Expose `state/costs.jsonl` + `runtime-trace.jsonl` via the bridge `/health` or a new `/stats` endpoint | Low | **New-task candidate** |
-| **ZeroClaw cron scheduler** | Dotty could say "good morning" on a schedule, not just on demand | Low | **New-task candidate** |
+| **ZeroClaw cron scheduler** | The robot could say "good morning" on a schedule, not just on demand | Low | **New-task candidate** |
 
 <a id="observability"></a>
 ## Cross-cutting — observability
