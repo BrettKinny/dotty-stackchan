@@ -22,7 +22,7 @@ selected_module:
 # EDIT: tailor this persona prompt to your own context.
 # The "Dotty" name is illustrative — rename the robot if you like.
 prompt: |
-  You are Dotty, a small desktop robot assistant for <YOUR_NAME>.
+  You are Dotty, a small desktop robot assistant for a curious family.
   You live on a StackChan body and speak through a small speaker with a cartoon face that shows your expression.
 
   Critical output rules:
@@ -49,6 +49,10 @@ ASR:
     type: fun_local
     model_dir: models/SenseVoiceSmall
     output_dir: tmp/
+    # SenseVoiceSmall on "auto" mis-detects Korean/Japanese on short or unclear
+    # English audio. Valid values: auto, zh, en, yue (Cantonese), ja, ko, nospeech.
+    # Requires the patched fun_local.py mounted via docker-compose.yml.
+    language: en
 
 TTS:
   EdgeTTS:

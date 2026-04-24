@@ -60,6 +60,7 @@ This repo uses placeholders (`<UNRAID_IP>`, `<RPI_IP>`, `<RPI_USER>`, `<UNRAID_X
 - `data/.config.yaml` on Unraid — the xiaozhi-server override config. Never overwrite wholesale on upgrades; merge keys.
 - `zeroclaw.py` — the custom LLM provider. Mounted into the container via docker-compose volume.
 - `edge_stream.py` — custom streaming TTS provider. Mounted similarly.
+- `fun_local.py` — patched FunASR provider. Adds a `language` config key (upstream hardcodes `"auto"`, which mis-detects Korean/Japanese on unclear English). Mounted as a file-level override over the upstream provider.
 - `bridge.py` on RPi — the HTTP↔ZeroClaw translator (ACP-over-stdio client).
 
 ## Emotion/Expression Protocol

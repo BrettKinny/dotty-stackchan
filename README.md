@@ -135,6 +135,7 @@ flowchart TB
         UA2["models/SenseVoiceSmall/<br/>(model.pt + configs)"]
         UA3["custom-providers/zeroclaw/<br/>(zeroclaw.py + __init__.py)"]
         UA3b["custom-providers/edge_stream/<br/>(edge_stream.py + __init__.py)"]
+        UA3c["custom-providers/asr/fun_local.py<br/>(patched ASR — language key)"]
         UA4["tmp/<br/>(TTS audio scratch)"]
         UA5["repo/<br/>(git clone, reference only)"]
         UA6["docker-compose.yml"]
@@ -160,6 +161,7 @@ Container volume mounts:
 | `tmp/` | `/opt/xiaozhi-esp32-server/tmp/` | Scratch |
 | `custom-providers/zeroclaw/` | `/opt/xiaozhi-esp32-server/core/providers/llm/zeroclaw/` | Custom LLM provider |
 | `custom-providers/edge_stream/` | `/opt/xiaozhi-esp32-server/core/providers/tts/edge_stream/` | Custom streaming TTS provider |
+| `custom-providers/asr/fun_local.py` | `/opt/xiaozhi-esp32-server/core/providers/asr/fun_local.py` | Patched FunASR — adds `language` config key so SenseVoiceSmall can be pinned to English |
 
 ---
 
@@ -238,6 +240,7 @@ Primary source: ZeroClaw's own system prompt in `<RPI_ZEROCLAW_CFG>` on the RPi.
 | `zeroclaw__init__.py` | Unraid (as `__init__.py`) | Python package marker |
 | `edge_stream.py` | Unraid `custom-providers/edge_stream/edge_stream.py` | Streaming EdgeTTS provider |
 | `edge_stream__init__.py` | Unraid (as `__init__.py`) | Python package marker |
+| `fun_local.py` | Unraid `custom-providers/asr/fun_local.py` | Patched FunASR provider (adds `language` config key) |
 | `.config.yaml` | Unraid `data/.config.yaml` | xiaozhi-server config override |
 | `docker-compose.yml` | Unraid `<UNRAID_XIAOZHI_PATH>` | Container definition |
 

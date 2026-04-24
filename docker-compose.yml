@@ -15,3 +15,4 @@ services:
       - ./tmp:/opt/xiaozhi-esp32-server/tmp
       - ./custom-providers/zeroclaw:/opt/xiaozhi-esp32-server/core/providers/llm/zeroclaw
       - ./custom-providers/edge_stream:/opt/xiaozhi-esp32-server/core/providers/tts/edge_stream
+      - ./custom-providers/asr/fun_local.py:/opt/xiaozhi-esp32-server/core/providers/asr/fun_local.py:ro
