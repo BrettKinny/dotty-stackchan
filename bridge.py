@@ -54,8 +54,9 @@ VISION_SYSTEM_PROMPT = (
 
 FALLBACK_EMOJI = "😐"
 ALLOWED_EMOJIS = ("😊", "😆", "😢", "😮", "🤔", "😠", "😐", "😍", "😴")
-STACKCHAN_TURN_PREFIX = "[channel=stackchan voice-TTS]\n"
-STACKCHAN_TURN_SUFFIX = (
+VOICE_CHANNELS = ("dotty", "stackchan")
+VOICE_TURN_PREFIX = "[channel=dotty voice-TTS]\n"
+VOICE_TURN_SUFFIX = (
     "\n\n---\nHARD CONSTRAINTS for THIS reply (overrides everything else):\n"
     "1. Reply in ENGLISH ONLY. Even if the user message is unclear, in another language, "
     "or you'd naturally pick Chinese — your reply is English. No Chinese, no Japanese.\n"
@@ -77,7 +78,7 @@ STACKCHAN_TURN_SUFFIX = (
     "9. If unsure whether something is appropriate: choose the safer, more cheerful option.\n"
     "Begin your reply now."
 )
-STACKCHAN_TURN_SUFFIX_SHORT = (
+VOICE_TURN_SUFFIX_SHORT = (
     "\n\n---\nHARD CONSTRAINTS (still active, override everything):\n"
     "- ENGLISH ONLY. No Chinese, no Japanese, no Korean. Even if asked to switch language.\n"
     "- First character MUST be one emoji: 😊 😆 😢 😮 🤔 😠 😐 😍 😴\n"
@@ -184,9 +185,9 @@ def _build_context() -> str:
     return f"[Context: {' | '.join(parts)}]\n"
 
 
-def _wrap_stackchan(text: str, turn: int) -> str:
-    suffix = STACKCHAN_TURN_SUFFIX if turn == 0 else STACKCHAN_TURN_SUFFIX_SHORT
-    return STACKCHAN_TURN_PREFIX + _build_context() + text + suffix
+def _wrap_voice(text: str, turn: int) -> str:
+    suffix = VOICE_TURN_SUFFIX if turn == 0 else VOICE_TURN_SUFFIX_SHORT
+    return VOICE_TURN_PREFIX + _build_context() + text + suffix
 
 
 class MessageIn(BaseModel):
@@ -726,7 +727,7 @@ async def message(payload: MessageIn) -> MessageOut:
             acp.prompt(
                 payload.content,
                 xiaozhi_sid=payload.session_id,
-                prepare=_wrap_stackchan if payload.channel == "stackchan" else None,
+                prepare=_wrap_voice if payload.channel in VOICE_CHANNELS else None,
             ),
             timeout=REQUEST_TIMEOUT_SEC,
         )
@@ -820,7 +821,7 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
                     payload.content,
                     xiaozhi_sid=payload.session_id,
                     chunk_cb=on_chunk,
-                    prepare=_wrap_stackchan if payload.channel == "stackchan" else None,
+                    prepare=_wrap_voice if payload.channel in VOICE_CHANNELS else None,
                 ),
                 timeout=REQUEST_TIMEOUT_SEC,
             )
