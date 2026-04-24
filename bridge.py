@@ -812,12 +812,10 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
                     state["blocked"] = True
             if state["blocked"]:
                 full = _CONTENT_FILTER_REPLACEMENT
-            # Fallback for providers that never stream (e.g. old openrouter path):
-            # no chunks were seen, emit the full text as a single chunk with
-            # emoji-prefix correction, matching legacy /api/message behavior.
             if not state["seen_nonws"]:
                 full = _ensure_emoji_prefix(full)
                 await queue.put(("chunk", full))
+            full = _ensure_emoji_prefix(full)
             await queue.put(("final", full))
         except asyncio.TimeoutError:
             log.warning("ACP timeout (stream)")
