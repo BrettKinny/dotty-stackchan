@@ -1,0 +1,47 @@
+name: Firmware Release
+
+on:
+  push:
+    tags:
+      - 'fw-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.5.4
+
+    steps:
+      - name: Checkout with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Fetch firmware dependencies
+        run: cd firmware/firmware && python fetch_repos.py
+
+      - name: Build firmware
+        run: cd firmware/firmware && idf.py build
+
+      - name: Generate checksums
+        run: |
+          cd firmware/firmware/build
+          sha256sum stack-chan.bin bootloader/bootloader.bin partition_table/partition-table.bin ota_data_initial.bin > checksums.txt
+          cat checksums.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            firmware/firmware/build/stack-chan.bin
+            firmware/firmware/build/bootloader/bootloader.bin
+            firmware/firmware/build/partition_table/partition-table.bin
+            firmware/firmware/build/ota_data_initial.bin
+            firmware/firmware/build/checksums.txt
