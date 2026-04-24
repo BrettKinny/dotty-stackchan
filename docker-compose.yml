@@ -17,6 +17,8 @@ services:
       - ./models/SenseVoiceSmall:/opt/xiaozhi-esp32-server/models/SenseVoiceSmall
       - ./tmp:/opt/xiaozhi-esp32-server/tmp
       - ./custom-providers/zeroclaw:/opt/xiaozhi-esp32-server/core/providers/llm/zeroclaw
+      - ./custom-providers/openai_compat:/opt/xiaozhi-esp32-server/core/providers/llm/openai_compat
+      - ./personas:/opt/xiaozhi-esp32-server/personas:ro
       - ./custom-providers/edge_stream/edge_stream.py:/opt/xiaozhi-esp32-server/core/providers/tts/edge_stream.py:ro
       - ./custom-providers/piper_local/piper_local.py:/opt/xiaozhi-esp32-server/core/providers/tts/piper_local.py:ro
       - ./models/piper:/opt/xiaozhi-esp32-server/models/piper:ro

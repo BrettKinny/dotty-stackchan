@@ -15,6 +15,7 @@ selected_module:
   VAD: SileroVAD
   ASR: FunASR
   LLM: ZeroClawLLM
+  # LLM: OpenAICompat      # <-- switch to direct OpenAI-compatible LLM
   TTS: LocalPiper
   Memory: nomem
   Intent: nointent
@@ -80,3 +81,25 @@ LLM:
     timeout: 90
     system_prompt: |
       You are <ROBOT_NAME>, a desktop robot (StackChan body). Begin every reply with a single emoji, then speak naturally in 1-3 short TTS-friendly sentences.
+
+  # Generic OpenAI-compatible provider — works with OpenAI, OpenRouter,
+  # Ollama (http://host:11434/v1), LM Studio, vLLM, etc.
+  OpenAICompat:
+    type: openai_compat
+    # Base URL for the API (must end at /v1 — the provider appends /chat/completions).
+    # Examples:
+    #   OpenAI:      https://api.openai.com/v1
+    #   OpenRouter:  https://openrouter.ai/api/v1
+    #   Ollama:      http://localhost:11434/v1
+    #   LM Studio:   http://localhost:1234/v1
+    #   vLLM:        http://localhost:8000/v1
+    url: <OPENAI_COMPAT_URL>
+    api_key: <OPENAI_COMPAT_API_KEY>
+    model: <OPENAI_COMPAT_MODEL>
+    # Path to a persona markdown file loaded as the system prompt.
+    # Relative paths resolve from the xiaozhi-server working directory
+    # inside the container (/opt/xiaozhi-esp32-server).
+    persona_file: personas/default.md
+    max_tokens: 256
+    temperature: 0.7
+    timeout: 60
