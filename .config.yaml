@@ -15,7 +15,7 @@ selected_module:
   VAD: SileroVAD
   ASR: FunASR
   LLM: ZeroClawLLM
-  TTS: StreamingEdgeTTS
+  TTS: LocalPiper
   Memory: nomem
   Intent: nointent
 
@@ -62,6 +62,12 @@ TTS:
   StreamingEdgeTTS:
     type: edge_stream
     voice: en-AU-WilliamNeural
+    output_dir: tmp/
+  LocalPiper:
+    type: piper_local
+    voice: en_GB-cori-medium
+    model_path: /opt/xiaozhi-esp32-server/models/piper/en_GB-cori-medium.onnx
+    config_path: /opt/xiaozhi-esp32-server/models/piper/en_GB-cori-medium.onnx.json
     output_dir: tmp/
 
 LLM:

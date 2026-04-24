@@ -1,6 +1,9 @@
 services:
   xiaozhi-esp32-server:
-    image: ghcr.io/xinnan-tech/xiaozhi-esp32-server:server_latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: xiaozhi-esp32-server-piper:local
     container_name: xiaozhi-esp32-server
     restart: unless-stopped
     environment:
@@ -15,4 +18,6 @@ services:
       - ./tmp:/opt/xiaozhi-esp32-server/tmp
       - ./custom-providers/zeroclaw:/opt/xiaozhi-esp32-server/core/providers/llm/zeroclaw
       - ./custom-providers/edge_stream:/opt/xiaozhi-esp32-server/core/providers/tts/edge_stream
+      - ./custom-providers/piper_local:/opt/xiaozhi-esp32-server/core/providers/tts/piper_local
+      - ./models/piper:/opt/xiaozhi-esp32-server/models/piper:ro
       - ./custom-providers/asr/fun_local.py:/opt/xiaozhi-esp32-server/core/providers/asr/fun_local.py:ro
