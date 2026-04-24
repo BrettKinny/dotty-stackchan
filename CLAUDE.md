@@ -57,11 +57,15 @@ This repo uses placeholders (`<UNRAID_IP>`, `<RPI_IP>`, `<RPI_USER>`, `<UNRAID_X
 
 ## Config Files to Know
 
-- `data/.config.yaml` on Unraid — the xiaozhi-server override config. Never overwrite wholesale on upgrades; merge keys.
-- `zeroclaw.py` — the custom LLM provider. Mounted into the container via docker-compose volume.
-- `edge_stream.py` — custom streaming TTS provider. Mounted similarly.
-- `fun_local.py` — patched FunASR provider. Adds a `language` config key (upstream hardcodes `"auto"`, which mis-detects Korean/Japanese on unclear English). Mounted as a file-level override over the upstream provider.
+- `.config.yaml` (repo root; deployed to Unraid) — the xiaozhi-server override config. Never overwrite wholesale on upgrades; merge keys.
+- `custom-providers/zeroclaw/zeroclaw.py` — custom LLM provider. Mounted into the container via docker-compose volume.
+- `custom-providers/edge_stream/edge_stream.py` — custom streaming TTS provider. Mounted similarly.
+- `custom-providers/openai_compat/openai_compat.py` — OpenAI-compatible LLM provider (alternative to ZeroClaw).
+- `custom-providers/piper_local/piper_local.py` — local Piper TTS provider (offline alternative to EdgeTTS).
+- `custom-providers/asr/fun_local.py` — patched FunASR provider. Adds a `language` config key (upstream hardcodes `"auto"`, which mis-detects Korean/Japanese on unclear English). Mounted as a file-level override over the upstream provider.
 - `bridge.py` on RPi — the HTTP↔ZeroClaw translator (ACP-over-stdio client).
+- `personas/default.md` — default robot persona prompt (swappable).
+- `session-prompt.md` — Claude Code session prompt for infrastructure setup.
 
 ## Emotion/Expression Protocol
 
@@ -72,6 +76,23 @@ Three layers enforce this:
 1. **ZeroClaw's own agent prompt** (the configured persona) — primary source
 2. **xiaozhi-server top-level `prompt:`** in `data/.config.yaml` — gets injected as system message
 3. **Bridge fallback** (`_ensure_emoji_prefix` in `bridge.py`) — if the first non-whitespace char isn't a non-ASCII symbol, prepends 😐 before returning.
+
+## Key Directories
+
+- `custom-providers/` — all custom ASR/LLM/TTS providers (mounted into the xiaozhi container)
+- `bridge/` — bridge Python dependencies (`requirements.txt`)
+- `firmware/` — StackChan firmware patches, remote config, and server-side OTA assets
+- `personas/` — swappable robot persona prompts
+- `docs/` — deep technical reference (architecture, hardware, protocols, brain, latent capabilities)
+
+## Make Targets
+
+Run `make help` for the full list. Key targets:
+
+- `make setup` — interactive first-run wizard (substitutes placeholders, fetches models, starts containers)
+- `make doctor` — health checks on config, models, and services
+- `make fetch-models` — download SenseVoiceSmall + Piper voice models
+- `make up` / `make down` / `make logs` / `make status` — docker compose shortcuts
 
 ## Common Maintenance Tasks
 

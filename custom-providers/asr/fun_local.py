@@ -88,7 +88,7 @@ class ASRProvider(ASRProviderBase):
                     batch_size_s=60,
                 )
                 text = lang_tag_filter(result[0]["text"])
-                logger.bind(tag=TAG).debug(
+                logger.bind(tag=TAG).info(
                     f"语音识别耗时: {time.time() - start_time:.3f}s | 结果: {text['content']}"
                 )
 

@@ -50,13 +50,25 @@ This is the strongest enforcement layer. Every turn on the `stackchan`
 channel is wrapped in a prefix and a suffix before being sent to the LLM:
 
 ```
-STACKCHAN_TURN_PREFIX + user_message + STACKCHAN_TURN_SUFFIX
+STACKCHAN_TURN_PREFIX + context + user_message + suffix
 ```
 
 The suffix is placed at the very end of the prompt -- the position with the
 highest attention weight in transformer models. This means the hard
 constraints in the suffix are the last thing the model reads before
 generating its reply, making them the hardest to override.
+
+**Per-session suffix caching.** The full ~600-token suffix
+(`STACKCHAN_TURN_SUFFIX`) is sent on the first turn of each ACP session.
+Subsequent turns receive a shorter reminder
+(`STACKCHAN_TURN_SUFFIX_SHORT`) that explicitly restates the English-only,
+emoji-leader, and child-safe constraints.
+This saves ~550 tokens per turn while the full rules remain in the LLM's
+conversation history from turn 0. Sessions rotate on idle timeout (5 min),
+turn count (50), or wall-clock age (30 min), at which point the full suffix
+is re-sent. The suffix choice is made inside `app_lock` (via a `prepare`
+callback on `ACPClient.prompt()`) to avoid a TOCTOU race where session
+rotation could send a short suffix on a fresh session's first turn.
 
 **Why a suffix, not just a system prompt?** System prompts are seen once and
 can be diluted by long conversations. The suffix is re-injected on every
@@ -69,6 +81,22 @@ After the LLM responds, `bridge.py` checks whether the first non-whitespace
 character is one of the nine allowed emojis. If not, it prepends the neutral
 face (see "Emoji Enforcement" below). This is a programmatic
 post-check -- it does not depend on the LLM obeying instructions.
+
+### Layer 3c -- Content Filter (`_content_filter` in `bridge.py`)
+
+A compiled regex blocklist (`_BLOCKED_WORDS_RE`) catches egregious content
+that leaked through the prompt layer. The list covers unambiguous profanity,
+slurs, explicit sexual terms, graphic violence terms, and hard drug names.
+Word boundaries (`\b`) prevent false positives on innocent words containing
+blocked substrings (e.g. "class", "method", "seaweed").
+
+When the filter fires, the entire response is replaced with a safe canned
+reply and a WARNING-level log entry records the triggering pattern. In
+streaming mode, per-chunk filtering suppresses remaining chunks immediately;
+a final-text backstop catches any split-word misses from chunk-level
+filtering.
+
+Pipeline order: `raw LLM output` -> `_content_filter` -> `_ensure_emoji_prefix` -> `_clean_for_tts`.
 
 ---
 
@@ -239,16 +267,18 @@ inappropriate content through).
 
 ## Where the Code Lives
 
-| Component | File | Lines / keys |
+| Component | File | Symbol |
 |---|---|---|
-| Sandwich prefix/suffix constants | `bridge.py` | `STACKCHAN_TURN_PREFIX` (line 24), `STACKCHAN_TURN_SUFFIX` (lines 25-46) |
-| Sandwich injection | `bridge.py` | `/api/message` handler and `/api/message/stream` handler (both check `channel == "stackchan"`) |
-| Emoji fallback (post-LLM) | `bridge.py` | `_ensure_emoji_prefix()` (lines 311-317) |
-| Streaming emoji fallback | `bridge.py` | `on_chunk()` inside `/api/message/stream` (lines 399-407) |
-| Fail-safe error responses | `bridge.py` | Exception handlers in `/api/message` (lines 359-367) and `/api/message/stream` (lines 427-434) |
-| Allowed emoji list | `bridge.py` | `ALLOWED_EMOJIS` (line 23), `FALLBACK_EMOJI` (line 22) |
-| xiaozhi system prompt | `.config.yaml` | Top-level `prompt:` block (lines 25-36) |
-| LLM provider system prompt | `.config.yaml` | `LLM.ZeroClawLLM.system_prompt` (lines 81-82) |
+| Sandwich prefix/suffix constants | `bridge.py` | `STACKCHAN_TURN_PREFIX`, `STACKCHAN_TURN_SUFFIX`, `STACKCHAN_TURN_SUFFIX_SHORT` |
+| Turn-aware sandwich wrapper | `bridge.py` | `_wrap_stackchan()` (full suffix on turn 0, short on turns 1+) |
+| Sandwich injection | `bridge.py` | `prepare=` callback on `ACPClient.prompt()`, called from both endpoint handlers |
+| Content filter (post-LLM) | `bridge.py` | `_content_filter()`, `_BLOCKED_WORDS_RE`, `_CONTENT_FILTER_REPLACEMENT` |
+| Emoji fallback (post-LLM) | `bridge.py` | `_ensure_emoji_prefix()` |
+| Streaming emoji + filter | `bridge.py` | `on_chunk()` inside `/api/message/stream` |
+| Fail-safe error responses | `bridge.py` | Exception handlers in both endpoint handlers |
+| Allowed emoji list | `bridge.py` | `ALLOWED_EMOJIS`, `FALLBACK_EMOJI` |
+| xiaozhi system prompt | `.config.yaml` | Top-level `prompt:` block |
+| LLM provider system prompt | `.config.yaml` | `LLM.ZeroClawLLM.system_prompt` |
 
 ---
 
@@ -256,14 +286,6 @@ inappropriate content through).
 
 The following items are identified as remaining work. They are tracked in the
 project backlog and are not yet active.
-
-### Programmatic Post-Filter
-
-There is currently no programmatic output filter between the LLM response
-and the emoji check. If the prompt-level rules leak (the model generates
-blocked content despite the suffix), nothing catches it today. The planned
-fix is a regex blocklist plus a small classifier in `bridge.py` that
-replaces egregious output with a safe canned reply (fail closed).
 
 ### MCP Tool Allowlist
 
@@ -339,6 +361,6 @@ adjusting downward would further simplify language.
   of the prompt exploits the recency bias in transformer attention. This is
   the strongest prompt-engineering position available.
 - **Honest about limitations.** Prompt-level enforcement is not a guarantee.
-  LLMs can leak. The planned post-filter (see "Known Gaps") is the belt to
-  the prompt's suspenders. Until it ships, the system relies on the prompt
-  layer plus the three-layer emoji enforcement plus fail-safe defaults.
+  LLMs can leak. The content filter (Layer 3c) is the belt to the prompt's
+  suspenders -- a compiled regex blocklist that replaces egregious output
+  with a safe canned reply, independent of LLM cooperation.
