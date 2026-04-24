@@ -35,7 +35,7 @@ class LLMProvider(LLMProviderBase):
         if not self.url:
             raise ValueError("ZeroClawLLM requires 'url' (e.g. http://RPI:8080/api/message)")
         self.timeout = float(config.get("timeout", 90))
-        self.channel = config.get("channel", "stackchan")
+        self.channel = config.get("channel", "dotty")
         self.system_prompt = config.get("system_prompt", "")
         self.session_id = str(uuid.uuid4())
         self._streaming = self.url.rstrip("/").endswith("/stream")

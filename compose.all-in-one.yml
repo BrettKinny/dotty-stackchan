@@ -67,7 +67,7 @@ services:
       - ./models/piper:/opt/xiaozhi-esp32-server/models/piper:ro
       - ./custom-providers/asr/fun_local.py:/opt/xiaozhi-esp32-server/core/providers/asr/fun_local.py:ro
     networks:
-      - stackchan
+      - dotty
     depends_on:
       bridge:
         condition: service_started
@@ -113,8 +113,8 @@ services:
       # Contains config.toml (agent persona, LLM provider, API keys).
       - /root/.zeroclaw:/root/.zeroclaw:ro
     networks:
-      - stackchan
+      - dotty
 
 networks:
-  stackchan:
+  dotty:
     driver: bridge

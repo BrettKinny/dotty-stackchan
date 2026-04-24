@@ -1,10 +1,10 @@
-site_name: stackchan-infra
+site_name: Dotty
 site_description: >-
-  A fully self-hosted voice stack for the M5Stack StackChan.
+  Your self-hosted StackChan robot assistant.
   Open-source firmware, local ASR/TTS, pluggable LLM brain — no cloud required.
-site_url: https://brettkinny.github.io/stackchan-infra
-repo_url: https://github.com/BrettKinny/stackchan-infra
-repo_name: BrettKinny/stackchan-infra
+site_url: https://brettkinny.github.io/dotty-stackchan
+repo_url: https://github.com/BrettKinny/dotty-stackchan
+repo_name: BrettKinny/dotty-stackchan
 
 theme:
   name: material

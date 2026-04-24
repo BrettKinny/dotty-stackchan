@@ -19,7 +19,7 @@ RESET  := \033[0m
 
 help: ## Show this help
 	@echo ""
-	@echo -e "$(BOLD)stackchan-infra$(RESET) — self-hosted voice robot"
+	@echo -e "$(BOLD)Dotty$(RESET) — your self-hosted StackChan robot assistant"
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BOLD)%-15s$(RESET) %s\n", $$1, $$2}'
@@ -30,7 +30,7 @@ help: ## Show this help
 # ─────────────────────────────────────────────────────────────────────
 setup: ## Interactive first-run wizard (prompts for IPs, names, timezone)
 	@echo ""
-	@echo -e "$(BOLD)stackchan-infra setup wizard$(RESET)"
+	@echo -e "$(BOLD)Dotty setup wizard$(RESET)"
 	@echo "This will substitute placeholders in config files and start the stack."
 	@echo ""
 	@read -rp "UNRAID_IP  (LAN IP of Docker host, e.g. 192.168.1.10): " UNRAID_IP && \
