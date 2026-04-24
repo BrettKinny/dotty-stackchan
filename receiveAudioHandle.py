@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import json
 import asyncio
@@ -15,6 +16,33 @@ from core.handle.sendAudioHandle import send_stt_message, SentenceType
 TAG = __name__
 
 VISION_BRIDGE_URL = os.environ.get("VISION_BRIDGE_URL", "")
+MIN_UTTERANCE_CHARS = int(os.environ.get("MIN_UTTERANCE_CHARS", "2"))
+_LETTERS_RE = re.compile(r'[a-zA-Z一-鿿぀-ゟ゠-ヿ]')
+
+_ASR_CORRECTIONS: dict[str, str] = {
+    "doty": "Dotty",
+    "dottie": "Dotty",
+    "dotie": "Dotty",
+    "dotti": "Dotty",
+    "dody": "Dotty",
+}
+_ASR_CORRECTION_RE = re.compile(
+    r'\b(' + '|'.join(re.escape(k) for k in _ASR_CORRECTIONS) + r')\b',
+    re.IGNORECASE,
+)
+
+
+def _is_noise(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped or len(stripped) < MIN_UTTERANCE_CHARS:
+        return True
+    return len(_LETTERS_RE.findall(stripped)) < MIN_UTTERANCE_CHARS
+
+
+def _apply_asr_corrections(text: str) -> str:
+    def _repl(m):
+        return _ASR_CORRECTIONS.get(m.group(0).lower(), m.group(0))
+    return _ASR_CORRECTION_RE.sub(_repl, text)
 VISION_PHRASES = (
     "look at", "what do you see", "what is this", "what's this",
     "take a photo", "take a picture", "can you see", "what's in front",
@@ -105,6 +133,12 @@ async def startToChat(conn: "ConnectionHandler", text):
                 actual_text = text
     except (json.JSONDecodeError, KeyError):
         pass
+
+    if _is_noise(actual_text):
+        conn.logger.bind(tag=TAG).info(f"ASR noise rejected: {actual_text!r}")
+        return
+
+    actual_text = _apply_asr_corrections(actual_text)
 
     if speaker_name:
         conn.current_speaker = speaker_name
