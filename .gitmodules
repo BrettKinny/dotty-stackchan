@@ -1,0 +1,4 @@
+[submodule "firmware"]
+	path = firmware
+	url = https://github.com/BrettKinny/StackChan.git
+	branch = dotty
