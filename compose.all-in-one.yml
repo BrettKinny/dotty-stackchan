@@ -1,0 +1,120 @@
+# compose.all-in-one.yml — single-host deployment
+#
+# Runs both xiaozhi-esp32-server (voice I/O) and zeroclaw-bridge (LLM brain)
+# on one Docker host. The two services talk over a shared Docker network;
+# no real IPs needed between them.
+#
+# For the multi-host (Unraid + RPi) deployment, see docs/advanced/multi-host.md.
+#
+# ─── Prerequisites ──────────────────────────────────────────────────────
+#
+#   1. ZeroClaw must be installed on the Docker host (or inside a volume
+#      the bridge container can reach). The bridge container needs:
+#        - The `zeroclaw` binary (default: /root/.cargo/bin/zeroclaw)
+#        - A ZeroClaw config directory (default: /root/.zeroclaw/)
+#      Install ZeroClaw: https://github.com/zeroclaw-labs/zeroclaw
+#
+#   2. ASR model weights must be downloaded into models/SenseVoiceSmall/.
+#      See the main README for setup instructions.
+#
+#   3. If using LocalPiper TTS, download Piper voice files into models/piper/.
+#
+# ─── Quick start ────────────────────────────────────────────────────────
+#
+#   1. Copy .env.example to .env and fill in real values.
+#   2. Edit data/.config.yaml — replace <UNRAID_IP> with this host's LAN IP
+#      (the StackChan device needs a LAN-reachable IP for WebSocket/OTA).
+#      The LLM URL is already set to use the Docker network (http://bridge:8080/...).
+#   3. docker compose -f compose.all-in-one.yml up -d
+#   4. Point StackChan OTA URL to http://<THIS_HOST_LAN_IP>:8003/xiaozhi/ota/
+#
+# ─── What to change for your environment ────────────────────────────────
+#
+#   - TZ: set to your IANA timezone (e.g. America/New_York, Europe/London)
+#   - ZEROCLAW_BIN: path to the zeroclaw binary on the host
+#   - ZeroClaw config volume: path to your .zeroclaw/ directory on the host
+#   - Piper model paths in data/.config.yaml if you use different voices
+#
+
+services:
+
+  # ── xiaozhi-esp32-server ─────────────────────────────────────────────
+  # Voice pipeline: ASR, TTS, emotion parsing, WebSocket to the StackChan.
+  # The LLM provider (ZeroClawLLM) calls the bridge service over the
+  # Docker network — no real IP needed.
+  xiaozhi-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: xiaozhi-esp32-server-piper:local
+    container_name: xiaozhi-esp32-server
+    restart: unless-stopped
+    environment:
+      # EDIT: set to your local timezone
+      - TZ=Australia/Brisbane
+    ports:
+      # 8000: WebSocket — StackChan connects here
+      - "8000:8000"
+      # 8003: HTTP — OTA endpoint for StackChan firmware config
+      - "8003:8003"
+    volumes:
+      - ./data/.config.yaml:/opt/xiaozhi-esp32-server/data/.config.yaml:ro
+      - ./models/SenseVoiceSmall:/opt/xiaozhi-esp32-server/models/SenseVoiceSmall
+      - ./tmp:/opt/xiaozhi-esp32-server/tmp
+      - ./custom-providers/zeroclaw:/opt/xiaozhi-esp32-server/core/providers/llm/zeroclaw
+      - ./custom-providers/edge_stream/edge_stream.py:/opt/xiaozhi-esp32-server/core/providers/tts/edge_stream.py:ro
+      - ./custom-providers/piper_local/piper_local.py:/opt/xiaozhi-esp32-server/core/providers/tts/piper_local.py:ro
+      - ./models/piper:/opt/xiaozhi-esp32-server/models/piper:ro
+      - ./custom-providers/asr/fun_local.py:/opt/xiaozhi-esp32-server/core/providers/asr/fun_local.py:ro
+    networks:
+      - stackchan
+    depends_on:
+      bridge:
+        condition: service_started
+
+  # ── zeroclaw-bridge ──────────────────────────────────────────────────
+  # FastAPI HTTP bridge: translates xiaozhi LLM provider requests into
+  # ZeroClaw ACP calls (JSON-RPC 2.0 over stdio to a long-running
+  # `zeroclaw acp` child process).
+  #
+  # PREREQUISITE: ZeroClaw must be installed on the Docker host.
+  # The binary and config directory are bind-mounted into the container.
+  # Install: https://github.com/zeroclaw-labs/zeroclaw
+  bridge:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM python:3.12-slim
+        WORKDIR /app
+        COPY bridge/requirements.txt /app/requirements.txt
+        RUN pip install --no-cache-dir -r requirements.txt
+        COPY bridge.py /app/bridge.py
+        EXPOSE 8080
+        CMD ["python", "bridge.py"]
+    container_name: zeroclaw-bridge
+    restart: unless-stopped
+    environment:
+      # EDIT: must match the bind-mounted path inside the container
+      - ZEROCLAW_BIN=/root/.cargo/bin/zeroclaw
+      - PORT=8080
+      - ZEROCLAW_TIMEOUT=90
+      - ZEROCLAW_INIT_TIMEOUT=10
+      - ZEROCLAW_SESSION_IDLE=300
+      - ZEROCLAW_SESSION_MAX_TURNS=50
+      - ZEROCLAW_SESSION_MAX_AGE_SEC=1800
+    ports:
+      # Exposed for external health checks: curl http://localhost:8080/health
+      - "8080:8080"
+    volumes:
+      # EDIT: path to the zeroclaw binary on the host.
+      # Default assumes cargo install under /root/.cargo/bin/.
+      - /root/.cargo/bin/zeroclaw:/root/.cargo/bin/zeroclaw:ro
+      # EDIT: path to the ZeroClaw config directory on the host.
+      # Contains config.toml (agent persona, LLM provider, API keys).
+      - /root/.zeroclaw:/root/.zeroclaw:ro
+    networks:
+      - stackchan
+
+networks:
+  stackchan:
+    driver: bridge
