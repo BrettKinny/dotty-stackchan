@@ -1,3 +1,8 @@
+---
+title: Latent Capabilities
+description: Features the hardware and software already support but are not yet wired up.
+---
+
 # Latent capabilities — features available but not wired up
 
 ## TL;DR

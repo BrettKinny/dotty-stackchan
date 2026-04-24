@@ -1,3 +1,8 @@
+---
+title: Voice Pipeline
+description: xiaozhi-esp32-server pipeline stages -- VAD, ASR, LLM proxy, and TTS.
+---
+
 # Voice pipeline — xiaozhi-esp32-server
 
 ## TL;DR

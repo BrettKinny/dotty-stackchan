@@ -1,3 +1,8 @@
+---
+title: Protocols
+description: Xiaozhi WebSocket protocol, ACP JSON-RPC, and the emotion frame format.
+---
+
 # Protocols — what's on the wire
 
 ## TL;DR

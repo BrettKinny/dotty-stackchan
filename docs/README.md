@@ -1,3 +1,8 @@
+---
+title: Docs Index
+description: Index of the StackChan tech reference documentation.
+---
+
 # Docs — StackChan tech reference
 
 Curated reference for the StackChan voice robot stack. The top-level `README.md`

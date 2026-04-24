@@ -1,0 +1,74 @@
+site_name: stackchan-infra
+site_description: >-
+  A fully self-hosted voice stack for the M5Stack StackChan.
+  Open-source firmware, local ASR/TTS, pluggable LLM brain — no cloud required.
+site_url: https://brettkinny.github.io/stackchan-infra
+repo_url: https://github.com/BrettKinny/stackchan-infra
+repo_name: BrettKinny/stackchan-infra
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+
+nav:
+  - Home: README.md
+  - Getting Started: SETUP.md
+  - Architecture: docs/architecture.md
+  - Hardware:
+      - Hardware: docs/hardware.md
+      - Hardware Support: docs/hardware-support.md
+  - Voice Pipeline: docs/voice-pipeline.md
+  - Brain: docs/brain.md
+  - Protocols: docs/protocols.md
+  - Safety: docs/child-safety.md
+  - Reference:
+      - Latent Capabilities: docs/latent-capabilities.md
+      - References: docs/references.md
+  - Troubleshooting: docs/troubleshooting.md
+  - FAQ: docs/faq.md
+  - About: docs/about.md
+  - Contributing: CONTRIBUTING.md
+  - Security: SECURITY.md
+  - Changelog: CHANGELOG.md
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - tables
+  - admonition
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - attr_list
+  - md_in_html

@@ -1,3 +1,8 @@
+---
+title: References
+description: Canonical upstream links for every component in the stack.
+---
+
 # References
 
 Canonical upstream links for every component mentioned in these docs. When a

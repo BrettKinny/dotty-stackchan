@@ -1,3 +1,8 @@
+---
+title: Hardware
+description: M5Stack StackChan hardware specs, CoreS3 ESP32-S3 SoC, and servo chassis.
+---
+
 # Hardware — M5Stack StackChan
 
 ## TL;DR

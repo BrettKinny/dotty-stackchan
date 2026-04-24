@@ -1,3 +1,8 @@
+---
+title: Brain
+description: ZeroClaw agent runtime, Qwen3 LLM via OpenRouter, and the FastAPI bridge.
+---
+
 # Brain — ZeroClaw + Qwen3 + OpenRouter
 
 ## TL;DR

@@ -1,3 +1,8 @@
+---
+title: Architecture
+description: Three-host architecture and message flow for the self-hosted voice stack.
+---
+
 # Architecture
 
 ## TL;DR
