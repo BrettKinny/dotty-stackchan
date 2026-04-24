@@ -11,6 +11,11 @@ Type=simple
 User=root
 WorkingDirectory=/root/zeroclaw-bridge
 Environment=ZEROCLAW_BIN=/root/.cargo/bin/zeroclaw
+# Optional: context injection for voice turns (date/time is always injected)
+# Environment=WEATHER_LOCATION=Brisbane
+# Environment=TZ=Australia/Brisbane
+# Environment=CALENDAR_ID=<CALENDAR_ID_1>,<CALENDAR_ID_2>
+# Environment=CALENDAR_SA_PATH=/root/.zeroclaw/secrets/google-calendar-sa.json
 ExecStart=/root/zeroclaw-bridge/.venv/bin/python /root/zeroclaw-bridge/bridge.py
 Restart=on-failure
 RestartSec=5

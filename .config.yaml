@@ -3,7 +3,7 @@ server:
   port: 8000
   http_port: 8003
   websocket: ws://<UNRAID_IP>:8000/xiaozhi/v1/
-  vision_explain: http://<UNRAID_IP>:8003/mcp/vision/explain
+  vision_explain: http://<RPI_IP>:8080/api/vision/explain
   timezone_offset: +10
 
 log:

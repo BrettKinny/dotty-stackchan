@@ -1,3 +1,4 @@
+import os
 import time
 import json
 import asyncio
@@ -12,6 +13,59 @@ from core.utils.output_counter import check_device_output_limit
 from core.handle.sendAudioHandle import send_stt_message, SentenceType
 
 TAG = __name__
+
+VISION_BRIDGE_URL = os.environ.get("VISION_BRIDGE_URL", "")
+VISION_PHRASES = (
+    "look at", "what do you see", "what is this", "what's this",
+    "take a photo", "take a picture", "can you see", "what's in front",
+    "what am i holding", "what's that", "what is that", "describe what",
+    "what color is", "what colour is", "how many", "do you see",
+)
+
+
+def _is_vision_request(text: str) -> bool:
+    lower = text.lower().strip()
+    return any(phrase in lower for phrase in VISION_PHRASES)
+
+
+async def _handle_vision(conn: "ConnectionHandler", text: str) -> str | None:
+    if not VISION_BRIDGE_URL:
+        conn.logger.bind(tag=TAG).warning("VISION_BRIDGE_URL not set, skipping vision")
+        return None
+
+    device_id = conn.headers.get("device-id", "unknown")
+
+    mcp_call = json.dumps({
+        "session_id": conn.session_id,
+        "type": "mcp",
+        "payload": {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "name": "self.camera.take_photo",
+                "arguments": {"question": text},
+            },
+            "id": int(time.time() * 1000),
+        },
+    })
+    await conn.websocket.send(mcp_call)
+    conn.logger.bind(tag=TAG).info(f"Vision: sent take_photo MCP call, device={device_id}")
+
+    try:
+        import requests
+        url = f"{VISION_BRIDGE_URL.rstrip('/')}/api/vision/latest/{device_id}"
+        resp = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: requests.get(url, timeout=20),
+        )
+        if resp.status_code == 200:
+            description = resp.json().get("description", "")
+            conn.logger.bind(tag=TAG).info(f"Vision: got description len={len(description)}")
+            return description
+    except Exception as exc:
+        conn.logger.bind(tag=TAG).error(f"Vision: bridge poll failed: {exc}")
+
+    return None
 
 
 async def handleAudioMessage(conn: "ConnectionHandler", audio):
@@ -78,12 +132,34 @@ async def startToChat(conn: "ConnectionHandler", text):
 
     await send_stt_message(conn, actual_text)
 
-    await conn.websocket.send(json.dumps({
+    thinking_frame = json.dumps({
         "type": "llm",
         "text": "\U0001f914",
         "emotion": "thinking",
         "session_id": conn.session_id,
-    }))
+    })
+    conn.logger.bind(tag=TAG).info(f"Sending thinking emotion frame to device")
+    await conn.websocket.send(thinking_frame)
+
+    user_text = actual_text
+    try:
+        if actual_text.strip().startswith("{"):
+            user_text = json.loads(actual_text).get("content", actual_text)
+    except (json.JSONDecodeError, KeyError):
+        pass
+
+    if _is_vision_request(user_text):
+        conn.logger.bind(tag=TAG).info(f"Vision intent detected: {user_text[:60]}")
+        description = await _handle_vision(conn, user_text)
+        if description:
+            vision_prompt = (
+                f"[You just used your camera and took a photo. "
+                f"The photo shows: {description}]\n"
+                f'The child said: "{user_text}"\n'
+                f"Respond naturally about what you see, as if looking at it together."
+            )
+            conn.executor.submit(conn.chat, vision_prompt)
+            return
 
     conn.executor.submit(conn.chat, actual_text)
 

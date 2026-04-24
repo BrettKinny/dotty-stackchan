@@ -9,6 +9,8 @@ services:
     environment:
       # EDIT: set to your local timezone
       - TZ=Australia/Brisbane
+      # EDIT: set to the ZeroClaw bridge URL for vision intent handling
+      - VISION_BRIDGE_URL=http://<RPI_IP>:8080
     ports:
       - "8000:8000"
       - "8003:8003"

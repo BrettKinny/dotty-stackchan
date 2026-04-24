@@ -1,15 +1,18 @@
 import asyncio
+import base64
 import itertools
 import json
 import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime
 from time import perf_counter
 from typing import Awaitable, Callable
+from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 ZEROCLAW_BIN = os.environ.get("ZEROCLAW_BIN", "/root/.cargo/bin/zeroclaw")
@@ -19,6 +22,32 @@ STOP_TIMEOUT_SEC = 2.0
 SESSION_IDLE_TIMEOUT_SEC = float(os.environ.get("ZEROCLAW_SESSION_IDLE", "300"))
 SESSION_MAX_TURNS = int(os.environ.get("ZEROCLAW_SESSION_MAX_TURNS", "50"))
 SESSION_MAX_AGE_SEC = float(os.environ.get("ZEROCLAW_SESSION_MAX_AGE_SEC", "1800"))
+
+LOCAL_TZ = ZoneInfo(os.environ.get("TZ", "Australia/Brisbane"))
+WEATHER_LOCATION = os.environ.get("WEATHER_LOCATION", "Brisbane")
+WEATHER_TTL_SEC = float(os.environ.get("WEATHER_TTL_SEC", "1800"))
+CALENDAR_IDS = [c.strip() for c in os.environ.get("CALENDAR_ID", "").split(",") if c.strip()]
+CALENDAR_SA_PATH = os.environ.get(
+    "CALENDAR_SA_PATH", "/root/.zeroclaw/secrets/google-calendar-sa.json",
+)
+GWS_BIN = os.environ.get("GWS_BIN", "/usr/local/bin/gws")
+VISION_MODEL = os.environ.get("VISION_MODEL", "qwen/qwen3-vl-8b-instruct")
+VISION_API_KEY = os.environ.get("VISION_API_KEY", os.environ.get("OPENROUTER_API_KEY", ""))
+VISION_API_URL = os.environ.get(
+    "VISION_API_URL", "https://openrouter.ai/api/v1/chat/completions",
+)
+VISION_TIMEOUT_SEC = float(os.environ.get("VISION_TIMEOUT", "15"))
+VISION_CACHE_TTL_SEC = 60.0
+VISION_SYSTEM_PROMPT = (
+    "You are describing a photo taken by a small children's robot camera (low resolution). "
+    "Describe what you see in simple, clear language suitable for a young child. "
+    "Focus on objects, colors, and actions. Do NOT identify or name specific people. "
+    "If the image is blurry or unclear, describe what you can make out. "
+    "If the image contains anything inappropriate for young children, "
+    "say only 'I see something I am not sure about' without further detail. "
+    "Keep your description to 2-3 sentences."
+)
+
 FALLBACK_EMOJI = "😐"
 ALLOWED_EMOJIS = ("😊", "😆", "😢", "😮", "🤔", "😠", "😐", "😍", "😴")
 STACKCHAN_TURN_PREFIX = "[channel=stackchan voice-TTS]\n"
@@ -49,6 +78,99 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("zeroclaw-bridge")
 
 app_lock = asyncio.Lock()
+
+# ---------------------------------------------------------------------------
+# Context injection — date/time, weather, calendar
+# ---------------------------------------------------------------------------
+
+_weather_cache: dict = {"text": "", "fetched": 0.0}
+_calendar_cache: dict = {"events": [], "fetched": 0.0, "date": ""}
+
+
+async def _fetch_weather() -> str:
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "curl", "-s", "-m", "10",
+            f"wttr.in/{WEATHER_LOCATION}?format=%C+%t+%h+%w",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+        text = stdout.decode("utf-8").strip()
+        if text and "Unknown" not in text and "Sorry" not in text:
+            return text
+    except Exception:
+        log.warning("weather fetch failed", exc_info=True)
+    return ""
+
+
+async def _fetch_calendar_events() -> list[str]:
+    if not CALENDAR_IDS or not os.path.isfile(CALENDAR_SA_PATH):
+        return []
+    now = datetime.now(LOCAL_TZ)
+    time_min = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    time_max = now.replace(hour=23, minute=59, second=59, microsecond=0).isoformat()
+    env = {**os.environ, "GOOGLE_APPLICATION_CREDENTIALS": CALENDAR_SA_PATH}
+    all_events: list[tuple[str, str]] = []
+    for cal_id in CALENDAR_IDS:
+        try:
+            params = json.dumps({
+                "calendarId": cal_id,
+                "timeMin": time_min,
+                "timeMax": time_max,
+                "singleEvents": True,
+                "orderBy": "startTime",
+                "maxResults": 10,
+            })
+            proc = await asyncio.create_subprocess_exec(
+                GWS_BIN, "calendar", "events", "list", "--params", params,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+                env=env,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+            data = json.loads(stdout.decode("utf-8"))
+            for item in data.get("items", []):
+                summary = item.get("summary", "")
+                start_obj = item.get("start", {})
+                start = start_obj.get("dateTime", start_obj.get("date", ""))
+                if summary:
+                    all_events.append((start, summary))
+        except Exception:
+            log.warning("calendar fetch failed cal=%s", cal_id, exc_info=True)
+    all_events.sort()
+    return [f"{start}: {summary}" for start, summary in all_events]
+
+
+async def _refresh_caches() -> None:
+    now = perf_counter()
+    if now - _weather_cache["fetched"] > WEATHER_TTL_SEC:
+        text = await _fetch_weather()
+        if text:
+            _weather_cache["text"] = text
+        _weather_cache["fetched"] = now
+
+    today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
+    if (
+        CALENDAR_IDS
+        and (now - _calendar_cache["fetched"] > WEATHER_TTL_SEC
+             or _calendar_cache["date"] != today)
+    ):
+        events = await _fetch_calendar_events()
+        _calendar_cache["events"] = events
+        _calendar_cache["fetched"] = now
+        _calendar_cache["date"] = today
+
+
+def _build_context() -> str:
+    parts = []
+    now = datetime.now(LOCAL_TZ)
+    parts.append(now.strftime("%A %d %B %Y, %H:%M %Z"))
+    if _weather_cache["text"]:
+        parts.append(f"{WEATHER_LOCATION}: {_weather_cache['text']}")
+    if _calendar_cache["events"]:
+        parts.append("Today: " + "; ".join(_calendar_cache["events"]))
+    return f"[Context: {' | '.join(parts)}]\n"
 
 
 class MessageIn(BaseModel):
@@ -142,6 +264,12 @@ class ACPClient:
                     await on_event(obj.get("params") or {})
                 except Exception:
                     log.exception("session/event callback raised")
+                continue
+            method = obj.get("method")
+            if method:
+                log.info("ACP unhandled method=%s id=%s params_keys=%s",
+                         method, obj.get("id"), list((obj.get("params") or {}).keys()))
+                continue
 
     async def _new_session(self) -> None:
         rid = next(self._id_gen)
@@ -324,6 +452,13 @@ async def lifespan(app: FastAPI):
             await acp.ensure_alive()
     except Exception:
         log.exception("Initial ACP spawn failed — will retry on first request")
+    try:
+        await _refresh_caches()
+        log.info("context-primed weather=%r calendar_events=%d",
+                 _weather_cache["text"][:60] if _weather_cache["text"] else "(none)",
+                 len(_calendar_cache["events"]))
+    except Exception:
+        log.exception("Initial context fetch failed — will retry on first request")
     yield
     await acp.shutdown()
 
@@ -343,13 +478,117 @@ async def health() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Vision — photo description via OpenRouter VLM
+# ---------------------------------------------------------------------------
+
+_vision_cache: dict[str, dict] = {}
+_vision_events: dict[str, asyncio.Event] = {}
+
+
+def _call_vision_api(b64_image: str, question: str) -> str:
+    import requests as req
+
+    if not VISION_API_KEY:
+        log.warning("VISION_API_KEY not set")
+        return "I couldn't quite see that clearly."
+    payload = {
+        "model": VISION_MODEL,
+        "messages": [
+            {"role": "system", "content": VISION_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"},
+                    },
+                    {"type": "text", "text": question},
+                ],
+            },
+        ],
+        "max_tokens": 200,
+        "temperature": 0.3,
+    }
+    try:
+        resp = req.post(
+            VISION_API_URL,
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {VISION_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            timeout=VISION_TIMEOUT_SEC,
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
+    except Exception:
+        log.exception("vision API call failed")
+        return "I couldn't quite see that clearly."
+
+
+@app.post("/api/vision/explain")
+async def vision_explain(
+    request: Request,
+    question: str = Form("What do you see?"),
+    file: UploadFile = File(...),
+):
+    device_id = request.headers.get("device-id", "unknown")
+    jpeg_bytes = await file.read()
+    log.info(
+        "vision device=%s question=%s bytes=%d",
+        device_id, question[:80], len(jpeg_bytes),
+    )
+    b64_image = base64.b64encode(jpeg_bytes).decode("ascii")
+    description = await asyncio.to_thread(_call_vision_api, b64_image, question)
+
+    _vision_cache[device_id] = {
+        "description": description,
+        "timestamp": perf_counter(),
+    }
+    event = _vision_events.get(device_id)
+    if event:
+        event.set()
+
+    now = perf_counter()
+    for k in [k for k, v in _vision_cache.items() if now - v["timestamp"] > VISION_CACHE_TTL_SEC]:
+        _vision_cache.pop(k, None)
+
+    log.info("vision result device=%s desc=%s", device_id, description[:120])
+    return {"description": description}
+
+
+@app.get("/api/vision/latest/{device_id}")
+async def vision_latest(device_id: str):
+    _vision_cache.pop(device_id, None)
+    event = asyncio.Event()
+    _vision_events[device_id] = event
+
+    entry = _vision_cache.get(device_id)
+    if entry:
+        _vision_events.pop(device_id, None)
+        return {"description": entry["description"]}
+
+    try:
+        await asyncio.wait_for(event.wait(), timeout=15.0)
+        entry = _vision_cache.get(device_id)
+        if entry:
+            return {"description": entry["description"]}
+        return JSONResponse(status_code=500, content={"error": "vision processing failed"})
+    except asyncio.TimeoutError:
+        return JSONResponse(status_code=404, content={"error": "no vision result in time"})
+    finally:
+        _vision_events.pop(device_id, None)
+
+
 @app.post("/api/message", response_model=MessageOut)
 async def message(payload: MessageIn) -> MessageOut:
     session_id = payload.session_id or str(uuid.uuid4())
     log.info("msg channel=%s session=%s len=%d", payload.channel, session_id, len(payload.content))
+    await _refresh_caches()
     prompt_text = payload.content
     if payload.channel == "stackchan":
-        prompt_text = STACKCHAN_TURN_PREFIX + prompt_text + STACKCHAN_TURN_SUFFIX
+        prompt_text = STACKCHAN_TURN_PREFIX + _build_context() + prompt_text + STACKCHAN_TURN_SUFFIX
     try:
         raw = await asyncio.wait_for(
             acp.prompt(prompt_text, xiaozhi_sid=payload.session_id),
@@ -389,9 +628,10 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
         "stream channel=%s session=%s len=%d",
         payload.channel, session_id, len(payload.content),
     )
+    await _refresh_caches()
     prompt_text = payload.content
     if payload.channel == "stackchan":
-        prompt_text = STACKCHAN_TURN_PREFIX + prompt_text + STACKCHAN_TURN_SUFFIX
+        prompt_text = STACKCHAN_TURN_PREFIX + _build_context() + prompt_text + STACKCHAN_TURN_SUFFIX
 
     queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
     state = {"seen_nonws": False}
