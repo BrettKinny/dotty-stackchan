@@ -31,7 +31,7 @@ CALENDAR_SA_PATH = os.environ.get(
     "CALENDAR_SA_PATH", "/root/.zeroclaw/secrets/google-calendar-sa.json",
 )
 GWS_BIN = os.environ.get("GWS_BIN", "/usr/local/bin/gws")
-VISION_MODEL = os.environ.get("VISION_MODEL", "qwen/qwen3-vl-8b-instruct")
+VISION_MODEL = os.environ.get("VISION_MODEL", "google/gemini-2.0-flash-001")
 VISION_API_KEY = os.environ.get("VISION_API_KEY", os.environ.get("OPENROUTER_API_KEY", ""))
 VISION_API_URL = os.environ.get(
     "VISION_API_URL", "https://openrouter.ai/api/v1/chat/completions",
@@ -259,16 +259,33 @@ class ACPClient:
                 continue
             if obj.get("id") == rid and "method" not in obj:
                 return obj
-            if on_event is not None and obj.get("method") == "session/event":
-                try:
-                    await on_event(obj.get("params") or {})
-                except Exception:
-                    log.exception("session/event callback raised")
-                continue
             method = obj.get("method")
+            if method == "session/event":
+                params = obj.get("params") or {}
+                evt_type = params.get("type")
+                if evt_type == "tool_call":
+                    log.info("tool-call name=%s", params.get("name", "?"))
+                elif evt_type == "tool_result":
+                    log.info("tool-result name=%s len=%d",
+                             params.get("name", "?"),
+                             len(str(params.get("output", ""))))
+                if on_event is not None:
+                    try:
+                        await on_event(params)
+                    except Exception:
+                        log.exception("session/event callback raised")
+                continue
+            if method == "session/request_permission":
+                perm_id = obj.get("id")
+                tool_name = (obj.get("params") or {}).get("toolName", "")
+                log.info("tool-permission tool=%s approved=True", tool_name)
+                await self._send({
+                    "jsonrpc": "2.0", "id": perm_id,
+                    "result": {"approved": True},
+                })
+                continue
             if method:
-                log.info("ACP unhandled method=%s id=%s params_keys=%s",
-                         method, obj.get("id"), list((obj.get("params") or {}).keys()))
+                log.debug("ACP notification method=%s", method)
                 continue
 
     async def _new_session(self) -> None:

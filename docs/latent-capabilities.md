@@ -60,8 +60,8 @@ ZeroClaw + Qwen3 + OpenRouter features that could be wired into the bridge.
 |---|---|---|---|
 | **ACP `session/update` streaming** | First-token TTS instead of waiting for the full response (perceived-latency win) | **High** | `tasks.md` → "Reduce first-audio latency" |
 | **Long-lived ZeroClaw sessions** | Skip `session/new` per turn — carry context across turns within a conversation | Medium | `tasks.md` → "Reduce first-audio latency" (ACP session overhead) |
-| **`session/request_permission`** | Bridge confirms tool calls before they execute — useful for child-safety | Medium | `tasks.md` → "Lock down for child-safe operation" |
-| **Qwen3 function-calling / tool-use** | Let Qwen call ZeroClaw tools directly in structured format instead of text-parsed intent | Medium | **New-task candidate** |
+| **`session/request_permission`** | Bridge confirms tool calls before they execute — useful for child-safety. Bridge now auto-approves (2026-04-25); tool allowlist for child-safety is a follow-up. | Medium | `tasks.md` → "Lock down for child-safe operation" |
+| ~~**Qwen3 function-calling / tool-use**~~ | **Wired up (2026-04-25).** ZeroClaw auto-approves tools in `auto_approve` list and sends tool execution as `session/event` notifications. Bridge logs tool calls at INFO level. Works for `weather`, `web_search_tool`, `calculator`, etc. | ~~Medium~~ Done | — |
 | **ZeroClaw MCP-server mode** | Expose ZeroClaw's tools/memory to other MCP clients | Low | **New-task candidate** |
 | **Qwen3 `role: "system"` injection** | Move the English+emoji constraints into a proper system message instead of a prompt prefix/suffix; better MoE adherence | Medium | Rework of bridge's wrapping logic |
 | **Qwen3 extended context (256K native)** | Keep long conversation history / memory verbatim instead of summarising | Low | Costs more tokens per turn — probably not worth it yet |

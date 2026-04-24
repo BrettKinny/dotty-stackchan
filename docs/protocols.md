@@ -248,12 +248,12 @@ Canonical spec: [agentclientprotocol.com](https://agentclientprotocol.com). Zed-
 ### What our bridge uses today
 
 - `initialize` (once at child startup)
-- `session/new` (per turn — candidate for reuse; see [latent-capabilities.md](./latent-capabilities.md#brain-unused))
-- `session/prompt` (non-streaming; bridge blocks until the terminal result)
+- `session/new` (with session caching — reuses across turns, rotates on idle/turn-count/age)
+- `session/prompt` (streaming via `session/event` chunks; bridge also supports buffered mode)
+- `session/event` — tool call/result logging (`tool_call`, `tool_result` types) and streaming text chunks
+- `session/request_permission` — auto-approves tool calls (safety net for tools not in ZeroClaw's `auto_approve` list)
 
 What the bridge doesn't yet use:
-- `session/update` notifications → first-token streaming to TTS (high impact; see tasks.md "Reduce first-audio latency").
-- `session/request_permission` → child-safety guardrails for tool invocations.
 - `session/cancel` → abort on barge-in (device already emits `abort` on wake-word-detected).
 
 ### ACP vs MCP — how they differ
