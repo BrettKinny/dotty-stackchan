@@ -75,7 +75,7 @@ TTS:
 LLM:
   ZeroClawLLM:
     type: zeroclaw
-    url: http://<RPI_IP>:8080/api/message
+    url: http://<RPI_IP>:8080/api/message/stream
     channel: stackchan
     timeout: 90
     system_prompt: |
