@@ -82,6 +82,10 @@ Three layers enforce this:
 - **Test bridge**: `curl http://<RPI_IP>:8080/health`
 - **Test full round-trip**: `curl -X POST http://<RPI_IP>:8080/api/message -H 'Content-Type: application/json' -d '{"content":"hello"}'`
 
+## Deeper reference
+
+For hardware specs, protocol details, model internals, and latent capabilities, see [`docs/README.md`](./docs/README.md) and its linked files (`architecture.md`, `hardware.md`, `voice-pipeline.md`, `brain.md`, `protocols.md`, `latent-capabilities.md`, `references.md`).
+
 ## Tech Stack Refs
 
 - xiaozhi-esp32-server: https://github.com/xinnan-tech/xiaozhi-esp32-server

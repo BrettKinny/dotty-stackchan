@@ -9,6 +9,20 @@ Everything except EdgeTTS runs on the local LAN — no cloud AI account required
 
 ---
 
+## Deeper reference
+
+This README covers deployment. For what the stack *is* underneath — hardware specs, protocol docs, model facts, and features we aren't using — see [`docs/`](./docs/README.md):
+
+- [docs/architecture.md](./docs/architecture.md) — end-to-end data flow, who talks to who, why this shape.
+- [docs/hardware.md](./docs/hardware.md) — M5Stack StackChan body + firmware lineage + on-device MCP tool catalog.
+- [docs/voice-pipeline.md](./docs/voice-pipeline.md) — xiaozhi-esp32-server internals, FunASR/SenseVoice, VAD, TTS.
+- [docs/brain.md](./docs/brain.md) — ZeroClaw architecture, Qwen3-30B-A3B facts, OpenRouter role.
+- [docs/protocols.md](./docs/protocols.md) — Xiaozhi WS framing, MCP-over-WS, ACP JSON-RPC, emotion channel.
+- [docs/latent-capabilities.md](./docs/latent-capabilities.md) — features upstream supports that we aren't using yet.
+- [docs/references.md](./docs/references.md) — canonical upstream URLs, model cards, licenses.
+
+---
+
 ## TL;DR — what runs where
 
 | Component | Host | Notes |
