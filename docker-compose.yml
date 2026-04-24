@@ -1,0 +1,17 @@
+services:
+  xiaozhi-esp32-server:
+    image: ghcr.io/xinnan-tech/xiaozhi-esp32-server:server_latest
+    container_name: xiaozhi-esp32-server
+    restart: unless-stopped
+    environment:
+      # EDIT: set to your local timezone
+      - TZ=Australia/Brisbane
+    ports:
+      - "8000:8000"
+      - "8003:8003"
+    volumes:
+      - ./data/.config.yaml:/opt/xiaozhi-esp32-server/data/.config.yaml:ro
+      - ./models/SenseVoiceSmall:/opt/xiaozhi-esp32-server/models/SenseVoiceSmall
+      - ./tmp:/opt/xiaozhi-esp32-server/tmp
+      - ./custom-providers/zeroclaw:/opt/xiaozhi-esp32-server/core/providers/llm/zeroclaw
+      - ./custom-providers/edge_stream:/opt/xiaozhi-esp32-server/core/providers/tts/edge_stream

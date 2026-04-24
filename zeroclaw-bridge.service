@@ -1,0 +1,21 @@
+[Unit]
+Description=ZeroClaw HTTP Bridge for StackChan
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# EDIT: replace /root/... paths with wherever you cloned zeroclaw-bridge
+# and installed the zeroclaw binary. These defaults assume running as root
+# with cargo-installed zeroclaw under /root/.cargo.
+Type=simple
+User=root
+WorkingDirectory=/root/zeroclaw-bridge
+Environment=ZEROCLAW_BIN=/root/.cargo/bin/zeroclaw
+ExecStart=/root/zeroclaw-bridge/.venv/bin/python /root/zeroclaw-bridge/bridge.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

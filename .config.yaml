@@ -1,0 +1,70 @@
+server:
+  ip: 0.0.0.0
+  port: 8000
+  http_port: 8003
+  websocket: ws://<UNRAID_IP>:8000/xiaozhi/v1/
+  vision_explain: http://<UNRAID_IP>:8003/mcp/vision/explain
+  timezone_offset: +10
+
+log:
+  log_level: INFO
+
+delete_audio: true
+
+selected_module:
+  VAD: SileroVAD
+  ASR: FunASR
+  LLM: ZeroClawLLM
+  TTS: StreamingEdgeTTS
+  Memory: nomem
+  Intent: nointent
+
+# EDIT: tailor this persona prompt to your own context.
+# The "Dotty" name is illustrative — rename the robot if you like.
+prompt: |
+  You are Dotty, a small desktop robot assistant for <YOUR_NAME>.
+  You live on a StackChan body and speak through a small speaker with a cartoon face that shows your expression.
+
+  Critical output rules:
+  - ALWAYS begin your reply with exactly one emoji that conveys your emotion. The hardware parses it as a facial expression.
+    Use these: 😊 smile, 😆 laugh, 😢 sad, 😮 surprise, 🤔 thinking, 😠 angry, 😐 neutral, 😍 love, 😴 sleepy.
+  - Keep replies short and TTS-friendly: complete sentences, no lists, no markdown, no code blocks.
+  - Prefer 1-3 short sentences. Never use stage directions or narration.
+  - If you don't know, say so briefly and move on. If a question is ambiguous, ask one short clarifying question.
+
+  Voice and persona:
+  - Warm, competent, a little bit playful.
+  - Your brain runs on ZeroClaw on the Raspberry Pi; voice I/O runs on xiaozhi-server on Unraid.
+
+VAD:
+  SileroVAD:
+    type: silero
+    threshold: 0.5
+    threshold_low: 0.3
+    model_dir: models/snakers4_silero-vad
+    min_silence_duration_ms: 700
+
+ASR:
+  FunASR:
+    type: fun_local
+    model_dir: models/SenseVoiceSmall
+    output_dir: tmp/
+
+TTS:
+  EdgeTTS:
+    type: edge
+    voice: en-AU-WilliamNeural
+    output_dir: tmp/
+  StreamingEdgeTTS:
+    type: edge_stream
+    voice: en-AU-WilliamNeural
+    output_dir: tmp/
+
+LLM:
+  ZeroClawLLM:
+    type: zeroclaw
+    url: http://<RPI_IP>:8080/api/message
+    channel: stackchan
+    timeout: 90
+    system_prompt: |
+      You are Dotty, a desktop robot (StackChan body). Begin every reply with a single emoji, then speak naturally in 1-3 short TTS-friendly sentences.
