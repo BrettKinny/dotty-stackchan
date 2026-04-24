@@ -1,0 +1,57 @@
+# zeroclaw-bridge — Docker deployment on the Raspberry Pi.
+#
+# Replaces the bare-metal systemd unit (zeroclaw-bridge.service). The
+# bare-metal path is still documented in the top-level README as
+# "Option B" for anyone who doesn't want Docker on the Pi.
+#
+# Usage on the Pi:
+#   mkdir -p /root/zeroclaw-bridge && cd /root/zeroclaw-bridge
+#   curl -L -o compose.yml https://raw.githubusercontent.com/BrettKinny/stackchan-infra/main/bridge/compose.bridge.yml
+#   mkdir -p /root/.zeroclaw   # populate per SETUP before first run
+#   docker compose up -d
+#
+# Inspect:
+#   docker compose logs -f
+#   curl http://127.0.0.1:8080/health
+
+services:
+  zeroclaw-bridge:
+    image: ghcr.io/brettkinny/zeroclaw-bridge:latest
+    container_name: zeroclaw-bridge
+    # Host networking: Pi is single-tenant, and the ZeroClaw gateway web UI
+    # on :42617 is reached via `ssh -L 42617:127.0.0.1:42617` — that tunnel
+    # hits the host loopback, so host mode keeps it working with no extra
+    # port plumbing. Also avoids the userland proxy hop on ARM.
+    network_mode: host
+    # tini as PID 1 reaps zombies from the `zeroclaw acp` subprocess if it
+    # ever exits mid-turn. Without this, FastAPI-as-PID-1 leaks processes.
+    init: true
+    restart: unless-stopped
+    volumes:
+      # Bind mount (not a named volume) so the host can edit persona files
+      # directly and so rollback to the systemd path sees the same state.
+      # Inside-container path matches the host path so config.toml absolute
+      # paths resolve without rewriting.
+      - /root/.zeroclaw:/root/.zeroclaw
+    environment:
+      # Surface the tunables the bridge already reads from the environment.
+      # Defaults here match bridge.py defaults; override per host as needed.
+      ZEROCLAW_TIMEOUT: "90"
+      ZEROCLAW_INIT_TIMEOUT: "10"
+      ZEROCLAW_SESSION_IDLE: "300"
+      ZEROCLAW_SESSION_MAX_TURNS: "50"
+      ZEROCLAW_SESSION_MAX_AGE_SEC: "1800"
+      PORT: "8080"
+    # Log rotation is not automatic with the default driver — set it here or
+    # /var/lib/docker will grow without bound.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=2).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3

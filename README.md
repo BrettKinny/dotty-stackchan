@@ -31,7 +31,7 @@ This README covers deployment. For what the stack *is* underneath — hardware s
 |---|---|---|
 | StackChan (device) | ESP32-S3 on the desk | Firmware built from `m5stack/StackChan` (see `SETUP.md`) |
 | xiaozhi-esp32-server | Unraid (`<UNRAID_IP>`) | Docker, ports 8000 + 8003 |
-| zeroclaw-bridge | RPi (`<RPI_IP>`) | FastAPI on port 8080, systemd |
+| zeroclaw-bridge | RPi (`<RPI_IP>`) | FastAPI on port 8080, Docker or systemd (see [`bridge/`](./bridge/README.md)) |
 | ZeroClaw daemon | RPi (`<RPI_IP>`) | `<RPI_ZEROCLAW_BIN>` |
 | Admin workstation | any LAN box | Development / `ssh` only |
 
@@ -62,7 +62,7 @@ Files you will definitely need to edit before first run:
 
 - `.config.yaml` — replace `<UNRAID_IP>`, `<RPI_IP>`, and customize the `prompt:` block.
 - `docker-compose.yml` — set `TZ` to your timezone.
-- `zeroclaw-bridge.service` — adjust paths if the bridge doesn't live at `/root/zeroclaw-bridge/`.
+- `zeroclaw-bridge.service` — adjust paths if the bridge doesn't live at `/root/zeroclaw-bridge/` (bare-metal install only; skip if using the Docker option — see [`bridge/README.md`](./bridge/README.md)).
 
 ---
 
@@ -169,6 +169,18 @@ flowchart TB
     end
 ```
 
+Bridge deployment on the RPi has two supported shapes — both read the
+same `~/.zeroclaw/` state directory, so you can swap between them without
+reprovisioning:
+
+- **Option A (Docker, recommended).** `docker compose` with a pre-built
+  multi-arch image from `ghcr.io/brettkinny/zeroclaw-bridge`. No Rust
+  toolchain on the Pi, no venv, no hand-edited service file. See
+  [`bridge/README.md`](./bridge/README.md).
+- **Option B (bare metal).** `cargo install zeroclaw` + systemd unit.
+  Same procedure the repo has always supported. Also documented in
+  [`bridge/README.md`](./bridge/README.md).
+
 Container volume mounts:
 
 | Host path | Container path | Purpose |
@@ -201,7 +213,8 @@ Both services restart themselves without manual intervention:
 | Host | Mechanism |
 |---|---|
 | Unraid | Array auto-start (`startArray=yes`) + Docker service auto-start (`DOCKER_ENABLED=yes`) + container `restart: unless-stopped`. dockerd starts containers that were running and weren't explicitly `docker stop`ped. |
-| RPi | `zeroclaw-bridge.service` is `enabled`, `Restart=on-failure`. |
+| RPi (bare metal) | `zeroclaw-bridge.service` is `enabled`, `Restart=on-failure`. |
+| RPi (Docker) | `restart: unless-stopped` in `compose.bridge.yml` — Docker daemon restarts the container on boot unless you explicitly `docker compose down`. |
 
 Caveat: if you run `docker compose down` on Unraid, the container is marked
 stopped and won't come back on reboot. Use `docker compose restart` or
@@ -215,14 +228,18 @@ stopped and won't come back on reboot. Use `docker compose restart` or
 # Tail xiaozhi-server logs (voice pipeline)
 ssh <UNRAID_USER>@<UNRAID_IP> 'docker logs -f xiaozhi-esp32-server'
 
-# Tail bridge logs
+# Tail bridge logs (bare metal / Option B)
 ssh <RPI_USER>@<RPI_IP> 'sudo journalctl -u zeroclaw-bridge -f'
+# Tail bridge logs (Docker / Option A)
+ssh <RPI_USER>@<RPI_IP> 'docker logs -f zeroclaw-bridge'
 
 # Restart voice pipeline after config change
 ssh <UNRAID_USER>@<UNRAID_IP> 'cd <UNRAID_XIAOZHI_PATH> && docker compose restart'
 
-# Restart the bridge
+# Restart the bridge (bare metal / Option B)
 ssh <RPI_USER>@<RPI_IP> 'sudo systemctl restart zeroclaw-bridge'
+# Restart the bridge (Docker / Option A)
+ssh <RPI_USER>@<RPI_IP> 'cd /root/zeroclaw-bridge && docker compose restart'
 
 # Smoke test full round-trip
 curl -X POST http://<RPI_IP>:8080/api/message \
@@ -251,8 +268,12 @@ Primary source: ZeroClaw's own system prompt in `<RPI_ZEROCLAW_CFG>` on the RPi.
 
 | File | Deployed to | Purpose |
 |---|---|---|
-| `bridge.py` | RPi `<RPI_BRIDGE_PATH>/bridge.py` | FastAPI HTTP→ZeroClaw translator (ACP over stdio) |
-| `zeroclaw-bridge.service` | RPi `/etc/systemd/system/` | systemd unit for bridge |
+| `bridge.py` | RPi `<RPI_BRIDGE_PATH>/bridge.py` | FastAPI HTTP→ZeroClaw translator (ACP over stdio); baked into the Docker image or installed directly for systemd |
+| `bridge/Dockerfile` | build-time only (CI) | Multi-stage image: Rust builder → Python runtime with `bridge.py` + `zeroclaw` binary |
+| `bridge/compose.bridge.yml` | RPi `/root/zeroclaw-bridge/compose.yml` | Deploy-side compose for Option A (Docker) |
+| `bridge/README.md` | docs only | Install procedure for both Docker and bare-metal options |
+| `.github/workflows/bridge-image.yml` | CI only | Multi-arch build + push to `ghcr.io/brettkinny/zeroclaw-bridge` |
+| `zeroclaw-bridge.service` | RPi `/etc/systemd/system/` | systemd unit for Option B (bare metal) |
 | `zeroclaw.py` | Unraid `custom-providers/zeroclaw/zeroclaw.py` | xiaozhi LLM provider |
 | `zeroclaw__init__.py` | Unraid (as `__init__.py`) | Python package marker |
 | `edge_stream.py` | Unraid `custom-providers/edge_stream/edge_stream.py` | Streaming EdgeTTS provider |
