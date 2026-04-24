@@ -24,6 +24,7 @@ STOP_TIMEOUT_SEC = 2.0
 SESSION_IDLE_TIMEOUT_SEC = float(os.environ.get("ZEROCLAW_SESSION_IDLE", "300"))
 SESSION_MAX_TURNS = int(os.environ.get("ZEROCLAW_SESSION_MAX_TURNS", "50"))
 SESSION_MAX_AGE_SEC = float(os.environ.get("ZEROCLAW_SESSION_MAX_AGE_SEC", "1800"))
+MAX_SENTENCES = int(os.environ.get("MAX_SENTENCES", "3"))
 
 LOCAL_TZ = ZoneInfo(os.environ.get("TZ", "Australia/Brisbane"))
 WEATHER_LOCATION = os.environ.get("WEATHER_LOCATION", "Brisbane")
@@ -487,6 +488,16 @@ def _clean_for_tts(text: str) -> str:
     return _TTS_STRIP_RE.sub("", text)
 
 
+def _truncate_sentences(text: str, max_sentences: int = MAX_SENTENCES) -> str:
+    count = 0
+    for i, ch in enumerate(text):
+        if ch in '.!?':
+            count += 1
+            if count >= max_sentences:
+                return text[:i + 1]
+    return text
+
+
 _BLOCKED_WORDS_RE = re.compile(
     r"\b("
     r"fuck\w*|shit\w*|bitch\w*|bastard|cunt|"
@@ -719,7 +730,7 @@ async def message(payload: MessageIn) -> MessageOut:
             ),
             timeout=REQUEST_TIMEOUT_SEC,
         )
-        answer = _clean_for_tts(_ensure_emoji_prefix(_content_filter(raw) or raw))
+        answer = _truncate_sentences(_clean_for_tts(_ensure_emoji_prefix(_content_filter(raw) or raw)))
     except asyncio.TimeoutError:
         log.warning("ACP timeout")
         answer = f"{FALLBACK_EMOJI} I'm thinking too slowly right now, try again."
@@ -767,13 +778,13 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
     await _refresh_caches()
 
     queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
-    state = {"seen_nonws": False, "blocked": False}
+    state = {"seen_nonws": False, "blocked": False, "sentence_ends": 0, "truncated": False}
 
     async def on_chunk(content: str) -> None:
         content = _clean_for_tts(content)
         if not content:
             return
-        if state["blocked"]:
+        if state["blocked"] or state["truncated"]:
             return
         if _BLOCKED_WORDS_RE.search(content):
             log.warning("content-filter-hit-stream chunk_len=%d", len(content))
@@ -781,14 +792,23 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
             state["seen_nonws"] = True
             await queue.put(("chunk", _CONTENT_FILTER_REPLACEMENT))
             return
-        # Emoji leader enforcement on the very first non-whitespace chunk.
         if not state["seen_nonws"]:
             stripped = content.lstrip()
             if stripped:
                 state["seen_nonws"] = True
                 if not any(stripped.startswith(e) for e in ALLOWED_EMOJIS):
                     content = f"{FALLBACK_EMOJI} " + content
-        await queue.put(("chunk", content))
+        out = []
+        for ch in content:
+            out.append(ch)
+            if ch in '.!?':
+                state["sentence_ends"] += 1
+                if state["sentence_ends"] >= MAX_SENTENCES:
+                    state["truncated"] = True
+                    break
+        content = ''.join(out)
+        if content:
+            await queue.put(("chunk", content))
 
     async def run_turn() -> None:
         t0 = perf_counter()
@@ -813,9 +833,9 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
             if state["blocked"]:
                 full = _CONTENT_FILTER_REPLACEMENT
             if not state["seen_nonws"]:
-                full = _ensure_emoji_prefix(full)
+                full = _truncate_sentences(_ensure_emoji_prefix(full))
                 await queue.put(("chunk", full))
-            full = _ensure_emoji_prefix(full)
+            full = _truncate_sentences(_ensure_emoji_prefix(full))
             await queue.put(("final", full))
         except asyncio.TimeoutError:
             log.warning("ACP timeout (stream)")
