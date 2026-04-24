@@ -30,7 +30,7 @@ Under `/root/.zeroclaw/workspace/`:
 | File | Upstream description | What we use it for |
 |---|---|---|
 | `SOUL.md` | "Core identity and operating principles" | The configured persona's voice, values, role in the household. `channel="stackchan"` section was removed (2026-04-24) after the bridge-level enforcement subsumed it. |
-| `IDENTITY.md` | Agent personality and role definition | Name, backstory, family context (owner is Brett / Square Wave Systems). |
+| `IDENTITY.md` | Agent personality and role definition | Name, backstory, household/family context specific to your deployment. |
 | `USER.md` | User context and preferences | Per-user context; optional. Not heavily populated in our deploy. |
 | `MEMORY.md` | "Long-term facts and lessons learned" | Git-visible core memories. Complemented by an SQLite `brain.db`. |
 | `AGENTS.md` | "Session conventions and initialization rules" | Cross-agent behavioral guardrails. Self-modifying per upstream — the agent writes to it. |
