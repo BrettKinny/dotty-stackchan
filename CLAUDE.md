@@ -103,6 +103,53 @@ Run `make help` for the full list. Key targets:
 - **Test bridge**: `curl http://<RPI_IP>:8080/health`
 - **Test full round-trip**: `curl -X POST http://<RPI_IP>:8080/api/message -H 'Content-Type: application/json' -d '{"content":"hello"}'`
 
+## Firmware iteration
+
+Build + flash the StackChan firmware locally with the cached IDF container — no GHA round-trip needed for dev cycles.
+
+```bash
+cd firmware/firmware
+
+# Build (≈5 min cold, faster incremental). fetch_repos.py clones
+# upstream xiaozhi-esp32 v2.2.4 and applies patches/xiaozhi-esp32.patch.
+docker run --rm -v "$PWD:/project" -w /project \
+  espressif/idf:v5.5.4 bash -lc \
+  'git config --global --add safe.directory "*" && python fetch_repos.py && idf.py build'
+
+# USB-C flash (device shows up as /dev/ttyACM0).
+docker run --rm -v "$PWD:/project" -w /project \
+  --device=/dev/ttyACM0 espressif/idf:v5.5.4 \
+  bash -lc 'idf.py -p /dev/ttyACM0 -b 921600 flash'
+```
+
+Gotchas hit in real sessions:
+
+- **CMake GLOB cache**: when adding a new `.cpp/.h` under `main/stackchan/`, `idf.py build` will *silently* not compile it and you'll get a linker error like `undefined reference to '...'`. Force a reconfigure with `touch main/CMakeLists.txt` then rebuild — or run `idf.py reconfigure` once.
+- **`%lld` printf**: ESP-IDF newlib's printf doesn't reliably honour `%lld` in this build. Use `%.0f` with a `double` cast for >32-bit integers, or manually split the value.
+- **Upstream xiaozhi-esp32 changes** go through `firmware/firmware/patches/xiaozhi-esp32.patch`, not directly into the working tree (which `fetch_repos.py` re-fetches). After editing the upstream tree locally for a build, regenerate with `git -C firmware/firmware/xiaozhi-esp32 diff HEAD > firmware/firmware/patches/xiaozhi-esp32.patch`. Verify the patch applies cleanly to a fresh `v2.2.4` checkout before committing.
+- **`/dev/ttyACM0` disappears** after a hard reset / power cycle; if `docker run` complains "no such file", either re-plug the USB-C cable or wait for the device to finish booting back into the JTAG-Serial endpoint.
+
+## Ambient perception layer (Phase 1)
+
+Forward-looking modes (face-detected greeting, sound-direction head-turn, future curiosity / boredom mode) all subscribe to a single perception event bus on the bridge. Producers are firmware-resident and emit JSON `event` frames over the WS:
+
+```json
+{"type":"event","name":"face_detected","data":{}}
+{"type":"event","name":"face_lost","data":{}}
+{"type":"event","name":"sound_event","data":{"direction":"left","balance":0.997,"energy":1807933247}}
+```
+
+Plumbing:
+
+- **Firmware emit**: `Application::SendEvent(name, data_json)` in upstream `application.cc` (lazy-opens the WS via `OpenAudioChannel()` because xiaozhi WS is otherwise session-scoped — without lazy-open, perception events from idle silently drop).
+- **xiaozhi-server relay**: custom override at `custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py` adds an `EventTextMessageHandler` that POSTs each event frame to the bridge's `/api/perception/event`.
+- **Bridge bus**: `_perception_listeners` pub/sub + `_perception_state[device_id]` per-device state in `bridge.py`, mirrored on the existing `_portal_event_listeners` pattern.
+- **Consumers** (also bridge-side): `_perception_face_greeter` (Hi! greeting via `/xiaozhi/admin/inject-text`), `_perception_sound_turner` (head-turn via `/xiaozhi/admin/set-head-angles`), `_perception_face_lost_aborter` (TTS abort when audience walks away).
+
+WS lifecycle is the structural fact most easily forgotten: **xiaozhi only opens the WS during a conversation**, not persistently. Anything that needs to fire a server-bound event from idle has to either (a) trigger `OpenAudioChannel()` first or (b) accept that events are session-only. Producer A and B both assume (a) — done in `SendEvent`.
+
+For the design spec see [`docs/modes.md`](./docs/modes.md) "Designed but not yet implemented" and the plan at `~/.claude/plans/let-s-do-a-bit-purrfect-whistle.md` (private, last session).
+
 ## Deeper reference
 
 For hardware specs, protocol details, model internals, latent capabilities, and the behavioural mode + LED contract, see [`docs/README.md`](./docs/README.md) and its linked files (`architecture.md`, `hardware.md`, `voice-pipeline.md`, `brain.md`, `protocols.md`, `modes.md`, `latent-capabilities.md`, `references.md`).
