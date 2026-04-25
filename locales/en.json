@@ -1,0 +1,36 @@
+{
+  "status.ok": "OK",
+  "status.error": "Error",
+  "status.unknown": "Unknown",
+
+  "bridge.no_device": "No device connected",
+  "bridge.device_required": "device_id is required",
+  "bridge.invalid_json": "Invalid JSON body",
+  "bridge.text_required": "text field is required",
+  "bridge.health_ok": "healthy",
+
+  "perception.face_detected": "Face detected",
+  "perception.face_lost": "Face lost",
+  "perception.sound_event": "Sound detected ({direction})",
+  "perception.head_pet_started": "Pet started",
+  "perception.head_pet_ended": "Pet ended",
+  "perception.sensor_stale": "Sensor data may be stale (>{threshold}s since last event)",
+  "perception.no_state": "No perception state recorded yet",
+
+  "portal.welcome": "Welcome to the Dotty portal",
+  "portal.devices": "Connected devices",
+  "portal.health": "Health",
+  "portal.inject_text": "Inject text",
+  "portal.abort": "Abort",
+  "portal.set_head_angles": "Set head angles",
+
+  "admin.kid_mode_enabled": "Kid mode enabled",
+  "admin.kid_mode_disabled": "Kid mode disabled",
+  "admin.persona_updated": "Persona updated",
+  "admin.model_updated": "Model updated",
+  "admin.restart_scheduled": "Restart scheduled",
+
+  "error.not_found": "Not found",
+  "error.service_unavailable": "Service unavailable",
+  "error.internal": "Internal error"
+}
