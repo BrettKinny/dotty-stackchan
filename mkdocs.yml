@@ -42,6 +42,7 @@ nav:
       - Hardware: docs/hardware.md
       - Hardware Support: docs/hardware-support.md
   - Voice Pipeline: docs/voice-pipeline.md
+  - Voice Mode Entry: docs/voice-mode-entry.md
   - Voice Catalog: docs/voice-catalog.md
   - Brain: docs/brain.md
   - Protocols: docs/protocols.md

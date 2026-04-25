@@ -1646,6 +1646,101 @@ async def _perception_purr_player() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Clap-to-wake consumer (non-visual voice-mode entry)
+# ---------------------------------------------------------------------------
+# Pairs with the env block at top-of-file (`CLAP_WAKE_*`). Subscribes to
+# the perception bus, filters `sound_event` by either:
+#   * data.kind == "clap" — explicit class (server-side YAMNet emits this
+#     today; the on-device sound localizer may grow it later), OR
+#   * data.energy / data.amplitude crossing CLAP_WAKE_MIN_AMPLITUDE — a
+#     coarse loud-noise fallback for deployments where the classifier
+#     isn't installed but a sharp transient should still wake.
+# Per-device cooldown via _perception_state["last_clap_wake_t"] mirrors
+# the face-greeter pattern. On trigger we route through the same
+# inject-text path the face-greeter uses, so xiaozhi opens its mic
+# exactly the way it does for face-detected wakes (no separate mic-open
+# admin route required).
+async def _perception_clap_waker() -> None:
+    """Phase 2 consumer: on a clap-classified or loud sound_event, open
+    a voice turn via the existing inject-text path.
+
+    Off by default — gated on CLAP_WAKE_ENABLED at lifespan time, so
+    when disabled this function is never spawned and adds zero overhead.
+    Defensive: any exception inside the loop is logged and the loop
+    continues; cancellation propagates as for the other consumers.
+    """
+    log.info(
+        "perception clap waker started (min_amp=%.2f cooldown=%.0fs text=%r)",
+        CLAP_WAKE_MIN_AMPLITUDE, CLAP_WAKE_COOLDOWN_SEC, CLAP_WAKE_TEXT,
+    )
+    q = _perception_subscribe()
+    try:
+        while True:
+            event = await q.get()
+            if event.get("name") != "sound_event":
+                continue
+            device_id = event.get("device_id", "")
+            if not device_id or device_id == "unknown":
+                continue
+            data = event.get("data") or {}
+            kind = data.get("kind") or ""
+            # Accept either `amplitude` (brief / firmware-side localizer
+            # convention) or `energy` (existing on-device localizer key).
+            amp_raw = data.get("amplitude")
+            if amp_raw is None:
+                amp_raw = data.get("energy")
+            try:
+                amplitude = float(amp_raw) if amp_raw is not None else 0.0
+            except (TypeError, ValueError):
+                amplitude = 0.0
+
+            is_clap_class = (kind == "clap")
+            is_loud_enough = (
+                CLAP_WAKE_MIN_AMPLITUDE > 0.0
+                and amplitude >= CLAP_WAKE_MIN_AMPLITUDE
+            )
+            if not (is_clap_class or is_loud_enough):
+                continue
+
+            now = event.get("ts", 0.0)
+            state = _perception_state.setdefault(device_id, {})
+            last_wake = state.get("last_clap_wake_t", 0.0)
+            if now - last_wake < CLAP_WAKE_COOLDOWN_SEC:
+                continue
+            state["last_clap_wake_t"] = now
+
+            log.info(
+                "sound_event → clap-wake: device=%s kind=%r amplitude=%.3f "
+                "trigger=%s",
+                device_id, kind, amplitude,
+                "class" if is_clap_class else "amplitude",
+            )
+            if CLAP_WAKE_TEXT:
+                # Same inject-text path the face-greeter uses → xiaozhi
+                # speaks the cue and then opens its mic for the user.
+                asyncio.create_task(
+                    _dispatch_face_greeting(device_id, CLAP_WAKE_TEXT),
+                )
+            else:
+                # Empty text → spoken-cue suppressed. The bridge has no
+                # standalone "open mic without speaking" admin route in
+                # this deployment; injecting a single space is the closest
+                # silent equivalent the xiaozhi pipeline currently honours.
+                # If this proves audibly distracting in practice, swap for
+                # a dedicated /admin/open-mic route once it lands.
+                asyncio.create_task(
+                    _dispatch_face_greeting(device_id, " "),
+                )
+    except asyncio.CancelledError:
+        log.info("perception clap waker cancelled")
+        raise
+    except Exception:
+        log.exception("perception clap waker crashed")
+    finally:
+        _perception_unsubscribe(q)
+
+
+# ---------------------------------------------------------------------------
 # Fixed-audio asset allowlist
 # ---------------------------------------------------------------------------
 # Pre-rendered audio that bypasses the kid-mode content-filter sandwich
@@ -1773,6 +1868,18 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_perception_face_lost_aborter()),
         asyncio.create_task(_perception_purr_player()),
     ]
+    # Clap-to-wake — opt-in. Disabled by default to keep idle deployments
+    # from waking on ambient kitchen noise; flip CLAP_WAKE_ENABLED=true
+    # to spawn the consumer.
+    if CLAP_WAKE_ENABLED:
+        perception_tasks.append(
+            asyncio.create_task(_perception_clap_waker()),
+        )
+    else:
+        log.info(
+            "clap-to-wake disabled (CLAP_WAKE_ENABLED=false) — "
+            "consumer not subscribed",
+        )
     # Layer 5: background calendar refresher (no-op when CALENDAR_IDS empty).
     calendar_task = asyncio.create_task(_calendar_poll_loop())
 
