@@ -66,6 +66,11 @@ services:
       - ./custom-providers/piper_local/piper_local.py:/opt/xiaozhi-esp32-server/core/providers/tts/piper_local.py:ro
       - ./models/piper:/opt/xiaozhi-esp32-server/models/piper:ro
       - ./custom-providers/asr/fun_local.py:/opt/xiaozhi-esp32-server/core/providers/asr/fun_local.py:ro
+      # OTA: patched ota_handler that composes firmware download URLs directly
+      # (upstream's vision_url.replace path was a no-op when vision_explain
+      # doesn't contain "/mcp/vision/explain"). See docs/ota-verification.md.
+      - ./custom-providers/xiaozhi-patches/ota_handler.py:/opt/xiaozhi-esp32-server/core/api/ota_handler.py:ro
+      - ./data/bin:/opt/xiaozhi-esp32-server/data/bin
     networks:
       - dotty
     depends_on:

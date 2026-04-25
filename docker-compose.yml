@@ -35,3 +35,11 @@ services:
       - ./custom-providers/xiaozhi-patches/http_server.py:/opt/xiaozhi-esp32-server/core/http_server.py:ro
       # DOTTY ambient perception: relay firmware "event" frames to the bridge
       - ./custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py:/opt/xiaozhi-esp32-server/core/handle/textMessageHandlerRegistry.py:ro
+      # DOTTY OTA: patched ota_handler that composes the firmware download URL
+      # directly from local_ip+http_port instead of doing a string-replace on
+      # `vision_explain` (which only worked when vision lived at the canonical
+      # `/mcp/vision/explain` path; our setup points it at the RPi bridge).
+      - ./custom-providers/xiaozhi-patches/ota_handler.py:/opt/xiaozhi-esp32-server/core/api/ota_handler.py:ro
+      # OTA artifact directory — drop m5stack-stack-chan_<version>.bin here
+      # and the device polls + self-flashes on next boot. See docs/ota-verification.md.
+      - ./data/bin:/opt/xiaozhi-esp32-server/data/bin
