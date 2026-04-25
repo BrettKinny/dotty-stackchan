@@ -43,6 +43,12 @@ VISION_API_URL = os.environ.get(
 )
 VISION_TIMEOUT_SEC = float(os.environ.get("VISION_TIMEOUT", "15"))
 VISION_CACHE_TTL_SEC = 60.0
+SMART_MODEL = os.environ.get("SMART_MODEL", "")
+SMART_API_KEY = os.environ.get("SMART_API_KEY", os.environ.get("OPENROUTER_API_KEY", ""))
+SMART_API_URL = os.environ.get(
+    "SMART_API_URL", "https://openrouter.ai/api/v1/chat/completions",
+)
+SMART_MAX_TOKENS = int(os.environ.get("SMART_MAX_TOKENS", "2048"))
 CONVO_LOG_DIR = Path(os.environ.get("CONVO_LOG_DIR", "/root/zeroclaw-bridge/logs"))
 VISION_SYSTEM_PROMPT = (
     "You are describing a photo taken by a small robot's camera (low resolution). "
@@ -610,6 +616,71 @@ def _content_filter(text: str) -> str | None:
     return None
 
 
+async def _smart_prompt(
+    text: str,
+    chunk_cb: Callable[[str], Awaitable[None]] | None = None,
+) -> str:
+    """Call a more capable model via OpenRouter for Smart Mode."""
+    import requests as req
+
+    loop = asyncio.get_event_loop()
+    context = _build_context()
+    system = (
+        context
+        + "You are Dotty, a robot assistant in Smart Mode — the user asked you to think harder.\n"
+        "Give a thorough, well-structured answer. You may use several sentences.\n"
+        "Reply in ENGLISH ONLY.\n"
+        "First character of your reply MUST be one of: 😊 😆 😢 😮 🤔 😠 😐 😍 😴\n"
+    )
+    if KID_MODE:
+        system += (
+            "Audience: young child (age 4-8). Be age-appropriate but give more detail than usual.\n"
+            "No weapons, drugs, sex, scary content, hate speech, or profanity.\n"
+            "If asked about harmful topics, redirect kindly.\n"
+        )
+
+    def _stream():
+        resp = req.post(
+            SMART_API_URL,
+            json={
+                "model": SMART_MODEL,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": text},
+                ],
+                "max_tokens": SMART_MAX_TOKENS,
+                "temperature": 0.7,
+                "stream": True,
+            },
+            headers={
+                "Authorization": f"Bearer {SMART_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            timeout=REQUEST_TIMEOUT_SEC,
+            stream=True,
+        )
+        resp.raise_for_status()
+        full: list[str] = []
+        for line in resp.iter_lines(decode_unicode=True):
+            if not line or not line.startswith("data: "):
+                continue
+            data = line[6:]
+            if data.strip() == "[DONE]":
+                break
+            try:
+                obj = json.loads(data)
+                content = (obj["choices"][0].get("delta") or {}).get("content", "")
+                if content:
+                    full.append(content)
+                    if chunk_cb:
+                        asyncio.run_coroutine_threadsafe(chunk_cb(content), loop)
+            except (json.JSONDecodeError, KeyError, IndexError):
+                continue
+        return "".join(full)
+
+    return await asyncio.to_thread(_stream)
+
+
 class _ConvoLogger:
     """Writes one NDJSON record per conversation turn to a daily log file."""
 
@@ -795,20 +866,29 @@ async def vision_latest(device_id: str):
 @app.post("/api/message", response_model=MessageOut)
 async def message(payload: MessageIn) -> MessageOut:
     session_id = payload.session_id or str(uuid.uuid4())
-    log.info("msg channel=%s session=%s len=%d", payload.channel, session_id, len(payload.content))
+    is_smart = bool(SMART_MODEL and (payload.metadata or {}).get("smart_mode"))
+    log.info("msg channel=%s session=%s smart=%s len=%d",
+             payload.channel, session_id, is_smart, len(payload.content))
     await _refresh_caches()
     t0 = perf_counter()
     error_msg = None
     try:
-        raw = await asyncio.wait_for(
-            acp.prompt(
-                payload.content,
-                xiaozhi_sid=payload.session_id,
-                prepare=_wrap_voice if payload.channel in VOICE_CHANNELS else None,
-            ),
-            timeout=REQUEST_TIMEOUT_SEC,
-        )
-        answer = _truncate_sentences(_clean_for_tts(_ensure_emoji_prefix(_content_filter(raw) or raw)))
+        if is_smart:
+            raw = await asyncio.wait_for(
+                _smart_prompt(payload.content),
+                timeout=REQUEST_TIMEOUT_SEC,
+            )
+        else:
+            raw = await asyncio.wait_for(
+                acp.prompt(
+                    payload.content,
+                    xiaozhi_sid=payload.session_id,
+                    prepare=_wrap_voice if payload.channel in VOICE_CHANNELS else None,
+                ),
+                timeout=REQUEST_TIMEOUT_SEC,
+            )
+        raw = _clean_for_tts(_ensure_emoji_prefix(_content_filter(raw) or raw))
+        answer = raw if is_smart else _truncate_sentences(raw)
     except asyncio.TimeoutError:
         log.warning("ACP timeout")
         answer = f"{FALLBACK_EMOJI} I'm thinking too slowly right now, try again."
@@ -849,9 +929,10 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
     animation protocol intact without waiting for the full response.
     """
     session_id = payload.session_id or str(uuid.uuid4())
+    is_smart = bool(SMART_MODEL and (payload.metadata or {}).get("smart_mode"))
     log.info(
-        "stream channel=%s session=%s len=%d",
-        payload.channel, session_id, len(payload.content),
+        "stream channel=%s session=%s smart=%s len=%d",
+        payload.channel, session_id, is_smart, len(payload.content),
     )
     await _refresh_caches()
 
@@ -876,15 +957,16 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
                 state["seen_nonws"] = True
                 if not any(stripped.startswith(e) for e in ALLOWED_EMOJIS):
                     content = f"{FALLBACK_EMOJI} " + content
-        out = []
-        for ch in content:
-            out.append(ch)
-            if ch in '.!?':
-                state["sentence_ends"] += 1
-                if state["sentence_ends"] >= MAX_SENTENCES:
-                    state["truncated"] = True
-                    break
-        content = ''.join(out)
+        if not is_smart:
+            out = []
+            for ch in content:
+                out.append(ch)
+                if ch in '.!?':
+                    state["sentence_ends"] += 1
+                    if state["sentence_ends"] >= MAX_SENTENCES:
+                        state["truncated"] = True
+                        break
+            content = ''.join(out)
         if content:
             await queue.put(("chunk", content))
 
@@ -893,15 +975,21 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
         error_msg = None
         full = ""
         try:
-            full = await asyncio.wait_for(
-                acp.prompt(
-                    payload.content,
-                    xiaozhi_sid=payload.session_id,
-                    chunk_cb=on_chunk,
-                    prepare=_wrap_voice if payload.channel in VOICE_CHANNELS else None,
-                ),
-                timeout=REQUEST_TIMEOUT_SEC,
-            )
+            if is_smart:
+                full = await asyncio.wait_for(
+                    _smart_prompt(payload.content, chunk_cb=on_chunk),
+                    timeout=REQUEST_TIMEOUT_SEC,
+                )
+            else:
+                full = await asyncio.wait_for(
+                    acp.prompt(
+                        payload.content,
+                        xiaozhi_sid=payload.session_id,
+                        chunk_cb=on_chunk,
+                        prepare=_wrap_voice if payload.channel in VOICE_CHANNELS else None,
+                    ),
+                    timeout=REQUEST_TIMEOUT_SEC,
+                )
             full = _clean_for_tts(full)
             if not state["blocked"]:
                 final_hit = _content_filter(full)
@@ -910,10 +998,11 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
                     state["blocked"] = True
             if state["blocked"]:
                 full = _CONTENT_FILTER_REPLACEMENT
+            full = _ensure_emoji_prefix(full)
+            if not is_smart:
+                full = _truncate_sentences(full)
             if not state["seen_nonws"]:
-                full = _truncate_sentences(_ensure_emoji_prefix(full))
                 await queue.put(("chunk", full))
-            full = _truncate_sentences(_ensure_emoji_prefix(full))
             await queue.put(("final", full))
         except asyncio.TimeoutError:
             log.warning("ACP timeout (stream)")

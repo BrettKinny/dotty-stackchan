@@ -67,11 +67,18 @@ class LLMProvider(LLMProviderBase):
         return [p for p in pieces if p]
 
     def _payload(self, session_id, dialogue):
+        content = self._compose(dialogue)
+        metadata = {"provider": "zeroclaw"}
+        if content.startswith("[SMART_MODE]\n"):
+            content = content[len("[SMART_MODE]\n"):]
+            metadata["smart_mode"] = True
+        elif content.startswith("[SMART_MODE_ACK] "):
+            content = content[len("[SMART_MODE_ACK] "):]
         return {
-            "content": self._compose(dialogue),
+            "content": content,
             "channel": self.channel,
             "session_id": session_id or self.session_id,
-            "metadata": {"provider": "zeroclaw"},
+            "metadata": metadata,
         }
 
     def response(self, session_id, dialogue, **kwargs):

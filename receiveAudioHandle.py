@@ -144,6 +144,45 @@ VISION_PHRASES = (
     "what color is", "what colour is", "how many", "do you see",
 )
 
+_SMART_MODE_PHRASES = (
+    "smart mode", "think harder", "big brain",
+)
+
+
+def _is_smart_mode_request(text: str) -> bool:
+    lower = text.lower().strip()
+    return any(phrase in lower for phrase in _SMART_MODE_PHRASES)
+
+
+def _strip_smart_trigger(text: str) -> str:
+    lower = text.lower()
+    for phrase in sorted(_SMART_MODE_PHRASES, key=len, reverse=True):
+        idx = lower.find(phrase)
+        if idx != -1:
+            remaining = text[:idx] + text[idx + len(phrase):]
+            return re.sub(r'^[\s,.\-!?]+|[\s,.\-!?]+$', '', remaining)
+    return ""
+
+
+async def _send_led_color(conn: "ConnectionHandler", r: int, g: int, b: int) -> None:
+    try:
+        msg = json.dumps({
+            "session_id": conn.session_id,
+            "type": "mcp",
+            "payload": {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "self.robot.set_led_color",
+                    "arguments": {"r": r, "g": g, "b": b},
+                },
+                "id": int(time.time() * 1000),
+            },
+        })
+        await conn.websocket.send(msg)
+    except Exception:
+        pass
+
 
 def _is_vision_request(text: str) -> bool:
     lower = text.lower().strip()
@@ -275,6 +314,27 @@ async def startToChat(conn: "ConnectionHandler", text):
             user_text = json.loads(actual_text).get("content", actual_text)
     except (json.JSONDecodeError, KeyError):
         pass
+
+    if _is_smart_mode_request(user_text):
+        remaining_q = _strip_smart_trigger(user_text)
+        conn.logger.bind(tag=TAG).info(f"Smart mode: q={remaining_q!r}")
+        await _send_led_color(conn, 168, 0, 168)
+        if remaining_q:
+            conn.executor.submit(conn.chat, f"[SMART_MODE]\n{remaining_q}")
+        else:
+            conn.smart_mode_next = True
+            conn.executor.submit(
+                conn.chat,
+                "[SMART_MODE_ACK] The user activated Smart Mode. "
+                "Say only: 'Smart mode! What would you like to know?'",
+            )
+        return
+
+    if getattr(conn, 'smart_mode_next', False):
+        conn.smart_mode_next = False
+        await _send_led_color(conn, 168, 0, 168)
+        conn.executor.submit(conn.chat, f"[SMART_MODE]\n{actual_text}")
+        return
 
     if _is_vision_request(user_text):
         conn.logger.bind(tag=TAG).info(f"Vision intent detected: {user_text[:60]}")
