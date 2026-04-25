@@ -77,6 +77,7 @@ nav:
   - Compatibility: COMPATIBILITY.md
   - SBOM: docs/sbom.md
   - Signed Releases: docs/signed-releases.md
+  - Reproducible Builds: docs/reproducible-builds.md
   - Versioning: docs/versioning.md
   - Changelog: CHANGELOG.md
 

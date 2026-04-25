@@ -18,7 +18,7 @@ BOLD   := \033[1m
 RESET  := \033[0m
 
 # ── Targets ──────────────────────────────────────────────────────────
-.PHONY: help setup fetch-models fetch-yamnet doctor audit up down logs status voice-list voice-install sbom
+.PHONY: help setup fetch-models fetch-yamnet doctor audit up down logs status voice-list voice-install sbom verify-firmware
 
 help: ## Show this help
 	@echo ""
@@ -312,6 +312,54 @@ voice-install: ## Install a curated Piper voice (VOICE=<key> [APPLY=1])
 	else \
 	  ./scripts/voice-install.sh "$(VOICE)"; \
 	fi
+
+# ─────────────────────────────────────────────────────────────────────
+# verify-firmware — build + checksum, optionally diff against published
+# ─────────────────────────────────────────────────────────────────────
+verify-firmware: ## Build firmware in IDF container and compute SHA256 checksums
+	@echo ""
+	@echo -e "$(BOLD)Firmware reproducibility check$(RESET)"
+	@echo ""
+	@if ! command -v docker >/dev/null 2>&1; then \
+	  echo -e "$(RED)Error: docker is required.$(RESET)"; exit 1; \
+	fi
+	@if [ ! -f firmware/firmware/CMakeLists.txt ]; then \
+	  echo -e "$(RED)Error: firmware submodule not initialised.$(RESET)"; \
+	  echo "Run: git submodule update --init --recursive"; \
+	  exit 1; \
+	fi
+	@echo -e "$(BOLD)Fetching firmware deps...$(RESET)"
+	docker run --rm -v "$(PWD)/firmware/firmware:/project" -w /project \
+	  espressif/idf:v5.5.4 \
+	  bash -lc 'git config --global --add safe.directory "*" && python fetch_repos.py'
+	@echo -e "$(BOLD)Building firmware...$(RESET)"
+	docker run --rm -v "$(PWD)/firmware/firmware:/project" -w /project \
+	  espressif/idf:v5.5.4 \
+	  bash -lc 'git config --global --add safe.directory "*" && idf.py build'
+	@echo -e "$(BOLD)Computing checksums...$(RESET)"
+	@sha256sum \
+	  firmware/firmware/build/stack-chan.bin \
+	  firmware/firmware/build/ota_data_initial.bin \
+	  firmware/firmware/build/generated_assets.bin \
+	  | tee firmware/firmware/build/SHA256SUMS.txt
+	@echo ""
+	@if [ -f firmware/firmware/build/SHA256SUMS.published ]; then \
+	  echo -e "$(BOLD)Comparing against published checksums...$(RESET)"; \
+	  if diff -q firmware/firmware/build/SHA256SUMS.published \
+	             firmware/firmware/build/SHA256SUMS.txt >/dev/null 2>&1; then \
+	    echo -e "$(GREEN)PASS$(RESET)  Build is reproducible."; \
+	  else \
+	    echo -e "$(RED)FAIL$(RESET)  Checksums differ:"; \
+	    diff firmware/firmware/build/SHA256SUMS.published \
+	         firmware/firmware/build/SHA256SUMS.txt; \
+	    exit 1; \
+	  fi; \
+	else \
+	  echo -e "$(YELLOW)NOTE$(RESET)  No published SHA256SUMS.published to compare against."; \
+	  echo "  To verify a release, download SHA256SUMS.txt from GitHub Releases,"; \
+	  echo "  save it as firmware/firmware/build/SHA256SUMS.published, and re-run."; \
+	fi
+	@echo ""
 
 status: ## Show container status + bridge health
 	@docker compose ps
