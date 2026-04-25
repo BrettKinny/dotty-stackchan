@@ -901,7 +901,7 @@ async def icon() -> Response:
 @router.get("/manifest.json", include_in_schema=False)
 async def manifest() -> JSONResponse:
     return JSONResponse({
-        "name": "Dotty Admin",
+        "name": "Dotty Dashboard",
         "short_name": "Dotty",
         "start_url": "/ui",
         "scope": "/ui/",

@@ -10,7 +10,7 @@
 <link rel="manifest" href="/ui/manifest.json">
 <link rel="icon" type="image/svg+xml" href="/ui/icon.svg">
 <link rel="apple-touch-icon" href="/ui/icon.svg">
-<title>Dotty Admin</title>
+<title>Dotty Dashboard</title>
 <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
 <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com"></script>
@@ -46,7 +46,7 @@
     <span id="alerts-badge" data-poll
           hx-get="/ui/alerts/count" hx-trigger="load, every 30s, dotty-refresh from:window"
           hx-swap="innerHTML"></span>
-    <span class="text-xs text-base-content/50 hidden sm:inline">admin</span>
+    <span class="text-xs text-base-content/50 hidden sm:inline">Dashboard</span>
   </div>
   <div class="flex-none flex items-center gap-1">
     <button type="button" class="btn btn-ghost btn-sm btn-circle"
