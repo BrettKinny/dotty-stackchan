@@ -1,0 +1,12 @@
+{% if ok %}
+<div class="alert alert-success py-2 text-sm">
+  <div>
+    <div class="text-xs text-base-content/60">you said</div>
+    <div class="break-words">{{ sent }}</div>
+    <div class="text-xs text-base-content/60 mt-2">Dotty replied</div>
+    <div class="break-words whitespace-pre-wrap">{{ response }}</div>
+  </div>
+</div>
+{% else %}
+<div class="alert alert-warning py-2 text-sm">{{ error }}</div>
+{% endif %}

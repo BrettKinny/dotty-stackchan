@@ -42,6 +42,27 @@
 <main class="p-3 space-y-5 max-w-5xl mx-auto">
 
   <section>
+    <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Say something</h2>
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body p-3">
+        <form hx-post="/ui/actions/say" hx-target="#say-result" hx-swap="innerHTML"
+              hx-disabled-elt="find button, find input"
+              hx-on::after-request="if(event.detail.successful)this.reset()"
+              class="flex flex-col sm:flex-row gap-2">
+          <input type="text" name="text" placeholder="Type something for Dotty to say…"
+                 class="input input-bordered flex-1" maxlength="500" autocomplete="off"
+                 enterkeyhint="send" required>
+          <button type="submit" class="btn btn-primary min-h-12">
+            <span class="htmx-indicator-hide">Send</span>
+            <span class="loading loading-spinner loading-sm htmx-indicator-show hidden"></span>
+          </button>
+        </form>
+        <div id="say-result" class="mt-2 empty:hidden"></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
     <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Hosts</h2>
     <div id="cards"
          class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-3"

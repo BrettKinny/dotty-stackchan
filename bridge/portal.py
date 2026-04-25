@@ -20,11 +20,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 log = logging.getLogger("portal")
+
+# Bridge wires its in-process message handler in via configure(). Lets the
+# "Say" action invoke the same path /api/message uses without an HTTP hop.
+_state: dict[str, Any] = {"send_message": None}
+
+
+def configure(*, send_message: Any = None) -> None:
+    """Register bridge state with the portal. Idempotent."""
+    if send_message is not None:
+        _state["send_message"] = send_message
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -241,6 +251,36 @@ async def cards(request: Request) -> Any:
     ]
     return templates.TemplateResponse(
         request, "cards.html", {"cards": cards_data}
+    )
+
+
+@router.post("/actions/say", response_class=HTMLResponse, include_in_schema=False)
+async def say(request: Request, text: str = Form(...)) -> Any:
+    text = (text or "").strip()
+    if not text:
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": "Empty message — type something for Dotty to say."},
+        )
+    if len(text) > 500:
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": "Too long — keep it under 500 characters."},
+        )
+    sender = _state.get("send_message")
+    if sender is None:
+        raise HTTPException(503, "send_message not configured")
+    try:
+        result = await sender(text=text, channel="dotty")
+    except Exception as exc:
+        log.exception("portal say action failed")
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": f"Bridge error: {exc.__class__.__name__}"},
+        )
+    return templates.TemplateResponse(
+        request, "say_result.html",
+        {"ok": True, "sent": text, "response": result.get("response", "")},
     )
 
 

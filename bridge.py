@@ -753,10 +753,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="ZeroClaw Bridge", lifespan=lifespan)
 
 try:
-    from bridge.portal import router as _portal_router
+    from bridge.portal import router as _portal_router, configure as _configure_portal
     app.include_router(_portal_router)
 except Exception:
     log.exception("portal mount failed — admin UI at /ui will be unavailable")
+    _configure_portal = None  # type: ignore[assignment]
 
 
 @app.get("/health")
@@ -916,6 +917,13 @@ async def message(payload: MessageIn) -> MessageOut:
         error=error_msg,
     )
     return MessageOut(response=answer, session_id=session_id)
+
+
+if _configure_portal is not None:
+    async def _portal_send_message(*, text: str, channel: str = "dotty") -> dict:
+        out = await message(MessageIn(content=text, channel=channel))
+        return {"response": out.response, "session_id": out.session_id}
+    _configure_portal(send_message=_portal_send_message)
 
 
 @app.post("/api/message/stream")
