@@ -46,6 +46,11 @@ def _read_kid_mode() -> bool:
     return os.environ.get("DOTTY_KID_MODE", "true").lower() in ("1", "true", "yes")
 
 
+def _write_kid_mode(enabled: bool) -> None:
+    _KID_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _KID_STATE_FILE.write_text("true" if enabled else "false")
+
+
 KID_MODE = _read_kid_mode()
 
 LOCAL_TZ = ZoneInfo(os.environ.get("TZ", "Australia/Brisbane"))
@@ -115,6 +120,8 @@ VISION_SYSTEM_PROMPT = (
 # ---------------------------------------------------------------------------
 # Tools the firmware advertises via WebSocket handshake. Names use the firmware's
 # "self." prefix stripped — the request_permission handler strips it before lookup.
+# Markers below bound the literal so /admin/safety can edit deterministically.
+# === ADMIN_ALLOWLIST_START ===
 MCP_TOOL_ALLOWLIST: set[str] = {
     "get_device_status",
     "audio_speaker.set_volume",
@@ -127,6 +134,7 @@ MCP_TOOL_ALLOWLIST: set[str] = {
     "robot.get_reminders",
     "robot.stop_reminder",
 }
+# === ADMIN_ALLOWLIST_END ===
 # Privacy-sensitive tools denied when KID_MODE is active.
 MCP_TOOL_DENYLIST: set[str] = {"camera.take_photo"} if KID_MODE else set()
 
@@ -1388,8 +1396,7 @@ if _configure_portal is not None:
         return {"response": out.response, "session_id": out.session_id}
 
     def _portal_set_kid_mode(enabled: bool) -> None:
-        _KID_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _KID_STATE_FILE.write_text("true" if enabled else "false")
+        _write_kid_mode(enabled)
 
     async def _portal_abort_device(*, device_id: str = "") -> dict:
         """Fire-and-forget POST to xiaozhi-server's admin abort route."""
@@ -1441,6 +1448,204 @@ if _configure_portal is not None:
         subscribe_events=_portal_subscribe_events,
         unsubscribe_events=_portal_unsubscribe_events,
     )
+
+
+# ---------------------------------------------------------------------------
+# /admin/* — runtime configuration mutations. Localhost-only so only same-host
+# callers can hit them. Useful when an external agent (e.g. a separate ZeroClaw
+# daemon or operator script) needs to flip kid-mode, swap models, edit a
+# persona file, or amend the MCP tool allowlist without an SSH session.
+#
+# Paths and systemd unit names are env-configurable (defaults match the
+# documented RPi layout):
+#   ZEROCLAW_VOICE_CFG       - voice daemon config.toml
+#   ZEROCLAW_VOICE_UNIT      - voice daemon's systemd unit (the bridge)
+#   ZEROCLAW_DISCORD_CFG     - optional secondary daemon config.toml
+#   ZEROCLAW_DISCORD_UNIT    - optional secondary daemon's systemd unit
+#   ZEROCLAW_WORKSPACE       - workspace dir holding SOUL.md / IDENTITY.md / ...
+# ---------------------------------------------------------------------------
+from fastapi import APIRouter, Depends, HTTPException
+
+_ADMIN_ALLOWED_PERSONA_FILES = {
+    "SOUL.md", "IDENTITY.md", "USER.md", "AGENTS.md",
+    "TOOLS.md", "BOOTSTRAP.md", "HEARTBEAT.md", "MEMORY.md",
+}
+_ADMIN_WORKSPACE_DIR = Path(
+    os.environ.get("ZEROCLAW_WORKSPACE", "/root/.zeroclaw/workspace")
+)
+_ADMIN_DAEMON_CFG = {
+    "voice": (
+        os.environ.get("ZEROCLAW_VOICE_CFG", "/root/.zeroclaw/config.toml"),
+        os.environ.get("ZEROCLAW_VOICE_UNIT", "zeroclaw-bridge"),
+    ),
+    "discord": (
+        os.environ.get("ZEROCLAW_DISCORD_CFG", "/root/.zeroclaw-discord/config.toml"),
+        os.environ.get("ZEROCLAW_DISCORD_UNIT", "zeroclaw-discord"),
+    ),
+}
+
+
+def _admin_require_localhost(request: Request) -> None:
+    host = request.client.host if request.client else ""
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(status_code=403, detail="admin endpoints are localhost-only")
+
+
+def _admin_schedule_restart(unit: str, delay: float = 2.0) -> None:
+    """Spawn detached `sleep N && systemctl restart UNIT` so the HTTP
+    response can flush before the bridge SIGTERMs itself. start_new_session
+    detaches the child from the parent's process group so it survives the
+    SIGTERM cascade."""
+    import subprocess
+    subprocess.Popen(
+        ["bash", "-c", f"sleep {delay} && systemctl restart {unit}"],
+        start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+class _AdminKidModeIn(BaseModel):
+    enabled: bool
+
+
+class _AdminPersonaIn(BaseModel):
+    file: str
+    content: str
+
+
+class _AdminModelIn(BaseModel):
+    daemon: str
+    model: str
+
+
+class _AdminSafetyIn(BaseModel):
+    action: str
+    tool: str
+
+
+_admin_router = APIRouter(
+    prefix="/admin", dependencies=[Depends(_admin_require_localhost)],
+)
+
+
+@_admin_router.post("/kid-mode")
+async def _admin_kid_mode(payload: _AdminKidModeIn) -> dict:
+    _write_kid_mode(payload.enabled)
+    _admin_schedule_restart(_ADMIN_DAEMON_CFG["voice"][1])
+    return {
+        "ok": True, "enabled": payload.enabled,
+        "restart": _ADMIN_DAEMON_CFG["voice"][1],
+    }
+
+
+@_admin_router.post("/persona")
+async def _admin_persona(payload: _AdminPersonaIn) -> dict:
+    if payload.file not in _ADMIN_ALLOWED_PERSONA_FILES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"file must be one of {sorted(_ADMIN_ALLOWED_PERSONA_FILES)}",
+        )
+    target = _ADMIN_WORKSPACE_DIR / payload.file
+    real = target.resolve() if target.is_symlink() or target.exists() else target
+    real.parent.mkdir(parents=True, exist_ok=True)
+    tmp = real.with_suffix(real.suffix + ".new")
+    tmp.write_text(payload.content)
+    tmp.replace(real)
+    return {
+        "ok": True, "file": str(target), "resolved": str(real),
+        "bytes": len(payload.content),
+    }
+
+
+@_admin_router.post("/model")
+async def _admin_model(payload: _AdminModelIn) -> dict:
+    if payload.daemon not in _ADMIN_DAEMON_CFG:
+        raise HTTPException(
+            status_code=400,
+            detail=f"daemon must be one of {sorted(_ADMIN_DAEMON_CFG)}",
+        )
+    if not re.fullmatch(r"[A-Za-z0-9./:_-]+", payload.model):
+        raise HTTPException(status_code=400, detail="model id has invalid chars")
+    cfg_path, unit = _ADMIN_DAEMON_CFG[payload.daemon]
+    cfg_p = Path(cfg_path)
+    if not cfg_p.exists():
+        raise HTTPException(status_code=404, detail=f"config not found: {cfg_path}")
+    src = cfg_p.read_text()
+    section_re = re.compile(r'\[providers\.models\."custom:[^"]+"\]')
+    m = section_re.search(src)
+    if not m:
+        raise HTTPException(status_code=500, detail="provider section not found")
+    sec_start = m.start()
+    sec_end = src.find("\n[", sec_start + 1)
+    if sec_end == -1:
+        sec_end = len(src)
+    section = src[sec_start:sec_end]
+    new_section, n = re.subn(
+        r'^model = ".*"$',
+        f'model = "{payload.model}"',
+        section, count=1, flags=re.MULTILINE,
+    )
+    if n == 0:
+        raise HTTPException(status_code=500, detail="model line not found")
+    cfg_p.write_text(src[:sec_start] + new_section + src[sec_end:])
+    _admin_schedule_restart(unit)
+    return {
+        "ok": True, "daemon": payload.daemon, "model": payload.model,
+        "config": cfg_path, "restart": unit,
+    }
+
+
+@_admin_router.post("/safety")
+async def _admin_safety(payload: _AdminSafetyIn) -> dict:
+    if payload.action not in ("add", "remove"):
+        raise HTTPException(status_code=400, detail="action must be 'add' or 'remove'")
+    if not re.fullmatch(r"[A-Za-z0-9._]+", payload.tool):
+        raise HTTPException(status_code=400, detail="tool name has invalid chars")
+    self_path = Path(__file__)
+    src = self_path.read_text()
+    start_marker = "# === ADMIN_ALLOWLIST_START ==="
+    end_marker = "# === ADMIN_ALLOWLIST_END ==="
+    if start_marker not in src or end_marker not in src:
+        raise HTTPException(status_code=500, detail="allowlist markers missing")
+    pre, rest = src.split(start_marker, 1)
+    block, post = rest.split(end_marker, 1)
+    set_re = re.compile(
+        r'MCP_TOOL_ALLOWLIST:\s*set\[str\]\s*=\s*\{([^}]*)\}',
+        re.DOTALL,
+    )
+    m_set = set_re.search(block)
+    if not m_set:
+        raise HTTPException(status_code=500, detail="allowlist set literal not found")
+    items = set(re.findall(r'"([^"]+)"', m_set.group(1)))
+    before_size = len(items)
+    if payload.action == "add":
+        items.add(payload.tool)
+    else:
+        items.discard(payload.tool)
+    new_items = sorted(items)
+    new_inner = "\n    " + ",\n    ".join(f'"{t}"' for t in new_items) + ",\n"
+    new_block = block[: m_set.start(1)] + new_inner + block[m_set.end(1):]
+    new_src = pre + start_marker + new_block + end_marker + post
+    new_path = self_path.with_suffix(".py.new")
+    new_path.write_text(new_src)
+    import py_compile
+    try:
+        py_compile.compile(str(new_path), doraise=True)
+    except py_compile.PyCompileError as exc:
+        new_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail=f"py_compile failed: {exc}")
+    new_path.replace(self_path)
+    _admin_schedule_restart(_ADMIN_DAEMON_CFG["voice"][1])
+    return {
+        "ok": True, "action": payload.action, "tool": payload.tool,
+        "size_before": before_size, "size_after": len(new_items),
+        "restart": _ADMIN_DAEMON_CFG["voice"][1],
+    }
+
+
+app.include_router(_admin_router)
 
 
 @app.post("/api/message/stream")
