@@ -590,7 +590,7 @@ def _ensure_emoji_prefix(text: str) -> str:
     return f"{FALLBACK_EMOJI} {text}"
 
 
-_TTS_STRIP_RE = re.compile("[‍️*]")
+_TTS_STRIP_RE = re.compile("[‍️*#>]")
 
 
 def _clean_for_tts(text: str) -> str:
@@ -649,9 +649,10 @@ async def _smart_prompt(
     system = (
         context
         + "You are Dotty, a robot assistant in Smart Mode — the user asked you to think harder.\n"
-        "Give a thorough, well-structured answer. You may use several sentences.\n"
+        "Give a thorough answer in plain prose. You may use several sentences.\n"
         "Reply in ENGLISH ONLY.\n"
-        "First character of your reply MUST be one of: 😊 😆 😢 😮 🤔 😠 😐 😍 😴\n"
+        "First character of your reply MUST be one of: 😊 😆 😢 😮 🤔 😠 😐 😍 😴.\n"
+        "Output is spoken aloud by TTS: no Markdown, no headers (#), no lists, no code blocks, no URLs.\n"
     )
     if KID_MODE:
         system += (
