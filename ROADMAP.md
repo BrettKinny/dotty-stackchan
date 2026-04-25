@@ -37,28 +37,45 @@ The 30+ planning docs accumulated during the v0.1 prep sprint surfaced these. No
 
 ## In progress
 
-Actively being worked on or partially complete.
+Actively being worked on or partially complete. **Big push 2026-04-25 evening:** ~26 commits scaffolding much of what was previously "Planned" — see [CHANGELOG.md](CHANGELOG.md) `[Unreleased]` for the full inventory. Most items below have code on `main` but are not yet deployed live or fully wired.
 
 - **Fully-local Ollama profile** -- `compose.local.override.yml` with NVIDIA GPU passthrough (compose file shipped, needs model pull + testing with dual RTX 3060s)
 - **CI pipeline** -- YAML lint, compose validation, config parse check, firmware dry-build, docs link check
 - **Firmware release workflow** -- GitHub Actions building `.bin` artifacts on tag push
 - **Quickstart improvements** -- linear "flash, clone, configure, talk" path assuming published firmware releases
 - **First-audio latency reduction** -- p50 1.9s with Mistral 3.2 (down from 5s with Qwen3-30B); next lever is self-hosted Ollama on local GPU.
-- **ASR accuracy for children's speech** -- post-ASR corrections live; whisper.cpp / faster-whisper swap planned (CPU-first, GPU follow-up).
+- **ASR accuracy for children's speech** -- post-ASR corrections live; Whisper Phase 1 scaffold landed at v0.1; A/B verification pending.
+- **Face detection + tracking** -- shipped firmware-side; smoother+faster tuning queued (EMA 0.5, speed 500, deadband, MSR thr 0.40). Flash + bench-test pending.
+- **Layer 4 face recognition** -- scaffolded both on-device (`FaceRecognizer` + `ParentalGate` + 4 MCP tools) and server-side (`bridge/face_db.py` + `face_recognizer.py`). Real ESP-DL `face_recognition.so` embedding integration pending (~1 person-week).
+- **Layer 6 proactive greetings** -- `bridge/proactive_greeter.py` + lifespan wiring shipped. Cooldown + time-of-day windowing + kid-safe sandwich + calendar-aware prompt + template fallback. Depends on Layer 4 for named greetings; works today with `face_detected` (unknown identity) for generic.
+- **Layer 1 privacy-indicator LEDs** -- firmware scaffold drives mic/camera state via RAII peripheral guards. Camera `VIDIOC_STREAMOFF` wiring deferred (closes the always-streaming hole; queued).
+- **Phase 2 audio scene classifier** -- `bridge/audio_scene.py` YAMNet INT8 scaffold. Whitelist filter + threshold + cooldown emitting `sound_event(class=doorbell|knock|baby-cry|...)`. xiaozhi audio-frame forwarder pending.
+- **Phase 4 engagement-decision sublayer** -- `bridge/engagement_decider.py` shipped. Cooldown registry + mood scalar + time-of-day gate + hard quiet-hours. `ENGAGEMENT_ENABLED=false` default — opt-in.
+- **DOTTY_RICH_MCP=true** -- `bridge/rich_mcp.py` exposes 17 firmware MCP tools to the LLM as native tool-use. Kid-mode filter applied (12 tools). Bridge.py wiring (passing `tools=` to LLM call sites) pending.
+- **Hybrid smart-mode LED** -- both halves shipped (firmware `set_led_multi` MCP tool + bridge `_send_led_multi` helper). Holds purple pixel during smart-mode turns. Re-asserts on color changes since firmware bypasses animation.
+- **Head-pet hold-to-listen wake** -- firmware scaffold (`WakeWordInvoke("head_pet_hold")` after 2s touch). Works in the dark. Also emits `head_pet_started`/`_ended` perception events for purr consumer.
+- **Wake word "Hey Dotty"** -- interim shipped: firmware default switched Chinese → English "Hi, ESP". Custom "Hey Dotty" microWakeWord roadmap documented (`docs/wake-word.md`); needs sample collection + Colab training (~2 weeks calendar).
+- **Clap-to-wake** -- `_perception_clap_waker` for dark rooms / no-face-match scenarios. `CLAP_WAKE_ENABLED=false` default. `docs/voice-mode-entry.md` compares all 6 entry paths.
+- **Purr-on-head-pet** -- server consumer shipped (`_perception_purr_player`); fires on `head_pet_started`. Asset path `bridge/assets/purr.opus` is a drop-in (asset itself not committed).
+- **Servo speed caps** -- already capped at 100-1000 in firmware; spring-physics damping handles smoothness. No further work planned.
+- **Abort race condition** -- fixed at v0.1 via kill-and-respawn ACP child on barge-in.
+- **Dancing mode** -- shipped at v0.1; karaoke + LLM-initiated dance + Phase 2 vocal singing remain.
+- **Voice catalog + install helper** -- `docs/voice-catalog.md` (12 Piper + 6 EdgeTTS) + `make voice-install`.
+- **Versioned docs via mike** -- `/latest/`, `/v0.1/`, `/dev/` URL structure scaffolded; first deploy run pending.
+- **Observability hooks** -- Prometheus `/metrics` + Grafana dashboard scaffold shipped. Deploy on RPi pending.
+- **Reproducible + signed firmware builds** -- SBOM + signed-releases scaffolds shipped. Maintainer GPG key + IDF Dockerfile SHA256 pin pending.
 
 ## Planned
 
 Designed but not yet started. Roughly in priority order.
 
-- **Face detection + tracking** -- ESP-WHO on the ESP32-S3; Dotty follows you with its head via `lookAtNormalized()` servo API
-- **Face recognition + proactive greetings** -- on-device face enrollment; Dotty greets your family by name with calendar context ("Hey, library day!")
-- **Servo speed caps** -- firmware-level velocity/acceleration guard to keep head motion calm and predictable
-- **Speech bubble sync** -- tie on-screen text bubble visibility to actual audio playback state
-- **Abort race condition fix** -- suppress late-arriving LLM chunks when the user interrupts mid-response
-- **Dancing mode** -- choreographed servo sequences synced to audio (Macarena first)
-- **Singing mode** -- lightweight vocal synthesis or pitch-shifted TTS over backing tracks
-- **Privacy-indicator LEDs** -- hardware-guaranteed LED tied to mic/camera peripheral enable (prerequisite for always-on face detection)
+- **Speech bubble sync** -- tie on-screen text bubble visibility to actual audio playback state (deferred at v0.1 — Brett says timing looks fine in practice)
+- **Singing mode** -- vocal synthesis or pitch-shifted TTS over backing tracks (Phase 2 of dance work)
 - **Runtime OTA provisioning** -- captive-portal WiFi + OTA URL setup on first boot (no rebuild to retarget)
+- **Layer 2.5 stereo mic + camera person tracking** -- sound-source localization + camera fusion for 360° awareness in idle mode
+- **Phase 3 continuous vision classifier** -- EfficientDet/YOLOX at 1Hz on the Unraid GPU once dual RTX 3060s land
+- **Variant board port guide** -- walkthrough for adding support for other ESP32-S3 boards
+- **xiaozhi audio-frame forwarder** -- bridge YAMNet (Phase 2) needs xiaozhi-server-side change to POST audio frames to `/api/audio-scene/feed`
 
 ## Community wishlist
 
