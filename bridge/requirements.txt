@@ -8,3 +8,8 @@ python-multipart>=0.0.9,<1
 # Observability — Prometheus /metrics endpoint and counters/histograms.
 # Bridge degrades gracefully if the import fails; see bridge/metrics.py.
 prometheus-client>=0.20,<1
+# Phase 2 audio scene classifier (optional). Install on Unraid only if
+# YAMNet runs there; bridge can still start without it. See
+# bridge/audio_scene.py — module imports cleanly and no-ops with a
+# warning log when this dependency is absent.
+# tflite-runtime>=2.13
