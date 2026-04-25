@@ -1,0 +1,6 @@
+{% if count > 0 %}
+<a href="#logs" title="{{ count }} errored turn{{ 's' if count != 1 else '' }} today"
+   class="badge badge-error badge-sm gap-1 cursor-pointer">
+  ⚠ {{ count }}
+</a>
+{% endif %}

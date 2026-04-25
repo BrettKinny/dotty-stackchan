@@ -43,6 +43,9 @@
     <span id="device-status" data-poll
           hx-get="/ui/device-status" hx-trigger="load, every 5s, dotty-refresh from:window"
           hx-swap="innerHTML"></span>
+    <span id="alerts-badge" data-poll
+          hx-get="/ui/alerts/count" hx-trigger="load, every 30s, dotty-refresh from:window"
+          hx-swap="innerHTML"></span>
     <span class="text-xs text-base-content/50 hidden sm:inline">admin</span>
   </div>
   <div class="flex-none flex items-center gap-1">

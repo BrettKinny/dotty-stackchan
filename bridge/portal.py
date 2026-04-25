@@ -340,6 +340,32 @@ async def device_status(request: Request) -> Any:
     )
 
 
+@router.get("/alerts/count", response_class=HTMLResponse, include_in_schema=False)
+async def alerts_count(request: Request) -> Any:
+    """Q6: count today's errored turns from the convo log so the header
+    badge shows it."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    path = _log_path_for(today)
+    n = 0
+    if path.exists():
+        try:
+            for line in path.read_bytes().splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                if rec.get("error"):
+                    n += 1
+        except OSError:
+            pass
+    return templates.TemplateResponse(
+        request, "alerts_badge.html",
+        {"count": n},
+    )
+
+
 @router.get("/face", response_class=HTMLResponse, include_in_schema=False)
 async def face_partial(request: Request) -> Any:
     """Show the most recent emoji Dotty used today (P9)."""
@@ -500,9 +526,17 @@ async def volume(request: Request, value: int = Form(...)) -> Any:
     return await _inject_or_error(request, prompt, label=f"set volume to {value}")
 
 
+_INJECT_WAIT_SEC = 8.0  # Q4: how long to wait for Dotty's reply before
+                        #     showing "no response in time" fallback.
+
+
 async def _inject_or_error(request: Request, text: str, label: str) -> Any:
     """Helper for action endpoints that fire text into xiaozhi-server's
-    pipeline so the device actually speaks/emotes/runs MCP tools."""
+    pipeline so the device actually speaks/emotes/runs MCP tools.
+
+    Q4: subscribes to the bridge's event stream BEFORE injecting, then
+    waits up to ~8s for the next turn so the portal can show what Dotty
+    actually said (not just "Sent…")."""
     inject = _state.get("inject_to_device")
     if inject is None:
         return templates.TemplateResponse(
@@ -510,23 +544,38 @@ async def _inject_or_error(request: Request, text: str, label: str) -> Any:
             {"ok": False,
              "error": "Inject path not configured (xiaozhi admin patch missing)."},
         )
+    subscribe = _state.get("subscribe_events")
+    unsubscribe = _state.get("unsubscribe_events")
+    queue = subscribe() if subscribe else None
     try:
-        result = await inject(text=text)
-    except Exception as exc:
-        log.exception("portal inject failed")
+        try:
+            result = await inject(text=text)
+        except Exception as exc:
+            log.exception("portal inject failed")
+            return templates.TemplateResponse(
+                request, "say_result.html",
+                {"ok": False, "error": f"Bridge error: {exc.__class__.__name__}"},
+            )
+        if not result.get("ok"):
+            return templates.TemplateResponse(
+                request, "say_result.html",
+                {"ok": False, "error": result.get("error", "unknown injection failure")},
+            )
+        # Wait for the next completed turn (likely ours — single device).
+        response_text = "Sent — no reply in 8s."
+        if queue is not None:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=_INJECT_WAIT_SEC)
+                response_text = event.get("response_text") or "(no text)"
+            except asyncio.TimeoutError:
+                pass
         return templates.TemplateResponse(
             request, "say_result.html",
-            {"ok": False, "error": f"Bridge error: {exc.__class__.__name__}"},
+            {"ok": True, "sent": label, "response": response_text},
         )
-    if not result.get("ok"):
-        return templates.TemplateResponse(
-            request, "say_result.html",
-            {"ok": False, "error": result.get("error", "unknown injection failure")},
-        )
-    return templates.TemplateResponse(
-        request, "say_result.html",
-        {"ok": True, "sent": label, "response": "Sent — Dotty should respond shortly."},
-    )
+    finally:
+        if queue is not None and unsubscribe is not None:
+            unsubscribe(queue)
 
 
 @router.post("/actions/say", response_class=HTMLResponse, include_in_schema=False)
