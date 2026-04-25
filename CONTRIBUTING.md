@@ -74,6 +74,20 @@ deployments must use a placeholder:
 Port numbers (`8000`, `8003`, `8080`, `18789`, `42617`) are product-generic
 and do not need placeholders.
 
+## Documentation versioning
+
+The docs site is published per-version using
+[`mike`](https://github.com/jimporter/mike). Pushes to `main` update the
+`/dev/` alias automatically; tag pushes (`server-vX.Y.Z`, `fw-vX.Y.Z`) publish
+a versioned tree at `/vX.Y/` and bump the `/latest/` alias. See
+[`docs/versioning.md`](docs/versioning.md) for the URL structure, version
+dropdown behavior, and maintainer commands (`mike deploy ... --push`,
+`mike list`, `mike delete`).
+
+When you add or rename a doc, prefer edits that work cleanly across versions
+(don't break links from older versions to ones that still exist). If a doc is
+only relevant for a future version, note that in the PR description.
+
 ## Safety-related changes
 
 The child-safety enforcement layer (prompt sandwich in `bridge.py`, audience

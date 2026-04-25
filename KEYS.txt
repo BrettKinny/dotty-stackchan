@@ -1,0 +1,13 @@
+# Maintainer GPG public key fingerprints
+#
+# This file is the single source of truth for the GPG keys that sign Dotty
+# release artifacts. Until a real key is generated, the fingerprint below is
+# a placeholder — release artifacts during this period are NOT signed.
+#
+# Brett Kinny <brett@example.com> — <FINGERPRINT_PENDING>
+#
+# To verify a release artifact:
+#   gpg --keyserver keys.openpgp.org --recv-keys <fingerprint>
+#   gpg --verify <artifact>.asc <artifact>
+#
+# See docs/signed-releases.md for the full signing + verification workflow.

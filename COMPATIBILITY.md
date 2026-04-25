@@ -91,8 +91,14 @@ Server and firmware are versioned independently:
 3. Commit with message: `release: server-vX.Y.Z` (or `release: fw-vX.Y.Z`).
 4. Create an annotated tag: `git tag -a server-vX.Y.Z -m "server-vX.Y.Z"`
 5. Push the tag: `git push origin server-vX.Y.Z`
+6. Deploy versioned docs (handled automatically by `.github/workflows/docs-deploy.yml`
+   on tag push; if you need to deploy manually, run
+   `mike deploy --push --update-aliases X.Y latest` from the repo root after
+   `pip install -r docs/requirements.txt`). See
+   [`docs/versioning.md`](docs/versioning.md) for the full URL/alias model.
 
-GitHub Actions handles image builds and artifact publishing from the tag.
+GitHub Actions handles image builds, artifact publishing, and versioned doc
+deploys from the tag.
 
 ### Compatibility matrix updates
 

@@ -190,6 +190,40 @@ SOUND_TURN_COOLDOWN_SEC = float(os.environ.get("SOUND_TURN_COOLDOWN_SEC", "3"))
 SOUND_TURN_YAW_DEG = int(os.environ.get("SOUND_TURN_YAW_DEG", "45"))
 SOUND_TURN_SPEED = int(os.environ.get("SOUND_TURN_SPEED", "250"))
 # ---------------------------------------------------------------------------
+# Clap-to-wake (non-visual voice-mode entry)
+# ---------------------------------------------------------------------------
+# Dark rooms / hand-occlusion can mask the firmware's `face_detected` path,
+# leaving no easy way to invite the robot into a voice turn. Clap-to-wake
+# subscribes to `sound_event` perception events and opens the same voice
+# window the face-greeter does (xiaozhi inject-text → ASR/TTS pipeline)
+# when:
+#   - the event's ``kind`` is "clap" (the on-device sound localizer or
+#     server-side YAMNet may emit either; we accept either spelling), OR
+#   - the reported amplitude / energy crosses CLAP_WAKE_MIN_AMPLITUDE.
+# Default OFF — opt in by setting CLAP_WAKE_ENABLED=true.
+CLAP_WAKE_ENABLED = os.environ.get(
+    "CLAP_WAKE_ENABLED", "false",
+).strip().lower() in ("1", "true", "yes", "on")
+# Amplitude threshold (loudness / energy units as emitted by the firmware
+# sound localizer). Set conservatively so casual room noise doesn't fire;
+# tune per deployment. Set to 0 to accept any amplitude when paired with
+# kind == "clap" (the kind check is enough on its own).
+CLAP_WAKE_MIN_AMPLITUDE = float(
+    os.environ.get("CLAP_WAKE_MIN_AMPLITUDE", "0.6"),
+)
+# Per-device cooldown after a successful wake. Default 10 s — long enough
+# that a single sustained clap pattern doesn't trigger twice, short enough
+# that a deliberate retry after the listen window closes still works.
+CLAP_WAKE_COOLDOWN_SEC = float(
+    os.environ.get("CLAP_WAKE_COOLDOWN_SEC", "10"),
+)
+# Optional verbal acknowledgement when a clap fires. Empty string keeps
+# the wake silent (chime + mic open via the inject-text → empty path is
+# not a thing — a small spoken cue is friendlier here than for the face
+# path). Default is a tiny "Yes?" which mirrors the FACE_GREET_TEXT
+# pattern without copying its longer "Hi!" greeting feel.
+CLAP_WAKE_TEXT = os.environ.get("CLAP_WAKE_TEXT", "Yes?")
+# ---------------------------------------------------------------------------
 # Purr-on-head-pet (server-pushed, Option B)
 # ---------------------------------------------------------------------------
 # When the firmware emits a `head_pet_started` perception event, the bridge
