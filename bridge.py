@@ -56,6 +56,26 @@ VISION_SYSTEM_PROMPT = (
     "Keep your description to 2-3 sentences."
 )
 
+# ---------------------------------------------------------------------------
+# MCP tool permission policy
+# ---------------------------------------------------------------------------
+# Tools the firmware advertises via WebSocket handshake. Names use the firmware's
+# "self." prefix stripped — the request_permission handler strips it before lookup.
+MCP_TOOL_ALLOWLIST: set[str] = {
+    "get_device_status",
+    "audio_speaker.set_volume",
+    "screen.set_brightness",
+    "screen.set_theme",
+    "robot.get_head_angles",
+    "robot.set_head_angles",
+    "robot.set_led_color",
+    "robot.create_reminder",
+    "robot.get_reminders",
+    "robot.stop_reminder",
+}
+# Privacy-sensitive tools denied when KID_MODE is active.
+MCP_TOOL_DENYLIST: set[str] = {"camera.take_photo"} if KID_MODE else set()
+
 FALLBACK_EMOJI = "😐"
 ALLOWED_EMOJIS = ("😊", "😆", "😢", "😮", "🤔", "😠", "😐", "😍", "😴")
 VOICE_CHANNELS = ("dotty", "stackchan")
@@ -302,11 +322,33 @@ class ACPClient:
             if method == "session/request_permission":
                 perm_id = obj.get("id")
                 tool_name = (obj.get("params") or {}).get("toolName", "")
-                log.info("tool-permission tool=%s approved=True", tool_name)
-                await self._send({
-                    "jsonrpc": "2.0", "id": perm_id,
-                    "result": {"approved": True},
-                })
+                # Normalise: firmware sends "self.camera.take_photo" etc.
+                bare_name = tool_name.removeprefix("self.")
+                if bare_name in MCP_TOOL_DENYLIST:
+                    log.warning(
+                        "tool-permission DENIED tool=%s (denylist, kid_mode=%s)",
+                        tool_name, KID_MODE,
+                    )
+                    await self._send({
+                        "jsonrpc": "2.0", "id": perm_id,
+                        "result": {"approved": False},
+                    })
+                elif bare_name in MCP_TOOL_ALLOWLIST:
+                    log.info("tool-permission tool=%s approved=True", tool_name)
+                    await self._send({
+                        "jsonrpc": "2.0", "id": perm_id,
+                        "result": {"approved": True},
+                    })
+                else:
+                    # Unknown tool — permissive default, but log for visibility.
+                    log.info(
+                        "tool-permission tool=%s approved=True (unlisted)",
+                        tool_name,
+                    )
+                    await self._send({
+                        "jsonrpc": "2.0", "id": perm_id,
+                        "result": {"approved": True},
+                    })
                 continue
             if method:
                 log.debug("ACP notification method=%s", method)
