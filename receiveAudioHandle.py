@@ -64,6 +64,7 @@ _PHRASE_CORRECTIONS: list[tuple[str, float]] = [
     # Common kid requests
     ("tell me a story", 0.7),
     ("sing a song", 0.7),
+    ("sing the macarena", 0.7),
     ("dance", 0.8),
     ("do the macarena", 0.7),
     # Identity questions
@@ -250,18 +251,31 @@ async def _handle_vision(conn: "ConnectionHandler", text: str) -> str | None:
     return None
 
 
-# ---------- Dance mode ----------
+# ---------- Dance / singing mode ----------
+# Singing and dancing are unified — both route to _handle_dance(), which plays
+# the choreography and (if a matching audio_file exists in DANCE_REGISTRY)
+# injects pre-rendered singing audio into the TTS queue.
 
 _DANCE_PHRASES = (
     "dance", "do a dance", "let's dance", "can you dance",
     "dance for me", "do the macarena", "macarena",
     "dance time", "dance mode",
+    # Singing triggers — same handler, optional audio file makes it sing.
+    "sing a song", "sing the macarena", "sing macarena",
+    "can you sing", "sing for me", "sing something",
+    "let's sing",
 )
+
+# Short "sing" needs word-boundary matching to avoid false positives on
+# words like "single" or "singapore".
+_SING_WORD_RE = re.compile(r"\bsing\b", re.IGNORECASE)
 
 
 def _is_dance_request(text: str) -> bool:
     lower = text.lower().strip()
-    return any(phrase in lower for phrase in _DANCE_PHRASES)
+    if any(phrase in lower for phrase in _DANCE_PHRASES):
+        return True
+    return bool(_SING_WORD_RE.search(lower))
 
 
 def _detect_dance_name(text: str) -> str:
