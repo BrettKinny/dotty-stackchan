@@ -18,7 +18,7 @@ BOLD   := \033[1m
 RESET  := \033[0m
 
 # ── Targets ──────────────────────────────────────────────────────────
-.PHONY: help setup fetch-models fetch-yamnet doctor audit up down logs status voice-list voice-install
+.PHONY: help setup fetch-models fetch-yamnet doctor audit up down logs status voice-list voice-install sbom
 
 help: ## Show this help
 	@echo ""
@@ -147,6 +147,12 @@ fetch-models: ## Download SenseVoiceSmall + Piper voice models
 # ─────────────────────────────────────────────────────────────────────
 fetch-yamnet: ## Download YAMNet TFLite (Phase 2 audio scene classifier)
 	@./scripts/fetch-yamnet.sh
+
+# ─────────────────────────────────────────────────────────────────────
+# sbom — generate a component+license inventory (sbom.json at repo root)
+# ─────────────────────────────────────────────────────────────────────
+sbom: ## Generate Software Bill of Materials (sbom.json)
+	@./scripts/generate-sbom.sh
 
 # ─────────────────────────────────────────────────────────────────────
 # doctor — health checks

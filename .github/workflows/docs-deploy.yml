@@ -1,14 +1,28 @@
 name: Deploy docs to GitHub Pages
 
 on:
+  # Pushes to main publish the 'dev' alias.
+  # Tag pushes (server-v*, fw-v*, v*) publish a versioned doc set and update
+  # the 'latest' alias.
+  # Path filters are deliberately omitted: mike deploys are cheap, and tag
+  # pushes don't always evaluate path filters reliably.
   push:
     branches:
       - main
-    paths:
-      - "docs/**"
-      - "mkdocs.yml"
-      - "README.md"
-      - "CHANGELOG.md"
+    tags:
+      - "server-v*"
+      - "fw-v*"
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label to deploy (e.g. 0.1, 1.0). Leave blank to deploy as 'dev'."
+        required: false
+        default: ""
+      alias:
+        description: "Alias to update (e.g. latest). Leave blank for none."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -17,14 +31,80 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - name: Configure git identity for mike
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch existing gh-pages branch (mike requires it)
+        run: |
+          git fetch origin gh-pages --depth=1 || echo "gh-pages branch not found yet; mike will create it on first deploy."
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install mkdocs-material
-        run: pip install mkdocs-material
+      - name: Install docs requirements
+        run: pip install -r docs/requirements.txt
 
-      - name: Deploy to GitHub Pages
-        run: mkdocs gh-deploy --force
+      - name: Determine deploy mode
+        id: mode
+        env:
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          INPUT_ALIAS: ${{ github.event.inputs.alias }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION="${INPUT_VERSION:-dev}"
+            ALIAS="${INPUT_ALIAS:-}"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            # Strip server-v / fw-v / v prefix; keep MAJOR.MINOR for the doc version.
+            RAW="${TAG#server-v}"
+            RAW="${RAW#fw-v}"
+            RAW="${RAW#v}"
+            # Reduce 1.2.3 to 1.2 (per-tag docs are typically MAJOR.MINOR).
+            VERSION="$(echo "$RAW" | awk -F. '{ printf "%s.%s", $1, $2 }')"
+            ALIAS="latest"
+          elif [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            VERSION="dev"
+            ALIAS=""
+          else
+            echo "Unsupported trigger: $GITHUB_REF"; exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "alias=$ALIAS" >> "$GITHUB_OUTPUT"
+          echo "Deploying version='$VERSION' alias='$ALIAS'"
+
+      - name: Deploy with mike (tag -> versioned + latest)
+        if: steps.mode.outputs.alias == 'latest'
+        run: |
+          mike deploy --push --update-aliases \
+            "${{ steps.mode.outputs.version }}" latest
+
+      - name: Deploy with mike (main -> dev)
+        if: steps.mode.outputs.version == 'dev' && steps.mode.outputs.alias == ''
+        run: |
+          mike deploy --push "${{ steps.mode.outputs.version }}"
+
+      - name: Deploy with mike (manual dispatch, custom)
+        if: github.event_name == 'workflow_dispatch' && steps.mode.outputs.version != 'dev'
+        run: |
+          if [ -n "${{ steps.mode.outputs.alias }}" ]; then
+            mike deploy --push --update-aliases \
+              "${{ steps.mode.outputs.version }}" "${{ steps.mode.outputs.alias }}"
+          else
+            mike deploy --push "${{ steps.mode.outputs.version }}"
+          fi
+
+      - name: Set default alias to 'latest' (idempotent)
+        if: steps.mode.outputs.alias == 'latest'
+        run: mike set-default --push latest
