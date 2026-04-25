@@ -1971,6 +1971,11 @@ _speaker_resolver: "SpeakerResolver | None" = None  # noqa: F821
 # voice path is unaffected either way.
 _engagement_decider: "EngagementDecider | None" = None  # noqa: F821
 
+# Rich-MCP tool surface — exposes enhanced firmware tool dispatch with
+# server-side kid-mode filtering and face-recognition integration.
+# Gated on DOTTY_RICH_MCP=false; None == disabled or init failed.
+_rich_mcp: "RichMCPToolSurface | None" = None  # noqa: F821
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -2109,6 +2114,35 @@ async def lifespan(app: FastAPI):
     else:
         log.info(
             "engagement decider disabled (ENGAGEMENT_ENABLED=false) — "
+            "set to true to opt in",
+        )
+
+    # Rich-MCP tool surface — server-side firmware tool dispatch with
+    # kid-mode filtering. Gated on DOTTY_RICH_MCP env (default false).
+    # Constructed once at startup; per-request dispatch is via
+    # bridge.rich_mcp_dispatch.build_ws_send_func(conn).
+    global _rich_mcp
+    if os.environ.get("DOTTY_RICH_MCP", "false").lower() in (
+        "1", "true", "yes", "on",
+    ):
+        try:
+            from bridge.rich_mcp import RichMCPToolSurface
+            _rich_mcp = RichMCPToolSurface(
+                kid_mode_provider=lambda: KID_MODE,
+            )
+            log.info(
+                "RichMCPToolSurface ready — %d tools (%d visible in kid-mode)",
+                len(_rich_mcp.available_tool_names()),
+                len(_rich_mcp.tools_for_llm()),
+            )
+        except Exception:
+            log.exception(
+                "RichMCPToolSurface init failed — continuing without it",
+            )
+            _rich_mcp = None
+    else:
+        log.info(
+            "rich-MCP disabled (DOTTY_RICH_MCP=false) — "
             "set to true to opt in",
         )
 

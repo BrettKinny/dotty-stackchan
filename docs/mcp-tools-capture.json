@@ -180,6 +180,99 @@
                         }
                     }
                 }
+            },
+            {
+                "name": "self.robot.set_led_multi",
+                "description": "Set a SINGLE pixel on the neon-ring without disturbing the others. Index 0-5 = left ring, 6-11 = right ring. Useful for status pips (e.g. one blue pixel = listening). Note: a subsequent `robot.set_led_color` will overwrite this pixel; re-call after a full-ring update if you need persistence.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "index": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 11,
+                            "description": "Pixel index 0-11."
+                        },
+                        "r": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 168
+                        },
+                        "g": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 168
+                        },
+                        "b": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 168
+                        }
+                    },
+                    "required": ["index", "r", "g", "b"]
+                }
+            },
+            {
+                "name": "self.robot.get_privacy_state",
+                "description": "Read the hardware privacy-LED state (camera/mic active indicators). Read-only; reflects the firmware's Layer 1 hardware tracking and is independent of LLM-facing tool intent.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
+            },
+            {
+                "name": "self.robot.face_unlock",
+                "description": "Unlock adult-mode features via face/PIN. `method` is 'face' or 'pin'; `secret` is the PIN string when method='pin'. Adult-mode only.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "method": {
+                            "type": "string",
+                            "enum": ["face", "pin"]
+                        },
+                        "secret": {
+                            "type": "string",
+                            "description": "PIN when method='pin'; ignored for method='face'."
+                        }
+                    },
+                    "required": ["method"]
+                }
+            },
+            {
+                "name": "self.robot.face_enroll",
+                "description": "Enroll a new face under `name`. Adult-mode only — filtered out under kid-mode.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Identity label, e.g. 'brett'."
+                        }
+                    },
+                    "required": ["name"]
+                }
+            },
+            {
+                "name": "self.robot.face_forget",
+                "description": "Delete an enrolled face by `name`. Adult-mode only — filtered out under kid-mode.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Identity label to forget."
+                        }
+                    },
+                    "required": ["name"]
+                }
+            },
+            {
+                "name": "self.robot.face_list",
+                "description": "List enrolled face identities. Read-only and safe in any mode.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
             }
         ]
     }
