@@ -292,23 +292,25 @@ async def _handle_dance(conn: "ConnectionHandler", dance_name: str) -> None:
 
     audio_file = dance.get("audio_file")
     has_audio = bool(audio_file) and os.path.exists(audio_file)
+    opus_packets = None
+    if has_audio:
+        try:
+            opus_packets = await audio_to_data(audio_file)
+        except Exception as exc:
+            conn.logger.bind(tag=TAG).error(f"Dance mode: audio decode failed: {exc}")
+            has_audio = False
+
+    if has_audio and opus_packets is not None:
+        conn.tts.tts_audio_queue.put((SentenceType.FIRST, opus_packets, None))
+        conn.tts.tts_audio_queue.put((SentenceType.LAST, [], None))
+        conn.logger.bind(tag=TAG).info(
+            f"Dance mode: queued singing audio {audio_file} ({len(opus_packets)} packets)"
+        )
 
     dance_task = asyncio.create_task(
         execute_choreography(conn, dance["timeline"], _send_head_angles, _send_led_color)
     )
     conn._dance_task = dance_task
-
-    if has_audio:
-        try:
-            opus_packets = await audio_to_data(audio_file)
-            conn.tts.tts_audio_queue.put((SentenceType.FIRST, opus_packets, None))
-            conn.tts.tts_audio_queue.put((SentenceType.LAST, [], None))
-            conn.logger.bind(tag=TAG).info(
-                f"Dance mode: queued singing audio {audio_file} ({len(opus_packets)} packets)"
-            )
-        except Exception as exc:
-            conn.logger.bind(tag=TAG).error(f"Dance mode: audio injection failed: {exc}")
-            has_audio = False
 
     if not has_audio:
         conn.executor.submit(
