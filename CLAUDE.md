@@ -43,7 +43,7 @@ This repo uses placeholders (`<UNRAID_IP>`, `<RPI_IP>`, `<RPI_USER>`, `<UNRAID_X
 - **Unraid xiaozhi-server**: `<UNRAID_XIAOZHI_PATH>` (e.g. `/mnt/user/appdata/xiaozhi-server/`)
 - **Unraid custom LLM provider**: mounted into container at `/opt/xiaozhi-server/core/providers/llm/zeroclaw/`
 - **RPi ZeroClaw bridge**: `<RPI_BRIDGE_PATH>` (e.g. `~/zeroclaw-bridge/`)
-- **This project dir**: wherever you cloned `stackchan-infra`
+- **This project dir**: wherever you cloned `dotty-stackchan`
 
 ## Ports
 

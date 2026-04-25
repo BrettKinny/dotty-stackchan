@@ -1,8 +1,8 @@
-# stackchan-infra
+# Dotty
 
-**A fully self-hosted voice stack for the M5Stack [StackChan](https://github.com/m5stack/StackChan).** Goal: the robot talks without phoning anywhere you don't control. Open-source firmware on the robot, [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) for voice I/O, a small FastAPI bridge to whatever LLM agent you want as the brain. Device firmware, ASR, session state, and persona live on your own hardware. LLM and TTS are pluggable — the reference config uses a cloud LLM (OpenRouter) and local Piper TTS, but both are pluggable — swap in Ollama for the LLM or EdgeTTS for cloud voices, so a 100% offline deployment is possible with no code changes to the stack.
+**Your self-hosted [StackChan](https://github.com/m5stack/StackChan) robot assistant.** A fully self-hosted voice stack — open-source firmware on the robot, [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) for voice I/O, a small FastAPI bridge to whatever LLM agent you want as the brain. Device firmware, ASR, session state, and persona live on your own hardware. LLM and TTS are pluggable — the reference config uses a cloud LLM (OpenRouter) and local Piper TTS, but swap in Ollama for fully offline operation with no code changes.
 
-**A hackable starting point, not a product.** The defaults here are *one* working configuration — a default persona (named after the hardware; you set your own name via the `<ROBOT_NAME>` placeholder), [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) as the brain, Qwen3-30B via OpenRouter as the LLM — but every seam is swappable. Fork it, rip out what you don't want, wire in your own agent / LLM / TTS / persona. No releases, no support, no roadmap — just a working wiring diagram you can adapt to your own StackChan.
+**Hackable by design.** Every seam is swappable — the default ships a persona named "Dotty" (rename it during `make setup`), [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) as the brain, and Qwen3-30B via OpenRouter as the LLM. Fork it, rip out what you don't want, wire in your own agent / LLM / TTS / persona.
 
 Reference deployment in this repo:
 - **Hardware**: M5Stack StackChan (CoreS3 + servo kit), firmware built from `m5stack/StackChan`.
@@ -232,7 +232,7 @@ ssh <RPI_USER>@<RPI_IP> 'sudo systemctl restart zeroclaw-bridge'
 # Smoke test full round-trip
 curl -X POST http://<RPI_IP>:8080/api/message \
   -H 'content-type: application/json' \
-  -d '{"content":"hello","channel":"stackchan"}'
+  -d '{"content":"hello","channel":"dotty"}'
 
 # Bridge health
 curl http://<RPI_IP>:8080/health

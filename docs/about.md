@@ -1,6 +1,6 @@
 ---
 title: About
-description: What stackchan-infra is and why it exists.
+description: What Dotty is and why it exists.
 ---
 
 # About

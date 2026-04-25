@@ -50,7 +50,7 @@ This is the strongest enforcement layer. Every turn on the `stackchan`
 channel is wrapped in a prefix and a suffix before being sent to the LLM:
 
 ```
-STACKCHAN_TURN_PREFIX + context + user_message + suffix
+VOICE_TURN_PREFIX + context + user_message + suffix
 ```
 
 The suffix is placed at the very end of the prompt -- the position with the
@@ -59,9 +59,9 @@ constraints in the suffix are the last thing the model reads before
 generating its reply, making them the hardest to override.
 
 **Per-session suffix caching.** The full ~600-token suffix
-(`STACKCHAN_TURN_SUFFIX`) is sent on the first turn of each ACP session.
+(`VOICE_TURN_SUFFIX`) is sent on the first turn of each ACP session.
 Subsequent turns receive a shorter reminder
-(`STACKCHAN_TURN_SUFFIX_SHORT`) that explicitly restates the English-only,
+(`VOICE_TURN_SUFFIX_SHORT`) that explicitly restates the English-only,
 emoji-leader, and child-safe constraints.
 This saves ~550 tokens per turn while the full rules remain in the LLM's
 conversation history from turn 0. Sessions rotate on idle timeout (5 min),
@@ -100,7 +100,7 @@ Pipeline order: `raw LLM output` -> `_content_filter` -> `_ensure_emoji_prefix` 
 
 ---
 
-## Active Rules (STACKCHAN_TURN_SUFFIX)
+## Active Rules (VOICE_TURN_SUFFIX)
 
 The following rules are injected as the suffix on every turn. They are
 labelled "HARD CONSTRAINTS" and the model is told they "override everything
@@ -269,8 +269,8 @@ inappropriate content through).
 
 | Component | File | Symbol |
 |---|---|---|
-| Sandwich prefix/suffix constants | `bridge.py` | `STACKCHAN_TURN_PREFIX`, `STACKCHAN_TURN_SUFFIX`, `STACKCHAN_TURN_SUFFIX_SHORT` |
-| Turn-aware sandwich wrapper | `bridge.py` | `_wrap_stackchan()` (full suffix on turn 0, short on turns 1+) |
+| Sandwich prefix/suffix constants | `bridge.py` | `VOICE_TURN_PREFIX`, `VOICE_TURN_SUFFIX`, `VOICE_TURN_SUFFIX_SHORT` |
+| Turn-aware sandwich wrapper | `bridge.py` | `_wrap_voice()` (full suffix on turn 0, short on turns 1+) |
 | Sandwich injection | `bridge.py` | `prepare=` callback on `ACPClient.prompt()`, called from both endpoint handlers |
 | Content filter (post-LLM) | `bridge.py` | `_content_filter()`, `_BLOCKED_WORDS_RE`, `_CONTENT_FILTER_REPLACEMENT` |
 | Emoji fallback (post-LLM) | `bridge.py` | `_ensure_emoji_prefix()` |
@@ -321,7 +321,7 @@ is to route the `stackchan` channel to a model with stronger built-in safety
 
 ### Modifying the Topic Blocklist
 
-Edit `STACKCHAN_TURN_SUFFIX` in `bridge.py` (lines 25-46). The blocked
+Edit `VOICE_TURN_SUFFIX` in `bridge.py` (lines 25-46). The blocked
 topics are in rule 5, as a bulleted list. Add or remove entries, then
 restart the bridge service:
 
@@ -331,19 +331,19 @@ systemctl restart zeroclaw-bridge
 
 ### Changing the Self-Harm Response
 
-Edit rule 6 in `STACKCHAN_TURN_SUFFIX`. Be careful here -- the current
+Edit rule 6 in `VOICE_TURN_SUFFIX`. Be careful here -- the current
 wording was chosen to acknowledge distress without attempting counseling.
 
 ### Adjusting the Emoji Set
 
 1. Update `ALLOWED_EMOJIS` in `bridge.py` (line 23) to add or remove emojis.
-2. Update rule 2 in `STACKCHAN_TURN_SUFFIX` to match.
+2. Update rule 2 in `VOICE_TURN_SUFFIX` to match.
 3. Update the `prompt:` block in `.config.yaml` to match.
 4. Confirm the StackChan firmware supports the face mapping for any new emoji.
 
 ### Changing the Age Range
 
-Edit rule 4 in `STACKCHAN_TURN_SUFFIX`. The current target is "YOUNG CHILD
+Edit rule 4 in `VOICE_TURN_SUFFIX`. The current target is "YOUNG CHILD
 (age 4-8)." Adjusting upward would allow more complex vocabulary and topics;
 adjusting downward would further simplify language.
 

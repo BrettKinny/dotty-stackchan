@@ -1,4 +1,4 @@
-# Contributing to stackchan-infra
+# Contributing to Dotty
 
 Thanks for your interest in contributing! This project is a hackable starting
 point for self-hosting a voice stack on the M5Stack StackChan. Contributions

@@ -17,7 +17,7 @@ happy path — see [SETUP.md](../SETUP.md) for alternatives and details.
 ## 2. Flash the firmware
 
 Download the latest binaries from
-[GitHub Releases](https://github.com/BrettKinny/stackchan-infra/releases)
+[GitHub Releases](https://github.com/BrettKinny/dotty-stackchan/releases)
 (look for a tag starting with `fw-v`).
 
 Install esptool and flash:
@@ -42,8 +42,8 @@ Verify checksums against `checksums.txt` in the release if desired.
 ## 3. Clone and set up the server
 
 ```bash
-git clone --recursive https://github.com/BrettKinny/stackchan-infra.git
-cd stackchan-infra
+git clone --recursive https://github.com/BrettKinny/dotty-stackchan.git
+cd dotty-stackchan
 make setup
 ```
 
