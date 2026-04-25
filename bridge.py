@@ -229,6 +229,7 @@ class ACPClient:
         self._sid_last_used: float = 0.0
         self._sid_created: float = 0.0
         self._sid_turns: int = 0
+        self._in_flight_rid: int | None = None
 
     async def _spawn(self) -> None:
         # Any respawn path invalidates the cached session — ZeroClaw has no memory of it.
@@ -337,6 +338,26 @@ class ACPClient:
         except Exception:
             log.debug("session/stop best-effort close raised; ignoring", exc_info=True)
 
+    async def _cancel_prompt(self) -> None:
+        """Kill the ACP child to guarantee no stale events after barge-in.
+
+        Cheaper than draining: respawn takes ~200ms and the next prompt()
+        call will re-create the session via ensure_alive().
+        """
+        self._in_flight_rid = None
+        self._sid = None
+        self._sid_turns = 0
+        if self._proc is not None and self._proc.returncode is None:
+            try:
+                self._proc.terminate()
+                await asyncio.wait_for(self._proc.wait(), timeout=1.0)
+            except (ProcessLookupError, asyncio.TimeoutError):
+                try:
+                    self._proc.kill()
+                except ProcessLookupError:
+                    pass
+        self._proc = None
+
     def _should_rotate(self, now: float) -> tuple[bool, str | None]:
         if self._sid is None:
             return (False, None)
@@ -363,6 +384,7 @@ class ACPClient:
         chunk_cb: Callable[[str], Awaitable[None]] | None = None,
     ) -> str:
         rid = next(self._id_gen)
+        self._in_flight_rid = rid
         await self._send({
             "jsonrpc": "2.0", "id": rid, "method": "session/prompt",
             "params": {"sessionId": self._sid, "prompt": text},
@@ -445,6 +467,17 @@ class ACPClient:
                     (xiaozhi_sid or "none")[:8],
                 )
                 return content
+            except asyncio.CancelledError:
+                total_ms = (perf_counter() - t_total) * 1000.0
+                log.info(
+                    "prompt-cancelled (barge-in) latency_ms=%.0f sid=%s turn=%d",
+                    total_ms, (self._sid or "none")[:8], self._sid_turns,
+                )
+                try:
+                    await self._cancel_prompt()
+                except Exception:
+                    log.debug("cancel cleanup failed", exc_info=True)
+                raise
             except (BrokenPipeError, ConnectionResetError, RuntimeError, asyncio.TimeoutError):
                 total_ms = (perf_counter() - t_total) * 1000.0
                 log.exception(

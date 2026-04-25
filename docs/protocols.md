@@ -253,8 +253,7 @@ Canonical spec: [agentclientprotocol.com](https://agentclientprotocol.com). Zed-
 - `session/event` — tool call/result logging (`tool_call`, `tool_result` types) and streaming text chunks
 - `session/request_permission` — auto-approves tool calls (safety net for tools not in ZeroClaw's `auto_approve` list)
 
-What the bridge doesn't yet use:
-- `session/cancel` → abort on barge-in (device already emits `abort` on wake-word-detected).
+- `session/cancel` → sent on barge-in (device emits `abort`, xiaozhi closes the streaming HTTP connection, bridge cancels the in-flight ACP prompt and drains stale output)
 
 ### ACP vs MCP — how they differ
 

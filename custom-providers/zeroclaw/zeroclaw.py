@@ -85,6 +85,7 @@ class LLMProvider(LLMProviderBase):
         t0 = time.perf_counter() if _DBG else 0.0
         def _ms():
             return (time.perf_counter() - t0) * 1000.0
+        resp = None
         try:
             if _DBG:
                 logger.bind(tag=TAG).info(f"strdbg {_ms():7.0f}ms POST begin url={self.url}")
@@ -129,8 +130,6 @@ class LLMProvider(LLMProviderBase):
                             )
                         yield content
                 elif etype == "final":
-                    # All chunks already yielded; the `content` field on final
-                    # is the concatenation and doesn't need re-emitting.
                     if _DBG:
                         logger.bind(tag=TAG).info(f"strdbg {_ms():7.0f}ms final (return)")
                     return
@@ -141,6 +140,8 @@ class LLMProvider(LLMProviderBase):
                     return
             if not any_chunk:
                 yield f"{FALLBACK_EMOJI} (no response)"
+        except GeneratorExit:
+            logger.bind(tag=TAG).info("ZeroClaw stream aborted (barge-in)")
         except requests.exceptions.Timeout:
             logger.bind(tag=TAG).warning("ZeroClaw bridge stream timeout")
             yield f"{FALLBACK_EMOJI} Sorry, I'm thinking too slowly right now."
@@ -150,6 +151,9 @@ class LLMProvider(LLMProviderBase):
         except Exception as exc:
             logger.bind(tag=TAG).exception("ZeroClaw bridge error (stream)")
             yield f"{FALLBACK_EMOJI} Something went wrong: {exc}"
+        finally:
+            if resp is not None:
+                resp.close()
 
     def _response_buffered(self, payload):
         try:
