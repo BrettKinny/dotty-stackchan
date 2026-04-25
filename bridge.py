@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from typing import Awaitable, Callable, TypedDict
+from typing import Any, Awaitable, Callable, TypedDict
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
@@ -1394,6 +1394,39 @@ def _portal_broadcast_turn(*, channel: str, request_text: str,
 # and tests can validate the surface before consumers are added.
 _perception_listeners: list[asyncio.Queue] = []
 _perception_state: dict[str, dict] = {}
+
+# Phase 2 audio scene classifier (YAMNet) lives in a worker thread.
+# Captured at lifespan startup; consumed by `_audio_scene_emit_from_thread`
+# below. None when YAMNet is disabled or its import failed.
+_audio_scene_classifier: Any = None
+_audio_scene_loop: "asyncio.AbstractEventLoop | None" = None
+
+
+def _audio_scene_emit_from_thread(event: dict) -> None:
+    """Thread-safe bridge from the YAMNet worker thread into the asyncio
+    perception bus. AudioSceneClassifier emits from a non-loop thread, so
+    `_perception_broadcast` (which touches asyncio.Queue) must be hopped
+    onto the captured loop via call_soon_threadsafe."""
+    loop = _audio_scene_loop
+    if loop is None or loop.is_closed():
+        return
+    device_id = event.get("device_id") or ""
+    name = event.get("name") or ""
+    data = event.get("data") or {}
+    ts = event.get("ts") or time.time()
+
+    def _emit() -> None:
+        try:
+            _update_perception_state(device_id, name, data, ts)
+            _perception_broadcast(event)
+        except Exception:
+            log.exception("audio_scene emit on loop failed")
+
+    try:
+        loop.call_soon_threadsafe(_emit)
+    except RuntimeError:
+        # Loop closed between the is_closed() check and the call.
+        pass
 
 
 def _perception_subscribe() -> asyncio.Queue:
