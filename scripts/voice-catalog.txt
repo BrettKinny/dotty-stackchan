@@ -1,0 +1,22 @@
+# Piper voice catalog for voice-install.sh
+# Format: <voice-key> <lang_dir>
+# lang_dir is the path under https://huggingface.co/rhasspy/piper-voices/resolve/main/
+# (the directory containing the voice's quality folder)
+#
+# URL pattern:
+#   https://huggingface.co/rhasspy/piper-voices/resolve/main/<lang_dir>/<voice>/<quality>/<key>.onnx
+#
+# Lines starting with # and blank lines are ignored.
+
+en_US-amy-medium                    en/en_US/amy/medium
+en_US-amy-low                       en/en_US/amy/low
+en_US-kristin-medium                en/en_US/kristin/medium
+en_US-hfc_female-medium             en/en_US/hfc_female/medium
+en_US-lessac-medium                 en/en_US/lessac/medium
+en_US-lessac-low                    en/en_US/lessac/low
+en_US-libritts_r-medium             en/en_US/libritts_r/medium
+en_GB-cori-medium                   en/en_GB/cori/medium
+en_GB-jenny_dylan-medium            en/en_GB/jenny_dylan/medium
+en_GB-southern_english_female-low   en/en_GB/southern_english_female/low
+en_GB-alba-medium                   en/en_GB/alba/medium
+en_GB-semaine-medium                en/en_GB/semaine/medium

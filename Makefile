@@ -18,7 +18,7 @@ BOLD   := \033[1m
 RESET  := \033[0m
 
 # ── Targets ──────────────────────────────────────────────────────────
-.PHONY: help setup fetch-models doctor audit up down logs status
+.PHONY: help setup fetch-models doctor audit up down logs status voice-list voice-install
 
 help: ## Show this help
 	@echo ""
@@ -285,6 +285,21 @@ down: ## Stop containers (docker compose down)
 
 logs: ## Tail container logs (docker compose logs -f)
 	docker compose logs -f
+
+voice-list: ## List curated Piper voices (see docs/voice-catalog.md)
+	@./scripts/voice-install.sh --list
+
+voice-install: ## Install a curated Piper voice (VOICE=<key> [APPLY=1])
+	@if [ -z "$(VOICE)" ]; then \
+	  echo -e "$(RED)Error: VOICE is required.$(RESET)  Example: make voice-install VOICE=en_US-kristin-medium"; \
+	  echo "Run 'make voice-list' to see the catalog."; \
+	  exit 2; \
+	fi
+	@if [ -n "$(APPLY)" ]; then \
+	  ./scripts/voice-install.sh "$(VOICE)" --apply; \
+	else \
+	  ./scripts/voice-install.sh "$(VOICE)"; \
+	fi
 
 status: ## Show container status + bridge health
 	@docker compose ps
