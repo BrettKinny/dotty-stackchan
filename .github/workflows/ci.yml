@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  yaml-lint:
+    name: YAML Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install yamllint
+      - name: Lint YAML files
+        run: |
+          cat > .yamllint.yml <<'EOF'
+          extends: relaxed
+          rules:
+            line-length: disable
+            truthy: disable
+          EOF
+          yamllint \
+            .config.yaml \
+            docker-compose.yml \
+            compose.all-in-one.yml \
+            compose.local.override.yml \
+            mkdocs.yml
+
+  compose-validate:
+    name: Compose Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate docker-compose.yml
+        run: docker compose -f docker-compose.yml config > /dev/null
+      - name: Validate compose.all-in-one.yml
+        run: docker compose -f compose.all-in-one.yml config > /dev/null
+
+  config-parse:
+    name: Config Parse
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse .config.yaml
+        run: python3 -c "import yaml; yaml.safe_load(open('.config.yaml'))"
+
+  python-syntax:
+    name: Python Syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Python syntax
+        run: |
+          for f in bridge.py receiveAudioHandle.py $(find custom-providers -name '*.py'); do
+            echo "Checking $f"
+            python3 -c "import ast; ast.parse(open('$f').read())"
+          done
+
+  frontmatter-check:
+    name: Frontmatter Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify YAML frontmatter in docs
+        run: |
+          fail=0
+          for f in docs/*.md; do
+            if ! head -1 "$f" | grep -q '^---$'; then
+              echo "FAIL: $f missing YAML frontmatter"
+              fail=1
+            fi
+          done
+          exit $fail
+
+  docs-links:
+    name: Docs Link Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check links
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: >-
+            --no-progress
+            --exclude-private
+            --offline
+            docs/*.md
+            *.md
