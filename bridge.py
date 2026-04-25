@@ -25,7 +25,28 @@ SESSION_IDLE_TIMEOUT_SEC = float(os.environ.get("ZEROCLAW_SESSION_IDLE", "300"))
 SESSION_MAX_TURNS = int(os.environ.get("ZEROCLAW_SESSION_MAX_TURNS", "50"))
 SESSION_MAX_AGE_SEC = float(os.environ.get("ZEROCLAW_SESSION_MAX_AGE_SEC", "1800"))
 MAX_SENTENCES = int(os.environ.get("MAX_SENTENCES", "3"))
-KID_MODE = os.environ.get("DOTTY_KID_MODE", "true").lower() in ("1", "true", "yes")
+_KID_STATE_FILE = Path(
+    os.environ.get("DOTTY_KID_MODE_STATE", "/root/zeroclaw-bridge/state/kid-mode")
+)
+
+
+def _read_kid_mode() -> bool:
+    """State file overrides env var so the portal can flip kid-mode and
+    survive a restart without editing the systemd unit. Format: "true" or
+    "false" (any other content falls back to the env default)."""
+    if _KID_STATE_FILE.exists():
+        try:
+            v = _KID_STATE_FILE.read_text().strip().lower()
+            if v in ("true", "1", "yes"):
+                return True
+            if v in ("false", "0", "no"):
+                return False
+        except OSError:
+            pass
+    return os.environ.get("DOTTY_KID_MODE", "true").lower() in ("1", "true", "yes")
+
+
+KID_MODE = _read_kid_mode()
 
 LOCAL_TZ = ZoneInfo(os.environ.get("TZ", "Australia/Brisbane"))
 WEATHER_LOCATION = os.environ.get("WEATHER_LOCATION", "Brisbane")
@@ -925,7 +946,17 @@ if _configure_portal is not None:
     async def _portal_send_message(*, text: str, channel: str = "dotty") -> dict:
         out = await message(MessageIn(content=text, channel=channel))
         return {"response": out.response, "session_id": out.session_id}
-    _configure_portal(send_message=_portal_send_message, vision_cache=_vision_cache)
+
+    def _portal_set_kid_mode(enabled: bool) -> None:
+        _KID_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _KID_STATE_FILE.write_text("true" if enabled else "false")
+
+    _configure_portal(
+        send_message=_portal_send_message,
+        vision_cache=_vision_cache,
+        kid_mode_getter=lambda: KID_MODE,
+        kid_mode_setter=_portal_set_kid_mode,
+    )
 
 
 @app.post("/api/message/stream")

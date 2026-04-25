@@ -1,0 +1,10 @@
+{% if ok %}
+<div class="alert alert-info py-2 text-sm"
+     hx-get="/health" hx-trigger="load delay:3s, every 2s"
+     hx-swap="none"
+     hx-on::after-request="if(event.detail.successful){htmx.ajax('GET','/ui/kid-mode',{target:'#kid-card-body',swap:'outerHTML'})}">
+  Restarting bridge to apply Kid Mode → {{ 'on' if new_state else 'off' }}…
+</div>
+{% else %}
+<div class="alert alert-error py-2 text-sm">{{ error }}</div>
+{% endif %}

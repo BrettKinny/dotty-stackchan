@@ -29,15 +29,25 @@ log = logging.getLogger("portal")
 
 # Bridge wires its in-process message handler in via configure(). Lets the
 # "Say" action invoke the same path /api/message uses without an HTTP hop.
-_state: dict[str, Any] = {"send_message": None, "vision_cache": None}
+_state: dict[str, Any] = {
+    "send_message": None,
+    "vision_cache": None,
+    "kid_mode_getter": None,
+    "kid_mode_setter": None,
+}
 
 
-def configure(*, send_message: Any = None, vision_cache: dict | None = None) -> None:
+def configure(*, send_message: Any = None, vision_cache: dict | None = None,
+              kid_mode_getter: Any = None, kid_mode_setter: Any = None) -> None:
     """Register bridge state with the portal. Idempotent."""
     if send_message is not None:
         _state["send_message"] = send_message
     if vision_cache is not None:
         _state["vision_cache"] = vision_cache
+    if kid_mode_getter is not None:
+        _state["kid_mode_getter"] = kid_mode_getter
+    if kid_mode_setter is not None:
+        _state["kid_mode_setter"] = kid_mode_setter
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -319,6 +329,56 @@ async def vision_latest(request: Request) -> Any:
             ),
         }
     return templates.TemplateResponse(request, "vision.html", ctx)
+
+
+@router.get("/kid-mode", response_class=HTMLResponse, include_in_schema=False)
+async def kid_mode_partial(request: Request) -> Any:
+    getter = _state.get("kid_mode_getter")
+    enabled = bool(getter()) if getter else True
+    return templates.TemplateResponse(
+        request, "kid_mode.html",
+        {"enabled": enabled, "available": getter is not None},
+    )
+
+
+@router.post("/actions/kid-mode", response_class=HTMLResponse, include_in_schema=False)
+async def kid_mode_set(request: Request, enabled: str = Form("")) -> Any:
+    """Persist Kid Mode state to a file the bridge re-reads on startup,
+    then trigger a self-restart via systemctl. The HTTP response returns
+    before the SIGTERM hits (subprocess.Popen + small delay).
+    """
+    setter = _state.get("kid_mode_setter")
+    if setter is None:
+        raise HTTPException(503, "kid_mode_setter not configured")
+    new_state = enabled.lower() in ("on", "true", "1", "yes")
+    try:
+        setter(new_state)
+    except Exception as exc:
+        log.exception("kid_mode setter failed")
+        return templates.TemplateResponse(
+            request, "kid_mode_result.html",
+            {"ok": False, "error": str(exc)},
+        )
+
+    # Spawn a delayed self-restart so we can return the response first.
+    import subprocess
+    try:
+        subprocess.Popen(
+            ["sh", "-c", "sleep 1 && systemctl restart zeroclaw-bridge"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as exc:
+        log.exception("self-restart spawn failed")
+        return templates.TemplateResponse(
+            request, "kid_mode_result.html",
+            {"ok": False, "error": f"restart failed: {exc}"},
+        )
+
+    return templates.TemplateResponse(
+        request, "kid_mode_result.html",
+        {"ok": True, "new_state": new_state},
+    )
 
 
 @router.get("/logs", response_class=HTMLResponse, include_in_schema=False)
