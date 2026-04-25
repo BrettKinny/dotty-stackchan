@@ -150,10 +150,28 @@ CONVO_LOG_DIR = Path(os.environ.get("CONVO_LOG_DIR", "/root/zeroclaw-bridge/logs
 # reach the xiaozhi admin endpoints regardless of portal availability.
 _XIAOZHI_HOST = os.environ.get("UNRAID_HOST", "")
 _XIAOZHI_HTTP_PORT = int(os.environ.get("UNRAID_OTA_PORT", "8003"))
-# Phase 1.5: face-greet cooldown. 60 s prevents the robot from re-greeting
-# the same person every time the face state machine bounces in/out of the
-# 2 s grace period during normal head movements.
-FACE_GREET_COOLDOWN_SEC = float(os.environ.get("FACE_GREET_COOLDOWN_SEC", "60"))
+# Phase 1.5: face-greet cooldown. Conservative default keeps the robot
+# from re-greeting on every casual walk-by while still re-engaging when
+# the user comes back after a real absence.
+#
+# `FACE_GREET_MIN_INTERVAL_SEC` is the new canonical name (the brief in
+# tasks.md tracks coexistence with the firmware-side WakeWordInvoke).
+# `FACE_GREET_COOLDOWN_SEC` is honoured for back-compat with existing
+# deployments — set either one. New default is 30 s; existing 60 s
+# overrides remain in force if the legacy name is set.
+FACE_GREET_MIN_INTERVAL_SEC = float(
+    os.environ.get(
+        "FACE_GREET_MIN_INTERVAL_SEC",
+        os.environ.get("FACE_GREET_COOLDOWN_SEC", "30"),
+    )
+)
+# Back-compat alias kept so existing references keep compiling. New code
+# should reference FACE_GREET_MIN_INTERVAL_SEC directly.
+FACE_GREET_COOLDOWN_SEC = FACE_GREET_MIN_INTERVAL_SEC
+# `FACE_GREET_TEXT=""` (empty string) DISABLES the verbal greet entirely
+# — the firmware-side WakeWordInvoke("face") still opens the mic, so the
+# robot acknowledges the person silently with a chime + listen window.
+# Default "Hi!" keeps the warmer "verbal + mic" combo.
 FACE_GREET_TEXT = os.environ.get("FACE_GREET_TEXT", "Hi!")
 # How recently must a greeting have fired for face_lost to abort it.
 # Firmware emits face_lost ~2 s after the face actually leaves frame
@@ -1428,8 +1446,10 @@ async def _perception_face_greeter() -> None:
     on the existing surface and is the natural seed for Phase 4
     curiosity / boredom mode behaviour.
     """
-    log.info("perception face greeter started (cooldown=%.0fs text=%r)",
-             FACE_GREET_COOLDOWN_SEC, FACE_GREET_TEXT)
+    log.info(
+        "perception face greeter started (min_interval=%.0fs text=%r)",
+        FACE_GREET_MIN_INTERVAL_SEC, FACE_GREET_TEXT,
+    )
     q = _perception_subscribe()
     try:
         while True:
@@ -1442,9 +1462,20 @@ async def _perception_face_greeter() -> None:
             now = event.get("ts", 0.0)
             state = _perception_state.setdefault(device_id, {})
             last_greet = state.get("last_face_greet_t", 0.0)
-            if now - last_greet < FACE_GREET_COOLDOWN_SEC:
+            if now - last_greet < FACE_GREET_MIN_INTERVAL_SEC:
                 continue
             state["last_face_greet_t"] = now
+            # Empty FACE_GREET_TEXT disables the verbal injection — the
+            # firmware-side WakeWordInvoke("face") still fires, so the
+            # device opens its mic without the bridge saying "Hi!". This
+            # gives "popup chime + mic open" rather than "popup chime +
+            # 'Hi!' + mic open", which can feel quieter day-to-day.
+            if not FACE_GREET_TEXT:
+                log.info(
+                    "face_detected → mic-only (FACE_GREET_TEXT empty): device=%s",
+                    device_id,
+                )
+                continue
             log.info("face_detected → greeting: device=%s", device_id)
             asyncio.create_task(
                 _dispatch_face_greeting(device_id, FACE_GREET_TEXT),
