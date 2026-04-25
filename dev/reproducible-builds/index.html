@@ -6,11 +6,11 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Cooldown + mood + time-of-day gate for unprompted utterances. The "Dotty notices you walk in and chimes up on its own" sublayer — default OFF.">
+        <meta name="description" content="Your self-hosted StackChan robot assistant. Open-source firmware, local ASR/TTS, pluggable LLM brain — no cloud required.">
       
       
       
-        <link rel="canonical" href="https://brettkinny.github.io/dotty-stackchan/dev/engagement-decider/">
+        <link rel="canonical" href="https://brettkinny.github.io/dotty-stackchan/dev/reproducible-builds/">
       
       
       
@@ -23,7 +23,7 @@
     
     
       
-        <title>Engagement Decider (Phase 4) - Dotty</title>
+        <title>Reproducible Firmware Builds - Dotty</title>
       
     
     
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#engagement-decider-phase-4" class="md-skip">
+        <a href="#reproducible-firmware-builds" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Engagement Decider (Phase 4)
+              Reproducible Firmware Builds
             
           </span>
         </div>
@@ -2259,10 +2259,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#architecture" class="md-nav__link">
+  <a href="#what-reproducible-means-here" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Architecture
+        What "reproducible" means here
       
     </span>
   </a>
@@ -2270,10 +2270,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#mood-scalar" class="md-nav__link">
+  <a href="#toolchain-pinning" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Mood scalar
+        Toolchain pinning
       
     </span>
   </a>
@@ -2281,10 +2281,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#intent-types" class="md-nav__link">
+  <a href="#verifying-a-release-locally" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Intent types
+        Verifying a release locally
       
     </span>
   </a>
@@ -2292,10 +2292,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#configuration-matrix" class="md-nav__link">
+  <a href="#pinning-managed-components" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Configuration matrix
+        Pinning managed components
       
     </span>
   </a>
@@ -2303,10 +2303,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#persistence" class="md-nav__link">
+  <a href="#ci-workflow" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Persistence
+        CI workflow
       
     </span>
   </a>
@@ -2314,82 +2314,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#privacy" class="md-nav__link">
+  <a href="#known-non-determinism-risks" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Privacy
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#operator-notes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Operator notes
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Operator notes">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#debugging" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Debugging
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#resetting-state" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Resetting state
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#disabling-at-runtime" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Disabling at runtime
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cross-references" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cross-references
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#status" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Status
+        Known non-determinism risks
       
     </span>
   </a>
@@ -2416,300 +2344,121 @@
   
 
 
-<h1 id="engagement-decider-phase-4">Engagement Decider (Phase 4)<a class="headerlink" href="#engagement-decider-phase-4" title="Permanent link">&para;</a></h1>
-<p>The engagement-decision sublayer is the arbiter for <strong>all</strong> unprompted
-behaviours. Where Layer 6's <a href="../proactive-greetings/">Proactive Greeter</a>
-is a single-purpose face → greeting reactor, the engagement decider is
-the general "should we say something now?" gate that sits between the
-perception bus and any future server-initiated speech path.</p>
-<p>This is the headline payoff of Phase 4: <strong>Dotty notices you walk in
-and chimes up on its own</strong> — but with cooldowns, quiet hours, and a
-mood scalar so the robot stays charming rather than chatty.</p>
-<div class="admonition warning">
-<p class="admonition-title">Default OFF</p>
-<p><code>ENGAGEMENT_ENABLED=false</code> by default. This is a big behaviour
-change — the robot starts speaking without being addressed.
-Operators must opt in explicitly.</p>
-</div>
-<h2 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h2>
-<pre class="mermaid"><code>flowchart LR
-    PB[Perception bus] --&gt;|face_recognized&lt;br/&gt;face_lost&lt;br/&gt;head_pet_started&lt;br/&gt;voice_turn_completed&lt;br/&gt;sound_event| SP[Stimulus pool&lt;br/&gt;bounded deque]
-    SP --&gt; DEC{Decider tick&lt;br/&gt;every 30s}
-    DEC --&gt; CD{Cooldown&lt;br/&gt;clear?}
-    CD -- no --&gt; SKIP[skip]
-    CD -- yes --&gt; QH{Quiet&lt;br/&gt;hours?}
-    QH -- yes --&gt; SKIP
-    QH -- no --&gt; TOD{In active&lt;br/&gt;window?}
-    TOD -- no --&gt; HP{High&lt;br/&gt;priority?}
-    HP -- no --&gt; SKIP
-    HP -- yes --&gt; MF{Mood&lt;br/&gt;&gt;= 0.3?}
-    TOD -- yes --&gt; MF
-    MF -- no --&gt; BYP{Mood&lt;br/&gt;bypass?}
-    BYP -- no --&gt; SKIP
-    BYP -- yes --&gt; ST{Stimulus&lt;br/&gt;matches?}
-    MF -- yes --&gt; ST
-    ST -- no --&gt; SKIP
-    ST -- yes --&gt; GEN[LLM&lt;br/&gt;+ template fallback]
-    GEN --&gt; TTS[push to device]
-    TTS --&gt; BUMP[bump cooldown&lt;br/&gt;+ mood +0.10]</code></pre>
-<p>The decider pulls perception events into a small recent-history
-buffer (the <strong>stimulus pool</strong>) and runs a periodic tick that walks an
-ordered cascade of intent types. The first intent that clears every
-gate fires; everything else waits for the next tick.</p>
-<h2 id="mood-scalar">Mood scalar<a class="headerlink" href="#mood-scalar" title="Permanent link">&para;</a></h2>
-<p>A single <code>[0.0, 1.0]</code> float that decays exponentially toward <code>0.5</code>
-(neutral) with τ = 10 minutes by default. Perception events nudge it
-in either direction; sustained silence pulls it down slowly so a
-quiet room doesn't get a "good morning" out of nowhere when nobody's
-been around for hours.</p>
+<h1 id="reproducible-firmware-builds">Reproducible Firmware Builds<a class="headerlink" href="#reproducible-firmware-builds" title="Permanent link">&para;</a></h1>
+<p>Dotty's firmware build is designed to be reproducible: the same source commit
+should always produce byte-identical binaries. This page explains the mechanism
+and how to verify a published release.</p>
+<h2 id="what-reproducible-means-here">What "reproducible" means here<a class="headerlink" href="#what-reproducible-means-here" title="Permanent link">&para;</a></h2>
+<p>Two engineers, starting from the same git commit, running <code>make verify-firmware</code>
+on different machines, should get the same <code>stack-chan.bin</code> SHA256 checksum.
+The GitHub Actions release workflow records that checksum in <code>SHA256SUMS.txt</code>
+and attaches it to every <code>fw-v*</code> release.</p>
+<h2 id="toolchain-pinning">Toolchain pinning<a class="headerlink" href="#toolchain-pinning" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Event</th>
-<th>Δ mood</th>
+<th>Layer</th>
+<th>Pinned to</th>
+<th>How</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>TTS push succeeded (any intent)</td>
-<td><strong>+0.10</strong></td>
+<td>IDF version</td>
+<td><code>espressif/idf:v5.5.4</code></td>
+<td><code>container.image</code> in <code>firmware-release.yml</code></td>
 </tr>
 <tr>
-<td><code>face_recognized</code> (known)</td>
-<td>+0.05</td>
+<td>Managed components</td>
+<td><code>idf_component.yml</code> + <code>dependencies.lock</code></td>
+<td>Committed in firmware submodule</td>
 </tr>
 <tr>
-<td><code>voice_turn_completed</code></td>
-<td>+0.05</td>
-</tr>
-<tr>
-<td><code>head_pet_started</code></td>
-<td>+0.10</td>
-</tr>
-<tr>
-<td><code>face_lost</code></td>
-<td>-0.05</td>
-</tr>
-<tr>
-<td>Per minute of total silence</td>
-<td>-0.02</td>
-</tr>
-<tr>
-<td>Decay toward 0.5</td>
-<td>τ=10 min</td>
+<td>Upstream firmware</td>
+<td><code>v2.2.4</code> tag + <code>patches/xiaozhi-esp32.patch</code></td>
+<td><code>fetch_repos.py</code> in firmware build</td>
 </tr>
 </tbody>
 </table>
-<p>When mood drops below <code>0.3</code>, only <strong>mood-bypass intents</strong>
-(<code>calendar_reminder</code>) are allowed to fire. Everything else waits for
-mood to recover.</p>
-<div class="admonition note">
-<p class="admonition-title">Tuning warning</p>
-<p>These coefficients are starter values informed by intuition.
-They will need real-world tuning once the loop is wired up; the
-current numbers are visible as constants on the
-<code>EngagementDecider</code> class for easy adjustment.</p>
-</div>
-<h2 id="intent-types">Intent types<a class="headerlink" href="#intent-types" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Intent</th>
-<th>Default cooldown</th>
-<th>Stimulus required</th>
-<th>Kid-mode?</th>
-<th>Time-of-day respect</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>calendar_reminder</code></td>
-<td>2 h</td>
-<td>calendar facade returns events</td>
-<td>yes</td>
-<td>bypasses out-of-window</td>
-</tr>
-<tr>
-<td><code>casual_greeting</code></td>
-<td>30 min</td>
-<td>recent <code>face_recognized</code> (known)</td>
-<td>yes</td>
-<td>bypasses out-of-window</td>
-</tr>
-<tr>
-<td><code>time_marker</code></td>
-<td>4 h</td>
-<td>any recent activity</td>
-<td>yes</td>
-<td>active-window only</td>
-</tr>
-<tr>
-<td><code>unknown_face</code></td>
-<td>1 h</td>
-<td>recent <code>face_detected</code> / unknown id (gated by <code>GREETER_GREET_UNKNOWN</code>)</td>
-<td>yes</td>
-<td>active-window only</td>
-</tr>
-<tr>
-<td><code>curiosity</code></td>
-<td>6 h</td>
-<td>any history + mood ≥ 0.5</td>
-<td>yes</td>
-<td>active-window only</td>
-</tr>
-</tbody>
-</table>
-<p>Quiet hours hard-block <strong>all</strong> of the above — even
-<code>calendar_reminder</code>. If the user is asleep, the robot stays quiet.</p>
-<h2 id="configuration-matrix">Configuration matrix<a class="headerlink" href="#configuration-matrix" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>Notes</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>ENGAGEMENT_ENABLED</code></td>
-<td><code>false</code></td>
-<td>Master switch — opt in.</td>
-</tr>
-<tr>
-<td><code>ENGAGEMENT_TICK_SEC</code></td>
-<td><code>30</code></td>
-<td>Tick period in seconds.</td>
-</tr>
-<tr>
-<td><code>ENGAGEMENT_QUIET_HOURS</code></td>
-<td><code>22:00-06:00</code></td>
-<td><code>HH:MM-HH:MM</code>. Wraps midnight.</td>
-</tr>
-<tr>
-<td><code>ENGAGEMENT_ACTIVE_WINDOW</code></td>
-<td><code>06:00-21:00</code></td>
-<td>Outside this, only HP intents pass.</td>
-</tr>
-<tr>
-<td><code>ENGAGEMENT_MOOD_DECAY_MIN</code></td>
-<td><code>10</code></td>
-<td>τ for decay toward neutral.</td>
-</tr>
-<tr>
-<td><code>ENGAGEMENT_UTTERANCE_MAX_WORDS</code></td>
-<td><code>18</code></td>
-<td>Hard cap embedded in the LLM prompt.</td>
-</tr>
-<tr>
-<td><code>ENGAGEMENT_STATE_PATH</code></td>
-<td><code>~/.zeroclaw/engagement_state.json</code></td>
-<td>Atomic-write JSON.</td>
-</tr>
-<tr>
-<td><code>ENGAGEMENT_COOLDOWN_CASUAL_GREETING</code></td>
-<td><code>1800</code></td>
-<td>Seconds. Per-intent override.</td>
-</tr>
-<tr>
-<td><code>ENGAGEMENT_COOLDOWN_CALENDAR_REMINDER</code></td>
-<td><code>7200</code></td>
-<td></td>
-</tr>
-<tr>
-<td><code>ENGAGEMENT_COOLDOWN_TIME_MARKER</code></td>
-<td><code>14400</code></td>
-<td></td>
-</tr>
-<tr>
-<td><code>ENGAGEMENT_COOLDOWN_CURIOSITY</code></td>
-<td><code>21600</code></td>
-<td></td>
-</tr>
-<tr>
-<td><code>ENGAGEMENT_COOLDOWN_UNKNOWN_FACE</code></td>
-<td><code>3600</code></td>
-<td></td>
-</tr>
-<tr>
-<td><code>GREETER_GREET_UNKNOWN</code></td>
-<td><code>false</code></td>
-<td>Reused — gates the <code>unknown_face</code> intent.</td>
-</tr>
-</tbody>
-</table>
-<h2 id="persistence">Persistence<a class="headerlink" href="#persistence" title="Permanent link">&para;</a></h2>
-<p>The cooldown registry and mood scalar are persisted on every tick to
-<code>ENGAGEMENT_STATE_PATH</code>. Writes are atomic (<code>temp + os.replace</code>) so a
-mid-write crash leaves the previous state intact. Corrupt or
-non-dict state files are treated as "fresh start" rather than fatal —
-the same defensive contract Layer 6 uses for its greet log.</p>
-<h2 id="privacy">Privacy<a class="headerlink" href="#privacy" title="Permanent link">&para;</a></h2>
-<ul>
-<li>The state file is <strong>local</strong>. It contains a single float (mood) and
-  a small dict of <code>intent_type → unix_ts</code> cooldown timestamps.</li>
-<li><strong>No biometric data is stored.</strong> The decider reads identity from
-  perception events but never persists names, faces, or audio.</li>
-<li>The decider does <strong>not</strong> enable face recognition. It only consumes
-  events that Layer 4 (a still-scaffold layer) would otherwise emit.</li>
-<li>All external calls (LLM, TTS, calendar, filesystem, perception bus)
-  are try/except guarded; a decider failure cannot break the
-  perception bus or the voice path.</li>
-</ul>
-<h2 id="operator-notes">Operator notes<a class="headerlink" href="#operator-notes" title="Permanent link">&para;</a></h2>
-<h3 id="debugging">Debugging<a class="headerlink" href="#debugging" title="Permanent link">&para;</a></h3>
-<p>Set the bridge log level to <code>DEBUG</code> and watch journalctl for
-<code>engagement_tick</code> lines:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>journalctl<span class="w"> </span>-u<span class="w"> </span>zeroclaw-bridge<span class="w"> </span>-f<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>engagement
+<blockquote>
+<p><strong>Adding a SHA256 digest to the IDF image</strong> (optional, maximum trust):
+Run <code>docker pull espressif/idf:v5.5.4 &amp;&amp; docker inspect espressif/idf:v5.5.4 --format '{{index .RepoDigests 0}}'</code>
+on a trusted machine and update <code>firmware-release.yml</code> <code>image:</code> to
+<code>espressif/idf:v5.5.4@sha256:&lt;digest&gt;</code>. This prevents a tag-rewrite attack
+on DockerHub from silently changing your toolchain.</p>
+</blockquote>
+<h2 id="verifying-a-release-locally">Verifying a release locally<a class="headerlink" href="#verifying-a-release-locally" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># 1. Initialise the firmware submodule (once)</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>git<span class="w"> </span>submodule<span class="w"> </span>update<span class="w"> </span>--init<span class="w"> </span>--recursive
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># 2. Build and checksum locally</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>make<span class="w"> </span>verify-firmware
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># 3. Download the published SHA256SUMS.txt for the release you&#39;re verifying</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="nv">RELEASE</span><span class="o">=</span>fw-v0.1.0<span class="w">   </span><span class="c1"># or whichever tag</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>curl<span class="w"> </span>-L<span class="w"> </span><span class="s2">&quot;https://github.com/BrettKinny/dotty-stackchan/releases/download/</span><span class="si">${</span><span class="nv">RELEASE</span><span class="si">}</span><span class="s2">/SHA256SUMS.txt&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">     </span>-o<span class="w"> </span>firmware/firmware/build/SHA256SUMS.published
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="c1"># 4. Re-run to compare</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>make<span class="w"> </span>verify-firmware
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="c1"># Expect: PASS  Build is reproducible.</span>
 </code></pre></div>
-<p>Each tick logs mood, active-window state, pool size, and the
-suppression reason for any intent that didn't pass. A successful fire
-logs at <code>INFO</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>engagement_tick: fired intent=casual_greeting device=dev-1 text=&#39;Good morning, Hudson!&#39;
+<h2 id="pinning-managed-components">Pinning managed components<a class="headerlink" href="#pinning-managed-components" title="Permanent link">&para;</a></h2>
+<p>IDF managed components are fetched at build time unless locked. To generate a
+lock file:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">cd</span><span class="w"> </span>firmware/firmware
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-v<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PWD</span><span class="s2">:/project&quot;</span><span class="w"> </span>-w<span class="w"> </span>/project<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>espressif/idf:v5.5.4<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span>bash<span class="w"> </span>-lc<span class="w"> </span><span class="s1">&#39;git config --global --add safe.directory &quot;*&quot; &amp;&amp; python fetch_repos.py &amp;&amp; idf.py reconfigure&#39;</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># Commit dependencies.lock alongside idf_component.yml</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>git<span class="w"> </span>add<span class="w"> </span>main/idf_component.yml<span class="w"> </span>dependencies.lock
 </code></pre></div>
-<h3 id="resetting-state">Resetting state<a class="headerlink" href="#resetting-state" title="Permanent link">&para;</a></h3>
-<p>Stop the bridge, delete <code>~/.zeroclaw/engagement_state.json</code>, restart.
-Mood will reset to <code>0.5</code> and all cooldowns will clear.</p>
-<h3 id="disabling-at-runtime">Disabling at runtime<a class="headerlink" href="#disabling-at-runtime" title="Permanent link">&para;</a></h3>
-<p>Set <code>ENGAGEMENT_ENABLED=false</code> in the bridge environment and restart
-<code>zeroclaw-bridge.service</code>. The decider treats the env as
-construction-time configuration; toggling without a restart is
-deliberately not supported.</p>
-<h2 id="cross-references">Cross-references<a class="headerlink" href="#cross-references" title="Permanent link">&para;</a></h2>
-<ul>
-<li><strong><a href="../proactive-greetings/">Proactive Greeter (Layer 6)</a></strong> — the
-  existing single-purpose greeter. A future change can route its
-  greetings through the engagement decider for unified cooldown
-  discipline; until that ships, the two run independently with
-  separate cooldowns. (Operators who enable both will see the
-  greeter fire on <code>face_recognized</code> AND the decider's
-  <code>casual_greeting</code> intent fire on its tick — pick one or stagger
-  cooldowns until the merge happens.)</li>
-<li><strong>Layer 4 — face recognition</strong>: scaffold; emits the
-  <code>face_recognized</code> events the decider keys on for
-  <code>casual_greeting</code>.</li>
-<li><strong>Layer 5 — calendar facade</strong>: source of <code>calendar_reminder</code>
-  evidence via <code>get_events()</code> + <code>summarize_for_prompt(...)</code>.</li>
-<li><strong><a href="../modes/">Modes</a></strong> — interaction-mode taxonomy. The decider is
-  active in normal smart-mode; a future iteration may suppress it in
-  story-mode and similar focused modes.</li>
-</ul>
-<h2 id="status">Status<a class="headerlink" href="#status" title="Permanent link">&para;</a></h2>
-<p><strong>Scaffolded; bridge wiring deferred.</strong> This module ships as a new
-file with full unit-test coverage. The <code>bridge.py</code> lifespan hook that
-will instantiate it lives behind the public-repo concurrency boundary
-and is being added in a follow-up commit. Until that lands, the
-decider is dormant — it will not start, even with
-<code>ENGAGEMENT_ENABLED=true</code>.</p>
+<p>The lock file pins exact component versions; without it, a new component
+release could silently change the binary.</p>
+<h2 id="ci-workflow">CI workflow<a class="headerlink" href="#ci-workflow" title="Permanent link">&para;</a></h2>
+<p>The <code>firmware-release.yml</code> workflow fires on <code>fw-v*</code> tags and:</p>
+<ol>
+<li>Checks out with <code>submodules: recursive</code></li>
+<li>Fetches upstream dependencies via <code>fetch_repos.py</code></li>
+<li>Builds with <code>idf.py build</code> inside <code>espressif/idf:v5.5.4</code></li>
+<li>Generates <code>SHA256SUMS.txt</code> over the three release binaries</li>
+<li>Attaches binaries + checksums to the GitHub Release</li>
+</ol>
+<p>GPG signing of release artifacts is scaffolded (see <code>docs/signed-releases.md</code>)
+and enabled once <code>GPG_PRIVATE_KEY</code> / <code>GPG_PASSPHRASE</code> repo secrets are set.</p>
+<h2 id="known-non-determinism-risks">Known non-determinism risks<a class="headerlink" href="#known-non-determinism-risks" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Timestamp embedded in binary</td>
+<td>Mitigated — ESP-IDF uses <code>SOURCE_DATE_EPOCH</code> when set</td>
+</tr>
+<tr>
+<td>Managed component version drift</td>
+<td>Mitigated once <code>dependencies.lock</code> is committed</td>
+</tr>
+<tr>
+<td>IDF tag re-point on DockerHub</td>
+<td>Low risk; pin digest for maximum confidence</td>
+</tr>
+<tr>
+<td><code>fetch_repos.py</code> fetching HEAD</td>
+<td>Fixed — script pins to <code>v2.2.4</code> tag</td>
+</tr>
+</tbody>
+</table>
 
 
 
 
 
 
-
-  
-  
 
 
 
