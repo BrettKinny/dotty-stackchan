@@ -24,6 +24,7 @@ try:
     from bridge.metrics import (
         dotty_active_acp_sessions,
         dotty_calendar_fetch_failures_total,
+        dotty_content_filter_hits_total,
         dotty_kid_mode_active,
         dotty_perception_events_total,
         dotty_request_duration_seconds,
@@ -948,14 +949,23 @@ def _truncate_sentences(text: str, max_sentences: int = MAX_SENTENCES) -> str:
     return text
 
 
-_BLOCKED_WORDS_RE = re.compile(
-    r"\b("
-    r"fuck\w*|shit\w*|bitch\w*|bastard|cunt|"
-    r"nigger|nigga|faggot|retard(?:ed)?|"
-    r"penis|vagina|orgasm|porn\w*|hentai|"
-    r"decapitat\w*|dismember\w*|mutilat\w*|"
-    r"cocaine|heroin|methamphetamine|fentanyl|ecstasy"
-    r")\b",
+# Content-filter severity tiers — all tiers return the same kid-safe replacement
+# so no information is leaked about WHY the filter fired. Tier affects logging
+# level and the Prometheus counter label, enabling different alert thresholds:
+#
+#   redirect — common profanity / slurs             → log.warning
+#   log      — explicit sexual / graphic violence   → log.warning
+#   alert    — hard drugs                           → log.error  (alert on this label)
+_CF_TIER_REDIRECT_RE = re.compile(
+    r"\b(fuck\w*|shit\w*|bitch\w*|bastard|cunt|nigger|nigga|faggot|retard(?:ed)?)\b",
+    re.IGNORECASE,
+)
+_CF_TIER_LOG_RE = re.compile(
+    r"\b(penis|vagina|orgasm|porn\w*|hentai|decapitat\w*|dismember\w*|mutilat\w*)\b",
+    re.IGNORECASE,
+)
+_CF_TIER_ALERT_RE = re.compile(
+    r"\b(cocaine|heroin|methamphetamine|fentanyl|ecstasy)\b",
     re.IGNORECASE,
 )
 
@@ -964,16 +974,33 @@ _CONTENT_FILTER_REPLACEMENT = (
     "What's your favorite animal?"
 )
 
+# Ordered highest-severity first so the most serious match wins when multiple
+# tiers could fire on the same text.
+_CF_TIERS: list[tuple[re.Pattern, str, int]] = [
+    (_CF_TIER_ALERT_RE, "alert", logging.ERROR),
+    (_CF_TIER_LOG_RE, "log", logging.WARNING),
+    (_CF_TIER_REDIRECT_RE, "redirect", logging.WARNING),
+]
+
 
 def _content_filter(text: str) -> str | None:
-    """Return a safe replacement if blocked content is found, else None."""
-    match = _BLOCKED_WORDS_RE.search(text)
-    if match:
-        log.warning(
-            "content-filter-hit pattern=%r pos=%d len=%d",
-            match.group(), match.start(), len(text),
-        )
-        return _CONTENT_FILTER_REPLACEMENT
+    """Return a safe replacement if blocked content is found, else None.
+
+    Checks three severity tiers. The kid-facing replacement is identical for
+    all tiers; only log level and the Prometheus tier label differ, letting
+    operators alert on ``tier="alert"`` without noising up lower-tier counts.
+    """
+    for pattern, tier, level in _CF_TIERS:
+        match = pattern.search(text)
+        if match:
+            log.log(
+                level,
+                "content-filter-hit tier=%s pattern=%r pos=%d len=%d",
+                tier, match.group(), match.start(), len(text),
+            )
+            if _METRICS_AVAILABLE:
+                _safe_metric(dotty_content_filter_hits_total.labels(tier=tier).inc)
+            return _CONTENT_FILTER_REPLACEMENT
     return None
 
 

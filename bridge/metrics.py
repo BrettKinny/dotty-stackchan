@@ -155,6 +155,14 @@ if _PROMETHEUS_AVAILABLE:
         labelnames=("type",),
         registry=REGISTRY,
     )
+
+    dotty_content_filter_hits_total = Counter(
+        "dotty_content_filter_hits_total",
+        "Content-filter blocks partitioned by severity tier "
+        "(redirect=profanity/slurs, log=sexual/violence, alert=hard drugs).",
+        labelnames=("tier",),
+        registry=REGISTRY,
+    )
 else:  # pragma: no cover — exercised only when prometheus_client missing
     REGISTRY = None  # type: ignore[assignment]
     dotty_first_audio_latency_seconds = _NoopMetric()  # type: ignore[assignment]
@@ -166,6 +174,7 @@ else:  # pragma: no cover — exercised only when prometheus_client missing
     dotty_smart_mode_invocations_total = _NoopMetric()  # type: ignore[assignment]
     dotty_kid_mode_active = _NoopMetric()  # type: ignore[assignment]
     dotty_perception_events_total = _NoopMetric()  # type: ignore[assignment]
+    dotty_content_filter_hits_total = _NoopMetric()  # type: ignore[assignment]
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +235,7 @@ __all__ = [
     "dotty_smart_mode_invocations_total",
     "dotty_kid_mode_active",
     "dotty_perception_events_total",
+    "dotty_content_filter_hits_total",
     "record_first_audio",
     "metrics_app",
 ]
