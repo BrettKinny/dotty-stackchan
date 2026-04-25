@@ -1,2 +1,99 @@
 <!DOCTYPE html>
-PLACEHOLDER
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dotty — Live Sensor Feed</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: ui-monospace, "Cascadia Code", "Menlo", monospace;
+         background: #0f0f0f; color: #e0e0e0; padding: 1rem; }
+  h1 { font-size: 1.1rem; letter-spacing: .05em; color: #aaa; margin-bottom: .75rem; }
+  #toolbar { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
+  #status { font-size: .85rem; padding: .25rem .6rem; border-radius: 999px; }
+  .connected    { background: #1a4a1a; color: #5cde5c; }
+  .disconnected { background: #4a1a1a; color: #de5c5c; }
+  button { background: #333; color: #ccc; border: 1px solid #555;
+           padding: .3rem .8rem; border-radius: 4px; cursor: pointer; font-size: .85rem; }
+  button:hover { background: #444; }
+  #feed { display: flex; flex-direction: column; gap: .4rem; max-width: 900px; }
+  .event { background: #1a1a1a; border: 1px solid #2a2a2a; border-left: 3px solid #555;
+           border-radius: 4px; padding: .5rem .75rem; font-size: .82rem; }
+  .event-header { display: flex; align-items: center; gap: .5rem; margin-bottom: .25rem; }
+  .badge { font-size: .72rem; padding: .15rem .45rem; border-radius: 3px; font-weight: bold; }
+  .badge-face_detected   { background:#1a4a1a; color:#5cde5c; }
+  .badge-face_lost       { background:#4a1a1a; color:#de5c5c; }
+  .badge-sound_event     { background:#4a2a00; color:#ffa040; }
+  .badge-head_pet_started,.badge-head_pet_ended { background:#2a1a4a; color:#aa88ff; }
+  .badge-unknown         { background:#2a2a2a; color:#888; }
+  .ts    { color: #666; font-size: .75rem; }
+  .dev   { color: #6699cc; font-size: .75rem; }
+  .data  { color: #aaa; word-break: break-all; }
+</style>
+</head>
+<body>
+<h1>Dotty · Live Sensor Feed</h1>
+<div id="toolbar">
+  <span id="status" class="disconnected">Disconnected</span>
+  <button onclick="clearFeed()">Clear</button>
+  <span id="count" style="color:#666;font-size:.8rem">0 events</span>
+</div>
+<div id="feed"></div>
+
+<script>
+const feed    = document.getElementById('feed');
+const statusEl = document.getElementById('status');
+const countEl  = document.getElementById('count');
+let count = 0;
+
+const BADGE_CLASS = {
+  face_detected:   'badge-face_detected',
+  face_lost:       'badge-face_lost',
+  sound_event:     'badge-sound_event',
+  head_pet_started:'badge-head_pet_started',
+  head_pet_ended:  'badge-head_pet_ended',
+};
+
+function badgeClass(name) {
+  return BADGE_CLASS[name] || 'badge-unknown';
+}
+
+function formatTs(ts) {
+  const d = new Date(ts * 1000);
+  return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit',fractionalSecondDigits:2});
+}
+
+function addEvent(ev) {
+  const div = document.createElement('div');
+  div.className = 'event';
+  const bc = badgeClass(ev.name);
+  div.innerHTML =
+    `<div class="event-header">` +
+      `<span class="badge ${bc}">${ev.name}</span>` +
+      `<span class="dev">${ev.device_id || '—'}</span>` +
+      `<span class="ts">${formatTs(ev.ts)}</span>` +
+    `</div>` +
+    `<div class="data">${JSON.stringify(ev.data)}</div>`;
+  feed.insertBefore(div, feed.firstChild);
+  count++;
+  countEl.textContent = count + ' event' + (count === 1 ? '' : 's');
+  if (feed.children.length > 200) feed.removeChild(feed.lastChild);
+}
+
+function clearFeed() { feed.innerHTML = ''; count = 0; countEl.textContent = '0 events'; }
+
+const es = new EventSource('/api/perception/feed');
+es.onopen = () => {
+  statusEl.textContent = 'Connected';
+  statusEl.className = 'connected';
+};
+es.onerror = () => {
+  statusEl.textContent = 'Reconnecting…';
+  statusEl.className = 'disconnected';
+};
+es.onmessage = (e) => {
+  try { addEvent(JSON.parse(e.data)); } catch(_) {}
+};
+</script>
+</body>
+</html>
