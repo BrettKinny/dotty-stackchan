@@ -14,6 +14,7 @@ delete_audio: true
 selected_module:
   VAD: SileroVAD
   ASR: FunASR
+  # ASR: WhisperLocal     # <-- uncomment to swap from FunASR (kid-speech win)
   LLM: ZeroClawLLM
   # LLM: OpenAICompat      # <-- switch to direct OpenAI-compatible LLM
   TTS: LocalPiper
@@ -56,6 +57,25 @@ ASR:
     # English audio. Valid values: auto, zh, en, yue (Cantonese), ja, ko, nospeech.
     # Requires the patched fun_local.py mounted via docker-compose.yml.
     language: en
+  WhisperLocal:
+    type: whisper_local
+    # On-disk CTranslate2 model dir (downloaded by `make fetch-models`).
+    model_dir: models/whisper-small.en-ct2
+    output_dir: tmp/
+    # small.en is English-only — keep "en". For multilingual, use a non-.en
+    # checkpoint and set "auto" or a specific code.
+    language: en
+    # Fallback model id when model_dir is empty (faster-whisper auto-fetch).
+    model_size: small.en
+    # Phase 1 = CPU-only. For Phase 2 (when GPUs are available) flip
+    # device: cuda + compute_type: float16 — no Python changes needed.
+    device: cpu
+    compute_type: int8
+    beam_size: 1
+    cpu_threads: 0
+    # Optional decoder bias — short list of canonical phrases improves
+    # recall on rare names. Keep under ~200 chars to avoid prompt bleed.
+    initial_prompt: null
 
 TTS:
   EdgeTTS:

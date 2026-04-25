@@ -6,6 +6,9 @@ SENSEVOICE_REPO  := https://huggingface.co/FunAudioLLM/SenseVoiceSmall
 PIPER_BASE       := https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/cori/medium
 PIPER_ONNX       := en_GB-cori-medium.onnx
 PIPER_JSON       := en_GB-cori-medium.onnx.json
+WHISPER_REPO     := https://huggingface.co/Systran/faster-whisper-small.en
+WHISPER_DIR      := models/whisper-small.en-ct2
+WHISPER_FILES    := config.json model.bin tokenizer.json vocabulary.json preprocessor_config.json
 
 # ── Colours ──────────────────────────────────────────────────────────
 GREEN  := \033[0;32m
@@ -122,6 +125,20 @@ fetch-models: ## Download SenseVoiceSmall + Piper voice models
 	    "$(PIPER_BASE)/$(PIPER_JSON)" || \
 	    { echo -e "  $(RED)Failed to download $(PIPER_JSON)$(RESET)"; exit 1; }; \
 	fi
+	@echo ""
+	@# ── faster-whisper small.en (CTranslate2) ──
+	@mkdir -p $(WHISPER_DIR)
+	@echo -e "$(BOLD)[faster-whisper small.en]$(RESET)"
+	@for f in $(WHISPER_FILES); do \
+	  if [ -f "$(WHISPER_DIR)/$$f" ]; then \
+	    echo -e "  $(GREEN)$$f — already exists, skipping$(RESET)"; \
+	  else \
+	    echo "  Downloading $$f ..."; \
+	    curl -# -L -o "$(WHISPER_DIR)/$$f" \
+	      "$(WHISPER_REPO)/resolve/main/$$f" || \
+	      { echo -e "  $(RED)Failed to download $$f$(RESET)"; exit 1; }; \
+	  fi; \
+	done
 	@echo ""
 	@echo -e "$(GREEN)All models ready.$(RESET)"
 
