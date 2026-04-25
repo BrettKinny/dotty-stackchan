@@ -3,6 +3,7 @@ import re
 import time
 import json
 import asyncio
+from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -25,11 +26,104 @@ _ASR_CORRECTIONS: dict[str, str] = {
     "dotie": "Dotty",
     "dotti": "Dotty",
     "dody": "Dotty",
+    "daughty": "Dotty",
+    "haughty": "Dotty",
+    "naughty": "Dotty",
+    "hardy": "Dotty",
+    "darty": "Dotty",
+    "foto": "photo",
+    "pitcher": "picture",
+    "pikture": "picture",
+    "storey": "story",
+    "danse": "dance",
+    "mornin": "morning",
+    "nite": "night",
+    "singah": "sing a",
 }
 _ASR_CORRECTION_RE = re.compile(
     r'\b(' + '|'.join(re.escape(k) for k in _ASR_CORRECTIONS) + r')\b',
     re.IGNORECASE,
 )
+
+
+# ---------- Fuzzy phrase corrections ----------
+# Each entry: (canonical_phrase, minimum_similarity_ratio)
+# The canonical phrase is what we want. If the ASR text (or a window of it)
+# fuzzy-matches above the threshold, we substitute the canonical form.
+# Threshold 0.7 is conservative — avoids false positives on short utterances.
+_PHRASE_CORRECTIONS: list[tuple[str, float]] = [
+    # Vision triggers
+    ("take a photo", 0.7),
+    ("take a picture", 0.7),
+    ("take a photo of me", 0.7),
+    ("take a picture of me", 0.7),
+    # Smart-mode triggers (future)
+    ("smart mode", 0.75),
+    ("think harder", 0.75),
+    ("big brain", 0.75),
+    # Common kid requests
+    ("tell me a story", 0.7),
+    ("sing a song", 0.7),
+    ("dance", 0.8),
+    # Identity questions
+    ("what's your name", 0.7),
+    ("what is your name", 0.7),
+    ("who are you", 0.75),
+    # Greetings
+    ("good morning", 0.7),
+    ("good night", 0.7),
+]
+
+
+def _apply_phrase_corrections(text: str) -> str:
+    """Fuzzy-match ASR text against known phrases and substitute if close enough.
+
+    Uses a sliding window: for each canonical phrase of N words, we check every
+    contiguous N-word window in the ASR text. If the best window exceeds the
+    similarity threshold, we replace that window with the canonical phrase.
+
+    Only the single best match (highest ratio) is applied per call to avoid
+    cascading replacements on short utterances.
+    """
+    lower = text.lower().strip()
+    words = lower.split()
+    if len(words) < 2:
+        return text  # too short to fuzzy-match phrases
+
+    best_ratio = 0.0
+    best_phrase = ""
+    best_start = 0
+    best_length = 0
+
+    for canonical, threshold in _PHRASE_CORRECTIONS:
+        canon_words = canonical.split()
+        window_size = len(canon_words)
+        if window_size > len(words):
+            continue
+
+        for i in range(len(words) - window_size + 1):
+            window = " ".join(words[i : i + window_size])
+            ratio = SequenceMatcher(None, window, canonical).ratio()
+            if ratio >= threshold and ratio > best_ratio:
+                best_ratio = ratio
+                best_phrase = canonical
+                best_start = i
+                best_length = window_size
+
+    if best_ratio > 0:
+        # Rebuild using original-case words outside the match window,
+        # substituting the canonical phrase for the matched span.
+        original_words = text.split()
+        # Map word indices from lower-cased split back to original split.
+        # They should align since we only called .lower() without changing
+        # word boundaries, but guard against edge cases.
+        if len(original_words) >= best_start + best_length:
+            before = " ".join(original_words[:best_start])
+            after = " ".join(original_words[best_start + best_length :])
+            parts = [p for p in (before, best_phrase, after) if p]
+            return " ".join(parts)
+
+    return text
 
 
 def _is_noise(text: str) -> bool:
@@ -139,6 +233,7 @@ async def startToChat(conn: "ConnectionHandler", text):
         return
 
     actual_text = _apply_asr_corrections(actual_text)
+    actual_text = _apply_phrase_corrections(actual_text)
 
     if speaker_name:
         conn.current_speaker = speaker_name
