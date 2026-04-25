@@ -67,6 +67,13 @@ _PHRASE_CORRECTIONS: list[tuple[str, float]] = [
     ("sing the macarena", 0.7),
     ("dance", 0.8),
     ("do the macarena", 0.7),
+    # Song-name fuzzy hits
+    ("play tetris", 0.7),
+    ("hall of the mountain king", 0.7),
+    ("star wars", 0.75),
+    ("pirates of the caribbean", 0.7),
+    ("super mario", 0.7),
+    ("play music", 0.75),
     # Identity questions
     ("what's your name", 0.7),
     ("what is your name", 0.7),
@@ -258,12 +265,20 @@ async def _handle_vision(conn: "ConnectionHandler", text: str) -> str | None:
 
 _DANCE_PHRASES = (
     "dance", "do a dance", "let's dance", "can you dance",
-    "dance for me", "do the macarena", "macarena",
-    "dance time", "dance mode",
-    # Singing triggers — same handler, optional audio file makes it sing.
+    "dance for me", "dance time", "dance mode",
+    # Macarena
+    "do the macarena", "macarena",
+    # Singing triggers — same handler, audio file decides if it sings.
     "sing a song", "sing the macarena", "sing macarena",
     "can you sing", "sing for me", "sing something",
     "let's sing",
+    # Other songs in the catalog
+    "play tetris", "tetris music", "play the tetris",
+    "mountain king", "hall of the mountain king",
+    "star wars", "play star wars", "star wars music",
+    "pirates", "pirate music", "pirates of the caribbean",
+    "play mario", "mario music", "super mario",
+    "play music", "play a song", "music time",
 )
 
 # Short "sing" needs word-boundary matching to avoid false positives on
@@ -278,17 +293,41 @@ def _is_dance_request(text: str) -> bool:
     return bool(_SING_WORD_RE.search(lower))
 
 
+# Map spoken-form aliases → registry key. First-match wins, longest first
+# so "mountain king" beats "king".
+_DANCE_ALIASES: tuple[tuple[str, str], ...] = (
+    ("hall of the mountain king", "mountain_king"),
+    ("mountain king", "mountain_king"),
+    ("pirates of the caribbean", "pirates"),
+    ("super mario", "mario"),
+    ("star wars", "star_wars"),
+    ("macarena", "macarena"),
+    ("tetris", "tetris"),
+    ("pirate", "pirates"),
+    ("mario", "mario"),
+)
+
+
 def _detect_dance_name(text: str) -> str:
     from core.handle.dances import DANCE_REGISTRY, DEFAULT_DANCE
+    import random
     lower = text.lower()
+    # Direct registry-key hit (handles "macarena", "tetris" already).
     for name in DANCE_REGISTRY:
         if name in lower:
             return name
+    # Aliased names (multi-word, underscored, etc.)
+    for alias, name in _DANCE_ALIASES:
+        if alias in lower:
+            return name
+    # Generic "play music" / "play a song" / "music time" → random pick.
+    if any(p in lower for p in ("play music", "play a song", "music time", "play song")):
+        return random.choice(list(DANCE_REGISTRY.keys()))
     return DEFAULT_DANCE
 
 
 async def _handle_dance(conn: "ConnectionHandler", dance_name: str) -> None:
-    from core.handle.dances import DANCE_REGISTRY, execute_choreography
+    from core.handle.dances import DANCE_REGISTRY, execute_choreography, resolve_timeline
 
     dance = DANCE_REGISTRY.get(dance_name)
     if not dance:
@@ -327,9 +366,10 @@ async def _handle_dance(conn: "ConnectionHandler", dance_name: str) -> None:
     from core.handle.dances import AUDIO_LATENCY_OFFSET_MS
     audio_offset = AUDIO_LATENCY_OFFSET_MS if has_audio else 0
 
+    timeline = resolve_timeline(dance)
     dance_task = asyncio.create_task(
         execute_choreography(
-            conn, dance["timeline"], _send_head_angles, _send_led_color,
+            conn, timeline, _send_head_angles, _send_led_color,
             audio_latency_offset_ms=audio_offset,
         )
     )
