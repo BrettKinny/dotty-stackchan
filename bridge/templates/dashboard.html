@@ -212,5 +212,37 @@
 
 </main>
 
+<div id="error-toast" class="toast toast-top toast-center hidden z-50">
+  <div class="alert alert-error">
+    <span id="error-toast-msg"></span>
+  </div>
+</div>
+
+<script>
+  (function () {
+    if (typeof EventSource === 'undefined') return;
+    var src = new EventSource('/ui/events');
+    src.onmessage = function (ev) {
+      var data;
+      try { data = JSON.parse(ev.data); } catch (e) { return; }
+      // Live log tail (P13) — fire the same window event the refresh
+      // button uses so every polling tile picks up new state immediately.
+      window.dispatchEvent(new CustomEvent('dotty-refresh'));
+      // Error toast (P12) — surface failed turns even when the dashboard
+      // is parked in the background.
+      if (data && data.error) {
+        var toast = document.getElementById('error-toast');
+        var msg = document.getElementById('error-toast-msg');
+        if (toast && msg) {
+          msg.textContent = 'Dotty error: ' + String(data.error);
+          toast.classList.remove('hidden');
+          setTimeout(function () { toast.classList.add('hidden'); }, 8000);
+        }
+      }
+    };
+    src.onerror = function () { /* EventSource auto-reconnects */ };
+  })();
+</script>
+
 </body>
 </html>

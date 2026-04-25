@@ -748,9 +748,59 @@ class _ConvoLogger:
             path.chmod(0o600)
         except Exception:
             log.warning("convo log write failed", exc_info=True)
+        _portal_broadcast_turn(
+            channel=channel or "",
+            request_text=request_text,
+            response_text=response_text,
+            latency_ms=latency_ms,
+            error=error,
+            emoji_used=emoji_used,
+            ts_iso=now.isoformat(),
+        )
 
 
 _convo_log = _ConvoLogger(CONVO_LOG_DIR)
+
+
+# --- Portal event broadcast (P12, P13) -----------------------------------
+# In-process pub/sub for completed turns. Subscribers get an asyncio.Queue
+# they can drain; the bridge pushes to all queues after each log_turn.
+_portal_event_listeners: list[asyncio.Queue] = []
+
+
+def _portal_subscribe_events() -> asyncio.Queue:
+    q: asyncio.Queue = asyncio.Queue(maxsize=100)
+    _portal_event_listeners.append(q)
+    return q
+
+
+def _portal_unsubscribe_events(q: asyncio.Queue) -> None:
+    try:
+        _portal_event_listeners.remove(q)
+    except ValueError:
+        pass
+
+
+def _portal_broadcast_turn(*, channel: str, request_text: str,
+                           response_text: str, latency_ms: float,
+                           error: str | None, emoji_used: str,
+                           ts_iso: str) -> None:
+    if not _portal_event_listeners:
+        return
+    event = {
+        "ts": ts_iso,
+        "channel": channel,
+        "request_text": request_text,
+        "response_text": response_text,
+        "latency_ms": round(latency_ms),
+        "error": error,
+        "emoji_used": emoji_used,
+    }
+    for q in list(_portal_event_listeners):
+        try:
+            q.put_nowait(event)
+        except asyncio.QueueFull:
+            pass
 
 
 @asynccontextmanager
@@ -981,6 +1031,8 @@ if _configure_portal is not None:
         kid_mode_getter=lambda: KID_MODE,
         kid_mode_setter=_portal_set_kid_mode,
         inject_to_device=_portal_inject_to_device,
+        subscribe_events=_portal_subscribe_events,
+        unsubscribe_events=_portal_unsubscribe_events,
     )
 
 
