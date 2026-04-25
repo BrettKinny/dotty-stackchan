@@ -18,6 +18,12 @@ TAG = __name__
 
 VISION_BRIDGE_URL = os.environ.get("VISION_BRIDGE_URL", "")
 MIN_UTTERANCE_CHARS = int(os.environ.get("MIN_UTTERANCE_CHARS", "2"))
+# Smart-mode persistent LED pixel: which ring index holds the purple
+# while listen/think/talk colours animate the rest of the ring. The
+# firmware MCP `self.robot.set_led_multi` tool (firmware ≥ 32163bd)
+# bypasses the colour-animation tick, so we re-assert this pixel after
+# every full-ring colour change.
+SMART_MODE_LED_INDEX = int(os.environ.get("SMART_MODE_LED_INDEX", "0"))
 _LETTERS_RE = re.compile(r'[a-zA-Z一-鿿぀-ゟ゠-ヿ]')
 
 _ASR_CORRECTIONS: dict[str, str] = {
@@ -191,6 +197,58 @@ async def _send_led_color(conn: "ConnectionHandler", r: int, g: int, b: int) -> 
         await conn.websocket.send(msg)
     except Exception:
         pass
+    # Smart-mode persistent pixel: the firmware's set_led_color repaints
+    # every pixel in the ring (including the smart-mode marker), so we
+    # re-paint our marker pixel afterward. Only fires when the smart-mode
+    # flag is active — a no-op the rest of the time.
+    if getattr(conn, "smart_mode_active", False):
+        await _send_led_multi(conn, SMART_MODE_LED_INDEX, 168, 0, 168)
+
+
+async def _send_led_multi(
+    conn: "ConnectionHandler", index: int, r: int, g: int, b: int,
+) -> None:
+    """Set a SINGLE pixel on the neon-ring without disturbing the rest.
+
+    Wraps the firmware MCP `self.robot.set_led_multi` tool (firmware
+    ≥ 32163bd). Index 0-5 = LeftNeonLight, 6-11 = RightNeonLight. This
+    bypasses the firmware's colour-animation tick, so callers that need
+    the pixel to PERSIST across a subsequent set_led_color must re-call
+    this after each full-ring update. (`_send_led_color` does that
+    automatically when `conn.smart_mode_active` is True.)
+
+    Defensive: try/except guarded so an old firmware (without this MCP
+    tool) degrades to the existing single-flash behaviour rather than
+    crashing the LLM flow. Logs a warning on first failure per session
+    so we don't noisily spam.
+    """
+    try:
+        msg = json.dumps({
+            "session_id": conn.session_id,
+            "type": "mcp",
+            "payload": {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "self.robot.set_led_multi",
+                    "arguments": {"index": index, "r": r, "g": g, "b": b},
+                },
+                "id": int(time.time() * 1000) % 0x7FFFFFFF,
+            },
+        })
+        await conn.websocket.send(msg)
+    except Exception as exc:
+        # The firmware may simply not support set_led_multi yet (old
+        # build); log warn-once per connection so we know without
+        # spamming on every re-assert.
+        if not getattr(conn, "_led_multi_warned", False):
+            try:
+                conn.logger.bind(tag=TAG).warning(
+                    f"set_led_multi failed (firmware may pre-date 32163bd): {exc}"
+                )
+            except Exception:
+                pass
+            conn._led_multi_warned = True
 
 
 async def _send_head_angles(conn: "ConnectionHandler", yaw: int, pitch: int, speed: int = 150) -> None:
@@ -667,6 +725,19 @@ async def startToChat(conn: "ConnectionHandler", text):
     actual_text = _apply_asr_corrections(actual_text)
     actual_text = _apply_phrase_corrections(actual_text)
 
+    # Smart-mode session ends when a new user turn arrives that ISN'T a
+    # smart-mode re-trigger. We don't have a chat-completion callback in
+    # this layer, but the next ASR turn from the same connection is a
+    # reliable "the previous response is done" signal. Re-trigger paths
+    # below set the flag back to True before sending the next colour.
+    if getattr(conn, "smart_mode_active", False):
+        # Clear unless the new turn is itself a smart-mode trigger or
+        # the queued smart_mode_next flag (handled below).
+        if not _is_smart_mode_request(actual_text) and not getattr(
+            conn, "smart_mode_next", False
+        ):
+            conn.smart_mode_active = False
+
     if speaker_name:
         conn.current_speaker = speaker_name
     else:
@@ -715,7 +786,11 @@ async def startToChat(conn: "ConnectionHandler", text):
     if _is_smart_mode_request(user_text):
         remaining_q = _strip_smart_trigger(user_text)
         conn.logger.bind(tag=TAG).info(f"Smart mode: q={remaining_q!r}")
+        # Mark BEFORE the colour change so _send_led_color's re-assert
+        # paints the smart-mode pixel on top of the full-ring purple.
+        conn.smart_mode_active = True
         await _send_led_color(conn, 168, 0, 168)
+        await _send_led_multi(conn, SMART_MODE_LED_INDEX, 168, 0, 168)
         if remaining_q:
             conn.executor.submit(conn.chat, f"[SMART_MODE]\n{remaining_q}")
         else:
@@ -729,7 +804,9 @@ async def startToChat(conn: "ConnectionHandler", text):
 
     if getattr(conn, 'smart_mode_next', False):
         conn.smart_mode_next = False
+        conn.smart_mode_active = True
         await _send_led_color(conn, 168, 0, 168)
+        await _send_led_multi(conn, SMART_MODE_LED_INDEX, 168, 0, 168)
         conn.executor.submit(conn.chat, f"[SMART_MODE]\n{actual_text}")
         return
 
