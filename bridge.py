@@ -3274,11 +3274,12 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
             return
         if state["blocked"] or state["truncated"]:
             return
-        if _BLOCKED_WORDS_RE.search(content):
+        replacement = _content_filter(content)
+        if replacement:
             log.warning("content-filter-hit-stream chunk_len=%d", len(content))
             state["blocked"] = True
             state["seen_nonws"] = True
-            await queue.put(("chunk", _CONTENT_FILTER_REPLACEMENT))
+            await queue.put(("chunk", replacement))
             return
         if not state["seen_nonws"]:
             stripped = content.lstrip()
