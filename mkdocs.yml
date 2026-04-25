@@ -45,14 +45,23 @@ nav:
   - Brain: docs/brain.md
   - Protocols: docs/protocols.md
   - Kid Mode: docs/kid-mode.md
+  - LLM Backends: docs/llm-backends.md
+  - Cookbook:
+      - Change Persona: docs/cookbook/change-persona.md
+      - Swap Voice: docs/cookbook/swap-voice.md
+      - Run Fully Local: docs/cookbook/run-fully-local.md
+      - Add Emoji: docs/cookbook/add-emoji.md
+      - Disable Kid Mode: docs/cookbook/disable-kid-mode.md
   - Reference:
       - Latent Capabilities: docs/latent-capabilities.md
       - References: docs/references.md
   - Troubleshooting: docs/troubleshooting.md
   - FAQ: docs/faq.md
   - About: docs/about.md
+  - Roadmap: ROADMAP.md
   - Contributing: CONTRIBUTING.md
   - Security: SECURITY.md
+  - Compatibility: COMPATIBILITY.md
   - Changelog: CHANGELOG.md
 
 markdown_extensions:
