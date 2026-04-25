@@ -495,6 +495,150 @@ async def kid_mode_set(request: Request, enabled: str = Form("")) -> Any:
     )
 
 
+# --- P15: update bridge from GitHub --------------------------------------
+
+GITHUB_REPO = os.environ.get(
+    "DOTTY_BRIDGE_REPO", "https://github.com/BrettKinny/dotty-stackchan.git"
+)
+BRIDGE_INSTALL_DIR = Path(
+    os.environ.get("DOTTY_BRIDGE_DIR", "/root/zeroclaw-bridge")
+)
+
+
+def _pull_and_install_bridge() -> tuple[bool, str]:
+    """git-clone the public repo into a tmpdir and copy bridge.py +
+    bridge/ over the install dir. Caller restarts the service."""
+    import subprocess
+    import tempfile
+    import shutil
+    work = Path(tempfile.mkdtemp(prefix="dotty-update-"))
+    try:
+        proc = subprocess.run(
+            ["git", "clone", "--depth", "1", "--branch", "main",
+             GITHUB_REPO, str(work)],
+            capture_output=True, text=True, timeout=60,
+        )
+        if proc.returncode != 0:
+            return False, f"git clone failed: {proc.stderr.strip()[:300]}"
+        src_bridge_py = work / "bridge.py"
+        src_bridge_dir = work / "bridge"
+        if not src_bridge_py.exists() or not src_bridge_dir.exists():
+            return False, "checkout missing bridge.py or bridge/ dir"
+        # Atomic-ish replace: rename current then copy new in.
+        dst_bridge_py = BRIDGE_INSTALL_DIR / "bridge.py"
+        dst_bridge_dir = BRIDGE_INSTALL_DIR / "bridge"
+        if dst_bridge_dir.exists():
+            backup = BRIDGE_INSTALL_DIR / "bridge.prev"
+            if backup.exists():
+                shutil.rmtree(backup)
+            shutil.move(str(dst_bridge_dir), str(backup))
+        shutil.copytree(str(src_bridge_dir), str(dst_bridge_dir))
+        if dst_bridge_py.exists():
+            dst_bridge_py.rename(BRIDGE_INSTALL_DIR / "bridge.py.prev")
+        shutil.copy2(str(src_bridge_py), str(dst_bridge_py))
+        return True, "Updated. Restarting…"
+    except Exception as exc:
+        return False, f"update error: {exc}"
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+@router.post("/actions/update-bridge",
+             response_class=HTMLResponse, include_in_schema=False)
+async def update_bridge(request: Request) -> Any:
+    ok, msg = await asyncio.to_thread(_pull_and_install_bridge)
+    if not ok:
+        return templates.TemplateResponse(
+            request, "update_result.html",
+            {"ok": False, "message": msg},
+        )
+    # Spawn delayed restart so the response can return first.
+    import subprocess
+    try:
+        subprocess.Popen(
+            ["sh", "-c", "sleep 1 && systemctl restart zeroclaw-bridge"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as exc:
+        return templates.TemplateResponse(
+            request, "update_result.html",
+            {"ok": False, "message": f"updated but restart failed: {exc}"},
+        )
+    return templates.TemplateResponse(
+        request, "update_result.html",
+        {"ok": True, "message": msg},
+    )
+
+
+# --- P16: persona switcher ------------------------------------------------
+
+PERSONAS_DIR = Path(
+    os.environ.get("DOTTY_PERSONAS_DIR", "/root/zeroclaw-bridge/personas")
+)
+PERSONA_STATE_FILE = Path(
+    os.environ.get("DOTTY_PERSONA_STATE", "/root/zeroclaw-bridge/state/persona")
+)
+
+
+def _list_personas() -> list[str]:
+    if not PERSONAS_DIR.is_dir():
+        return []
+    return sorted(p.stem for p in PERSONAS_DIR.glob("*.md"))
+
+
+def _current_persona() -> str:
+    if PERSONA_STATE_FILE.exists():
+        try:
+            v = PERSONA_STATE_FILE.read_text().strip()
+            if v in _list_personas():
+                return v
+        except OSError:
+            pass
+    return "default"
+
+
+@router.get("/persona", response_class=HTMLResponse, include_in_schema=False)
+async def persona_partial(request: Request) -> Any:
+    return templates.TemplateResponse(
+        request, "persona.html",
+        {"available": _list_personas(), "current": _current_persona()},
+    )
+
+
+@router.post("/actions/persona", response_class=HTMLResponse,
+             include_in_schema=False)
+async def persona_set(request: Request, name: str = Form(...)) -> Any:
+    available = _list_personas()
+    if name not in available:
+        return templates.TemplateResponse(
+            request, "persona.html",
+            {"available": available, "current": _current_persona(),
+             "error": f"Unknown persona: {name}"},
+        )
+    PERSONA_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PERSONA_STATE_FILE.write_text(name)
+    # Spawn delayed self-restart so the new persona is picked up by the
+    # bridge's voice-wrap (it reads the state file at startup).
+    import subprocess
+    try:
+        subprocess.Popen(
+            ["sh", "-c", "sleep 1 && systemctl restart zeroclaw-bridge"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as exc:
+        return templates.TemplateResponse(
+            request, "persona.html",
+            {"available": available, "current": name,
+             "error": f"set but restart failed: {exc}"},
+        )
+    return templates.TemplateResponse(
+        request, "persona.html",
+        {"available": available, "current": name, "switching": True},
+    )
+
+
 # --- P7: restart bridge ---------------------------------------------------
 
 @router.post("/actions/restart-bridge",

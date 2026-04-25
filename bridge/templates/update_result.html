@@ -1,0 +1,10 @@
+{% if ok %}
+<div class="alert alert-info py-2 text-sm"
+     hx-get="/health" hx-trigger="load delay:5s, every 2s"
+     hx-swap="none"
+     hx-on::after-request="if(event.detail.successful){this.remove();}">
+  {{ message }}
+</div>
+{% else %}
+<div class="alert alert-error py-2 text-sm">{{ message }}</div>
+{% endif %}
