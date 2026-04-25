@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, TypedDict
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
@@ -62,6 +62,31 @@ CALENDAR_SA_PATH = os.environ.get(
     "CALENDAR_SA_PATH", "/root/.zeroclaw/secrets/google-calendar-sa.json",
 )
 GWS_BIN = os.environ.get("GWS_BIN", "/usr/local/bin/gws")
+# Background-poll cadence for the calendar cache refresher. 900 s (15 min)
+# is well below CALENDAR_TTL_SEC so transient gws/network failures don't
+# leave a stale cache visible for the full TTL window.
+CALENDAR_POLL_SEC = float(os.environ.get("CALENDAR_POLL_SEC", "900"))
+# Bucket name for events whose summary has no `[Person]` prefix tag. The
+# "_" leading underscore makes it impossible to collide with a real first
+# name typed into a calendar event.
+CALENDAR_HOUSEHOLD_BUCKET = os.environ.get("CALENDAR_HOUSEHOLD_BUCKET", "_household")
+# Regex applied to event summaries to extract a person tag. Must define
+# named groups `person` and `rest`. Default matches `[Name] real summary`
+# where Name is 1-32 chars of [A-Za-z0-9_-] starting with a letter.
+CALENDAR_PERSON_PREFIX_RE = os.environ.get(
+    "CALENDAR_PERSON_PREFIX_RE",
+    r"^\s*\[(?P<person>[A-Za-z][A-Za-z0-9_-]{0,31})\]\s*(?P<rest>.+)$",
+)
+try:
+    _CALENDAR_PERSON_RE = re.compile(CALENDAR_PERSON_PREFIX_RE)
+except re.error:
+    logging.getLogger("zeroclaw-bridge").warning(
+        "invalid CALENDAR_PERSON_PREFIX_RE=%r; falling back to default",
+        CALENDAR_PERSON_PREFIX_RE,
+    )
+    _CALENDAR_PERSON_RE = re.compile(
+        r"^\s*\[(?P<person>[A-Za-z][A-Za-z0-9_-]{0,31})\]\s*(?P<rest>.+)$"
+    )
 VISION_MODEL = os.environ.get("VISION_MODEL", "google/gemini-2.0-flash-001")
 VISION_API_KEY = os.environ.get("VISION_API_KEY", os.environ.get("OPENROUTER_API_KEY", ""))
 VISION_API_URL = os.environ.get(
@@ -185,8 +210,69 @@ app_lock = asyncio.Lock()
 # Context injection — date/time, weather, calendar
 # ---------------------------------------------------------------------------
 
+class Event(TypedDict):
+    """One calendar event, post-parsing.
+
+    `person` is either the tag captured from a `[Name] ...` summary prefix
+    or `CALENDAR_HOUSEHOLD_BUCKET` when no tag matched. `time` is a short,
+    human-friendly local-time string suitable for prompt injection
+    (e.g. "09:30" or "all-day"); `start_iso` is the raw ISO timestamp
+    retained ONLY for the cache + admin debug endpoint and MUST be
+    stripped by `summarize_for_prompt` before any prompt or LAN response.
+    """
+    person: str
+    time: str
+    summary: str
+    start_iso: str
+    calendar_id: str
+
+
 _weather_cache: dict = {"text": "", "fetched": 0.0}
-_calendar_cache: dict = {"events": [], "fetched": 0.0, "date": ""}
+# `events`: structured list[Event] sorted by start_iso. `by_person`:
+# bucketed view for cheap per-person lookup (keys include the
+# CALENDAR_HOUSEHOLD_BUCKET sentinel). `consecutive_failures`: drives
+# the polling loop's exponential backoff; reset to 0 on a successful
+# fetch. `date` is the local-day stamp the cache was last filled for —
+# when it doesn't match today, the cache is flushed (events + by_person)
+# rather than just having the date string updated, fixing a bug where
+# stale events stuck around past midnight until the next successful
+# fetch landed.
+_calendar_cache: dict = {
+    "events": [],          # list[Event]
+    "by_person": {},       # dict[str, list[Event]]
+    "fetched": 0.0,
+    "date": "",
+    "consecutive_failures": 0,
+}
+
+# Email-address regex used by the privacy funnel. Conservative: matches
+# RFC-style local@domain.tld with at least one dot in the domain part.
+_EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")
+# ISO-8601 timestamp regex (date or datetime, with optional offset/Z).
+# Catches both `2025-04-25` (all-day) and `2025-04-25T09:30:00+10:00`.
+_ISO_TS_RE = re.compile(
+    r"\b\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?\b"
+)
+
+
+def _format_event_time(start_iso: str) -> str:
+    """Render `start_iso` as a short local clock string for prompts.
+
+    Returns "all-day" for date-only stamps, "HH:MM" for datetime stamps,
+    or "" if parsing fails (callers should treat that as `summarize_for_prompt`'s
+    fallback path)."""
+    if not start_iso:
+        return ""
+    # All-day events come back as plain `YYYY-MM-DD` from the gws CLI.
+    if "T" not in start_iso:
+        return "all-day"
+    try:
+        dt = datetime.fromisoformat(start_iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=LOCAL_TZ)
+        return dt.astimezone(LOCAL_TZ).strftime("%H:%M")
+    except ValueError:
+        return ""
 
 
 async def _fetch_weather() -> str:
@@ -206,14 +292,21 @@ async def _fetch_weather() -> str:
     return ""
 
 
-async def _fetch_calendar_events() -> list[str]:
+async def _fetch_calendar_events() -> list[Event]:
+    """Fetch today's events across all configured calendars.
+
+    Raises on full failure (every configured calendar errored) so the
+    polling loop can apply backoff. Per-calendar failures only log; an
+    empty list is still a valid success (e.g. nothing scheduled today).
+    """
     if not CALENDAR_IDS or not os.path.isfile(CALENDAR_SA_PATH):
         return []
     now = datetime.now(LOCAL_TZ)
     time_min = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     time_max = now.replace(hour=23, minute=59, second=59, microsecond=0).isoformat()
     env = {**os.environ, "GOOGLE_APPLICATION_CREDENTIALS": CALENDAR_SA_PATH}
-    all_events: list[tuple[str, str]] = []
+    all_events: list[Event] = []
+    failures = 0
     for cal_id in CALENDAR_IDS:
         try:
             params = json.dumps({
@@ -233,15 +326,86 @@ async def _fetch_calendar_events() -> list[str]:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
             data = json.loads(stdout.decode("utf-8"))
             for item in data.get("items", []):
-                summary = item.get("summary", "")
+                raw_summary = item.get("summary", "")
                 start_obj = item.get("start", {})
-                start = start_obj.get("dateTime", start_obj.get("date", ""))
-                if summary:
-                    all_events.append((start, summary))
+                start_iso = start_obj.get("dateTime", start_obj.get("date", ""))
+                if not raw_summary:
+                    continue
+                m = _CALENDAR_PERSON_RE.match(raw_summary)
+                if m:
+                    person = m.group("person")
+                    rest = m.group("rest").strip()
+                else:
+                    person = CALENDAR_HOUSEHOLD_BUCKET
+                    rest = raw_summary.strip()
+                all_events.append(Event(
+                    person=person,
+                    time=_format_event_time(start_iso),
+                    summary=rest,
+                    start_iso=start_iso,
+                    calendar_id=cal_id,
+                ))
         except Exception:
+            failures += 1
             log.warning("calendar fetch failed cal=%s", cal_id, exc_info=True)
-    all_events.sort()
-    return [f"{start}: {summary}" for start, summary in all_events]
+    if CALENDAR_IDS and failures == len(CALENDAR_IDS):
+        # Every calendar failed — propagate so the polling loop can back off.
+        raise RuntimeError("all calendar fetches failed")
+    all_events.sort(key=lambda e: e["start_iso"])
+    return all_events
+
+
+def _bucket_by_person(events: list[Event]) -> dict[str, list[Event]]:
+    out: dict[str, list[Event]] = {}
+    for ev in events:
+        out.setdefault(ev["person"], []).append(ev)
+    return out
+
+
+def summarize_for_prompt(
+    events: list[Event],
+    *,
+    person: str | None = None,
+    include_household: bool = True,
+) -> list[str]:
+    """**Single privacy chokepoint** for calendar -> prompt injection.
+
+    Strips ISO timestamps, email addresses, and calendar IDs; emits only
+    short `HH:MM summary` (or `all-day summary`) strings. All call sites
+    that put calendar data into a model prompt MUST go through here —
+    this is the only place enforcing the privacy contract.
+
+    `person`: if set, return only that person's events (plus household
+    when `include_household` is true). If None, return events for every
+    person.
+    """
+    out: list[str] = []
+    for ev in events:
+        if person is not None:
+            if ev["person"] != person and not (
+                include_household and ev["person"] == CALENDAR_HOUSEHOLD_BUCKET
+            ):
+                continue
+        time_label = ev["time"] or ""
+        # Defence-in-depth: scrub anything that looks like a leaked
+        # timestamp or email even if it somehow ended up in a summary
+        # field. The fetch path already strips raw timestamps, but the
+        # summary text comes from the user, so an event titled
+        # "Call alice@x.com 2025-04-25T09:00" would leak otherwise.
+        clean_summary = _ISO_TS_RE.sub("", ev["summary"])
+        clean_summary = _EMAIL_RE.sub("[email]", clean_summary)
+        clean_summary = " ".join(clean_summary.split())  # collapse whitespace
+        if not clean_summary:
+            continue
+        if ev["person"] != CALENDAR_HOUSEHOLD_BUCKET and person is None:
+            tag = f"[{ev['person']}] "
+        else:
+            tag = ""
+        if time_label:
+            out.append(f"{time_label} {tag}{clean_summary}".strip())
+        else:
+            out.append(f"{tag}{clean_summary}".strip())
+    return out
 
 
 async def _refresh_caches() -> None:
@@ -253,15 +417,68 @@ async def _refresh_caches() -> None:
         _weather_cache["fetched"] = now
 
     today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
-    if (
-        CALENDAR_IDS
-        and (now - _calendar_cache["fetched"] > CALENDAR_TTL_SEC
-             or _calendar_cache["date"] != today)
-    ):
-        events = await _fetch_calendar_events()
-        _calendar_cache["events"] = events
-        _calendar_cache["fetched"] = now
+    if not CALENDAR_IDS:
+        return
+    date_rolled = _calendar_cache["date"] != today
+    ttl_expired = now - _calendar_cache["fetched"] > CALENDAR_TTL_SEC
+    if date_rolled:
+        # Nightly-flush fix: previously only the `date` string was being
+        # updated when the day rolled over, which meant yesterday's
+        # events stuck in the cache (and therefore in every prompt and
+        # the /api/calendar/today response) until the next *successful*
+        # fetch landed. Drop them eagerly so even a failed refresh on
+        # day-roll yields an empty cache rather than yesterday's data.
+        _calendar_cache["events"] = []
+        _calendar_cache["by_person"] = {}
         _calendar_cache["date"] = today
+    if date_rolled or ttl_expired:
+        try:
+            events = await _fetch_calendar_events()
+            _calendar_cache["events"] = events
+            _calendar_cache["by_person"] = _bucket_by_person(events)
+            _calendar_cache["fetched"] = now
+            _calendar_cache["date"] = today
+            _calendar_cache["consecutive_failures"] = 0
+        except Exception:
+            # Don't update `fetched` so the next request retries; bump
+            # failure counter so the polling loop can back off.
+            _calendar_cache["consecutive_failures"] += 1
+            log.warning("calendar refresh failed (consecutive=%d)",
+                        _calendar_cache["consecutive_failures"], exc_info=True)
+
+
+# Exponential-backoff schedule (seconds) when consecutive_failures > 0.
+# After this is exhausted we sit at the last value (10 min) until a
+# success resets the counter.
+_CALENDAR_BACKOFF_SCHEDULE_SEC = (60.0, 120.0, 300.0, 600.0)
+
+
+async def _calendar_poll_loop() -> None:
+    """Background task: periodically refresh the calendar cache so the
+    next conversation turn always sees fresh-ish data without paying a
+    fetch latency on the request path. Uses exponential backoff after a
+    fetch fails so a flaky service-account or upstream Google outage
+    doesn't get hammered."""
+    if not CALENDAR_IDS:
+        return
+    while True:
+        try:
+            failures = int(_calendar_cache.get("consecutive_failures", 0))
+            if failures == 0:
+                delay = CALENDAR_POLL_SEC
+            else:
+                idx = min(failures - 1, len(_CALENDAR_BACKOFF_SCHEDULE_SEC) - 1)
+                delay = _CALENDAR_BACKOFF_SCHEDULE_SEC[idx]
+            await asyncio.sleep(delay)
+            await _refresh_caches()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Belt-and-braces: never let an unexpected error kill the
+            # poll loop. _refresh_caches already handles its own errors,
+            # but a bug elsewhere shouldn't take the cache offline.
+            log.exception("calendar poll loop iteration crashed")
+            await asyncio.sleep(CALENDAR_POLL_SEC)
 
 
 def _build_context() -> str:
@@ -270,8 +487,12 @@ def _build_context() -> str:
     parts.append(now.strftime("%A %d %B %Y, %H:%M %Z"))
     if _weather_cache["text"]:
         parts.append(f"{WEATHER_LOCATION}: {_weather_cache['text']}")
-    if _calendar_cache["events"]:
-        parts.append("Today: " + "; ".join(_calendar_cache["events"]))
+    events = _calendar_cache.get("events") or []
+    if events:
+        # Privacy funnel — never inline raw event records into a prompt.
+        cleaned = summarize_for_prompt(events)
+        if cleaned:
+            parts.append("Today: " + "; ".join(cleaned))
     return f"[Context: {' | '.join(parts)}]\n"
 
 
@@ -1164,10 +1385,13 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_perception_sound_turner()),
         asyncio.create_task(_perception_face_lost_aborter()),
     ]
+    # Layer 5: background calendar refresher (no-op when CALENDAR_IDS empty).
+    calendar_task = asyncio.create_task(_calendar_poll_loop())
     yield
     for t in perception_tasks:
         t.cancel()
-    await asyncio.gather(*perception_tasks, return_exceptions=True)
+    calendar_task.cancel()
+    await asyncio.gather(*perception_tasks, calendar_task, return_exceptions=True)
     await acp.shutdown()
 
 
@@ -1190,6 +1414,38 @@ async def health() -> dict:
         "acp_running": proc_ok,
         "cached_session": acp._sid is not None,
         "session_turns": acp._sid_turns,
+    }
+
+
+@app.get("/api/calendar/today")
+async def calendar_today(
+    person: str | None = None,
+    include_household: bool = True,
+) -> dict:
+    """LAN endpoint for today's calendar events.
+
+    Routes through `summarize_for_prompt` so the response carries the
+    same privacy guarantees as prompt injection: no ISO timestamps, no
+    email addresses, no raw calendar IDs. Intended for the firmware /
+    portal UI; deliberately NOT registered as an MCP tool because the
+    firmware-side `MCP_TOOL_ALLOWLIST` is closed and we want this stay
+    a passive read endpoint, not something the LLM can call.
+    """
+    # Triggers a lazy refresh if the cache is stale or the day rolled.
+    await _refresh_caches()
+    events = _calendar_cache.get("events") or []
+    cleaned = summarize_for_prompt(
+        events, person=person, include_household=include_household,
+    )
+    return {
+        "ok": True,
+        "date": _calendar_cache.get("date", ""),
+        "fetched": _calendar_cache.get("fetched", 0.0),
+        "consecutive_failures": _calendar_cache.get("consecutive_failures", 0),
+        "person": person,
+        "include_household": include_household,
+        "events": cleaned,
+        "count": len(cleaned),
     }
 
 
