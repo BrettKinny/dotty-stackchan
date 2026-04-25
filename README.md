@@ -6,6 +6,8 @@ Dotty is a fully self-hosted voice stack for the M5Stack StackChan desktop robot
 
 Out of the box, Dotty ships in **Kid Mode** -- age-appropriate language, safety guardrails, and content filtering are on by default. Disable Kid Mode for a general-purpose assistant. The default persona is named "Dotty" (rename it during `make setup`).
 
+> **v0.1 — early-feedback release.** Dotty works end-to-end on the maintainer's hardware. This first tagged release is to invite real-world feedback before v1.0 polish. **Known issues:** face emoji rendering is missing visual differentiation for 4 of 9 emotions (sad / surprise / love / laughing); sound-direction localizer has a hardware-AEC-related left-bias on M5Stack CoreS3 (energy detection works, direction is unreliable); kid-voice ASR accuracy on SenseVoice has a kid-speech gap that whisper.cpp will close in a follow-up. Full backlog in `tasks.md` (private). Bugs, PRs, and "this didn't work for me" issues all very welcome.
+
 ## Features
 
 - **Kid Mode (on by default)** -- age-appropriate responses, content filtering, and safety guardrails. Toggle off for general-purpose use. See [`docs/child-safety.md`](./docs/child-safety.md).
@@ -23,7 +25,7 @@ Out of the box, Dotty ships in **Kid Mode** -- age-appropriate language, safety 
 ## Reference deployment
 
 - **Hardware**: M5Stack StackChan (CoreS3 + servo kit), firmware built from `m5stack/StackChan`.
-- **Brain**: [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) on a Raspberry Pi, with Qwen3-30B via OpenRouter as the LLM.
+- **Brain**: [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) on a Raspberry Pi, with Mistral Small 3.2 via OpenRouter as the default LLM (Qwen3-30B, Claude, and others are drop-in alternates).
 - **Voice I/O**: xiaozhi-esp32-server on Docker (Unraid here, but single-host works too).
 
 ---
@@ -35,7 +37,7 @@ This README covers deployment. For what the stack *is* underneath — hardware s
 - [docs/architecture.md](./docs/architecture.md) — end-to-end data flow, who talks to who, why this shape.
 - [docs/hardware.md](./docs/hardware.md) — M5Stack StackChan body + firmware lineage + on-device MCP tool catalog.
 - [docs/voice-pipeline.md](./docs/voice-pipeline.md) — xiaozhi-esp32-server internals, FunASR/SenseVoice, VAD, TTS.
-- [docs/brain.md](./docs/brain.md) — ZeroClaw architecture, Qwen3-30B-A3B facts, OpenRouter role.
+- [docs/brain.md](./docs/brain.md) — ZeroClaw architecture, LLM model details, OpenRouter role.
 - [docs/protocols.md](./docs/protocols.md) — Xiaozhi WS framing, MCP-over-WS, ACP JSON-RPC, emotion channel.
 - [docs/modes.md](./docs/modes.md) — behavioural mode taxonomy + LED contract + transition diagram.
 - [docs/latent-capabilities.md](./docs/latent-capabilities.md) — features upstream supports that we aren't using yet.

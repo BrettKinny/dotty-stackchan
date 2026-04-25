@@ -2,15 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-
-This project does not yet follow [Semantic Versioning](https://semver.org/) —
-there are no tagged releases. The history below is a retrospective changelog
-built from the commit log.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). From v0.1.0 forward this project follows [Semantic Versioning](https://semver.org/). Server and firmware tag independently as `server-vX.Y.Z` and `fw-vX.Y.Z`; see `COMPATIBILITY.md` for the matrix.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-04-25
+
+First tagged release — early-feedback alpha. Works end-to-end on the maintainer's hardware (M5Stack StackChan + Unraid Docker host + Raspberry Pi bridge + ZeroClaw + OpenRouter Mistral Small 3.2). External users welcome; see `ROADMAP.md` for known issues.
+
+### Fixed in v0.1.0
+- **Smart Mode marker check.** `zeroclaw.py` `_payload` was matching `[SMART_MODE]\n` against the composed `[Context] … [User] …` payload (marker landed at offset ~2700, so `startswith` was always False). Every voice "smart mode" turn since `434988d` silently fell back to the default voice model. Fix detects markers on the raw user message before `_compose()` wraps it.
+
 ### Changed
+- **Default LLM switched** from `qwen/qwen3-30b-a3b-instruct-2507` to `mistralai/mistral-small-3.2-24b-instruct` (2.6× speedup, p50 1.9 s vs 5 s, no quality regression on smoke battery).
 - **Rebranded to Dotty.** Project identity renamed from `stackchan-infra` to Dotty (`dotty-stackchan`). Default robot name is "Dotty" (customizable via `make setup`). Channel identifier `stackchan` → `dotty` (both accepted during transition). Python constants `STACKCHAN_TURN_*` → `VOICE_TURN_*`. All docs, config, and build files updated.
 - **3-sentence response limit** enforced in both `/api/message` and `/api/message/stream` endpoints. `MAX_SENTENCES` env var (default 3).
 - **Streaming `final` line** now always includes emoji prefix correction.
