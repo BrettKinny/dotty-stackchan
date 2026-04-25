@@ -52,6 +52,7 @@ nav:
   - LLM Backends: docs/llm-backends.md
   - Observability: docs/observability.md
   - Audio Scene Classifier: docs/audio-scene-classifier.md
+  - Engagement Decider: docs/engagement-decider.md
   - Cookbook:
       - Change Persona: docs/cookbook/change-persona.md
       - Swap Voice: docs/cookbook/swap-voice.md
