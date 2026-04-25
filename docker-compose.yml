@@ -29,3 +29,7 @@ services:
       - ./dances.py:/opt/xiaozhi-esp32-server/core/handle/dances.py:ro
       - ./custom-providers/textUtils.py:/opt/xiaozhi-esp32-server/core/utils/textUtils.py:ro
       - ./songs:/opt/xiaozhi-esp32-server/config/assets/songs:ro
+      # DOTTY portal: admin /inject-text route + active-connection registry
+      - ./custom-providers/xiaozhi-patches/portal_bridge.py:/opt/xiaozhi-esp32-server/core/portal_bridge.py:ro
+      - ./custom-providers/xiaozhi-patches/websocket_server.py:/opt/xiaozhi-esp32-server/core/websocket_server.py:ro
+      - ./custom-providers/xiaozhi-patches/http_server.py:/opt/xiaozhi-esp32-server/core/http_server.py:ro

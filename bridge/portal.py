@@ -34,11 +34,13 @@ _state: dict[str, Any] = {
     "vision_cache": None,
     "kid_mode_getter": None,
     "kid_mode_setter": None,
+    "inject_to_device": None,
 }
 
 
 def configure(*, send_message: Any = None, vision_cache: dict | None = None,
-              kid_mode_getter: Any = None, kid_mode_setter: Any = None) -> None:
+              kid_mode_getter: Any = None, kid_mode_setter: Any = None,
+              inject_to_device: Any = None) -> None:
     """Register bridge state with the portal. Idempotent."""
     if send_message is not None:
         _state["send_message"] = send_message
@@ -48,6 +50,8 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
         _state["kid_mode_getter"] = kid_mode_getter
     if kid_mode_setter is not None:
         _state["kid_mode_setter"] = kid_mode_setter
+    if inject_to_device is not None:
+        _state["inject_to_device"] = inject_to_device
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -313,26 +317,8 @@ async def mood(request: Request, emoji: str = Form(...)) -> Any:
             request, "say_result.html",
             {"ok": False, "error": "Unknown emoji."},
         )
-    sender = _state.get("send_message")
-    if sender is None:
-        raise HTTPException(503, "send_message not configured")
-    prompt = (
-        f"Make the {emoji} face for me. Reply with just '{emoji} ok' "
-        f"and nothing else."
-    )
-    try:
-        result = await sender(text=prompt, channel="dotty")
-    except Exception as exc:
-        log.exception("portal mood action failed")
-        return templates.TemplateResponse(
-            request, "say_result.html",
-            {"ok": False, "error": f"Bridge error: {exc.__class__.__name__}"},
-        )
-    return templates.TemplateResponse(
-        request, "say_result.html",
-        {"ok": True, "sent": f"make the {emoji} face",
-         "response": result.get("response", "")},
-    )
+    prompt = f"Make the {emoji} face. Reply with just '{emoji} ok'."
+    return await _inject_or_error(request, prompt, label=f"make the {emoji} face")
 
 
 @router.post("/actions/dance", response_class=HTMLResponse, include_in_schema=False)
@@ -343,22 +329,7 @@ async def dance(request: Request, key: str = Form(...)) -> Any:
             request, "say_result.html",
             {"ok": False, "error": "Unknown dance/song."},
         )
-    sender = _state.get("send_message")
-    if sender is None:
-        raise HTTPException(503, "send_message not configured")
-    try:
-        result = await sender(text=pick["phrase"], channel="dotty")
-    except Exception as exc:
-        log.exception("portal dance action failed")
-        return templates.TemplateResponse(
-            request, "say_result.html",
-            {"ok": False, "error": f"Bridge error: {exc.__class__.__name__}"},
-        )
-    return templates.TemplateResponse(
-        request, "say_result.html",
-        {"ok": True, "sent": pick["phrase"],
-         "response": result.get("response", "")},
-    )
+    return await _inject_or_error(request, pick["phrase"], label=pick["phrase"])
 
 
 @router.post("/actions/volume", response_class=HTMLResponse, include_in_schema=False)
@@ -375,25 +346,39 @@ async def volume(request: Request, value: int = Form(...)) -> Any:
             request, "say_result.html",
             {"ok": False, "error": "Volume must be 0–100."},
         )
-    sender = _state.get("send_message")
-    if sender is None:
-        raise HTTPException(503, "send_message not configured")
     prompt = (
-        f"Use your audio_speaker.set_volume tool to set the volume to {value}. "
-        f"Reply with just the volume emoji and 'volume {value}'."
+        f"Set the speaker volume to {value} percent using your "
+        f"audio_speaker.set_volume tool, then reply with just '🔊 {value}'."
     )
+    return await _inject_or_error(request, prompt, label=f"set volume to {value}")
+
+
+async def _inject_or_error(request: Request, text: str, label: str) -> Any:
+    """Helper for action endpoints that fire text into xiaozhi-server's
+    pipeline so the device actually speaks/emotes/runs MCP tools."""
+    inject = _state.get("inject_to_device")
+    if inject is None:
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False,
+             "error": "Inject path not configured (xiaozhi admin patch missing)."},
+        )
     try:
-        result = await sender(text=prompt, channel="dotty")
+        result = await inject(text=text)
     except Exception as exc:
-        log.exception("portal volume action failed")
+        log.exception("portal inject failed")
         return templates.TemplateResponse(
             request, "say_result.html",
             {"ok": False, "error": f"Bridge error: {exc.__class__.__name__}"},
         )
+    if not result.get("ok"):
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": result.get("error", "unknown injection failure")},
+        )
     return templates.TemplateResponse(
         request, "say_result.html",
-        {"ok": True, "sent": f"set volume to {value}",
-         "response": result.get("response", "")},
+        {"ok": True, "sent": label, "response": "Sent — Dotty should respond shortly."},
     )
 
 
@@ -410,21 +395,7 @@ async def say(request: Request, text: str = Form(...)) -> Any:
             request, "say_result.html",
             {"ok": False, "error": "Too long — keep it under 500 characters."},
         )
-    sender = _state.get("send_message")
-    if sender is None:
-        raise HTTPException(503, "send_message not configured")
-    try:
-        result = await sender(text=text, channel="dotty")
-    except Exception as exc:
-        log.exception("portal say action failed")
-        return templates.TemplateResponse(
-            request, "say_result.html",
-            {"ok": False, "error": f"Bridge error: {exc.__class__.__name__}"},
-        )
-    return templates.TemplateResponse(
-        request, "say_result.html",
-        {"ok": True, "sent": text, "response": result.get("response", "")},
-    )
+    return await _inject_or_error(request, text, label=text)
 
 
 def _latest_vision_entry() -> tuple[str, dict] | None:

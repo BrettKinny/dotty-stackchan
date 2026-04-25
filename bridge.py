@@ -951,11 +951,36 @@ if _configure_portal is not None:
         _KID_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         _KID_STATE_FILE.write_text("true" if enabled else "false")
 
+    _XIAOZHI_HOST = os.environ.get("UNRAID_HOST", "")
+    _XIAOZHI_HTTP_PORT = int(os.environ.get("UNRAID_OTA_PORT", "8003"))
+
+    async def _portal_inject_to_device(*, text: str, device_id: str = "") -> dict:
+        """Fire-and-forget POST to xiaozhi-server's admin route so the
+        named (or first-available) device runs the text through its
+        normal post-ASR pipeline — intent detection, MCP tools, TTS."""
+        if not _XIAOZHI_HOST:
+            return {"ok": False, "error": "UNRAID_HOST not set"}
+        import requests as _req
+        url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/inject-text"
+        payload = {"text": text}
+        if device_id:
+            payload["device_id"] = device_id
+        def _post() -> dict:
+            try:
+                r = _req.post(url, json=payload, timeout=3)
+                if r.status_code == 200:
+                    return {"ok": True, **r.json()}
+                return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
+        return await asyncio.to_thread(_post)
+
     _configure_portal(
         send_message=_portal_send_message,
         vision_cache=_vision_cache,
         kid_mode_getter=lambda: KID_MODE,
         kid_mode_setter=_portal_set_kid_mode,
+        inject_to_device=_portal_inject_to_device,
     )
 
 
