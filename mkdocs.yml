@@ -72,7 +72,14 @@ nav:
   - Style Guide: docs/style.md
   - Security: SECURITY.md
   - Compatibility: COMPATIBILITY.md
+  - SBOM: docs/sbom.md
+  - Versioning: docs/versioning.md
   - Changelog: CHANGELOG.md
+
+extra:
+  version:
+    provider: mike
+    default: latest
 
 markdown_extensions:
   - toc:
