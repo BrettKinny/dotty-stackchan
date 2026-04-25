@@ -11,6 +11,11 @@ LED = "led"
 
 BEAT_MS = 582  # Macarena ~103 BPM
 
+# Audio reaches the device ~150 ms after we queue Opus packets (encoding +
+# WebSocket transit + device decode buffer). Delay choreography start by this
+# amount so servo movements land on the audible beat. Tune by ear/video.
+AUDIO_LATENCY_OFFSET_MS = 150
+
 # Timeline: (time_ms, action_type, params)
 # Servo: yaw -128..128, pitch 0..90, speed 100..1000
 # LED: r/g/b 0..168
@@ -117,9 +122,12 @@ async def execute_choreography(
     timeline: list[tuple[int, str, dict]],
     send_head_fn: "Callable",
     send_led_fn: "Callable",
+    audio_latency_offset_ms: int = AUDIO_LATENCY_OFFSET_MS,
 ) -> None:
     """Walk a timed choreography timeline, sending MCP commands at each mark."""
     loop = asyncio.get_event_loop()
+    if audio_latency_offset_ms > 0:
+        await asyncio.sleep(audio_latency_offset_ms / 1000.0)
     start = loop.time()
 
     for t_ms, action_type, params in timeline:

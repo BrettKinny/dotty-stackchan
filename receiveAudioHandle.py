@@ -321,8 +321,15 @@ async def _handle_dance(conn: "ConnectionHandler", dance_name: str) -> None:
             f"Dance mode: queued singing audio {audio_file} ({len(opus_packets)} packets)"
         )
 
+    # Only delay choreography for audio sync when we actually queued audio.
+    from core.handle.dances import AUDIO_LATENCY_OFFSET_MS
+    audio_offset = AUDIO_LATENCY_OFFSET_MS if has_audio else 0
+
     dance_task = asyncio.create_task(
-        execute_choreography(conn, dance["timeline"], _send_head_angles, _send_led_color)
+        execute_choreography(
+            conn, dance["timeline"], _send_head_angles, _send_led_color,
+            audio_latency_offset_ms=audio_offset,
+        )
     )
     conn._dance_task = dance_task
 
