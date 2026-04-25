@@ -1,3 +1,13 @@
+# Build StackChan firmware and publish a GitHub Release.
+#
+# Triggered by tags matching fw-v* (e.g. fw-v1.0.0).
+# Uses the Espressif IDF Docker container to build the ESP32-S3 firmware,
+# then attaches the binaries + SHA256 checksums to a GitHub Release.
+#
+# NOTE: The build path (firmware/firmware/) assumes the submodule layout
+# described in firmware/README.md. If the submodule structure changes after
+# initial addition, the paths in this workflow may need adjustment.
+
 name: Firmware Release
 
 on:
@@ -9,7 +19,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-and-release:
+    name: Build & Release
     runs-on: ubuntu-latest
     container:
       image: espressif/idf:v5.5.4
@@ -20,28 +31,45 @@ jobs:
         with:
           submodules: recursive
 
+      # The IDF container runs as root; GitHub's checkout creates the
+      # workspace as a different user. Mark it safe so git operations
+      # (version embedding, submodule queries) don't fail.
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      # The firmware build depends on upstream repos (xiaozhi-esp32, etc.)
+      # fetched by a helper script rather than git submodules.
       - name: Fetch firmware dependencies
-        run: cd firmware/firmware && python fetch_repos.py
+        working-directory: firmware/firmware
+        run: python fetch_repos.py
 
       - name: Build firmware
-        run: cd firmware/firmware && idf.py build
+        working-directory: firmware/firmware
+        run: idf.py build
 
-      - name: Generate checksums
+      # Collect the three release binaries and generate checksums.
+      # Build output lands in firmware/firmware/build/.
+      # NOTE: generated_assets.bin is produced by the SPIFFS assets
+      # partition build. If the partition layout changes, this path
+      # may need updating.
+      - name: Generate SHA256 checksums
+        working-directory: firmware/firmware/build
         run: |
-          cd firmware/firmware/build
-          sha256sum stack-chan.bin bootloader/bootloader.bin partition_table/partition-table.bin ota_data_initial.bin > checksums.txt
-          cat checksums.txt
+          sha256sum \
+            stack-chan.bin \
+            ota_data_initial.bin \
+            generated_assets.bin \
+            > SHA256SUMS.txt
+          echo "--- checksums ---"
+          cat SHA256SUMS.txt
 
-      - name: Create release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          name: ${{ github.ref_name }}
           generate_release_notes: true
           files: |
             firmware/firmware/build/stack-chan.bin
-            firmware/firmware/build/bootloader/bootloader.bin
-            firmware/firmware/build/partition_table/partition-table.bin
             firmware/firmware/build/ota_data_initial.bin
-            firmware/firmware/build/checksums.txt
+            firmware/firmware/build/generated_assets.bin
+            firmware/firmware/build/SHA256SUMS.txt
