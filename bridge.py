@@ -839,6 +839,8 @@ async def vision_explain(
     _vision_cache[device_id] = {
         "description": description,
         "timestamp": perf_counter(),
+        "jpeg_bytes": jpeg_bytes,
+        "question": question,
     }
     event = _vision_events.get(device_id)
     if event:
@@ -923,7 +925,7 @@ if _configure_portal is not None:
     async def _portal_send_message(*, text: str, channel: str = "dotty") -> dict:
         out = await message(MessageIn(content=text, channel=channel))
         return {"response": out.response, "session_id": out.session_id}
-    _configure_portal(send_message=_portal_send_message)
+    _configure_portal(send_message=_portal_send_message, vision_cache=_vision_cache)
 
 
 @app.post("/api/message/stream")

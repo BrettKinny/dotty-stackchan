@@ -11,6 +11,7 @@ service. Cards for unset hosts render as "unknown".
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -28,13 +29,15 @@ log = logging.getLogger("portal")
 
 # Bridge wires its in-process message handler in via configure(). Lets the
 # "Say" action invoke the same path /api/message uses without an HTTP hop.
-_state: dict[str, Any] = {"send_message": None}
+_state: dict[str, Any] = {"send_message": None, "vision_cache": None}
 
 
-def configure(*, send_message: Any = None) -> None:
+def configure(*, send_message: Any = None, vision_cache: dict | None = None) -> None:
     """Register bridge state with the portal. Idempotent."""
     if send_message is not None:
         _state["send_message"] = send_message
+    if vision_cache is not None:
+        _state["vision_cache"] = vision_cache
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -282,6 +285,40 @@ async def say(request: Request, text: str = Form(...)) -> Any:
         request, "say_result.html",
         {"ok": True, "sent": text, "response": result.get("response", "")},
     )
+
+
+def _latest_vision_entry() -> tuple[str, dict] | None:
+    """Pick the most-recently captured device entry from the vision cache."""
+    cache = _state.get("vision_cache") or {}
+    if not cache:
+        return None
+    device_id, entry = max(
+        cache.items(), key=lambda kv: kv[1].get("timestamp", 0.0)
+    )
+    return device_id, entry
+
+
+@router.get("/vision/latest", response_class=HTMLResponse, include_in_schema=False)
+async def vision_latest(request: Request) -> Any:
+    """Render a thumbnail + description for the most recent capture, if any."""
+    pick = _latest_vision_entry()
+    ctx: dict[str, Any] = {"have_photo": False}
+    if pick is not None:
+        device_id, entry = pick
+        jpeg = entry.get("jpeg_bytes")
+        # `timestamp` is a perf_counter() value — relative, so use elapsed.
+        elapsed = max(0.0, time.monotonic() - entry.get("timestamp", time.monotonic()))
+        ctx = {
+            "have_photo": jpeg is not None,
+            "device_id": device_id,
+            "description": entry.get("description", ""),
+            "question": entry.get("question", ""),
+            "age": _humanize_age(elapsed),
+            "thumbnail_b64": (
+                base64.b64encode(jpeg).decode("ascii") if jpeg else ""
+            ),
+        }
+    return templates.TemplateResponse(request, "vision.html", ctx)
 
 
 @router.get("/logs", response_class=HTMLResponse, include_in_schema=False)

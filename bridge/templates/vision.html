@@ -1,0 +1,18 @@
+<div class="card-body p-3">
+  {% if have_photo %}
+  <div class="flex gap-3 items-start">
+    <img src="data:image/jpeg;base64,{{ thumbnail_b64 }}"
+         alt="Latest capture" loading="lazy"
+         class="w-32 h-32 sm:w-40 sm:h-40 rounded-lg object-cover bg-base-300 flex-shrink-0">
+    <div class="min-w-0 flex-1">
+      <div class="text-xs text-base-content/50 mb-1">{{ age }} ago{% if question %} &middot; "{{ question }}"{% endif %}</div>
+      <div class="text-sm break-words whitespace-pre-wrap">{{ description }}</div>
+    </div>
+  </div>
+  {% else %}
+  <div class="text-sm text-base-content/60 text-center py-4 px-2">
+    No recent photo. Ask Dotty <em>"what do you see?"</em> or <em>"take a photo"</em>
+    to capture one (cached for 60 seconds).
+  </div>
+  {% endif %}
+</div>
