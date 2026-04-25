@@ -2,16 +2,20 @@
 
 ## Threat model
 
-This project is infrastructure for a **kid-adjacent, always-on voice device**.
-The StackChan sits on a desk, listens via a hot mic, and speaks aloud. That
-combination makes the threat model more sensitive than a typical hobby project:
+This project is infrastructure for an **always-on voice assistant** (StackChan).
+The device sits on a desk, listens via a hot mic, and speaks aloud. It ships
+with Kid Mode enabled by default (an optional child-safe personality mode), but
+the base system is a general-purpose assistant. The always-on microphone and
+unauthenticated LAN endpoints make the threat model more sensitive than a
+typical hobby project; when Kid Mode is active the threat model escalates
+further because children become the audience:
 
 - **Voice pipeline exposure:** ASR transcripts, LLM prompts, and TTS audio
   traverse the LAN between the device, the Docker host, and the RPi. An
   attacker on the LAN could intercept or inject traffic.
-- **Child safety:** The device is designed to be used around young children.
-  Prompt injection or jailbreaks that bypass the child-safety enforcement
-  layer could expose a child to harmful content.
+- **Kid Mode safety:** When Kid Mode is active, children are the intended
+  audience. Prompt injection or jailbreaks that bypass the content-safety
+  enforcement layer could expose a child to harmful content.
 - **Always-on microphone:** The device captures ambient audio. Compromise of
   the voice pipeline could leak private conversations.
 - **No authentication on internal endpoints:** The bridge (`/api/message`)
@@ -25,7 +29,8 @@ combination makes the threat model more sensitive than a typical hobby project:
 - Custom xiaozhi-server providers (`zeroclaw.py`, `edge_stream.py`,
   `fun_local.py`, `piper_local.py`)
 - Docker Compose configuration and container security
-- Child-safety prompt enforcement (prompt sandwich, emoji prefix enforcement)
+- Content-safety prompt enforcement (prompt sandwich, emoji prefix enforcement,
+  Kid Mode filtering)
 - The bridge Docker image and its CI pipeline
 - Documentation that could lead to insecure deployments if followed as-is
 
@@ -59,7 +64,7 @@ Instead, use one of these channels:
 - Description of the vulnerability
 - Steps to reproduce (or a proof of concept)
 - Affected component(s) and file(s)
-- Potential impact, especially if it relates to child safety or audio privacy
+- Potential impact, especially if it relates to Kid Mode safety or audio privacy
 
 ### What to expect
 
@@ -67,7 +72,7 @@ Instead, use one of these channels:
 - **Initial assessment** within 7 days — whether it is accepted, needs more
   information, or is out of scope.
 - **Fix or mitigation** timeline communicated once the issue is confirmed.
-  For child-safety issues, expect an accelerated response.
+  For Kid Mode safety issues, expect an accelerated response.
 - **Credit** in the fix commit and changelog (unless you prefer to remain
   anonymous).
 
