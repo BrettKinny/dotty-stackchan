@@ -44,6 +44,7 @@ nav:
   - Voice Pipeline: docs/voice-pipeline.md
   - Brain: docs/brain.md
   - Protocols: docs/protocols.md
+  - OTA Verification: docs/ota-verification.md
   - Kid Mode: docs/kid-mode.md
   - LLM Backends: docs/llm-backends.md
   - Cookbook:
@@ -62,6 +63,7 @@ nav:
   - About: docs/about.md
   - Roadmap: ROADMAP.md
   - Contributing: CONTRIBUTING.md
+  - Style Guide: docs/style.md
   - Security: SECURITY.md
   - Compatibility: COMPATIBILITY.md
   - Changelog: CHANGELOG.md
