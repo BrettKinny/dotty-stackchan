@@ -267,6 +267,42 @@ async def cards(request: Request) -> Any:
     )
 
 
+@router.post("/actions/volume", response_class=HTMLResponse, include_in_schema=False)
+async def volume(request: Request, value: int = Form(...)) -> Any:
+    """Set Dotty's speaker volume by routing the request through the LLM
+    so ZeroClaw fires the existing `audio_speaker.set_volume` MCP tool.
+
+    Caveat: this path goes through the LLM and TTS pipeline — Dotty will
+    briefly acknowledge ("Volume set to N!"). A silent direct-MCP path
+    would require an admin endpoint inside xiaozhi-server (tracked).
+    """
+    if not 0 <= value <= 100:
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": "Volume must be 0–100."},
+        )
+    sender = _state.get("send_message")
+    if sender is None:
+        raise HTTPException(503, "send_message not configured")
+    prompt = (
+        f"Use your audio_speaker.set_volume tool to set the volume to {value}. "
+        f"Reply with just the volume emoji and 'volume {value}'."
+    )
+    try:
+        result = await sender(text=prompt, channel="dotty")
+    except Exception as exc:
+        log.exception("portal volume action failed")
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": f"Bridge error: {exc.__class__.__name__}"},
+        )
+    return templates.TemplateResponse(
+        request, "say_result.html",
+        {"ok": True, "sent": f"set volume to {value}",
+         "response": result.get("response", "")},
+    )
+
+
 @router.post("/actions/say", response_class=HTMLResponse, include_in_schema=False)
 async def say(request: Request, text: str = Form(...)) -> Any:
     text = (text or "").strip()

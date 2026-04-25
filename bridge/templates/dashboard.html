@@ -42,6 +42,25 @@
 <main class="p-3 space-y-5 max-w-5xl mx-auto">
 
   <section>
+    <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Volume</h2>
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body p-3">
+        <form hx-post="/ui/actions/volume" hx-target="#vol-result" hx-swap="innerHTML"
+              hx-include="this"
+              class="flex items-center gap-3">
+          <span class="text-base">🔈</span>
+          <input type="range" name="value" min="0" max="100" step="5" value="50"
+                 oninput="document.getElementById('vol-out').textContent = this.value"
+                 class="range range-sm flex-1">
+          <span class="text-base">🔊</span>
+          <output id="vol-out" class="text-sm font-mono w-8 text-right">50</output>
+        </form>
+        <div id="vol-result" class="mt-2 empty:hidden"></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
     <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Mode</h2>
     <div id="kid-card-body" class="card bg-base-100 shadow-sm overflow-hidden"
          hx-get="/ui/kid-mode" hx-trigger="load" hx-swap="outerHTML"
