@@ -33,3 +33,5 @@ services:
       - ./custom-providers/xiaozhi-patches/portal_bridge.py:/opt/xiaozhi-esp32-server/core/portal_bridge.py:ro
       - ./custom-providers/xiaozhi-patches/websocket_server.py:/opt/xiaozhi-esp32-server/core/websocket_server.py:ro
       - ./custom-providers/xiaozhi-patches/http_server.py:/opt/xiaozhi-esp32-server/core/http_server.py:ro
+      # DOTTY ambient perception: relay firmware "event" frames to the bridge
+      - ./custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py:/opt/xiaozhi-esp32-server/core/handle/textMessageHandlerRegistry.py:ro
