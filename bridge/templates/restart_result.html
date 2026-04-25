@@ -1,0 +1,6 @@
+<div class="alert alert-info py-2 text-sm"
+     hx-get="/health" hx-trigger="load delay:3s, every 2s"
+     hx-swap="none"
+     hx-on::after-request="if(event.detail.successful){this.remove();}">
+  Restarting {{ target }}…
+</div>

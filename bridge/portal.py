@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
 log = logging.getLogger("portal")
@@ -508,6 +508,152 @@ async def kid_mode_set(request: Request, enabled: str = Form("")) -> Any:
     return templates.TemplateResponse(
         request, "kid_mode_result.html",
         {"ok": True, "new_state": new_state},
+    )
+
+
+# --- P7: restart bridge ---------------------------------------------------
+
+@router.post("/actions/restart-bridge",
+             response_class=HTMLResponse, include_in_schema=False)
+async def restart_bridge(request: Request) -> Any:
+    """Spawn a delayed `systemctl restart` so the response can return
+    before SIGTERM hits."""
+    import subprocess
+    try:
+        subprocess.Popen(
+            ["sh", "-c", "sleep 1 && systemctl restart zeroclaw-bridge"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as exc:
+        log.exception("self-restart spawn failed")
+        return templates.TemplateResponse(
+            request, "kid_mode_result.html",
+            {"ok": False, "error": f"restart failed: {exc}"},
+        )
+    return templates.TemplateResponse(
+        request, "restart_result.html",
+        {"target": "bridge"},
+    )
+
+
+# --- P8: PWA manifest + icon ----------------------------------------------
+
+_ICON_SVG = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'
+    '<rect width="512" height="512" rx="96" fill="#1d232a"/>'
+    '<circle cx="180" cy="220" r="36" fill="#22c55e"/>'
+    '<circle cx="332" cy="220" r="36" fill="#22c55e"/>'
+    '<path d="M150 320 q106 80 212 0" stroke="#22c55e" stroke-width="22" '
+    'stroke-linecap="round" fill="none"/>'
+    '</svg>'
+)
+
+
+@router.get("/icon.svg", include_in_schema=False)
+async def icon() -> Response:
+    return Response(content=_ICON_SVG, media_type="image/svg+xml",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
+@router.get("/manifest.json", include_in_schema=False)
+async def manifest() -> JSONResponse:
+    return JSONResponse({
+        "name": "Dotty Admin",
+        "short_name": "Dotty",
+        "start_url": "/ui",
+        "scope": "/ui/",
+        "display": "standalone",
+        "orientation": "portrait",
+        "background_color": "#1d232a",
+        "theme_color": "#1d232a",
+        "icons": [
+            {"src": "/ui/icon.svg", "sizes": "any", "type": "image/svg+xml",
+             "purpose": "any"},
+        ],
+    })
+
+
+# --- P14: system metrics --------------------------------------------------
+
+def _read_first_line(path: str) -> str:
+    try:
+        with open(path) as f:
+            return f.readline().strip()
+    except OSError:
+        return ""
+
+
+def _read_memory_mb() -> tuple[int, int] | None:
+    try:
+        with open("/proc/meminfo") as f:
+            data = f.read()
+    except OSError:
+        return None
+    total_kb = avail_kb = 0
+    for line in data.splitlines():
+        if line.startswith("MemTotal:"):
+            total_kb = int(line.split()[1])
+        elif line.startswith("MemAvailable:"):
+            avail_kb = int(line.split()[1])
+    if not total_kb:
+        return None
+    used_mb = (total_kb - avail_kb) // 1024
+    total_mb = total_kb // 1024
+    return used_mb, total_mb
+
+
+def _cpu_temp_c() -> float | None:
+    raw = _read_first_line("/sys/class/thermal/thermal_zone0/temp")
+    try:
+        return int(raw) / 1000.0 if raw else None
+    except ValueError:
+        return None
+
+
+def _proc_uptime_sec() -> float | None:
+    raw = _read_first_line("/proc/uptime")
+    try:
+        return float(raw.split()[0]) if raw else None
+    except ValueError:
+        return None
+
+
+def _disk_usage_root() -> tuple[int, int] | None:
+    import shutil
+    try:
+        u = shutil.disk_usage("/")
+        return u.used // (1024 ** 3), u.total // (1024 ** 3)
+    except OSError:
+        return None
+
+
+@router.get("/metrics", response_class=HTMLResponse, include_in_schema=False)
+async def metrics(request: Request) -> Any:
+    cpu_c = _cpu_temp_c()
+    mem = _read_memory_mb()
+    disk = _disk_usage_root()
+    upt = _proc_uptime_sec()
+    rows = [
+        {"label": "CPU temp",
+         "value": f"{cpu_c:.1f} °C" if cpu_c else "n/a",
+         "warn": cpu_c is not None and cpu_c >= 75},
+        {"label": "Memory",
+         "value": (f"{mem[0]} / {mem[1]} MB" if mem else "n/a"),
+         "warn": mem is not None and mem[1] and (mem[0] / mem[1]) > 0.85},
+        {"label": "Disk /",
+         "value": (f"{disk[0]} / {disk[1]} GiB" if disk else "n/a"),
+         "warn": disk is not None and disk[1] and (disk[0] / disk[1]) > 0.85},
+        {"label": "RPi uptime",
+         "value": _humanize_age(upt) if upt else "n/a",
+         "warn": False},
+        {"label": "Bridge uptime",
+         "value": _humanize_age(time.time() - _START_TIME),
+         "warn": False},
+    ]
+    return templates.TemplateResponse(
+        request, "metrics.html", {"rows": rows}
     )
 
 

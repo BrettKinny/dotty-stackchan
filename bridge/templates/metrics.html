@@ -1,0 +1,10 @@
+<div class="card-body p-3">
+  <ul class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+    {% for row in rows %}
+    <li class="flex justify-between gap-2 border-b border-base-300/40 py-1">
+      <span class="text-base-content/60">{{ row.label }}</span>
+      <span class="font-mono {% if row.warn %}text-warning{% endif %}">{{ row.value }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
