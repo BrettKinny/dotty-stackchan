@@ -6,11 +6,11 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="How to run Dotty's voice stack on an ESP32-S3 board other than the M5Stack CoreS3.">
+        <meta name="description" content="Every way to invite Dotty into a voice turn — wake word, face detection, head-pet hold, clap-to-wake, touchscreen tap, and the LAN admin inject path — with a comparison table covering when each one works.">
       
       
       
-        <link rel="canonical" href="https://brettkinny.github.io/dotty-stackchan/dev/advanced/variant-port-guide/">
+        <link rel="canonical" href="https://brettkinny.github.io/dotty-stackchan/dev/voice-mode-entry/">
       
       
       
@@ -18,19 +18,19 @@
         
       
       
-      <link rel="icon" href="../../assets/images/favicon.png">
+      <link rel="icon" href="../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>Variant Port Guide - Dotty</title>
+        <title>Voice Mode Entry - Dotty</title>
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -49,7 +49,7 @@
       
     
     
-    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#variant-port-guide" class="md-skip">
+        <a href="#voice-mode-how-to-enter-it" class="md-skip">
           Skip to content
         </a>
       
@@ -92,7 +92,7 @@
 
 <header class="md-header" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../.." title="Dotty" class="md-header__button md-logo" aria-label="Dotty" data-md-component="logo">
+    <a href=".." title="Dotty" class="md-header__button md-logo" aria-label="Dotty" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Variant Port Guide
+              Voice Mode Entry
             
           </span>
         </div>
@@ -225,7 +225,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../.." class="md-tabs__link">
+      <a href=".." class="md-tabs__link">
         
   
   
@@ -244,7 +244,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../SETUP.md" class="md-tabs__link">
+      <a href="../SETUP.md" class="md-tabs__link">
         
   
   
@@ -263,7 +263,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/architecture.md" class="md-tabs__link">
+      <a href="../docs/architecture.md" class="md-tabs__link">
         
   
   
@@ -284,7 +284,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../docs/hardware.md" class="md-tabs__link">
+        <a href="../docs/hardware.md" class="md-tabs__link">
           
   
   
@@ -302,7 +302,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/voice-pipeline.md" class="md-tabs__link">
+      <a href="../docs/voice-pipeline.md" class="md-tabs__link">
         
   
   
@@ -321,7 +321,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/voice-mode-entry.md" class="md-tabs__link">
+      <a href="../docs/voice-mode-entry.md" class="md-tabs__link">
         
   
   
@@ -340,7 +340,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/voice-catalog.md" class="md-tabs__link">
+      <a href="../docs/voice-catalog.md" class="md-tabs__link">
         
   
   
@@ -359,7 +359,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/brain.md" class="md-tabs__link">
+      <a href="../docs/brain.md" class="md-tabs__link">
         
   
   
@@ -378,7 +378,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/protocols.md" class="md-tabs__link">
+      <a href="../docs/protocols.md" class="md-tabs__link">
         
   
   
@@ -397,7 +397,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/ota-verification.md" class="md-tabs__link">
+      <a href="../docs/ota-verification.md" class="md-tabs__link">
         
   
   
@@ -416,7 +416,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/kid-mode.md" class="md-tabs__link">
+      <a href="../docs/kid-mode.md" class="md-tabs__link">
         
   
   
@@ -435,7 +435,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/llm-backends.md" class="md-tabs__link">
+      <a href="../docs/llm-backends.md" class="md-tabs__link">
         
   
   
@@ -454,7 +454,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/observability.md" class="md-tabs__link">
+      <a href="../docs/observability.md" class="md-tabs__link">
         
   
   
@@ -473,7 +473,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/audio-scene-classifier.md" class="md-tabs__link">
+      <a href="../docs/audio-scene-classifier.md" class="md-tabs__link">
         
   
   
@@ -494,7 +494,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../docs/cookbook/change-persona.md" class="md-tabs__link">
+        <a href="../docs/cookbook/change-persona.md" class="md-tabs__link">
           
   
   
@@ -514,7 +514,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../docs/advanced/multi-host.md" class="md-tabs__link">
+        <a href="../docs/advanced/multi-host.md" class="md-tabs__link">
           
   
   
@@ -534,7 +534,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../docs/emoji-mapping.md" class="md-tabs__link">
+        <a href="../docs/emoji-mapping.md" class="md-tabs__link">
           
   
   
@@ -552,7 +552,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/troubleshooting.md" class="md-tabs__link">
+      <a href="../docs/troubleshooting.md" class="md-tabs__link">
         
   
   
@@ -571,7 +571,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/faq.md" class="md-tabs__link">
+      <a href="../docs/faq.md" class="md-tabs__link">
         
   
   
@@ -590,7 +590,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/about.md" class="md-tabs__link">
+      <a href="../docs/about.md" class="md-tabs__link">
         
   
   
@@ -609,7 +609,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../ROADMAP.md" class="md-tabs__link">
+      <a href="../ROADMAP.md" class="md-tabs__link">
         
   
   
@@ -628,7 +628,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../CONTRIBUTING.md" class="md-tabs__link">
+      <a href="../CONTRIBUTING.md" class="md-tabs__link">
         
   
   
@@ -647,7 +647,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/style.md" class="md-tabs__link">
+      <a href="../docs/style.md" class="md-tabs__link">
         
   
   
@@ -666,7 +666,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../SECURITY.md" class="md-tabs__link">
+      <a href="../SECURITY.md" class="md-tabs__link">
         
   
   
@@ -685,7 +685,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../COMPATIBILITY.md" class="md-tabs__link">
+      <a href="../COMPATIBILITY.md" class="md-tabs__link">
         
   
   
@@ -704,7 +704,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/sbom.md" class="md-tabs__link">
+      <a href="../docs/sbom.md" class="md-tabs__link">
         
   
   
@@ -723,7 +723,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/signed-releases.md" class="md-tabs__link">
+      <a href="../docs/signed-releases.md" class="md-tabs__link">
         
   
   
@@ -742,7 +742,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/versioning.md" class="md-tabs__link">
+      <a href="../docs/versioning.md" class="md-tabs__link">
         
   
   
@@ -761,7 +761,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../CHANGELOG.md" class="md-tabs__link">
+      <a href="../CHANGELOG.md" class="md-tabs__link">
         
   
   
@@ -796,7 +796,7 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../.." title="Dotty" class="md-nav__button md-logo" aria-label="Dotty" data-md-component="logo">
+    <a href=".." title="Dotty" class="md-nav__button md-logo" aria-label="Dotty" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -826,7 +826,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../.." class="md-nav__link">
+      <a href=".." class="md-nav__link">
         
   
   
@@ -853,7 +853,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../SETUP.md" class="md-nav__link">
+      <a href="../SETUP.md" class="md-nav__link">
         
   
   
@@ -880,7 +880,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/architecture.md" class="md-nav__link">
+      <a href="../docs/architecture.md" class="md-nav__link">
         
   
   
@@ -959,7 +959,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/hardware.md" class="md-nav__link">
+      <a href="../docs/hardware.md" class="md-nav__link">
         
   
   
@@ -987,7 +987,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/hardware-support.md" class="md-nav__link">
+      <a href="../docs/hardware-support.md" class="md-nav__link">
         
   
   
@@ -1022,7 +1022,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/voice-pipeline.md" class="md-nav__link">
+      <a href="../docs/voice-pipeline.md" class="md-nav__link">
         
   
   
@@ -1049,7 +1049,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/voice-mode-entry.md" class="md-nav__link">
+      <a href="../docs/voice-mode-entry.md" class="md-nav__link">
         
   
   
@@ -1076,7 +1076,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/voice-catalog.md" class="md-nav__link">
+      <a href="../docs/voice-catalog.md" class="md-nav__link">
         
   
   
@@ -1103,7 +1103,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/brain.md" class="md-nav__link">
+      <a href="../docs/brain.md" class="md-nav__link">
         
   
   
@@ -1130,7 +1130,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/protocols.md" class="md-nav__link">
+      <a href="../docs/protocols.md" class="md-nav__link">
         
   
   
@@ -1157,7 +1157,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/ota-verification.md" class="md-nav__link">
+      <a href="../docs/ota-verification.md" class="md-nav__link">
         
   
   
@@ -1184,7 +1184,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/kid-mode.md" class="md-nav__link">
+      <a href="../docs/kid-mode.md" class="md-nav__link">
         
   
   
@@ -1211,7 +1211,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/llm-backends.md" class="md-nav__link">
+      <a href="../docs/llm-backends.md" class="md-nav__link">
         
   
   
@@ -1238,7 +1238,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/observability.md" class="md-nav__link">
+      <a href="../docs/observability.md" class="md-nav__link">
         
   
   
@@ -1265,7 +1265,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/audio-scene-classifier.md" class="md-nav__link">
+      <a href="../docs/audio-scene-classifier.md" class="md-nav__link">
         
   
   
@@ -1344,7 +1344,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/cookbook/change-persona.md" class="md-nav__link">
+      <a href="../docs/cookbook/change-persona.md" class="md-nav__link">
         
   
   
@@ -1372,7 +1372,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/cookbook/swap-voice.md" class="md-nav__link">
+      <a href="../docs/cookbook/swap-voice.md" class="md-nav__link">
         
   
   
@@ -1400,7 +1400,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/cookbook/run-fully-local.md" class="md-nav__link">
+      <a href="../docs/cookbook/run-fully-local.md" class="md-nav__link">
         
   
   
@@ -1428,7 +1428,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/cookbook/add-emoji.md" class="md-nav__link">
+      <a href="../docs/cookbook/add-emoji.md" class="md-nav__link">
         
   
   
@@ -1456,7 +1456,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/cookbook/disable-kid-mode.md" class="md-nav__link">
+      <a href="../docs/cookbook/disable-kid-mode.md" class="md-nav__link">
         
   
   
@@ -1543,7 +1543,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/advanced/multi-host.md" class="md-nav__link">
+      <a href="../docs/advanced/multi-host.md" class="md-nav__link">
         
   
   
@@ -1571,7 +1571,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/advanced/variant-port-guide.md" class="md-nav__link">
+      <a href="../docs/advanced/variant-port-guide.md" class="md-nav__link">
         
   
   
@@ -1658,7 +1658,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/emoji-mapping.md" class="md-nav__link">
+      <a href="../docs/emoji-mapping.md" class="md-nav__link">
         
   
   
@@ -1686,7 +1686,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/interaction-map.md" class="md-nav__link">
+      <a href="../docs/interaction-map.md" class="md-nav__link">
         
   
   
@@ -1714,7 +1714,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/latent-capabilities.md" class="md-nav__link">
+      <a href="../docs/latent-capabilities.md" class="md-nav__link">
         
   
   
@@ -1742,7 +1742,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/references.md" class="md-nav__link">
+      <a href="../docs/references.md" class="md-nav__link">
         
   
   
@@ -1777,7 +1777,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/troubleshooting.md" class="md-nav__link">
+      <a href="../docs/troubleshooting.md" class="md-nav__link">
         
   
   
@@ -1804,7 +1804,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/faq.md" class="md-nav__link">
+      <a href="../docs/faq.md" class="md-nav__link">
         
   
   
@@ -1831,7 +1831,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/about.md" class="md-nav__link">
+      <a href="../docs/about.md" class="md-nav__link">
         
   
   
@@ -1858,7 +1858,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../ROADMAP.md" class="md-nav__link">
+      <a href="../ROADMAP.md" class="md-nav__link">
         
   
   
@@ -1885,7 +1885,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../CONTRIBUTING.md" class="md-nav__link">
+      <a href="../CONTRIBUTING.md" class="md-nav__link">
         
   
   
@@ -1912,7 +1912,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/style.md" class="md-nav__link">
+      <a href="../docs/style.md" class="md-nav__link">
         
   
   
@@ -1939,7 +1939,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../SECURITY.md" class="md-nav__link">
+      <a href="../SECURITY.md" class="md-nav__link">
         
   
   
@@ -1966,7 +1966,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../COMPATIBILITY.md" class="md-nav__link">
+      <a href="../COMPATIBILITY.md" class="md-nav__link">
         
   
   
@@ -1993,7 +1993,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/sbom.md" class="md-nav__link">
+      <a href="../docs/sbom.md" class="md-nav__link">
         
   
   
@@ -2020,7 +2020,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/signed-releases.md" class="md-nav__link">
+      <a href="../docs/signed-releases.md" class="md-nav__link">
         
   
   
@@ -2047,7 +2047,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/versioning.md" class="md-nav__link">
+      <a href="../docs/versioning.md" class="md-nav__link">
         
   
   
@@ -2074,7 +2074,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../CHANGELOG.md" class="md-nav__link">
+      <a href="../CHANGELOG.md" class="md-nav__link">
         
   
   
@@ -2121,55 +2121,22 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#tldr" class="md-nav__link">
+  <a href="#entry-paths" class="md-nav__link">
     <span class="md-ellipsis">
       
-        TL;DR
+        Entry paths
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#server-side-nothing-to-change" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Server side: nothing to change
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#firmware-path-decision" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Firmware path decision
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#option-a-voice-pipeline-on-a-new-esp32-s3-board" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Option A — voice pipeline on a new ESP32-S3 board
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Option A — voice pipeline on a new ESP32-S3 board">
+    <nav class="md-nav" aria-label="Entry paths">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#1-check-if-your-board-already-has-a-config" class="md-nav__link">
+  <a href="#1-wake-word-firmware" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Check if your board already has a config
+        1. Wake word — firmware
       
     </span>
   </a>
@@ -2177,10 +2144,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#2-create-a-new-board-definition" class="md-nav__link">
+  <a href="#2-face-detection-firmware-bridge" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Create a new board definition
+        2. Face detection — firmware → bridge
       
     </span>
   </a>
@@ -2188,10 +2155,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#3-build-and-flash" class="md-nav__link">
+  <a href="#3-head-pet-hold-firmware" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Build and flash
+        3. Head-pet hold — firmware
       
     </span>
   </a>
@@ -2199,10 +2166,32 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#4-verify-the-websocket-connection" class="md-nav__link">
+  <a href="#4-clap-to-wake-server-side-perception-consumer" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Verify the WebSocket connection
+        4. Clap-to-wake — server-side perception consumer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-touchscreen-tap-firmware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Touchscreen tap — firmware
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-admininject-text-server-side-lan-admin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. /admin/inject-text — server-side LAN admin
       
     </span>
   </a>
@@ -2215,49 +2204,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#option-b-porting-m5stackstackchan-to-a-new-board" class="md-nav__link">
+  <a href="#comparison" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Option B — porting m5stack/StackChan to a new board
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Option B — porting m5stack/StackChan to a new board">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#adaptation-checklist" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Adaptation checklist
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#patch-workflow" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Patch workflow
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#testing-your-port" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Testing your port
+        Comparison
       
     </span>
   </a>
@@ -2265,10 +2215,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#see-also" class="md-nav__link">
+  <a href="#choosing-for-your-room" class="md-nav__link">
     <span class="md-ellipsis">
       
-        See also
+        Choosing for your room
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cross-references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cross-references
       
     </span>
   </a>
@@ -2295,177 +2256,161 @@
   
 
 
-<h1 id="variant-port-guide">Variant port guide<a class="headerlink" href="#variant-port-guide" title="Permanent link">&para;</a></h1>
-<p>Dotty's server stack (xiaozhi-server, bridge, ZeroClaw) is protocol-agnostic — it doesn't care which ESP32-S3 board is on the other end of the WebSocket. All the interesting porting work is in the firmware.</p>
-<p>This guide explains how to bring up the voice pipeline on a different ESP32-S3 board, and what hardware adaptation is needed to get the robot-body features (servos, LEDs, display) working.</p>
-<h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
+<h1 id="voice-mode-how-to-enter-it">Voice mode — how to enter it<a class="headerlink" href="#voice-mode-how-to-enter-it" title="Permanent link">&para;</a></h1>
+<p>A "voice turn" is the moment Dotty switches from passive idle to actively listening: the wake-word path opens, the mic opens, ASR captures speech, the LLM responds, and TTS plays. There are six distinct ways to enter that state today. This page collects them in one place, with a comparison table at the end so you can pick the right one for the room you're in.</p>
+<p>The default phrase is <strong>"Hi, ESP"</strong> (firmware shipped this as the default in a recent change). See <a href="../wake-word/">wake-word.md</a> for how to change it.</p>
+<h2 id="entry-paths">Entry paths<a class="headerlink" href="#entry-paths" title="Permanent link">&para;</a></h2>
+<h3 id="1-wake-word-firmware">1. Wake word — firmware<a class="headerlink" href="#1-wake-word-firmware" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p><strong>"Hi, ESP" (default), "Hi, Stack Chan", "Computer", or any of the prebuilt WakeNet9 phrases.</strong></p>
+</blockquote>
+<p>The classic path. The mic is always sampling at low cost (AFE + WakeNet9 INT8 on the ESP32-S3). When the wake-net spots the phrase, <code>Application::HandleWakeWordDetectedEvent</code> opens the WebSocket and the device transitions to listening. Works with no line of sight, no touch, no LAN. <strong>Requires the user to speak.</strong></p>
+<p>Cross-link: <a href="../wake-word/">wake-word.md</a> covers the whole stack — current model, the five-minute switch to a different prebuilt, and the long-term branded "Hey Dotty" microWakeWord roadmap.</p>
+<h3 id="2-face-detection-firmware-bridge">2. Face detection — firmware → bridge<a class="headerlink" href="#2-face-detection-firmware-bridge" title="Permanent link">&para;</a></h3>
+<p>The on-device face tracker (PSRAM-mounted ESP-WHO model in <code>firmware/firmware/main/stackchan/modifiers/face_tracking.cpp</code>) emits a <code>face_detected</code> perception event when a human face enters the camera's field of view. The xiaozhi-server-side relay forwards that event to the bridge, where <code>_perception_face_greeter</code> (in <code>bridge.py</code>) injects the configured greeting (<code>FACE_GREET_TEXT</code>, default "Hi!") via the xiaozhi <code>/admin/inject-text</code> route. xiaozhi speaks the greeting and opens the mic for the reply.</p>
+<p>Per-device cooldown stops a stationary user from re-triggering on every blink of the tracker. Set <code>FACE_GREET_TEXT=""</code> to suppress the verbal greeting and just open the mic silently — see the env block in <code>bridge.py</code> for the full set of knobs.</p>
+<p><strong>Requires line of sight.</strong> Useless in the dark or when the camera is occluded.</p>
+<h3 id="3-head-pet-hold-firmware">3. Head-pet hold — firmware<a class="headerlink" href="#3-head-pet-hold-firmware" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p><strong>Hold a finger on Dotty's head capacitive pad for ≥2 seconds.</strong></p>
+</blockquote>
+<p>Shipped in firmware commit <code>e8370d2</code>. The head-pet handler distinguishes a quick swipe (visual purr feedback only — see Path B in <code>head_pet.h</code>) from a sustained hold; on hold-detected the firmware fires <code>Application::WakeWordInvoke("head_pet_hold")</code> directly, which is exactly what the wake-net would do for a real wake-word hit. The mic opens, no audible cue.</p>
+<p>This is the <strong>dark-room friendly</strong> entry point: works with no light, no line of sight, no spoken phrase. Brett's primary use case is morning interactions before the lights are up.</p>
+<h3 id="4-clap-to-wake-server-side-perception-consumer">4. Clap-to-wake — server-side perception consumer<a class="headerlink" href="#4-clap-to-wake-server-side-perception-consumer" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p><strong>Clap once (or otherwise produce a sharp transient above CLAP_WAKE_MIN_AMPLITUDE).</strong></p>
+</blockquote>
+<p>Off by default. Opt in with <code>CLAP_WAKE_ENABLED=true</code> on the bridge.</p>
+<p>Subscribes to the same perception bus the face-greeter uses, filters <code>sound_event</code> events by either <code>data.kind == "clap"</code> (server-side YAMNet emits this) or <code>data.energy / data.amplitude</code> crossing a configurable threshold. On a hit, <code>_perception_clap_waker</code> fires the configured <code>CLAP_WAKE_TEXT</code> (default "Yes?") through <code>/admin/inject-text</code>, which speaks the cue and opens the mic. Per-device cooldown (default 10 s) prevents a sustained clap pattern from looping.</p>
+<p>Tunables (env vars on the bridge):</p>
 <table>
 <thead>
 <tr>
-<th>Goal</th>
-<th>Firmware path</th>
-<th>Effort</th>
+<th>Variable</th>
+<th>Default</th>
+<th>Notes</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Voice only (ASR / TTS / LLM)</td>
-<td><code>78/xiaozhi-esp32</code> with your board's config</td>
-<td>Low — add board config + flash</td>
+<td><code>CLAP_WAKE_ENABLED</code></td>
+<td><code>false</code></td>
+<td>Master switch. Consumer isn't even spawned when off.</td>
 </tr>
 <tr>
-<td>Full robot body (servos, LEDs, avatar)</td>
-<td>Port <code>m5stack/StackChan</code> to your board</td>
-<td>Medium–high — display + servo + LED adaptation</td>
+<td><code>CLAP_WAKE_MIN_AMPLITUDE</code></td>
+<td><code>0.6</code></td>
+<td>Loudness threshold for the amplitude fallback. Set to <code>0</code> to require an explicit <code>kind=="clap"</code> classification.</td>
+</tr>
+<tr>
+<td><code>CLAP_WAKE_COOLDOWN_SEC</code></td>
+<td><code>10</code></td>
+<td>Per-device cooldown after a successful wake.</td>
+</tr>
+<tr>
+<td><code>CLAP_WAKE_TEXT</code></td>
+<td><code>"Yes?"</code></td>
+<td>Spoken cue. Empty string ≈ silent open (see <code>_perception_clap_waker</code> for the caveat).</td>
 </tr>
 </tbody>
 </table>
-<hr />
-<h2 id="server-side-nothing-to-change">Server side: nothing to change<a class="headerlink" href="#server-side-nothing-to-change" title="Permanent link">&para;</a></h2>
-<p>xiaozhi-server, the bridge, and ZeroClaw run on the server host — not on the device. They communicate over the Xiaozhi WebSocket protocol, which is board-agnostic.</p>
-<p>The only server-side value that varies per board is the OTA firmware filename, which you set in the device's <code>sdkconfig</code> before flashing.</p>
-<hr />
-<h2 id="firmware-path-decision">Firmware path decision<a class="headerlink" href="#firmware-path-decision" title="Permanent link">&para;</a></h2>
-<p>Two codebases speak the Xiaozhi protocol:</p>
+<p>Trade-off vs. wake word: a clap is faster than speaking a phrase but has more false positives in a noisy household. <strong>Useful in the dark when your hands are full</strong> (you can elbow-clap a doorframe).</p>
+<h3 id="5-touchscreen-tap-firmware">5. Touchscreen tap — firmware<a class="headerlink" href="#5-touchscreen-tap-firmware" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p><strong>Tap the M5 CoreS3 screen 5+ times.</strong></p>
+</blockquote>
+<p>The I2C touchpad on the CoreS3 is flaky in this build, so a single tap isn't reliable enough to use as a wake gesture; the firmware requires 5+ taps before invoking the listen window. Treat this as a <strong>last-resort fallback</strong>, not a primary entry point. If the screen stops responding entirely, the head-pet hold path (entry #3) is the better backup since it uses a separate GPIO touch input rather than the I2C controller.</p>
+<h3 id="6-admininject-text-server-side-lan-admin">6. <code>/admin/inject-text</code> — server-side LAN admin<a class="headerlink" href="#6-admininject-text-server-side-lan-admin" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p><strong><code>curl -XPOST http://&lt;bridge&gt;/admin/inject-text -d '{"text":"...","device_id":"..."}'</code></strong></p>
+</blockquote>
+<p>This is the path the Discord daemon and the portal "Greet" button use. Strictly speaking it doesn't enter voice mode — it bypasses the listen pipeline entirely and inserts text directly into the LLM turn, skipping wake-word + ASR. Useful when you want Dotty to say something <strong>without anyone needing to be physically present</strong>: scheduled greetings, DM-style admin messages, automation hooks. Not exposed to the public internet.</p>
+<h2 id="comparison">Comparison<a class="headerlink" href="#comparison" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Firmware</th>
-<th>Board support</th>
-<th>Robot body</th>
-<th>Use when</th>
+<th>Entry path</th>
+<th>Works in dark</th>
+<th>Line of sight</th>
+<th>Spoken utterance</th>
+<th>Touch</th>
+<th>LAN admin</th>
+<th>Cooldown</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><a href="https://github.com/78/xiaozhi-esp32"><code>78/xiaozhi-esp32</code></a></td>
-<td>70+ ESP32-S3 targets</td>
-<td>No — generic voice assistant</td>
-<td>You want voice quickly on a custom board, no servo/avatar</td>
+<td>Wake word ("Hi, ESP")</td>
+<td>yes</td>
+<td>no</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>none (always armed)</td>
 </tr>
 <tr>
-<td><a href="https://github.com/m5stack/StackChan"><code>m5stack/StackChan</code></a></td>
-<td>CoreS3 out of the box</td>
-<td>Yes — servos, avatar, LEDs, MCP tools</td>
-<td>You have a StackChan-like body and want full robot integration</td>
+<td>Face detected</td>
+<td>no</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>no</td>
+<td>per-device, <code>FACE_GREET_MIN_INTERVAL_SEC</code></td>
+</tr>
+<tr>
+<td>Head-pet hold (≥2 s)</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+<td>no</td>
+<td>none (immediate WakeWordInvoke)</td>
+</tr>
+<tr>
+<td>Clap-to-wake</td>
+<td>yes</td>
+<td>no</td>
+<td>no (clap only)</td>
+<td>no</td>
+<td>no</td>
+<td>per-device, <code>CLAP_WAKE_COOLDOWN_SEC</code> (10 s default)</td>
+</tr>
+<tr>
+<td>Touchscreen tap (5+)</td>
+<td>yes</td>
+<td>no (but you need to find the screen)</td>
+<td>no</td>
+<td>yes</td>
+<td>no</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>/admin/inject-text</code></td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+<td>none</td>
 </tr>
 </tbody>
 </table>
-<p>Both firmwares are vendored in this repo under <code>firmware/</code> (a git submodule pointing to <code>BrettKinny/StackChan</code>). The StackChan firmware pulls in <code>78/xiaozhi-esp32</code> v2.2.4 at build time via <code>fetch_repos.py</code>.</p>
-<hr />
-<h2 id="option-a-voice-pipeline-on-a-new-esp32-s3-board">Option A — voice pipeline on a new ESP32-S3 board<a class="headerlink" href="#option-a-voice-pipeline-on-a-new-esp32-s3-board" title="Permanent link">&para;</a></h2>
-<p>Use <code>78/xiaozhi-esp32</code> directly. You get ASR / TTS / LLM but no servo or avatar control.</p>
-<h3 id="1-check-if-your-board-already-has-a-config">1. Check if your board already has a config<a class="headerlink" href="#1-check-if-your-board-already-has-a-config" title="Permanent link">&para;</a></h3>
-<p>After running <code>fetch_repos.py</code>, the upstream firmware is cloned into <code>firmware/firmware/xiaozhi-esp32/</code>. Board configs live under <code>boards/</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ls<span class="w"> </span>firmware/firmware/xiaozhi-esp32/boards/
-</code></pre></div>
-<p>If your board is listed (search by chipset, e.g. <code>esp32s3_*</code>), you can build directly:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>idf.py<span class="w"> </span>set-target<span class="w"> </span>esp32s3
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>idf.py<span class="w"> </span>-D<span class="w"> </span><span class="nv">SDKCONFIG_DEFAULTS</span><span class="o">=</span><span class="s2">&quot;boards/&lt;your-board&gt;/sdkconfig.defaults&quot;</span><span class="w"> </span>build
-</code></pre></div>
-<h3 id="2-create-a-new-board-definition">2. Create a new board definition<a class="headerlink" href="#2-create-a-new-board-definition" title="Permanent link">&para;</a></h3>
-<p>If your board isn't in the list, add one. Each board directory needs at minimum an <code>sdkconfig.defaults</code> that sets:</p>
+<h2 id="choosing-for-your-room">Choosing for your room<a class="headerlink" href="#choosing-for-your-room" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Flash size and PSRAM type (<code>CONFIG_ESPTOOLPY_FLASHSIZE</code>, <code>CONFIG_SPIRAM_*</code>)</li>
-<li>Audio codec I2S pins and clock rates</li>
-<li>Microphone channel configuration</li>
-<li>Display interface pins (if using the avatar renderer)</li>
+<li><strong>Lights on, you're across the room</strong>: wake word.</li>
+<li><strong>Lights on, you're right in front of Dotty</strong>: face detection beats waiting for the wake-net every time.</li>
+<li><strong>Lights off, hands free</strong>: wake word still works.</li>
+<li><strong>Lights off, hands full</strong> (carrying laundry, holding a kid): clap-to-wake if enabled, otherwise head-pet hold once you're close enough.</li>
+<li><strong>Lights off, hands full, mouth full</strong>: head-pet hold.</li>
+<li><strong>You're not in the room at all</strong>: <code>/admin/inject-text</code> from another device on the LAN.</li>
 </ul>
-<p>Use a similar existing board as your starting point. <code>boards/m5stack_core_s3/sdkconfig.defaults</code> is the closest reference for any M5Stack product.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>firmware/firmware/xiaozhi-esp32/boards/
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  m5stack_core_s3/
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    sdkconfig.defaults       ← reference config
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>  your_board_name/
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    sdkconfig.defaults       ← create this
-</code></pre></div>
-<h3 id="3-build-and-flash">3. Build and flash<a class="headerlink" href="#3-build-and-flash" title="Permanent link">&para;</a></h3>
-<p>See <a href="../../CLAUDE.md#firmware-iteration">CLAUDE.md</a> for the full build and flash commands. In short:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nb">cd</span><span class="w"> </span>firmware/firmware
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1"># Fetch upstream + apply patches, then build</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-v<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PWD</span><span class="s2">:/project&quot;</span><span class="w"> </span>-w<span class="w"> </span>/project<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span>espressif/idf:v5.5.4<span class="w"> </span>bash<span class="w"> </span>-lc<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span><span class="s1">&#39;git config --global --add safe.directory &quot;*&quot; &amp;&amp; python fetch_repos.py &amp;&amp; idf.py build&#39;</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="c1"># Flash (adjust the port if needed)</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-v<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PWD</span><span class="s2">:/project&quot;</span><span class="w"> </span>-w<span class="w"> </span>/project<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">  </span>--device<span class="o">=</span>/dev/ttyACM0<span class="w"> </span>espressif/idf:v5.5.4<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">  </span>bash<span class="w"> </span>-lc<span class="w"> </span><span class="s1">&#39;idf.py -p /dev/ttyACM0 -b 921600 flash&#39;</span>
-</code></pre></div>
-<h3 id="4-verify-the-websocket-connection">4. Verify the WebSocket connection<a class="headerlink" href="#4-verify-the-websocket-connection" title="Permanent link">&para;</a></h3>
-<p>Once flashed, the device should connect and negotiate the handshake. Check the server logs:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>docker<span class="w"> </span>logs<span class="w"> </span>xiaozhi-esp32-server<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">&#39;(hello|tools/list|connected)&#39;</span>
-</code></pre></div>
-<p>A <code>tools/list</code> response confirms the device is advertising its MCP tools and the voice pipeline is ready.</p>
-<hr />
-<h2 id="option-b-porting-m5stackstackchan-to-a-new-board">Option B — porting m5stack/StackChan to a new board<a class="headerlink" href="#option-b-porting-m5stackstackchan-to-a-new-board" title="Permanent link">&para;</a></h2>
-<p>If you have servo hardware and want the full robot-body MCP tools, adapt the StackChan firmware. It targets the CoreS3 explicitly in several places.</p>
-<h3 id="adaptation-checklist">Adaptation checklist<a class="headerlink" href="#adaptation-checklist" title="Permanent link">&para;</a></h3>
-<p><strong>Display (avatar renderer)</strong></p>
-<p>The M5Stack Avatar library assumes an ILI9342C display at 320×240 over SPI. If your display uses a different controller:</p>
-<ol>
-<li>Update the <code>DisplayDevice</code> typedef and initialization in the display driver.</li>
-<li>Adjust resolution constants if your panel differs from 320×240.</li>
-<li>Test face animations independently before wiring the audio pipeline.</li>
-</ol>
-<p><strong>Audio codec (ASR input)</strong></p>
-<p>The CoreS3 uses the ES7210 codec for mic input via I2S. If your board uses a different codec:</p>
-<ol>
-<li>Find and update the codec init sequence in the board-specific audio driver.</li>
-<li>Update I2S clock, sample rate, and codec register writes.</li>
-<li>The Xiaozhi protocol expects 16 kHz mono input — resample in firmware if your codec runs at a different rate.</li>
-</ol>
-<p><strong>Servos</strong></p>
-<p>The StackChan kit uses SG90-class feedback servos on a dedicated bus. If your board uses a different servo controller or different pins:</p>
-<ol>
-<li>Update pin definitions in the servo driver.</li>
-<li>Update the physical angle limits (min/max) for your mechanism.</li>
-<li>The spring-physics motion system (<code>motion.h</code>) is board-agnostic above the servo layer and does not need changing.</li>
-</ol>
-<p><strong>RGB LEDs</strong></p>
-<p>The kit has 12 NeoPixel-compatible LEDs. If your board has a different count or layout:</p>
-<ol>
-<li>Update <code>LED_COUNT</code> and the layout mapping in the LED driver.</li>
-<li>LED color patterns are defined in <code>bridge.py</code> server-side — changing them is a config change, not a firmware change.</li>
-</ol>
-<p><strong>MCP tool registration</strong></p>
-<p>Each hardware peripheral exposed to the LLM is registered via <code>McpServer::AddTool</code>. If your board lacks a peripheral (e.g. no NFC), the tool still registers but returns an error when called. Guard missing hardware with a build-time config check:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="cp">#if CONFIG_YOUR_BOARD_HAS_NFC</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="n">McpServer</span><span class="o">::</span><span class="n">AddTool</span><span class="p">(</span><span class="s">&quot;self.nfc.read_tag&quot;</span><span class="p">,</span><span class="w"> </span><span class="cm">/* ... */</span><span class="p">);</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="cp">#endif</span>
-</code></pre></div>
-<h3 id="patch-workflow">Patch workflow<a class="headerlink" href="#patch-workflow" title="Permanent link">&para;</a></h3>
-<p>This repo carries changes to the upstream <code>78/xiaozhi-esp32</code> as a patch:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>firmware/firmware/patches/xiaozhi-esp32.patch
-</code></pre></div>
-<p>After editing the local <code>xiaozhi-esp32/</code> working tree, regenerate:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>git<span class="w"> </span>-C<span class="w"> </span>firmware/firmware/xiaozhi-esp32<span class="w"> </span>diff<span class="w"> </span>HEAD<span class="w"> </span>&gt;<span class="w"> </span>firmware/firmware/patches/xiaozhi-esp32.patch
-</code></pre></div>
-<p>Verify the patch applies cleanly to a fresh v2.2.4 checkout before committing.</p>
-<p>Changes to <code>m5stack/StackChan</code>-specific code go directly into the submodule (tracked on the <code>dotty</code> branch of <code>BrettKinny/StackChan</code>).</p>
-<hr />
-<h2 id="testing-your-port">Testing your port<a class="headerlink" href="#testing-your-port" title="Permanent link">&para;</a></h2>
-<p>Once the device connects, run through:</p>
-<ol>
-<li><strong>WebSocket handshake</strong> — <code>tools/list</code> in the server logs should list all advertised MCP tools.</li>
-<li><strong>Voice round-trip</strong> — speak a simple phrase and confirm ASR → LLM → TTS returns audio to the device.</li>
-<li><strong>MCP tool call</strong> — send a test instruction through the bridge:
-   <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://&lt;RPI_IP&gt;:8080/api/message<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;Content-Type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;content&quot;:&quot;Turn your head to the right&quot;}&#39;</span>
-</code></pre></div></li>
-<li><strong>LED feedback</strong> — confirm the three-state pattern (listening / thinking / speaking) works on your LED hardware.</li>
-</ol>
-<hr />
-<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<h2 id="cross-references">Cross-references<a class="headerlink" href="#cross-references" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../../hardware-support/">hardware-support.md</a> — verified / build-only / out-of-scope tier matrix.</li>
-<li><a href="../../hardware/">hardware.md</a> — CoreS3 specs and MCP tool catalog.</li>
-<li><a href="../../protocols/">protocols.md</a> — Xiaozhi WebSocket protocol reference.</li>
-<li><a href="https://github.com/78/xiaozhi-esp32/tree/main/boards"><code>78/xiaozhi-esp32 boards/</code></a> — upstream board definitions.</li>
-<li><a href="https://github.com/m5stack/StackChan"><code>m5stack/StackChan</code></a> — the firmware we vendor and build from.</li>
+<li><a href="../wake-word/">wake-word.md</a> — wake-net details, switching the phrase, microWakeWord roadmap.</li>
+<li><a href="../voice-pipeline/">voice-pipeline.md</a> — what happens <em>after</em> the listen window opens (VAD → ASR → LLM → TTS).</li>
+<li><a href="../modes/">modes.md</a> — the broader mode taxonomy and LED contract.</li>
+<li><a href="../interaction-map/">interaction-map.md</a> — every Dotty-side input/output, including the non-voice ones.</li>
 </ul>
-<p>Last verified: 2026-04-25.</p>
 
 
 
@@ -2524,10 +2469,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>
