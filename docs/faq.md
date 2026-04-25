@@ -54,19 +54,19 @@ With Piper TTS and a local Ollama model, nothing leaves your LAN. The trade-off 
 
 ### Is it safe for kids?
 
-The architecture supports child-safety guardrails, but this is a self-hosted system — you are responsible for the configuration.
+**Kid Mode is ON by default** (`DOTTY_KID_MODE=true`). It enforces child-safe guardrails. You can disable it with `DOTTY_KID_MODE=false` for general-purpose use.
 
-What the stack does:
+What Kid Mode enforces:
 - Per-turn sandwich enforcement in the bridge forces the LLM to respond in English with an emoji prefix, which limits the scope of unexpected output.
-- The ZeroClaw persona files (`SOUL.md`, `IDENTITY.md`) define the robot's personality and boundaries.
-- The design supports a dual kid/adult mode (kid-safe by default, adult mode toggled explicitly).
+- The ZeroClaw persona files (`SOUL.md`, `IDENTITY.md`) define the robot's personality and boundaries with kid-safe defaults.
+- Content and tone are constrained to be age-appropriate.
 
-What the stack does **not** do:
+What Kid Mode does **not** do:
 - Content-filter the LLM's output at a network level. If the LLM says something inappropriate, the bridge passes it through.
 - Prevent a determined child from asking adversarial questions.
 - Guarantee the LLM won't hallucinate inappropriate content (no model can).
 
-The safety posture is: you control the prompt, you control the model, you can read every log. That's more control than any cloud voice assistant gives you, but it's not a substitute for parental judgment.
+This is a self-hosted system — you control the prompt, the model, and every log. That's more control than any cloud voice assistant gives you, but it's not a substitute for parental judgment.
 
 ---
 
