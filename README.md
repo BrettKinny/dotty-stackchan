@@ -1,15 +1,29 @@
 # Dotty
 
-**Your self-hosted [StackChan](https://github.com/m5stack/StackChan) robot assistant.** A fully self-hosted voice stack — open-source firmware on the robot, [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) for voice I/O, a small FastAPI bridge to whatever LLM agent you want as the brain. Device firmware, ASR, session state, and persona live on your own hardware. LLM and TTS are pluggable — the reference config uses a cloud LLM (OpenRouter) and local Piper TTS, but swap in Ollama for fully offline operation with no code changes.
+**Your self-hosted [StackChan](https://github.com/m5stack/StackChan) robot assistant -- kid-safe by default, hackable by design, private by architecture.**
 
-**Hackable by design.** Every seam is swappable — the default ships a persona named "Dotty" (rename it during `make setup`), [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) as the brain, and Qwen3-30B via OpenRouter as the LLM. Fork it, rip out what you don't want, wire in your own agent / LLM / TTS / persona.
+Dotty is a fully self-hosted voice stack for the M5Stack StackChan desktop robot. Open-source firmware on the device, [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) for voice I/O, and a small FastAPI bridge to whatever LLM agent you want as the brain. ASR, TTS, session state, and persona all run on your own hardware. The LLM is pluggable -- the reference config uses OpenRouter, but swap in Ollama for fully offline operation with no code changes.
 
-Reference deployment in this repo:
+Out of the box, Dotty ships in **Kid Mode** -- age-appropriate language, safety guardrails, and content filtering are on by default. Disable Kid Mode for a general-purpose assistant. The default persona is named "Dotty" (rename it during `make setup`).
+
+## Features
+
+- **Kid Mode (on by default)** -- age-appropriate responses, content filtering, and safety guardrails. Toggle off for general-purpose use. See [`docs/child-safety.md`](./docs/child-safety.md).
+- **Local ASR** -- FunASR SenseVoiceSmall runs on your hardware, no cloud transcription.
+- **Local or cloud TTS** -- Piper (offline) or EdgeTTS (cloud). Swap with a config change.
+- **Streaming responses** -- the bridge streams LLM output to the voice pipeline for lower perceived latency.
+- **Emoji expressions** -- every response starts with an emoji that the firmware maps to a face animation (smile, laugh, sad, surprise, thinking, angry, love, sleepy, neutral).
+- **MCP tools** -- ZeroClaw exposes tools (web search, memory, etc.) to the LLM via the Model Context Protocol.
+- **Vision (camera)** -- the StackChan's built-in camera can capture images for multimodal LLM queries.
+- **Persona system** -- swappable persona prompts in `personas/`. Change the robot's personality without touching code.
+- **Calendar context** -- optional calendar integration feeds upcoming events into the conversation context.
+- **Hackable** -- every seam is swappable: LLM, TTS, ASR, agent framework, persona. Fork it, rip out what you don't want, wire in your own.
+
+## Reference deployment
+
 - **Hardware**: M5Stack StackChan (CoreS3 + servo kit), firmware built from `m5stack/StackChan`.
-- **Brain**: ZeroClaw on a Raspberry Pi.
+- **Brain**: [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) on a Raspberry Pi, with Qwen3-30B via OpenRouter as the LLM.
 - **Voice I/O**: xiaozhi-esp32-server on Docker (Unraid here, but single-host works too).
-
-> **Known limitations (pre-v1.0).** This repo is under active development and has not been field-tested by outside users. Known issues: first-audio latency is ~5s (dominated by the cloud LLM round-trip), firmware LED state colours have a race condition, servo motion can be startlingly fast, and the custom-providers layout requires manual directory creation if you're not using `make setup`. Child-safety guardrails are active but have not been red-teamed over voice (only HTTP). See [`docs/child-safety.md`](./docs/child-safety.md) for details. File issues at [GitHub Issues](../../issues).
 
 ---
 
