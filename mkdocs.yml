@@ -48,6 +48,7 @@ nav:
   - OTA Verification: docs/ota-verification.md
   - Kid Mode: docs/kid-mode.md
   - LLM Backends: docs/llm-backends.md
+  - Observability: docs/observability.md
   - Cookbook:
       - Change Persona: docs/cookbook/change-persona.md
       - Swap Voice: docs/cookbook/swap-voice.md

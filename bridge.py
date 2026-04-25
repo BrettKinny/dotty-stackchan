@@ -17,6 +17,45 @@ from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+# Observability — every metric call is wrapped in `_safe_metric(...)` so a
+# bug in metrics wiring can NEVER break the request path. The metrics
+# module also degrades to no-ops if prometheus_client is unavailable.
+try:
+    from bridge.metrics import (
+        dotty_active_acp_sessions,
+        dotty_calendar_fetch_failures_total,
+        dotty_kid_mode_active,
+        dotty_perception_events_total,
+        dotty_request_duration_seconds,
+        dotty_request_errors_total,
+        dotty_smart_mode_invocations_total,
+        metrics_app,
+        record_first_audio,
+    )
+    _METRICS_AVAILABLE = True
+except Exception:  # pragma: no cover
+    _METRICS_AVAILABLE = False
+    metrics_app = None  # type: ignore[assignment]
+    def record_first_audio(_seconds: float) -> None:  # type: ignore[no-redef]
+        return None
+
+
+def _safe_metric(fn, *args, **kwargs) -> None:
+    """Run a metrics-mutating callable, swallowing any exception.
+
+    Counter/Gauge/Histogram methods rarely raise, but we still guard the
+    call site because this code runs on the live voice path. A broken
+    metric must never take down a turn.
+    """
+    try:
+        fn(*args, **kwargs)
+    except Exception:
+        # Use debug — we don't want a noisy log every request if a label
+        # name is mistyped. The /metrics endpoint surface still works.
+        logging.getLogger("zeroclaw-bridge").debug(
+            "metric update raised; ignoring", exc_info=True,
+        )
+
 ZEROCLAW_BIN = os.environ.get("ZEROCLAW_BIN", "/root/.cargo/bin/zeroclaw")
 REQUEST_TIMEOUT_SEC = float(os.environ.get("ZEROCLAW_TIMEOUT", "90"))
 INIT_TIMEOUT_SEC = float(os.environ.get("ZEROCLAW_INIT_TIMEOUT", "10"))
@@ -49,9 +88,13 @@ def _read_kid_mode() -> bool:
 def _write_kid_mode(enabled: bool) -> None:
     _KID_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     _KID_STATE_FILE.write_text("true" if enabled else "false")
+    if _METRICS_AVAILABLE:
+        _safe_metric(dotty_kid_mode_active.set, 1 if enabled else 0)
 
 
 KID_MODE = _read_kid_mode()
+if _METRICS_AVAILABLE:
+    _safe_metric(dotty_kid_mode_active.set, 1 if KID_MODE else 0)
 
 LOCAL_TZ = ZoneInfo(os.environ.get("TZ", "Australia/Brisbane"))
 WEATHER_LOCATION = os.environ.get("WEATHER_LOCATION", "Brisbane")
@@ -443,6 +486,8 @@ async def _refresh_caches() -> None:
             # Don't update `fetched` so the next request retries; bump
             # failure counter so the polling loop can back off.
             _calendar_cache["consecutive_failures"] += 1
+            if _METRICS_AVAILABLE:
+                _safe_metric(dotty_calendar_fetch_failures_total.inc)
             log.warning("calendar refresh failed (consecutive=%d)",
                         _calendar_cache["consecutive_failures"], exc_info=True)
 
@@ -650,6 +695,11 @@ class ACPClient:
         self._sid_created = now
         self._sid_last_used = now
         self._sid_turns = 0
+        if _METRICS_AVAILABLE:
+            # Single ACP child = at most one session, but a Gauge tolerates
+            # the abstraction — we set rather than inc so respawns don't
+            # double-count if a close was missed.
+            _safe_metric(dotty_active_acp_sessions.set, 1)
 
     async def _close_session(self, sid: str) -> None:
         try:
@@ -664,6 +714,9 @@ class ACPClient:
                 log.debug("session/stop ack timed out (non-fatal)")
         except Exception:
             log.debug("session/stop best-effort close raised; ignoring", exc_info=True)
+        finally:
+            if _METRICS_AVAILABLE:
+                _safe_metric(dotty_active_acp_sessions.set, 0)
 
     async def _cancel_prompt(self) -> None:
         """Kill the ACP child to guarantee no stale events after barge-in.
@@ -674,6 +727,8 @@ class ACPClient:
         self._in_flight_rid = None
         self._sid = None
         self._sid_turns = 0
+        if _METRICS_AVAILABLE:
+            _safe_metric(dotty_active_acp_sessions.set, 0)
         if self._proc is not None and self._proc.returncode is None:
             try:
                 self._proc.terminate()
@@ -833,6 +888,8 @@ class ACPClient:
                     self._proc.kill()
                 except ProcessLookupError:
                     pass
+        if _METRICS_AVAILABLE:
+            _safe_metric(dotty_active_acp_sessions.set, 0)
 
 
 acp = ACPClient()
@@ -1117,6 +1174,15 @@ def _perception_unsubscribe(q: asyncio.Queue) -> None:
 
 
 def _perception_broadcast(event: dict) -> None:
+    # Bounded label cardinality: only count names we know about so a
+    # buggy or malicious payload can't blow up the time-series count.
+    name = event.get("name") or ""
+    if _METRICS_AVAILABLE and name in (
+        "face_detected", "face_lost", "sound_event",
+    ):
+        _safe_metric(
+            dotty_perception_events_total.labels(type=name).inc,
+        )
     if not _perception_listeners:
         return
     for q in list(_perception_listeners):
@@ -1397,6 +1463,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="ZeroClaw Bridge", lifespan=lifespan)
 
+# Prometheus exposition. Mounted as an ASGI sub-app so it shares the
+# bridge's listener — keep that listener LAN-only (bind 0.0.0.0 on a
+# private network or 127.0.0.1 + a reverse proxy). NEVER expose /metrics
+# to the public internet; it leaks operational details about the host.
+if _METRICS_AVAILABLE and metrics_app is not None:
+    try:
+        app.mount("/metrics", metrics_app())
+        log.info("Prometheus /metrics mounted")
+    except Exception:
+        log.exception("metrics mount failed — /metrics will be unavailable")
+
 try:
     from bridge.portal import router as _portal_router, configure as _configure_portal
     app.include_router(_portal_router)
@@ -1431,22 +1508,42 @@ async def calendar_today(
     firmware-side `MCP_TOOL_ALLOWLIST` is closed and we want this stay
     a passive read endpoint, not something the LLM can call.
     """
-    # Triggers a lazy refresh if the cache is stale or the day rolled.
-    await _refresh_caches()
-    events = _calendar_cache.get("events") or []
-    cleaned = summarize_for_prompt(
-        events, person=person, include_household=include_household,
-    )
-    return {
-        "ok": True,
-        "date": _calendar_cache.get("date", ""),
-        "fetched": _calendar_cache.get("fetched", 0.0),
-        "consecutive_failures": _calendar_cache.get("consecutive_failures", 0),
-        "person": person,
-        "include_household": include_household,
-        "events": cleaned,
-        "count": len(cleaned),
-    }
+    t0 = perf_counter()
+    err_kind: str | None = None
+    try:
+        # Triggers a lazy refresh if the cache is stale or the day rolled.
+        await _refresh_caches()
+        events = _calendar_cache.get("events") or []
+        cleaned = summarize_for_prompt(
+            events, person=person, include_household=include_household,
+        )
+        return {
+            "ok": True,
+            "date": _calendar_cache.get("date", ""),
+            "fetched": _calendar_cache.get("fetched", 0.0),
+            "consecutive_failures": _calendar_cache.get("consecutive_failures", 0),
+            "person": person,
+            "include_household": include_household,
+            "events": cleaned,
+            "count": len(cleaned),
+        }
+    except Exception:
+        err_kind = "exception"
+        raise
+    finally:
+        if _METRICS_AVAILABLE:
+            _safe_metric(
+                dotty_request_duration_seconds.labels(
+                    endpoint="calendar_today",
+                ).observe,
+                perf_counter() - t0,
+            )
+            if err_kind:
+                _safe_metric(
+                    dotty_request_errors_total.labels(
+                        endpoint="calendar_today", kind=err_kind,
+                    ).inc,
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -1469,22 +1566,42 @@ async def perception_event(payload: PerceptionEventIn) -> None:
     Updates per-device state and broadcasts to all in-process
     subscribers (no consumers in Phase 1.1; added in 1.5 / 1.6)."""
     import time as _time
-    ts = payload.ts if payload.ts is not None else _time.time()
-    event = {
-        "device_id": payload.device_id,
-        "ts": ts,
-        "name": payload.name,
-        "data": payload.data or {},
-    }
-    _update_perception_state(
-        payload.device_id, payload.name, event["data"], ts,
-    )
-    _perception_broadcast(event)
-    log.info(
-        "perception event: device=%s name=%s data=%s",
-        payload.device_id, payload.name, event["data"],
-    )
-    return None
+    t0 = perf_counter()
+    err_kind: str | None = None
+    try:
+        ts = payload.ts if payload.ts is not None else _time.time()
+        event = {
+            "device_id": payload.device_id,
+            "ts": ts,
+            "name": payload.name,
+            "data": payload.data or {},
+        }
+        _update_perception_state(
+            payload.device_id, payload.name, event["data"], ts,
+        )
+        _perception_broadcast(event)
+        log.info(
+            "perception event: device=%s name=%s data=%s",
+            payload.device_id, payload.name, event["data"],
+        )
+        return None
+    except Exception:
+        err_kind = "exception"
+        raise
+    finally:
+        if _METRICS_AVAILABLE:
+            _safe_metric(
+                dotty_request_duration_seconds.labels(
+                    endpoint="perception_event",
+                ).observe,
+                perf_counter() - t0,
+            )
+            if err_kind:
+                _safe_metric(
+                    dotty_request_errors_total.labels(
+                        endpoint="perception_event", kind=err_kind,
+                    ).inc,
+                )
 
 
 @app.get("/api/perception/state")
@@ -1551,31 +1668,51 @@ async def vision_explain(
     question: str = Form("What do you see?"),
     file: UploadFile = File(...),
 ):
-    device_id = request.headers.get("device-id", "unknown")
-    jpeg_bytes = await file.read()
-    log.info(
-        "vision device=%s question=%s bytes=%d",
-        device_id, question[:80], len(jpeg_bytes),
-    )
-    b64_image = base64.b64encode(jpeg_bytes).decode("ascii")
-    description = await asyncio.to_thread(_call_vision_api, b64_image, question)
+    t0 = perf_counter()
+    err_kind: str | None = None
+    try:
+        device_id = request.headers.get("device-id", "unknown")
+        jpeg_bytes = await file.read()
+        log.info(
+            "vision device=%s question=%s bytes=%d",
+            device_id, question[:80], len(jpeg_bytes),
+        )
+        b64_image = base64.b64encode(jpeg_bytes).decode("ascii")
+        description = await asyncio.to_thread(_call_vision_api, b64_image, question)
 
-    _vision_cache[device_id] = {
-        "description": description,
-        "timestamp": perf_counter(),
-        "jpeg_bytes": jpeg_bytes,
-        "question": question,
-    }
-    event = _vision_events.get(device_id)
-    if event:
-        event.set()
+        _vision_cache[device_id] = {
+            "description": description,
+            "timestamp": perf_counter(),
+            "jpeg_bytes": jpeg_bytes,
+            "question": question,
+        }
+        event = _vision_events.get(device_id)
+        if event:
+            event.set()
 
-    now = perf_counter()
-    for k in [k for k, v in _vision_cache.items() if now - v["timestamp"] > VISION_CACHE_TTL_SEC]:
-        _vision_cache.pop(k, None)
+        now = perf_counter()
+        for k in [k for k, v in _vision_cache.items() if now - v["timestamp"] > VISION_CACHE_TTL_SEC]:
+            _vision_cache.pop(k, None)
 
-    log.info("vision result device=%s desc=%s", device_id, description[:120])
-    return {"description": description}
+        log.info("vision result device=%s desc=%s", device_id, description[:120])
+        return {"description": description}
+    except Exception:
+        err_kind = "exception"
+        raise
+    finally:
+        if _METRICS_AVAILABLE:
+            _safe_metric(
+                dotty_request_duration_seconds.labels(
+                    endpoint="vision_explain",
+                ).observe,
+                perf_counter() - t0,
+            )
+            if err_kind:
+                _safe_metric(
+                    dotty_request_errors_total.labels(
+                        endpoint="vision_explain", kind=err_kind,
+                    ).inc,
+                )
 
 
 @app.get("/api/vision/latest/{device_id}")
@@ -1600,6 +1737,8 @@ async def vision_latest(device_id: str):
 async def message(payload: MessageIn) -> MessageOut:
     session_id = payload.session_id or str(uuid.uuid4())
     is_smart = bool(SMART_MODEL and (payload.metadata or {}).get("smart_mode"))
+    if _METRICS_AVAILABLE and is_smart:
+        _safe_metric(dotty_smart_mode_invocations_total.inc)
     log.info("msg channel=%s session=%s smart=%s len=%d",
              payload.channel, session_id, is_smart, len(payload.content))
     await _refresh_caches()
@@ -1635,12 +1774,30 @@ async def message(payload: MessageIn) -> MessageOut:
         log.exception("ACP invocation failed")
         answer = f"{FALLBACK_EMOJI} Something went wrong, please try again."
         error_msg = "exception"
+    elapsed_s = perf_counter() - t0
+    if _METRICS_AVAILABLE:
+        _safe_metric(
+            dotty_request_duration_seconds.labels(endpoint="message").observe,
+            elapsed_s,
+        )
+        if error_msg:
+            _safe_metric(
+                dotty_request_errors_total.labels(
+                    endpoint="message", kind=error_msg,
+                ).inc,
+            )
+        else:
+            # Non-streaming first-audio = full response latency from the
+            # bridge's POV (xiaozhi-server pipelines TTS once it gets the
+            # full reply). Streaming endpoint records a tighter value at
+            # first chunk emit.
+            _safe_metric(record_first_audio, elapsed_s)
     _convo_log.log_turn(
         channel=payload.channel or "",
         session_id=session_id,
         request_text=payload.content,
         response_text=answer,
-        latency_ms=(perf_counter() - t0) * 1000.0,
+        latency_ms=elapsed_s * 1000.0,
         error=error_msg,
     )
     return MessageOut(response=answer, session_id=session_id)
@@ -1922,14 +2079,24 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
     """
     session_id = payload.session_id or str(uuid.uuid4())
     is_smart = bool(SMART_MODEL and (payload.metadata or {}).get("smart_mode"))
+    if _METRICS_AVAILABLE and is_smart:
+        _safe_metric(dotty_smart_mode_invocations_total.inc)
     log.info(
         "stream channel=%s session=%s smart=%s len=%d",
         payload.channel, session_id, is_smart, len(payload.content),
     )
     await _refresh_caches()
 
+    # `t_request_start` is captured per-request and read inside on_chunk
+    # so the first-audio histogram observes the elapsed time at the
+    # exact point the bridge emits its first content chunk to the client.
+    t_request_start = perf_counter()
     queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
-    state = {"seen_nonws": False, "blocked": False, "sentence_ends": 0, "truncated": False}
+    state = {
+        "seen_nonws": False, "blocked": False,
+        "sentence_ends": 0, "truncated": False,
+        "first_audio_recorded": False,
+    }
 
     async def on_chunk(content: str) -> None:
         content = _clean_for_tts(content)
@@ -1949,6 +2116,17 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
                 state["seen_nonws"] = True
                 if not any(stripped.startswith(e) for e in ALLOWED_EMOJIS):
                     content = f"{FALLBACK_EMOJI} " + content
+                # First chunk that carries non-whitespace content == the
+                # first-audio milestone from the bridge's perspective.
+                # xiaozhi-server pipelines TTS synthesis off of this, so
+                # (bridge_first_chunk + tts_synth_first) ~= true audible
+                # latency on-device. We capture the bridge half here.
+                if _METRICS_AVAILABLE and not state["first_audio_recorded"]:
+                    state["first_audio_recorded"] = True
+                    _safe_metric(
+                        record_first_audio,
+                        perf_counter() - t_request_start,
+                    )
         if not is_smart:
             out = []
             for ch in content:
@@ -2009,12 +2187,26 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
             log.exception("ACP invocation failed (stream)")
             error_msg = "exception"
             await queue.put(("error", f"{FALLBACK_EMOJI} Something went wrong, please try again."))
+        elapsed_s = perf_counter() - t0
+        if _METRICS_AVAILABLE:
+            _safe_metric(
+                dotty_request_duration_seconds.labels(
+                    endpoint="message_stream",
+                ).observe,
+                elapsed_s,
+            )
+            if error_msg:
+                _safe_metric(
+                    dotty_request_errors_total.labels(
+                        endpoint="message_stream", kind=error_msg,
+                    ).inc,
+                )
         _convo_log.log_turn(
             channel=payload.channel or "",
             session_id=session_id,
             request_text=payload.content,
             response_text=full,
-            latency_ms=(perf_counter() - t0) * 1000.0,
+            latency_ms=elapsed_s * 1000.0,
             error=error_msg,
         )
 
