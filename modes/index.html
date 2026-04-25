@@ -1,0 +1,2710 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Canonical taxonomy of Dotty's behavioural modes, what triggers each, what LED plays, and how they hand off to one another.">
+      
+      
+      
+        <link rel="canonical" href="https://brettkinny.github.io/dotty-stackchan/modes/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Modes & LED Contract - Dotty</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#modes-led-contract" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Dotty" class="md-header__button md-logo" aria-label="Dotty" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Dotty
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Modes & LED Contract
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/BrettKinny/dotty-stackchan" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    BrettKinny/dotty-stackchan
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../SETUP.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../docs/architecture.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../docs/hardware.md" class="md-tabs__link">
+          
+  
+  
+  Hardware
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../docs/voice-pipeline.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Voice Pipeline
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../docs/voice-catalog.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Voice Catalog
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../docs/brain.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Brain
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../docs/protocols.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Protocols
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../docs/ota-verification.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  OTA Verification
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../docs/kid-mode.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Kid Mode
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../docs/llm-backends.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  LLM Backends
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../docs/observability.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Observability
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../docs/audio-scene-classifier.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Audio Scene Classifier
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../docs/cookbook/change-persona.md" class="md-tabs__link">
+          
+  
+  
+  Cookbook
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../docs/advanced/multi-host.md" class="md-tabs__link">
+          
+  
+  
+  Advanced
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../docs/emoji-mapping.md" class="md-tabs__link">
+          
+  
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../docs/troubleshooting.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Troubleshooting
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../docs/faq.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  FAQ
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../docs/about.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  About
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../ROADMAP.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Roadmap
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../CONTRIBUTING.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../docs/style.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Style Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../SECURITY.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Security
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../COMPATIBILITY.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Compatibility
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../docs/sbom.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  SBOM
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../docs/versioning.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Versioning
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../CHANGELOG.md" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Dotty" class="md-nav__button md-logo" aria-label="Dotty" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Dotty
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/BrettKinny/dotty-stackchan" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    BrettKinny/dotty-stackchan
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SETUP.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/architecture.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hardware
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Hardware
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/hardware.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hardware
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/hardware-support.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hardware Support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/voice-pipeline.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Voice Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/voice-catalog.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Voice Catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/brain.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Brain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/protocols.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Protocols
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/ota-verification.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OTA Verification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/kid-mode.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kid Mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/llm-backends.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LLM Backends
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/observability.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/audio-scene-classifier.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Audio Scene Classifier
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_14" id="__nav_14_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cookbook
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Cookbook
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/cookbook/change-persona.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Change Persona
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/cookbook/swap-voice.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Swap Voice
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/cookbook/run-fully-local.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run Fully Local
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/cookbook/add-emoji.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add Emoji
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/cookbook/disable-kid-mode.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Disable Kid Mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_15" >
+        
+          
+          <label class="md-nav__link" for="__nav_15" id="__nav_15_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Advanced
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_15_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_15">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Advanced
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/advanced/multi-host.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multi-host deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/advanced/variant-port-guide.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Variant port guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_16" >
+        
+          
+          <label class="md-nav__link" for="__nav_16" id="__nav_16_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_16_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_16">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/emoji-mapping.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Emoji Mapping
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/interaction-map.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interaction Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/latent-capabilities.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Latent Capabilities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/references.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    References
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/troubleshooting.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/faq.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/about.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    About
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ROADMAP.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/style.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Style Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SECURITY.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../COMPATIBILITY.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compatibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/sbom.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SBOM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docs/versioning.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CHANGELOG.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tldr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TL;DR
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mode-tiers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mode tiers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#per-mode-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-mode reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Per-mode reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#face_tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        face_tracking
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#listening-thinking-talking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        listening / thinking / talking
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smart" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        smart
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        vision
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dance-sing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dance / sing
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#state-transition-diagram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State transition diagram
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#led-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LED contract
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="LED contract">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#led-control-surfaces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LED control surfaces
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#available-led-primitives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Available LED primitives
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#designed-but-not-yet-implemented" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Designed but not yet implemented
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Designed but not yet implemented">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#face-detected-auto-listen-deferred" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Face-detected auto-listen (deferred)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hybrid-smart-mode-led-shipped" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hybrid smart-mode LED (shipped)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#future-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Future modes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="modes-led-contract">Modes &amp; LED Contract<a class="headerlink" href="#modes-led-contract" title="Permanent link">&para;</a></h1>
+<p>One-page reference for every behavioural mode Dotty has, what colour the ring shows, and how a mode hands off to the next. Pair this with <a href="../interaction-map/">interaction-map.md</a> (which catalogs the underlying signals) and <a href="../hardware/">hardware.md</a> (which catalogs the physical LED ring + servos).</p>
+<h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Dotty has four mode <strong>tiers</strong>: ambient (idle), conversation (talking), performance (one-shot action), maintenance (config / OTA).</li>
+<li>The 12-LED WS2812 ring on the front panel is the primary feedback channel. Two control paths drive it: <strong>firmware-automatic</strong> (reacts to device state) and <strong>server-overridable</strong> (MCP <code>set_led_color</code>).</li>
+<li>Most mode transitions are voice-phrase triggered today. Face-tracking is firmware-resident; dance / sing / smart / vision are dispatched server-side from <code>receiveAudioHandle.py</code>.</li>
+<li>One behaviour is <strong>designed but not yet implemented</strong>: face-detected auto-listen (face → 5 s manual-listen window → fall back to face-tracking). See <a href="#designed-but-not-yet-implemented">Designed but not yet implemented</a> below.</li>
+<li><strong>Hybrid smart-mode LED is live</strong> (bridge commit <code>b72b121</code>, firmware <code>32163bd</code>): LED index 0 holds purple throughout the smart-mode turn; remaining 11 LEDs continue showing listen / think / talk colours.</li>
+</ul>
+<h2 id="mode-tiers">Mode tiers<a class="headerlink" href="#mode-tiers" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Ambient        face_tracking          (default; no user intent yet)
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>               sleep                   (deferred — see Future modes)
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>Conversation   listening
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>               thinking                 sub-states of one conversation,
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>               talking                  owned by xiaozhi-server
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>               smart                   (capable-model variant)
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>Performance   dance / sing             (rainbow timeline + choreography)
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>               vision                  (camera capture + describe)
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>Maintenance   wifi_configuring
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>               connecting              firmware-driven during boot / OTA
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>               upgrading
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>               activating
+</code></pre></div>
+<h2 id="per-mode-reference">Per-mode reference<a class="headerlink" href="#per-mode-reference" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Tier</th>
+<th>Triggered by</th>
+<th>LED today</th>
+<th>Lives in</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>face_tracking</code></td>
+<td>ambient</td>
+<td>firmware face-detect (Idle ↔ Tracking ↔ GracePeriod)</td>
+<td>left LED green when face seen, ring otherwise off (FadeOut)</td>
+<td><code>firmware/firmware/main/stackchan/modifiers/face_tracking.cpp</code></td>
+</tr>
+<tr>
+<td><code>listening</code></td>
+<td>conversation</td>
+<td>xiaozhi VAD detects speech start</td>
+<td>ring solid red <code>(32,0,0)</code></td>
+<td><code>firmware/firmware/xiaozhi-esp32/main/led/circular_strip.cc</code></td>
+</tr>
+<tr>
+<td><code>thinking</code></td>
+<td>conversation</td>
+<td>STT frame received (ASR result emitted)</td>
+<td>ring solid orange (firmware-side)</td>
+<td>firmware (triggered server-side via <code>llm</code> emotion frame)</td>
+</tr>
+<tr>
+<td><code>talking</code></td>
+<td>conversation</td>
+<td>TTS <code>sentence_start</code> event</td>
+<td>ring solid green <code>(0,32,0)</code></td>
+<td><code>firmware/firmware/xiaozhi-esp32/main/led/circular_strip.cc</code></td>
+</tr>
+<tr>
+<td><code>smart</code></td>
+<td>conversation</td>
+<td>voice phrase: <code>"smart mode"</code>, <code>"think harder"</code>, <code>"big brain"</code></td>
+<td>one-shot purple <code>(168,0,168)</code> flash on entry, then normal listen / think / talk</td>
+<td><code>receiveAudioHandle.py</code> (smart-mode dispatch) + <code>bridge.py</code> (<code>SMART_MODEL</code> routing)</td>
+</tr>
+<tr>
+<td><code>vision</code></td>
+<td>performance</td>
+<td>voice phrase: <code>"what do you see"</code>, <code>"take a photo"</code>, <code>"describe what"</code></td>
+<td>none distinct (uses normal speech LEDs)</td>
+<td><code>receiveAudioHandle.py</code> (<code>_handle_vision</code>) + <code>bridge.py</code> (<code>/api/vision/*</code>)</td>
+</tr>
+<tr>
+<td><code>dance</code> / <code>sing</code></td>
+<td>performance</td>
+<td>voice phrase: <code>"dance"</code>, <code>"sing"</code>, song-name (<code>"macarena"</code>, <code>"tetris"</code>, <code>"star wars"</code>, …)</td>
+<td>timeline-driven multi-colour rainbow (see <a href="#dance--sing">Dance &amp; sing</a>)</td>
+<td><code>receiveAudioHandle.py</code> (<code>_handle_dance</code>) + <code>dances.py</code></td>
+</tr>
+<tr>
+<td><code>wifi_configuring</code></td>
+<td>maintenance</td>
+<td>first boot, no creds</td>
+<td>blue blink, 500 ms</td>
+<td><code>firmware/firmware/xiaozhi-esp32/main/led/circular_strip.cc</code></td>
+</tr>
+<tr>
+<td><code>connecting</code></td>
+<td>maintenance</td>
+<td>post-boot, joining WiFi/WS</td>
+<td>solid blue (low-brightness)</td>
+<td>same</td>
+</tr>
+<tr>
+<td><code>upgrading</code></td>
+<td>maintenance</td>
+<td>OTA in progress</td>
+<td>green blink, 100 ms</td>
+<td>same</td>
+</tr>
+<tr>
+<td><code>activating</code></td>
+<td>maintenance</td>
+<td>provisioning code entry</td>
+<td>green blink, 500 ms</td>
+<td>same</td>
+</tr>
+</tbody>
+</table>
+<h3 id="face_tracking">face_tracking<a class="headerlink" href="#face_tracking" title="Permanent link">&para;</a></h3>
+<p>Three-state firmware modifier (<code>face_tracking.cpp</code>):</p>
+<ul>
+<li><strong>Idle</strong> — no face seen. Idle motion runs (random head looks every 4–8 s). Left LED off.</li>
+<li><strong>Tracking</strong> — face detected. Idle motion paused. Head smoothly follows normalised bbox via <code>motion().lookAtNormalized()</code>. Left LED green <code>(0,168,0)</code>.</li>
+<li><strong>GracePeriod</strong> — face just lost. 2 s window where re-acquisition snaps back to Tracking. After 2 s, returns to Idle.</li>
+</ul>
+<p>The Tracking ↔ GracePeriod ↔ Idle loop is <strong>entirely firmware-resident</strong>. The server-side Python pipeline does not know whether a face is currently visible. This is the gap the <a href="#face-detected-auto-listen-deferred">face-detected auto-listen</a> design closes.</p>
+<h3 id="listening-thinking-talking">listening / thinking / talking<a class="headerlink" href="#listening-thinking-talking" title="Permanent link">&para;</a></h3>
+<p>These are sub-states of a single conversation turn. Driven from xiaozhi-server, signalled to the firmware via the existing event protocol (<code>stt</code>, <code>llm</code>, <code>tts/start</code>, <code>tts/sentence_start</code>). The firmware drives LEDs from device-state changes via <code>CircularStrip::OnStateChanged()</code>. See <a href="../interaction-map/">interaction-map.md</a> for the per-event signal table.</p>
+<h3 id="smart">smart<a class="headerlink" href="#smart" title="Permanent link">&para;</a></h3>
+<p>Capable-model variant of conversation. Triggered by phrase match in <code>receiveAudioHandle.py</code> against <code>_SMART_MODE_PHRASES</code>. Two activation paths:</p>
+<ul>
+<li><strong>One-shot</strong>: <code>"smart mode, what is the speed of light?"</code> → trigger phrase + remaining query routed to the capable model in a single turn.</li>
+<li><strong>Two-turn</strong>: <code>"smart mode."</code> (no query) → robot acknowledges (<code>"Smart mode! What would you like to know?"</code>), <code>conn.smart_mode_next = True</code> flag set; the next turn is forced through smart routing.</li>
+</ul>
+<p>The capable model is configured via <code>SMART_MODEL</code> env on the bridge (e.g. Claude Sonnet via OpenRouter); falls through to the default brain if unset. LED: on smart-mode entry <code>set_led_color(168,0,168)</code> pulses the ring, then <code>conn.smart_mode_active = True</code> is set; subsequently <code>_send_led_color</code> re-asserts pixel <code>SMART_MODE_LED_INDEX</code> (default 0) purple via <code>set_led_multi</code> after every full-ring state change, so the indicator persists until the turn completes (flash-pending: firmware <code>32163bd</code>).</p>
+<h3 id="vision">vision<a class="headerlink" href="#vision" title="Permanent link">&para;</a></h3>
+<p>Camera-driven multimodal turn. Phrase match against <code>VISION_PHRASES</code> triggers an MCP <code>tools/call</code> for <code>self.camera.take_photo</code>, then long-polls the bridge's <code>/api/vision/latest/&lt;device_id&gt;</code> for the description. Description is injected as context into the next ZeroClaw prompt; LLM responds naturally as if looking at the photo.</p>
+<h3 id="dance-sing">dance / sing<a class="headerlink" href="#dance-sing" title="Permanent link">&para;</a></h3>
+<p>Unified handler — both phrases route through <code>_handle_dance()</code>. Behaviour:</p>
+<ol>
+<li>Phrase match → registry lookup in <code>DANCE_REGISTRY</code> (<code>dances.py</code>).</li>
+<li>If preset has a renderable <code>audio_file</code> (<code>.mid</code> / <code>.wav</code>): render to Opus and stream into the TTS queue while a parallel asyncio task walks the choreography timeline (servo <code>HEAD</code> events + <code>LED</code> events).</li>
+<li>If no audio: prompt the LLM for a spoken intro and run choreography only.</li>
+</ol>
+<p>Six choreographies ship today, all in <code>dances.py</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Choreography</th>
+<th>LED feel</th>
+<th>Used by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>macarena_moves</code></td>
+<td>hand-tuned 14-event timeline (purple / red / blue / green / yellow / cyan / orange / white)</td>
+<td><code>macarena</code></td>
+</tr>
+<tr>
+<td><code>head_bob</code></td>
+<td>steady cool blue <code>(0, 80, 168)</code></td>
+<td>(none currently)</td>
+</tr>
+<tr>
+<td><code>color_party</code></td>
+<td>rainbow palette, colour change every 2 beats</td>
+<td><code>mario</code></td>
+</tr>
+<tr>
+<td><code>bouncy_party</code></td>
+<td>rainbow palette, colour change every beat (faster)</td>
+<td><code>tetris</code>, <code>pirates</code></td>
+</tr>
+<tr>
+<td><code>sleepy_sway</code></td>
+<td>warm dim <code>(100, 40, 0)</code>, gentle sway</td>
+<td>(none currently)</td>
+</tr>
+<tr>
+<td><code>look_around</code></td>
+<td>deep blue / white pulses, dramatic poses</td>
+<td><code>mountain_king</code>, <code>star_wars</code></td>
+</tr>
+</tbody>
+</table>
+<p>The shared rainbow palette (<code>_RAINBOW</code> in <code>dances.py</code>) is 8 colours: red, orange, yellow, green, cyan, blue, violet, magenta. New songs slot in by adding an entry to <code>DANCE_REGISTRY</code> and (if needed) a new choreography factory in <code>CHOREOGRAPHIES</code>.</p>
+<h2 id="state-transition-diagram">State transition diagram<a class="headerlink" href="#state-transition-diagram" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>stateDiagram-v2
+    [*] --&gt; face_tracking_idle: boot complete
+
+    state face_tracking {
+        face_tracking_idle: Idle
+        face_tracking_active: Tracking
+        face_tracking_grace: GracePeriod
+
+        face_tracking_idle --&gt; face_tracking_active: face detected
+        face_tracking_active --&gt; face_tracking_grace: face lost
+        face_tracking_grace --&gt; face_tracking_active: face re-acquired
+        face_tracking_grace --&gt; face_tracking_idle: 2 s grace expires
+    }
+
+    face_tracking_idle --&gt; listening: VAD speech start
+    face_tracking_active --&gt; listening: VAD speech start
+
+    state conversation {
+        listening --&gt; thinking: STT result
+        thinking --&gt; talking: TTS sentence_start
+        talking --&gt; listening: TTS done + VAD speech start
+    }
+
+    listening --&gt; smart: phrase = "smart mode"
+    smart --&gt; conversation: turn complete
+    listening --&gt; vision: phrase = "what do you see"
+    vision --&gt; conversation: description injected
+    listening --&gt; performance: phrase = "dance" / "sing"
+
+    state performance {
+        dance
+        sing
+    }
+
+    conversation --&gt; face_tracking_idle: idle 30 s (proposed)
+    performance --&gt; face_tracking_idle: completion or barge-in</code></pre>
+<p>The <code>face_tracking → listening</code> edge currently fires only when the user speaks (VAD trips). With <a href="#face-detected-auto-listen-deferred">face-detected auto-listen</a>, that edge would also fire briefly when a face is acquired, opening a 5 s manual-listen window before falling back to face-tracking.</p>
+<h2 id="led-contract">LED contract<a class="headerlink" href="#led-contract" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Resting LED</th>
+<th>Transition cue</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>face_tracking</code> idle</td>
+<td>ring off (FadeOut)</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>face_tracking</code> active</td>
+<td>left LED green; ring breathing low-green <em>(proposed)</em></td>
+<td>brief breathe-up on face acquire <em>(proposed)</em></td>
+</tr>
+<tr>
+<td><code>listening</code></td>
+<td>ring solid red <code>(32,0,0)</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>thinking</code></td>
+<td>ring solid orange</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>talking</code></td>
+<td>ring solid green <code>(0,32,0)</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>smart</code> (active turn)</td>
+<td>one ring LED held purple <code>(168,0,168)</code>; remaining 11 LEDs continue listen / think / talk <em>(proposed)</em></td>
+<td>purple pulse on entry; held LED clears on exit</td>
+</tr>
+<tr>
+<td><code>vision</code></td>
+<td>brief cyan flash on capture <em>(proposed)</em></td>
+<td>restores prior mode's LED after capture</td>
+</tr>
+<tr>
+<td><code>dance</code> / <code>sing</code></td>
+<td>timeline rainbow (choreography-driven)</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>sleep</code> <em>(deferred)</em></td>
+<td>all off</td>
+<td>brief fade-out on entry</td>
+</tr>
+<tr>
+<td><code>wifi_configuring</code></td>
+<td>blue blink, 500 ms</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>connecting</code></td>
+<td>solid blue, low-brightness</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>upgrading</code></td>
+<td>green blink, 100 ms</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>activating</code></td>
+<td>green blink, 500 ms</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h3 id="led-control-surfaces">LED control surfaces<a class="headerlink" href="#led-control-surfaces" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Firmware-automatic</strong> — <code>CircularStrip::OnStateChanged()</code> (<code>firmware/firmware/xiaozhi-esp32/main/led/circular_strip.cc</code>) maps device state → solid / blink / scroll patterns. Triggered by the firmware's own <code>kDeviceState*</code> enum changes.</li>
+<li><strong>Server-overridable</strong> — two MCP tools invoked via helpers in <code>receiveAudioHandle.py</code>:</li>
+<li><code>self.robot.set_led_color(r, g, b)</code> → <code>_send_led_color()</code>: paints the full 12-LED ring one colour; used for smart-mode entry pulse and dance timeline events. Overrides firmware-automatic LED until the next firmware state change.</li>
+<li><code>self.robot.set_led_multi(index, r, g, b)</code> → <code>_send_led_multi()</code> (firmware ≥ <code>32163bd</code>): sets a <strong>single</strong> pixel without disturbing the rest. Bypasses the colour-animation tick, so it persists across firmware state changes that use <code>SetAllColor</code>. Used by the hybrid smart-mode indicator (re-asserted after each <code>_send_led_color</code> call when <code>conn.smart_mode_active</code> is True). Degrades gracefully on older firmware.</li>
+</ul>
+<h3 id="available-led-primitives">Available LED primitives<a class="headerlink" href="#available-led-primitives" title="Permanent link">&para;</a></h3>
+<p>Firmware <code>CircularStrip</code> (<code>circular_strip.h</code>) exposes: <code>SetAllColor</code>, <code>SetSingleColor</code>, <code>SetMultiColors</code>, <code>Blink(color, interval_ms)</code>, <code>Breathe(low, high, interval_ms)</code>, <code>Scroll(low, high, length, interval_ms)</code>, <code>Rainbow(low, high, interval_ms)</code>, <code>FadeOut(interval_ms)</code>. Brightness is <code>DEFAULT_BRIGHTNESS = 32</code>, <code>LOW_BRIGHTNESS = 4</code> (0–255 scale).</p>
+<p>The <code>set_led_multi</code> MCP tool (firmware <code>32163bd</code>) wraps <code>setColorAt()</code> on the <code>NeonLight</code> objects (index 0–5 → LeftNeonLight, 6–11 → RightNeonLight). Note: <code>setColorAt()</code> is a per-pixel write that bypasses <code>_color_anim</code>, which is why re-assertion is needed after full-ring colour changes.</p>
+<p>Anything we want to design fits inside this primitive set.</p>
+<h2 id="designed-but-not-yet-implemented">Designed but not yet implemented<a class="headerlink" href="#designed-but-not-yet-implemented" title="Permanent link">&para;</a></h2>
+<h3 id="face-detected-auto-listen-deferred">Face-detected auto-listen (deferred)<a class="headerlink" href="#face-detected-auto-listen-deferred" title="Permanent link">&para;</a></h3>
+<p><strong>Problem.</strong> Face tracking detects a face and turns the left LED green, but the event never reaches the Python side. The user has to speak first to engage a conversation. Walking up and waiting at the robot does nothing.</p>
+<p><strong>Design.</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>[face_tracking idle] ──face detected──▶ [face_tracking active, LED green]
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>                                          │
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>                                          ├─ speech heard within 5 s ─▶ [listening] (normal flow)
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>                                          │
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>                                          └─ 5 s of silence ─────────▶ stay in [face_tracking active]
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>[face_tracking active] ──face lost &gt; 2 s grace──▶ [face_tracking idle]
+</code></pre></div>
+<p><strong>Implementation sketch</strong> (deferred to a follow-up task):</p>
+<ol>
+<li><strong>Firmware</strong> (<code>face_tracking.cpp</code> Idle → Tracking edge): emit a server-bound event, e.g. <code>{"type":"event","name":"face_detected"}</code>, via the same outbound JSON channel used for <code>listen</code> / <code>abort</code> frames.</li>
+<li><strong>Server</strong> (<code>receiveAudioHandle.py</code>): on <code>face_detected</code>, send <code>{"type":"listen","state":"start","mode":"manual"}</code> to the device, start a 5 s timer. If VAD trips within the window → normal conversation flow takes over. If timer expires without VAD → send <code>{"type":"listen","state":"stop"}</code> and remain in face-tracking.</li>
+</ol>
+<p><strong>Why it's deferred.</strong> This requires firmware changes (new outbound event) which mean an OTA reflash. Captured here so the design is durable; implementation tracked in <a href="../ROADMAP.md"><code>ROADMAP.md</code></a>.</p>
+<h3 id="hybrid-smart-mode-led-shipped">Hybrid smart-mode LED (shipped)<a class="headerlink" href="#hybrid-smart-mode-led-shipped" title="Permanent link">&para;</a></h3>
+<p><strong>Shipped</strong> in bridge commit <code>b72b121</code> (firmware half: StackChan/dotty <code>32163bd</code>, <strong>flash pending</strong>).</p>
+<p><strong>Behaviour.</strong> On smart-mode entry, <code>conn.smart_mode_active = True</code> is set on the <code>ConnectionHandler</code>. <code>_send_led_color()</code> then re-asserts pixel <code>SMART_MODE_LED_INDEX</code> (env var, default <code>0</code>) at purple <code>(168,0,168)</code> via <code>_send_led_multi()</code> after every full-ring colour change. The remaining 11 LEDs continue to show the firmware-automatic listen / think / talk colours. On turn completion <code>smart_mode_active</code> is cleared; the ring returns to firmware-automatic behaviour.</p>
+<p><strong>Firmware prerequisite.</strong> The <code>self.robot.set_led_multi(index, r, g, b)</code> MCP tool was added in StackChan/dotty <code>32163bd</code>. Without that firmware, the bridge degrades to the previous single-flash behaviour (warn-once per connection).</p>
+<h2 id="future-modes">Future modes<a class="headerlink" href="#future-modes" title="Permanent link">&para;</a></h2>
+<p>These are documented as design-space placeholders so contributors know where they would slot in. None are scheduled today.</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Tier</th>
+<th>Resting LED (proposed)</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sleep</code></td>
+<td>ambient</td>
+<td>all off; display dim</td>
+<td>Manual toggle now; later schedule-driven (quiet hours). Wake on wake-word or portal toggle.</td>
+</tr>
+<tr>
+<td><code>greeting</code></td>
+<td>conversation</td>
+<td>brief warm flash on entry</td>
+<td>Proactive on recognised face. Per-person, per-day cooldown; time-of-day-aware tone. Roadmap-only.</td>
+</tr>
+<tr>
+<td><code>privacy</code> / <code>mute</code></td>
+<td>ambient</td>
+<td>solid red (one LED, low-brightness)</td>
+<td>Mic + camera disabled; hardware-guaranteed indicator. Prerequisite for always-on face detection.</td>
+</tr>
+<tr>
+<td><code>story_time</code></td>
+<td>conversation</td>
+<td>dimmed warm <code>(100, 40, 0)</code></td>
+<td>Longer-form narration, no sentence truncation, lower TTS rate.</td>
+</tr>
+<tr>
+<td><code>game</code></td>
+<td>performance</td>
+<td>mode-specific palette</td>
+<td>Turn-based interactions (rock-paper-scissors, Simon Says).</td>
+</tr>
+</tbody>
+</table>
+<p>See <a href="../ROADMAP.md"><code>ROADMAP.md</code></a> for current priority on each.</p>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../interaction-map/">interaction-map.md</a> — every cross-layer signal (audio, LLM, MCP, session control); the wire-level companion to this doc.</li>
+<li><a href="../hardware/">hardware.md</a> — physical LED ring spec, servo capabilities, MCP tool catalog.</li>
+<li><a href="../voice-pipeline/">voice-pipeline.md</a> — how listening / thinking / talking sub-states map to xiaozhi-server internals.</li>
+<li><a href="../kid-mode/">kid-mode.md</a> — how Kid Mode wraps every conversation mode (default-on safety guardrails, prompt suffix injection).</li>
+<li><a href="../latent-capabilities/">latent-capabilities.md</a> — upstream features we aren't yet using; some of these would land as new modes.</li>
+</ul>
+<p>Last verified: 2026-04-25. Updated 2026-04-25 (hybrid smart-mode LED shipped, SetMultiColors→set_led_multi correction).</p>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
