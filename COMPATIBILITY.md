@@ -65,6 +65,41 @@ compatibility matrix"). When adopted, the plan is:
 5. **Roll back if broken.** Restore from the backup taken in step 2 and
    revert to the previous image or binary.
 
+## Release process
+
+### Tag namespaces
+
+Server and firmware are versioned independently:
+
+- Server (bridge, custom providers, docker compose): `server-vX.Y.Z`
+- Firmware (ESP32-S3 StackChan firmware): `fw-vX.Y.Z`
+
+### SemVer rules
+
+| Bump | Server | Firmware |
+|------|--------|----------|
+| **Major** | Breaking change to bridge HTTP API, NDJSON streaming format, or ACP session semantics | Breaking change to WebSocket frame shape, MCP tool surface, or OTA handshake |
+| **Minor** | New endpoint, new provider, new config key (backward-compatible) | New emotion, new MCP tool, new config option |
+| **Patch** | Bug fix, performance improvement, doc-only change | Bug fix, cosmetic animation change |
+
+### Cutting a release
+
+1. Update `CHANGELOG.md` — move items from `[Unreleased]` into a new
+   `[server-vX.Y.Z]` or `[fw-vX.Y.Z]` section with today's date.
+2. Update the compatibility matrix in this file if the new version changes
+   any interface listed in "What counts as a breaking change."
+3. Commit with message: `release: server-vX.Y.Z` (or `release: fw-vX.Y.Z`).
+4. Create an annotated tag: `git tag -a server-vX.Y.Z -m "server-vX.Y.Z"`
+5. Push the tag: `git push origin server-vX.Y.Z`
+
+GitHub Actions handles image builds and artifact publishing from the tag.
+
+### Compatibility matrix updates
+
+When either component ships a new version, add a row (or update the existing
+row) in the compatibility matrix above so operators can verify which server
+versions work with which firmware versions.
+
 ---
 
 Last verified: 2026-04-25.

@@ -43,6 +43,7 @@ built from the commit log.
 - **TTS mounts switched to flat-file format** — directory-form mounts silently fell through to "unsupported TTS type" errors; now matches the working `fun_local.py` ASR pattern.
 
 ### Fixed
+- **Abort race condition** — kill and respawn ACP child on barge-in to prevent stale chunk contamination.
 - **FunASR language mis-detection** — upstream hardcodes `language="auto"`, causing SenseVoiceSmall to classify short/unclear English audio as Korean or Japanese. Config-driven language override resolves this.
 - **Child-safety self-harm response** — LLM was redirecting to blanket-fort building instead of naming a trusted adult; dedicated rule fixed the last failing red-team case (10/10 pass rate).
 - **TTS provider loading failure** — directory-form Docker mounts caused silent fallthrough; flat-file mounts fixed "unsupported TTS type" errors at connect time.
