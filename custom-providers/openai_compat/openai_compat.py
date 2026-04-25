@@ -19,8 +19,8 @@ from core.providers.llm.base import LLMProviderBase
 TAG = __name__
 logger = setup_logging()
 
-FALLBACK_EMOJI = "\U0001f610"  # 😐
-ALLOWED_EMOJIS = (
+FALLBACK_EMOJI = "\U0001f610"  # 😐  — canonical source: textUtils.py
+ALLOWED_EMOJIS = (  # canonical source: textUtils.py
     "\U0001f60a",  # 😊
     "\U0001f606",  # 😆
     "\U0001f622",  # 😢
@@ -222,7 +222,7 @@ class LLMProvider(LLMProviderBase):
             return
         except Exception as exc:
             logger.bind(tag=TAG).exception("OpenAICompat request error")
-            yield f"{FALLBACK_EMOJI} Something went wrong: {exc}"
+            yield f"{FALLBACK_EMOJI} Something went wrong, please try again."
             return
 
         # Accumulate full text so we can do emoji-prefix enforcement on the
@@ -281,54 +281,6 @@ class LLMProvider(LLMProviderBase):
         # If we never yielded anything, emit a fallback.
         if not full_text or not "".join(full_text).strip():
             yield f"{FALLBACK_EMOJI} (no response)"
-
-    # ------------------------------------------------------------------
-    # buffered fallback (non-streaming)
-    # ------------------------------------------------------------------
-
-    def _response_buffered(self, messages):
-        """POST without streaming, sentence-chunk the result."""
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "max_tokens": self.max_tokens,
-            "temperature": self.temperature,
-            "stream": False,
-        }
-        try:
-            resp = requests.post(
-                self._completions_url(),
-                json=payload,
-                headers=self._headers(),
-                timeout=self.timeout,
-            )
-            resp.raise_for_status()
-            body = resp.json()
-            choices = body.get("choices") or []
-            if choices:
-                text = (choices[0].get("message") or {}).get("content", "")
-            else:
-                text = ""
-            text = _ensure_emoji_prefix(text.strip())
-        except requests.exceptions.Timeout:
-            logger.bind(tag=TAG).warning("OpenAICompat timeout")
-            text = f"{FALLBACK_EMOJI} Sorry, I'm thinking too slowly right now."
-        except requests.exceptions.ConnectionError:
-            logger.bind(tag=TAG).error(
-                f"OpenAICompat unreachable: {self._completions_url()}"
-            )
-            text = f"{FALLBACK_EMOJI} My brain is offline. Check the LLM endpoint."
-        except Exception as exc:
-            logger.bind(tag=TAG).exception("OpenAICompat request error")
-            text = f"{FALLBACK_EMOJI} Something went wrong: {exc}"
-
-        chunks = self._chunk_sentences(text)
-        if not chunks:
-            yield f"{FALLBACK_EMOJI} (no response)"
-            return
-        last = len(chunks) - 1
-        for i, chunk in enumerate(chunks):
-            yield chunk + (" " if i < last else "")
 
     # ------------------------------------------------------------------
     # public interface (called by xiaozhi-server)

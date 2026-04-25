@@ -14,7 +14,7 @@ from core.providers.llm.base import LLMProviderBase
 TAG = __name__
 logger = setup_logging()
 
-FALLBACK_EMOJI = "😐"
+FALLBACK_EMOJI = "😐"  # canonical source: textUtils.py
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?。！？])\s+")
 
 
@@ -150,7 +150,7 @@ class LLMProvider(LLMProviderBase):
             yield f"{FALLBACK_EMOJI} My brain is offline. Please check the ZeroClaw bridge."
         except Exception as exc:
             logger.bind(tag=TAG).exception("ZeroClaw bridge error (stream)")
-            yield f"{FALLBACK_EMOJI} Something went wrong: {exc}"
+            yield f"{FALLBACK_EMOJI} Something went wrong, please try again."
         finally:
             if resp is not None:
                 resp.close()
@@ -176,7 +176,7 @@ class LLMProvider(LLMProviderBase):
             text = f"{FALLBACK_EMOJI} My brain is offline. Please check the ZeroClaw bridge."
         except Exception as exc:
             logger.bind(tag=TAG).exception("ZeroClaw bridge error")
-            text = f"{FALLBACK_EMOJI} Something went wrong: {exc}"
+            text = f"{FALLBACK_EMOJI} Something went wrong, please try again."
 
         chunks = self._chunk(text)
         if not chunks:

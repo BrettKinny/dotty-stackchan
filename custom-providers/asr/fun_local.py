@@ -2,7 +2,6 @@ import os
 import io
 import sys
 import time
-import shutil
 import psutil
 import asyncio
 
@@ -104,7 +103,7 @@ class ASRProvider(ASRProviderBase):
                 logger.bind(tag=TAG).warning(
                     f"语音识别失败，正在重试（{retry_count}/{MAX_RETRIES}）: {e}"
                 )
-                time.sleep(RETRY_DELAY)
+                await asyncio.sleep(RETRY_DELAY)
 
             except Exception as e:
                 logger.bind(tag=TAG).error(f"语音识别失败: {e}", exc_info=True)

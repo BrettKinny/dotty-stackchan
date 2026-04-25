@@ -1,4 +1,3 @@
-import asyncio
 import os
 import queue
 import traceback
@@ -128,12 +127,12 @@ class TTSProvider(TTSProviderBase):
     def to_tts_single_stream(self, text, is_last=False):
         text = MarkdownCleaner.clean_markdown(text)
         try:
-            asyncio.run(self.text_to_speak(text, is_last))
+            self.text_to_speak(text, is_last)
         except Exception as e:
             logger.bind(tag=TAG).error(f"Piper synth failed for {text!r}: {e}")
         return None
 
-    async def text_to_speak(self, text, is_last):
+    def text_to_speak(self, text, is_last):
         frame_bytes = int(
             self.opus_encoder.sample_rate
             * self.opus_encoder.channels

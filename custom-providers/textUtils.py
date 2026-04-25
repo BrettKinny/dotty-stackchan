@@ -5,6 +5,13 @@ if TYPE_CHECKING:
     from core.connection import ConnectionHandler
 
 TAG = __name__
+
+# Canonical definitions — duplicated in bridge.py, openai_compat.py, zeroclaw.py
+# (those copies can't import from here; they run in different contexts)
+ALLOWED_EMOJIS = ("😊", "😆", "😢", "😮", "🤔", "😠", "😐", "😍", "😴")
+FALLBACK_EMOJI = "😐"
+
+# Enforced subset (bridge.py ALLOWED_EMOJIS): 😊 😆 😢 😮 🤔 😠 😐 😍 😴
 EMOJI_MAP = {
     "😂": "funny",
     "😭": "crying",

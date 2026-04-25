@@ -224,7 +224,6 @@ async def startToChat(conn: "ConnectionHandler", text):
                 language_tag = data["language"]
                 actual_text = data["content"]
                 conn.logger.bind(tag=TAG).info(f"解析到说话人信息: {speaker_name}")
-                actual_text = text
     except (json.JSONDecodeError, KeyError):
         pass
 
@@ -315,13 +314,13 @@ async def no_voice_close_connect(conn: "ConnectionHandler", have_voice):
                 return
             prompt = end_prompt.get("prompt")
             if not prompt:
-                prompt = "请你以```时间过得真快```未来头，用富有感情、依依不舍的话来结束这场对话吧。！"
+                prompt = "Time flies when we're having fun! Let's chat again next time!"
             await startToChat(conn, prompt)
 
 
 async def max_out_size(conn: "ConnectionHandler"):
     conn.client_abort = False
-    text = "不好意思，我现在有点事情要忙，明天这个时候我们再聊，约好了哦！明天不见不散，拜拜！"
+    text = "Sorry, I need to take a break now. Let's talk again tomorrow — same time, same place! Bye bye!"
     await send_stt_message(conn, text)
     file_path = "config/assets/max_output_size.wav"
     opus_packets = await audio_to_data(file_path)
@@ -332,12 +331,12 @@ async def max_out_size(conn: "ConnectionHandler"):
 async def check_bind_device(conn: "ConnectionHandler"):
     if conn.bind_code:
         if len(conn.bind_code) != 6:
-            conn.logger.bind(tag=TAG).error(f"无效的绑定码格式: {conn.bind_code}")
-            text = "绑定码格式错误，请检查配置。"
+            conn.logger.bind(tag=TAG).error(f"Invalid bind code format: {conn.bind_code}")
+            text = "Bind code format error, please check the configuration."
             await send_stt_message(conn, text)
             return
 
-        text = f"请登录控制面板，输入{conn.bind_code}，绑定设备。"
+        text = f"Please open the control panel and enter {conn.bind_code} to bind this device."
         await send_stt_message(conn, text)
 
         music_path = "config/assets/bind_code.wav"
@@ -356,7 +355,7 @@ async def check_bind_device(conn: "ConnectionHandler"):
         conn.tts.tts_audio_queue.put((SentenceType.LAST, [], None))
     else:
         conn.client_abort = False
-        text = f"没有找到该设备的版本信息，请正确配置 OTA地址，然后重新编译固件。"
+        text = "Could not find device version information. Please configure the OTA URL correctly and rebuild the firmware."
         await send_stt_message(conn, text)
         music_path = "config/assets/bind_not_found.wav"
         opus_packets = await audio_to_data(music_path)

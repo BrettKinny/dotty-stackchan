@@ -30,6 +30,7 @@ KID_MODE = os.environ.get("DOTTY_KID_MODE", "true").lower() in ("1", "true", "ye
 LOCAL_TZ = ZoneInfo(os.environ.get("TZ", "Australia/Brisbane"))
 WEATHER_LOCATION = os.environ.get("WEATHER_LOCATION", "Brisbane")
 WEATHER_TTL_SEC = float(os.environ.get("WEATHER_TTL_SEC", "1800"))
+CALENDAR_TTL_SEC = float(os.environ.get("CALENDAR_TTL_SEC", "7200"))
 CALENDAR_IDS = [c.strip() for c in os.environ.get("CALENDAR_ID", "").split(",") if c.strip()]
 CALENDAR_SA_PATH = os.environ.get(
     "CALENDAR_SA_PATH", "/root/.zeroclaw/secrets/google-calendar-sa.json",
@@ -76,8 +77,8 @@ MCP_TOOL_ALLOWLIST: set[str] = {
 # Privacy-sensitive tools denied when KID_MODE is active.
 MCP_TOOL_DENYLIST: set[str] = {"camera.take_photo"} if KID_MODE else set()
 
-FALLBACK_EMOJI = "😐"
-ALLOWED_EMOJIS = ("😊", "😆", "😢", "😮", "🤔", "😠", "😐", "😍", "😴")
+FALLBACK_EMOJI = "😐"  # canonical source: textUtils.py
+ALLOWED_EMOJIS = ("😊", "😆", "😢", "😮", "🤔", "😠", "😐", "😍", "😴")  # canonical source: textUtils.py
 VOICE_CHANNELS = ("dotty", "stackchan")
 VOICE_TURN_PREFIX = "[channel=dotty voice-TTS]\n"
 _BASE_SUFFIX = (
@@ -191,7 +192,7 @@ async def _refresh_caches() -> None:
     today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
     if (
         CALENDAR_IDS
-        and (now - _calendar_cache["fetched"] > WEATHER_TTL_SEC
+        and (now - _calendar_cache["fetched"] > CALENDAR_TTL_SEC
              or _calendar_cache["date"] != today)
     ):
         events = await _fetch_calendar_events()
@@ -778,11 +779,6 @@ async def vision_latest(device_id: str):
     _vision_cache.pop(device_id, None)
     event = asyncio.Event()
     _vision_events[device_id] = event
-
-    entry = _vision_cache.get(device_id)
-    if entry:
-        _vision_events.pop(device_id, None)
-        return {"description": entry["description"]}
 
     try:
         await asyncio.wait_for(event.wait(), timeout=15.0)
