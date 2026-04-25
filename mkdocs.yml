@@ -53,6 +53,8 @@ nav:
       - Add Emoji: docs/cookbook/add-emoji.md
       - Disable Kid Mode: docs/cookbook/disable-kid-mode.md
   - Reference:
+      - Emoji Mapping: docs/emoji-mapping.md
+      - Interaction Map: docs/interaction-map.md
       - Latent Capabilities: docs/latent-capabilities.md
       - References: docs/references.md
   - Troubleshooting: docs/troubleshooting.md
