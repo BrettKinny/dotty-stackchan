@@ -267,6 +267,100 @@ async def cards(request: Request) -> Any:
     )
 
 
+_ALLOWED_EMOJIS = ("😊", "😆", "😢", "😮", "🤔", "😠", "😐", "😍", "😴")
+_DANCES = (
+    {"key": "macarena", "label": "Macarena", "phrase": "do the macarena", "icon": "💃"},
+    {"key": "sing", "label": "Sing a song", "phrase": "sing a song", "icon": "🎤"},
+)
+
+
+@router.get("/face", response_class=HTMLResponse, include_in_schema=False)
+async def face_partial(request: Request) -> Any:
+    """Show the most recent emoji Dotty used today (P9)."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    path = _log_path_for(today)
+    last_emoji = ""
+    last_age = ""
+    if path.exists():
+        try:
+            data = path.read_bytes().splitlines()
+        except OSError:
+            data = []
+        for line in reversed(data):
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            e = (rec.get("emoji_used") or "").strip()
+            if e:
+                last_emoji = e
+                ts = _parse_ts(rec.get("ts", ""))
+                if ts is not None:
+                    last_age = _humanize_age(max(0.0, time.time() - ts)) + " ago"
+                break
+    return templates.TemplateResponse(
+        request, "face.html",
+        {"emoji": last_emoji, "age": last_age},
+    )
+
+
+@router.post("/actions/mood", response_class=HTMLResponse, include_in_schema=False)
+async def mood(request: Request, emoji: str = Form(...)) -> Any:
+    if emoji not in _ALLOWED_EMOJIS:
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": "Unknown emoji."},
+        )
+    sender = _state.get("send_message")
+    if sender is None:
+        raise HTTPException(503, "send_message not configured")
+    prompt = (
+        f"Make the {emoji} face for me. Reply with just '{emoji} ok' "
+        f"and nothing else."
+    )
+    try:
+        result = await sender(text=prompt, channel="dotty")
+    except Exception as exc:
+        log.exception("portal mood action failed")
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": f"Bridge error: {exc.__class__.__name__}"},
+        )
+    return templates.TemplateResponse(
+        request, "say_result.html",
+        {"ok": True, "sent": f"make the {emoji} face",
+         "response": result.get("response", "")},
+    )
+
+
+@router.post("/actions/dance", response_class=HTMLResponse, include_in_schema=False)
+async def dance(request: Request, key: str = Form(...)) -> Any:
+    pick = next((d for d in _DANCES if d["key"] == key), None)
+    if pick is None:
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": "Unknown dance/song."},
+        )
+    sender = _state.get("send_message")
+    if sender is None:
+        raise HTTPException(503, "send_message not configured")
+    try:
+        result = await sender(text=pick["phrase"], channel="dotty")
+    except Exception as exc:
+        log.exception("portal dance action failed")
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": f"Bridge error: {exc.__class__.__name__}"},
+        )
+    return templates.TemplateResponse(
+        request, "say_result.html",
+        {"ok": True, "sent": pick["phrase"],
+         "response": result.get("response", "")},
+    )
+
+
 @router.post("/actions/volume", response_class=HTMLResponse, include_in_schema=False)
 async def volume(request: Request, value: int = Form(...)) -> Any:
     """Set Dotty's speaker volume by routing the request through the LLM
