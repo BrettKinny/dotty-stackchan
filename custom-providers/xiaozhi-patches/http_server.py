@@ -94,6 +94,58 @@ class SimpleHttpServer:
             "ok": True,
             "device_id": (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id,
         })
+
+    async def _dotty_set_head_angles(self, request: "web.Request") -> "web.Response":
+        """POST /xiaozhi/admin/set-head-angles
+        Body: {"device_id": "<optional>", "yaw": int, "pitch": int, "speed": int}
+
+        Direct MCP self.robot.set_head_angles call against the named
+        (or first available) device. Phase 1.6 ambient perception
+        consumer (sound-direction head-turn) calls this from the
+        bridge.
+        """
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        device_id = (data.get("device_id") or "").strip()
+        try:
+            yaw = int(data.get("yaw", 0))
+            pitch = int(data.get("pitch", 0))
+            speed = int(data.get("speed", 250))
+        except (TypeError, ValueError):
+            return web.json_response({"error": "yaw/pitch/speed must be ints"}, status=400)
+        if device_id:
+            conn = _dotty_active_connections.get(device_id)
+        else:
+            conn = next(iter(_dotty_active_connections.values()), None)
+        if conn is None:
+            return web.json_response(
+                {"error": "no device connected",
+                 "known": list(_dotty_active_connections)},
+                status=503,
+            )
+        import json
+        import time
+        msg = json.dumps({
+            "session_id": getattr(conn, "session_id", ""),
+            "type": "mcp",
+            "payload": {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "self.robot.set_head_angles",
+                    "arguments": {"yaw": yaw, "pitch": pitch, "speed": speed},
+                },
+                "id": int(time.time() * 1000) % 0x7FFFFFFF,
+            },
+        })
+        asyncio.create_task(conn.websocket.send(msg))
+        return web.json_response({
+            "ok": True,
+            "device_id": (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id,
+            "yaw": yaw, "pitch": pitch, "speed": speed,
+        })
     # END DOTTY-PATCH --------------------------------------------------------
 
     async def start(self):
@@ -142,6 +194,10 @@ class SimpleHttpServer:
                         ),
                         web.post(
                             "/xiaozhi/admin/abort", self._dotty_abort
+                        ),
+                        web.post(
+                            "/xiaozhi/admin/set-head-angles",
+                            self._dotty_set_head_angles,
                         ),
                     ]
                 )

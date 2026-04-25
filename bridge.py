@@ -81,6 +81,16 @@ _XIAOZHI_HTTP_PORT = int(os.environ.get("UNRAID_OTA_PORT", "8003"))
 # 2 s grace period during normal head movements.
 FACE_GREET_COOLDOWN_SEC = float(os.environ.get("FACE_GREET_COOLDOWN_SEC", "60"))
 FACE_GREET_TEXT = os.environ.get("FACE_GREET_TEXT", "Hi!")
+# Phase 1.6: head-turn cooldown so the servos don't whip back and forth
+# on rapid sound bursts. 3 s is roughly the time a deliberate noise
+# (clap, doorbell) takes to register and have the user notice the head
+# move toward it.
+SOUND_TURN_COOLDOWN_SEC = float(os.environ.get("SOUND_TURN_COOLDOWN_SEC", "3"))
+# Yaw mapping for sound direction. Conservative angles so the gaze is
+# obvious without overshooting; the firmware MCP head-angles call
+# clamps to its own limits.
+SOUND_TURN_YAW_DEG = int(os.environ.get("SOUND_TURN_YAW_DEG", "45"))
+SOUND_TURN_SPEED = int(os.environ.get("SOUND_TURN_SPEED", "250"))
 VISION_SYSTEM_PROMPT = (
     "You are describing a photo taken by a small robot's camera (low resolution). "
     + ("Describe what you see in simple, clear language suitable for a young child. "
@@ -927,6 +937,93 @@ async def _dispatch_face_greeting(device_id: str, text: str) -> None:
     await asyncio.to_thread(_post)
 
 
+async def _dispatch_set_head_angles(device_id: str, yaw: int,
+                                     pitch: int, speed: int) -> None:
+    """Phase 1.6 helper: fire-and-forget POST to the new
+    /xiaozhi/admin/set-head-angles route to send a direct MCP
+    head-angles frame to the device."""
+    if not _XIAOZHI_HOST:
+        log.warning("sound turn: UNRAID_HOST not set; cannot reach xiaozhi-server")
+        return
+    import requests as _req
+    url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/set-head-angles"
+    payload = {
+        "device_id": device_id, "yaw": yaw, "pitch": pitch, "speed": speed,
+    }
+
+    def _post() -> None:
+        try:
+            r = _req.post(url, json=payload, timeout=3)
+            if r.status_code >= 400:
+                log.warning(
+                    "sound turn set-head-angles %s: %s",
+                    r.status_code, r.text[:200],
+                )
+        except Exception as exc:
+            log.warning("sound turn set-head-angles failed: %s", exc)
+
+    await asyncio.to_thread(_post)
+
+
+async def _perception_sound_turner() -> None:
+    """Phase 1.6 consumer: on sound_event, turn the head toward the
+    sound direction (left / centre / right) via direct MCP. Idle-only
+    behaviour — face wins, conversation wins.
+    """
+    log.info(
+        "perception sound turner started (cooldown=%.0fs yaw=±%d speed=%d)",
+        SOUND_TURN_COOLDOWN_SEC, SOUND_TURN_YAW_DEG, SOUND_TURN_SPEED,
+    )
+    q = _perception_subscribe()
+    try:
+        while True:
+            event = await q.get()
+            if event.get("name") != "sound_event":
+                continue
+            device_id = event.get("device_id", "")
+            if not device_id or device_id == "unknown":
+                continue
+            direction = (event.get("data") or {}).get("direction", "")
+            if direction not in ("left", "centre", "center", "right"):
+                continue
+
+            now = event.get("ts", 0.0)
+            state = _perception_state.setdefault(device_id, {})
+            # Idle-only: face wins, conversation wins.
+            if state.get("face_present"):
+                continue
+            last_chat = state.get("last_chat_t", 0.0)
+            if now - last_chat < 30.0:
+                continue
+            last_turn = state.get("last_sound_turn_t", 0.0)
+            if now - last_turn < SOUND_TURN_COOLDOWN_SEC:
+                continue
+            state["last_sound_turn_t"] = now
+
+            if direction == "left":
+                yaw = -SOUND_TURN_YAW_DEG
+            elif direction == "right":
+                yaw = SOUND_TURN_YAW_DEG
+            else:
+                yaw = 0
+            log.info(
+                "sound_event → head-turn: device=%s direction=%s yaw=%d",
+                device_id, direction, yaw,
+            )
+            asyncio.create_task(
+                _dispatch_set_head_angles(
+                    device_id, yaw, 0, SOUND_TURN_SPEED,
+                ),
+            )
+    except asyncio.CancelledError:
+        log.info("perception sound turner cancelled")
+        raise
+    except Exception:
+        log.exception("perception sound turner crashed")
+    finally:
+        _perception_unsubscribe(q)
+
+
 async def _perception_face_greeter() -> None:
     """Phase 1.5 consumer: on face_detected events, fire a brief
     audible greeting through the existing inject-text path so the
@@ -983,9 +1080,10 @@ async def lifespan(app: FastAPI):
                  len(_calendar_cache["events"]))
     except Exception:
         log.exception("Initial context fetch failed — will retry on first request")
-    # Phase 1.5: start perception subscriber tasks
+    # Phase 1.5 / 1.6: start perception subscriber tasks
     perception_tasks = [
         asyncio.create_task(_perception_face_greeter()),
+        asyncio.create_task(_perception_sound_turner()),
     ]
     yield
     for t in perception_tasks:
