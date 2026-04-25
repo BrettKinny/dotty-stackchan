@@ -681,6 +681,10 @@ async def _smart_prompt(
             stream=True,
         )
         resp.raise_for_status()
+        # OpenRouter SSE responses don't set a charset, so requests defaults
+        # iter_lines(decode_unicode=True) to ISO-8859-1. Force UTF-8 or all
+        # multibyte chars (emojis, em-dashes) come out as mojibake.
+        resp.encoding = "utf-8"
         full: list[str] = []
         for line in resp.iter_lines(decode_unicode=True):
             if not line or not line.startswith("data: "):
