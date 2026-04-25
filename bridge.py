@@ -191,6 +191,13 @@ FACE_GREET_TEXT = os.environ.get("FACE_GREET_TEXT", "Hi!")
 # greeting / response cycle has wrapped up naturally.
 FACE_LOST_ABORT_WINDOW_SEC = float(
     os.environ.get("FACE_LOST_ABORT_WINDOW_SEC", "12"))
+# Debounce delay before the abort actually fires. The firmware face
+# detector trips face_lost on small head movements, blinks, or brief
+# occlusion — without a grace period, the aborter kills the greet/listen
+# cycle every time the user shifts in their seat. If face_detected
+# returns within the grace window, the pending abort is cancelled.
+FACE_LOST_ABORT_GRACE_SEC = float(
+    os.environ.get("FACE_LOST_ABORT_GRACE_SEC", "4"))
 # Phase 1.6: head-turn cooldown so the servos don't whip back and forth
 # on rapid sound bursts. 3 s is roughly the time a deliberate noise
 # (clap, doorbell) takes to register and have the user notice the head
@@ -1553,39 +1560,79 @@ async def _dispatch_abort(device_id: str) -> None:
 
 async def _perception_face_lost_aborter() -> None:
     """On face_lost, if a greeting recently fired and the user hasn't
-    walked back into frame, fire xiaozhi admin abort so Dotty stops
-    talking to empty space.
+    walked back into frame within the grace period, fire xiaozhi admin
+    abort so Dotty stops talking to empty space.
 
-    Conservative: only acts within FACE_LOST_ABORT_WINDOW_SEC of the
-    last greet, so an unrelated face_lost during a long-finished
-    conversation doesn't kill anything. Side benefit: if the user is
-    actively talking back, they're in frame — face_lost wouldn't fire.
+    Two-stage filter:
+      1. Only acts within FACE_LOST_ABORT_WINDOW_SEC of the last greet
+         (long-finished conversations are left alone).
+      2. Schedules the abort FACE_LOST_ABORT_GRACE_SEC in the future
+         and cancels it if face_detected fires for the same device
+         before then. This protects greet/listen cycles from being
+         killed by a transient face_lost (head turn, blink, brief
+         occlusion) — the firmware face tracker is sensitive enough
+         that without this, the aborter ate every turn empirically.
     """
     log.info(
-        "perception face-lost aborter started (window=%.0fs)",
-        FACE_LOST_ABORT_WINDOW_SEC,
+        "perception face-lost aborter started (window=%.0fs grace=%.1fs)",
+        FACE_LOST_ABORT_WINDOW_SEC, FACE_LOST_ABORT_GRACE_SEC,
     )
+    pending: dict[str, asyncio.Task] = {}
+
+    async def _delayed_abort(device_id: str, delay: float) -> None:
+        try:
+            await asyncio.sleep(delay)
+            log.info(
+                "face_lost → abort: device=%s (face stayed lost %.1fs)",
+                device_id, delay,
+            )
+            await _dispatch_abort(device_id)
+        except asyncio.CancelledError:
+            log.info(
+                "face_lost abort cancelled (face returned): device=%s",
+                device_id,
+            )
+            raise
+
     q = _perception_subscribe()
     try:
         while True:
             event = await q.get()
-            if event.get("name") != "face_lost":
-                continue
+            name = event.get("name")
             device_id = event.get("device_id", "")
             if not device_id or device_id == "unknown":
                 continue
+
+            if name == "face_detected":
+                t = pending.pop(device_id, None)
+                if t and not t.done():
+                    t.cancel()
+                continue
+
+            if name != "face_lost":
+                continue
+
             now = event.get("ts", 0.0)
             state = _perception_state.setdefault(device_id, {})
             last_greet = state.get("last_face_greet_t", 0.0)
             if now - last_greet > FACE_LOST_ABORT_WINDOW_SEC:
                 continue
+
+            prior = pending.pop(device_id, None)
+            if prior and not prior.done():
+                prior.cancel()
             log.info(
-                "face_lost → abort: device=%s (greet %.1fs ago)",
-                device_id, now - last_greet,
+                "face_lost → schedule abort in %.1fs: device=%s (greet %.1fs ago)",
+                FACE_LOST_ABORT_GRACE_SEC, device_id, now - last_greet,
             )
-            asyncio.create_task(_dispatch_abort(device_id))
+            pending[device_id] = asyncio.create_task(
+                _delayed_abort(device_id, FACE_LOST_ABORT_GRACE_SEC),
+            )
     except asyncio.CancelledError:
         log.info("perception face-lost aborter cancelled")
+        for t in pending.values():
+            if not t.done():
+                t.cancel()
         raise
     except Exception:
         log.exception("perception face-lost aborter crashed")
