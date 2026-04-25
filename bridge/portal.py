@@ -122,6 +122,17 @@ def _safe_date(date_str: str | None) -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
+def _looks_like_xiaozhi_system_msg(text: str) -> bool:
+    """Heuristic: voice-channel turns whose user payload is mostly Chinese
+    are xiaozhi-server's automated wrap-up / system-injected prompts, not
+    something the kid actually said. Filter them out of the portal log so
+    the conversation history stays readable."""
+    if not text:
+        return False
+    cjk = sum(1 for c in text if 0x4E00 <= ord(c) <= 0x9FFF)
+    return cjk >= 3 and cjk / max(1, len(text)) > 0.3
+
+
 def _clean_request_text(s: str) -> str:
     """Strip the wrapped `[Context] ... [User] <payload>` preamble.
 
@@ -203,6 +214,8 @@ def _read_recent_log_entries(date_str: str, limit: int = 20) -> list[dict[str, A
         except Exception:
             time_str = ts[-8:] if ts else "?"
         cleaned_request = _clean_request_text(rec.get("request_text") or "")
+        if _looks_like_xiaozhi_system_msg(cleaned_request):
+            continue
         out.append({
             "time": time_str,
             "channel": rec.get("channel") or "?",
