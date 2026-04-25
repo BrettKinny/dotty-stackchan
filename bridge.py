@@ -189,6 +189,24 @@ SOUND_TURN_COOLDOWN_SEC = float(os.environ.get("SOUND_TURN_COOLDOWN_SEC", "3"))
 # clamps to its own limits.
 SOUND_TURN_YAW_DEG = int(os.environ.get("SOUND_TURN_YAW_DEG", "45"))
 SOUND_TURN_SPEED = int(os.environ.get("SOUND_TURN_SPEED", "250"))
+# ---------------------------------------------------------------------------
+# Purr-on-head-pet (server-pushed, Option B)
+# ---------------------------------------------------------------------------
+# When the firmware emits a `head_pet_started` perception event, the bridge
+# pushes a pre-rendered purr clip from bridge/assets/purr.opus. This is a
+# fixed-audio asset path — kid-mode content filtering does NOT apply because
+# the bytes are curated, not LLM-generated (see bridge/assets/README.md).
+# Per-device cooldown stops a continuous head-pet from re-triggering the
+# clip on every event burst.
+PURR_AUDIO_PATH = Path(
+    os.environ.get("PURR_AUDIO_PATH", "bridge/assets/purr.opus")
+)
+PURR_COOLDOWN_SEC = float(os.environ.get("PURR_COOLDOWN_SEC", "5"))
+# Approximate playback duration. We extend the device's `last_chat_t` for
+# this many seconds while the purr plays so the sound localizer doesn't
+# turn the head toward the speaker mid-purr (see _perception_sound_turner
+# which checks last_chat_t to suppress turns during talking).
+PURR_DURATION_SEC = float(os.environ.get("PURR_DURATION_SEC", "2.0"))
 VISION_SYSTEM_PROMPT = (
     "You are describing a photo taken by a small robot's camera (low resolution). "
     + ("Describe what you see in simple, clear language suitable for a young child. "
@@ -1489,6 +1507,120 @@ async def _perception_face_greeter() -> None:
         _perception_unsubscribe(q)
 
 
+# ---------------------------------------------------------------------------
+# Purr-on-head-pet (Option B: server-pushed pre-rendered asset)
+# ---------------------------------------------------------------------------
+
+async def _dispatch_purr_audio(device_id: str) -> bool:
+    """Push the purr asset to the device.
+
+    Mirrors the inject-text dispatcher pattern used by the face greeter
+    but targets a play-asset admin route on xiaozhi-server. The matching
+    server-side admin route is a follow-up — until it lands, this call
+    will log a warning and return False, but it MUST NOT crash the
+    perception loop.
+
+    Defensive contract:
+      * Missing UNRAID_HOST → return False (no network attempt).
+      * Missing audio file → return False (skip without raising).
+      * Network/HTTP failure → return False, log warning.
+    """
+    if not _XIAOZHI_HOST:
+        log.warning("purr: UNRAID_HOST not set; cannot reach xiaozhi-server")
+        return False
+    if not PURR_AUDIO_PATH.exists():
+        log.warning(
+            "purr: asset missing at %s (drop a purr.opus to enable, "
+            "see bridge/assets/README.md)",
+            PURR_AUDIO_PATH,
+        )
+        return False
+    import requests as _req
+    url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/play-asset"
+    payload = {"device_id": device_id, "asset": str(PURR_AUDIO_PATH)}
+
+    def _post() -> bool:
+        try:
+            r = _req.post(url, json=payload, timeout=3)
+            if r.status_code >= 400:
+                log.warning(
+                    "purr play-asset %s: %s",
+                    r.status_code, r.text[:200],
+                )
+                return False
+            return True
+        except Exception as exc:
+            log.warning("purr play-asset failed: %s", exc)
+            return False
+
+    try:
+        return await asyncio.to_thread(_post)
+    except Exception:
+        log.exception("purr dispatch raised")
+        return False
+
+
+async def _perception_purr_player() -> None:
+    """Consumer: on `head_pet_started` events, push the purr asset.
+
+    Per-device cooldown stops a continuous head-pet from re-triggering
+    the clip on every event burst. Bypasses kid-mode sandwich (the
+    asset is curated bytes, not LLM-generated content). Extends
+    `last_chat_t` by `PURR_DURATION_SEC` so the sound localizer
+    (`_perception_sound_turner`) doesn't turn the head toward the
+    speaker mid-purr — without that suppression the localizer would
+    treat the purr's own audio as a sound event from the side.
+
+    Firmware-side `head_pet_started` perception event emission is a
+    separate task (see firmware/firmware/main/stackchan/modifiers/
+    head_pet.h:82-91 for the existing visual-only handler). This
+    consumer is ready for whenever that event lands on the bus.
+    """
+    log.info(
+        "perception purr player started (cooldown=%.0fs asset=%s)",
+        PURR_COOLDOWN_SEC, PURR_AUDIO_PATH,
+    )
+    q = _perception_subscribe()
+    try:
+        while True:
+            event = await q.get()
+            if event.get("name") != "head_pet_started":
+                continue
+            device_id = event.get("device_id", "")
+            if not device_id or device_id == "unknown":
+                continue
+            now = event.get("ts", 0.0)
+            state = _perception_state.setdefault(device_id, {})
+            last_purr = state.get("last_purr_t", 0.0)
+            if now - last_purr < PURR_COOLDOWN_SEC:
+                continue
+            state["last_purr_t"] = now
+            # Suppress the sound-localiser head-turn while the purr
+            # plays. Setting last_chat_t to now+duration is the
+            # single hook the localiser already reads (it skips
+            # turns when last_chat_t is fresh).
+            state["last_chat_t"] = now + PURR_DURATION_SEC
+            log.info("head_pet_started → purr: device=%s", device_id)
+            asyncio.create_task(_dispatch_purr_audio(device_id))
+    except asyncio.CancelledError:
+        log.info("perception purr player cancelled")
+        raise
+    except Exception:
+        log.exception("perception purr player crashed")
+    finally:
+        _perception_unsubscribe(q)
+
+
+# ---------------------------------------------------------------------------
+# Fixed-audio asset allowlist
+# ---------------------------------------------------------------------------
+# Pre-rendered audio that bypasses the kid-mode content-filter sandwich
+# because the bytes are curated, not LLM-generated. Add new assets here
+# when you wire them into a perception consumer or admin route — keeps
+# the "what plays without filtering" surface visible in one place.
+_FIXED_AUDIO_ASSETS: tuple[Path, ...] = (PURR_AUDIO_PATH,)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
@@ -1508,6 +1640,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_perception_face_greeter()),
         asyncio.create_task(_perception_sound_turner()),
         asyncio.create_task(_perception_face_lost_aborter()),
+        asyncio.create_task(_perception_purr_player()),
     ]
     # Layer 5: background calendar refresher (no-op when CALENDAR_IDS empty).
     calendar_task = asyncio.create_task(_calendar_poll_loop())
