@@ -1,14 +1,33 @@
 ---
-title: Child-Safety Guardrails
-description: Active guardrails protecting voice interactions for young children.
+title: Kid Mode
+description: Optional child-safety guardrails for age-appropriate voice interactions.
 ---
 
-# Child-Safety Guardrails
+# Kid Mode
 
-This page documents the active child-safety system protecting voice
-interactions on the StackChan robot. The primary audience is a family with
-young children (ages 4-8). The system is designed to keep conversations
-age-appropriate, redirect harmful topics, and fail toward safer defaults.
+Dotty ships with **Kid Mode enabled by default** (`DOTTY_KID_MODE=true`).
+When active, it enforces age-appropriate conversations for young children
+(ages 4-8): topic blocklist, self-harm redirect, jailbreak resistance,
+picture-book vocabulary, and fail-toward-safer defaults.
+
+## How to enable / disable
+
+Kid Mode is controlled by the `DOTTY_KID_MODE` environment variable on the
+bridge (or in `.env` for the all-in-one compose profile):
+
+```bash
+# Kid Mode ON (default) — child-safe guardrails active
+DOTTY_KID_MODE=true
+
+# Kid Mode OFF — general-purpose assistant, no topic restrictions
+DOTTY_KID_MODE=false
+```
+
+When disabled, Dotty still enforces English-only replies, emoji prefix, and
+the 3-sentence TTS length limit (rules 1-3). Only the child-specific rules
+(4-9) are removed.
+
+## Guardrail details
 
 This is an honest accounting: it describes what is enforced today, where the
 enforcement code lives, and what gaps remain.

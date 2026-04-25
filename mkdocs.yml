@@ -44,7 +44,7 @@ nav:
   - Voice Pipeline: docs/voice-pipeline.md
   - Brain: docs/brain.md
   - Protocols: docs/protocols.md
-  - Safety: docs/child-safety.md
+  - Kid Mode: docs/kid-mode.md
   - Reference:
       - Latent Capabilities: docs/latent-capabilities.md
       - References: docs/references.md
