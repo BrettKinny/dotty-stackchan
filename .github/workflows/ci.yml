@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
 
@@ -55,6 +57,29 @@ jobs:
             echo "Checking $f"
             python3 -c "import ast; ast.parse(open('$f').read())"
           done
+
+  python-tests:
+    name: Python Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: |
+          pip install pytest
+          pip install \
+            'fastapi>=0.115,<1' \
+            'uvicorn[standard]>=0.34,<1' \
+            'pydantic>=2.9,<3' \
+            'jinja2>=3.1,<4' \
+            'python-multipart>=0.0.9,<1' \
+            'prometheus-client>=0.20,<1' \
+            'PyYAML>=6.0,<7' \
+            'numpy>=1.24,<3'
+      - name: Run bridge unit tests
+        run: pytest tests/ -v --tb=short
 
   frontmatter-check:
     name: Frontmatter Check
