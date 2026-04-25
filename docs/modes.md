@@ -12,7 +12,8 @@ One-page reference for every behavioural mode Dotty has, what colour the ring sh
 - Dotty has four mode **tiers**: ambient (idle), conversation (talking), performance (one-shot action), maintenance (config / OTA).
 - The 12-LED WS2812 ring on the front panel is the primary feedback channel. Two control paths drive it: **firmware-automatic** (reacts to device state) and **server-overridable** (MCP `set_led_color`).
 - Most mode transitions are voice-phrase triggered today. Face-tracking is firmware-resident; dance / sing / smart / vision are dispatched server-side from `receiveAudioHandle.py`.
-- Two behaviours are **designed but not yet implemented**: face-detected auto-listen (face → 5 s manual-listen window → fall back to face-tracking) and hybrid smart-mode LED (one ring LED held purple while smart mode is active, rest of ring still shows listen / think / talk colours). See [Designed but not yet implemented](#designed-but-not-yet-implemented) below.
+- One behaviour is **designed but not yet implemented**: face-detected auto-listen (face → 5 s manual-listen window → fall back to face-tracking). See [Designed but not yet implemented](#designed-but-not-yet-implemented) below.
+- **Hybrid smart-mode LED is live** (bridge commit `b72b121`, firmware `32163bd`): LED index 0 holds purple throughout the smart-mode turn; remaining 11 LEDs continue showing listen / think / talk colours.
 
 ## Mode tiers
 
@@ -71,7 +72,7 @@ Capable-model variant of conversation. Triggered by phrase match in `receiveAudi
 - **One-shot**: `"smart mode, what is the speed of light?"` → trigger phrase + remaining query routed to the capable model in a single turn.
 - **Two-turn**: `"smart mode."` (no query) → robot acknowledges (`"Smart mode! What would you like to know?"`), `conn.smart_mode_next = True` flag set; the next turn is forced through smart routing.
 
-The capable model is configured via `SMART_MODEL` env on the bridge (e.g. Claude Sonnet via OpenRouter); falls through to the default brain if unset. LED today is a single MCP `set_led_color(168,0,168)` on entry — see [hybrid smart-mode LED](#hybrid-smart-mode-led-deferred) for the target behaviour.
+The capable model is configured via `SMART_MODEL` env on the bridge (e.g. Claude Sonnet via OpenRouter); falls through to the default brain if unset. LED: on smart-mode entry `set_led_color(168,0,168)` pulses the ring, then `conn.smart_mode_active = True` is set; subsequently `_send_led_color` re-asserts pixel `SMART_MODE_LED_INDEX` (default 0) purple via `set_led_multi` after every full-ring state change, so the indicator persists until the turn completes (flash-pending: firmware `32163bd`).
 
 ### vision
 
@@ -162,13 +163,17 @@ The `face_tracking → listening` edge currently fires only when the user speaks
 ### LED control surfaces
 
 - **Firmware-automatic** — `CircularStrip::OnStateChanged()` (`firmware/firmware/xiaozhi-esp32/main/led/circular_strip.cc`) maps device state → solid / blink / scroll patterns. Triggered by the firmware's own `kDeviceState*` enum changes.
-- **Server-overridable** — MCP tool `self.robot.set_led_color(r, g, b)` invoked via `_send_led_color()` in `receiveAudioHandle.py`. Used today by smart mode (entry pulse) and dance choreographies (timeline events). Overrides the firmware-automatic LED until the next state change.
+- **Server-overridable** — two MCP tools invoked via helpers in `receiveAudioHandle.py`:
+  - `self.robot.set_led_color(r, g, b)` → `_send_led_color()`: paints the full 12-LED ring one colour; used for smart-mode entry pulse and dance timeline events. Overrides firmware-automatic LED until the next firmware state change.
+  - `self.robot.set_led_multi(index, r, g, b)` → `_send_led_multi()` (firmware ≥ `32163bd`): sets a **single** pixel without disturbing the rest. Bypasses the colour-animation tick, so it persists across firmware state changes that use `SetAllColor`. Used by the hybrid smart-mode indicator (re-asserted after each `_send_led_color` call when `conn.smart_mode_active` is True). Degrades gracefully on older firmware.
 
 ### Available LED primitives
 
 Firmware `CircularStrip` (`circular_strip.h`) exposes: `SetAllColor`, `SetSingleColor`, `SetMultiColors`, `Blink(color, interval_ms)`, `Breathe(low, high, interval_ms)`, `Scroll(low, high, length, interval_ms)`, `Rainbow(low, high, interval_ms)`, `FadeOut(interval_ms)`. Brightness is `DEFAULT_BRIGHTNESS = 32`, `LOW_BRIGHTNESS = 4` (0–255 scale).
 
-Anything we want to design fits inside this primitive set — no new firmware primitives are needed for the deferred behaviours below.
+The `set_led_multi` MCP tool (firmware `32163bd`) wraps `setColorAt()` on the `NeonLight` objects (index 0–5 → LeftNeonLight, 6–11 → RightNeonLight). Note: `setColorAt()` is a per-pixel write that bypasses `_color_anim`, which is why re-assertion is needed after full-ring colour changes.
+
+Anything we want to design fits inside this primitive set.
 
 ## Designed but not yet implemented
 
@@ -195,19 +200,13 @@ Anything we want to design fits inside this primitive set — no new firmware pr
 
 **Why it's deferred.** This requires firmware changes (new outbound event) which mean an OTA reflash. Captured here so the design is durable; implementation tracked in [`ROADMAP.md`](../ROADMAP.md).
 
-### Hybrid smart-mode LED (deferred)
+### Hybrid smart-mode LED (shipped)
 
-**Problem.** Today smart mode flashes purple once on entry, then the LED returns to normal listen / think / talk colours. There is no sustained visual proof that smart mode is active for the duration of the turn.
+**Shipped** in bridge commit `b72b121` (firmware half: StackChan/dotty `32163bd`, **flash pending**).
 
-**Design.** Hold one ring LED at purple `(168,0,168)` for the entire smart-mode turn. The remaining 11 LEDs continue to show the normal conversation sub-state colours (red listening, orange thinking, green talking). Provides sustained smart-mode feedback without losing the listen / think / talk cue.
+**Behaviour.** On smart-mode entry, `conn.smart_mode_active = True` is set on the `ConnectionHandler`. `_send_led_color()` then re-asserts pixel `SMART_MODE_LED_INDEX` (env var, default `0`) at purple `(168,0,168)` via `_send_led_multi()` after every full-ring colour change. The remaining 11 LEDs continue to show the firmware-automatic listen / think / talk colours. On turn completion `smart_mode_active` is cleared; the ring returns to firmware-automatic behaviour.
 
-**Implementation sketch** (deferred):
-
-1. On smart-mode entry: in addition to the existing `set_led_color` purple pulse, mark a "smart mode active" flag on the connection.
-2. While the flag is set, every state-change LED frame the server emits should use `SetMultiColors` (one purple LED + 11 state-coloured LEDs) instead of the firmware-automatic uniform colour.
-3. Clear the flag on turn completion; ring returns to firmware-automatic behaviour.
-
-`SetMultiColors` already exists as a firmware primitive (`circular_strip.h`), so no new firmware capability is required — only a new server-side LED frame format and the dispatch flag.
+**Firmware prerequisite.** The `self.robot.set_led_multi(index, r, g, b)` MCP tool was added in StackChan/dotty `32163bd`. Without that firmware, the bridge degrades to the previous single-flash behaviour (warn-once per connection).
 
 ## Future modes
 
@@ -231,4 +230,4 @@ See [`ROADMAP.md`](../ROADMAP.md) for current priority on each.
 - [kid-mode.md](./kid-mode.md) — how Kid Mode wraps every conversation mode (default-on safety guardrails, prompt suffix injection).
 - [latent-capabilities.md](./latent-capabilities.md) — upstream features we aren't yet using; some of these would land as new modes.
 
-Last verified: 2026-04-25.
+Last verified: 2026-04-25. Updated 2026-04-25 (hybrid smart-mode LED shipped, SetMultiColors→set_led_multi correction).
