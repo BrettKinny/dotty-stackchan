@@ -56,6 +56,9 @@ nav:
       - Run Fully Local: docs/cookbook/run-fully-local.md
       - Add Emoji: docs/cookbook/add-emoji.md
       - Disable Kid Mode: docs/cookbook/disable-kid-mode.md
+  - Advanced:
+      - Multi-host deployment: docs/advanced/multi-host.md
+      - Variant port guide: docs/advanced/variant-port-guide.md
   - Reference:
       - Emoji Mapping: docs/emoji-mapping.md
       - Interaction Map: docs/interaction-map.md
