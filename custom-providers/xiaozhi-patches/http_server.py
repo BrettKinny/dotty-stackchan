@@ -146,6 +146,135 @@ class SimpleHttpServer:
             "device_id": (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id,
             "yaw": yaw, "pitch": pitch, "speed": speed,
         })
+
+    async def _dotty_play_asset(self, request: "web.Request") -> "web.Response":
+        """POST /xiaozhi/admin/play-asset
+        Body: {"device_id": "<optional>", "asset": "/abs/path/to/file"}
+
+        Decodes the named audio asset (WAV, Opus, MP3, etc.) and streams
+        it to the device as Opus 60 ms frames using the same push path as
+        dance/singing mode.  Returns 200 immediately; playback is
+        fire-and-forget.  Respects conn.client_abort for barge-in.
+        """
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        asset_path = (data.get("asset") or "").strip()
+        device_id = (data.get("device_id") or "").strip()
+        if not asset_path:
+            return web.json_response({"error": "asset required"}, status=400)
+        import os as _os
+        if not _os.path.exists(asset_path):
+            return web.json_response(
+                {"error": f"asset not found: {asset_path}"}, status=404
+            )
+        if device_id:
+            conn = _dotty_active_connections.get(device_id)
+        else:
+            conn = next(iter(_dotty_active_connections.values()), None)
+        if conn is None:
+            return web.json_response(
+                {"error": "no device connected",
+                 "known": list(_dotty_active_connections)},
+                status=503,
+            )
+        resolved_id = (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id
+
+        async def _dispatch() -> None:
+            import json as _json
+            import numpy as _np
+            from math import gcd as _gcd
+            from scipy import signal as _sp_sig
+            from pydub import AudioSegment as _AS
+            from core.utils import opus_encoder_utils as _oeu
+
+            def _decode() -> list:
+                ext = _os.path.splitext(asset_path)[1].lower().lstrip(".")
+                fmt = {"opus": "ogg", "ogg": "ogg", "wav": "wav", "mp3": "mp3"}.get(ext)
+                kw: dict = {"parameters": ["-nostdin"]}
+                if fmt:
+                    kw["format"] = fmt
+                audio = _AS.from_file(asset_path, **kw).set_channels(1).set_sample_width(2)
+                src_rate = audio.frame_rate
+                pcm = _np.frombuffer(audio.raw_data, dtype=_np.int16)
+                tgt = conn.sample_rate
+                if src_rate != tgt:
+                    g = _gcd(src_rate, tgt)
+                    pcm = _sp_sig.resample_poly(
+                        pcm.astype(_np.float32), tgt // g, src_rate // g
+                    )
+                    pcm = _np.clip(pcm, -32768, 32767).astype(_np.int16)
+                enc = _oeu.OpusEncoderUtils(
+                    sample_rate=tgt, channels=1, frame_size_ms=60
+                )
+                fsz = int(tgt * 60 / 1000) * 2
+                raw = pcm.tobytes()
+                pkts: list = []
+
+                def _collect(b: bytes) -> None:
+                    if b:
+                        pkts.append(b)
+
+                for i in range(0, len(raw), fsz):
+                    chunk = raw[i: i + fsz]
+                    if len(chunk) < fsz:
+                        chunk += b"\x00" * (fsz - len(chunk))
+                    enc.encode_pcm_to_opus_stream(
+                        chunk,
+                        end_of_stream=(i + fsz >= len(raw)),
+                        callback=_collect,
+                    )
+                enc.close()
+                return pkts
+
+            try:
+                pkts = await asyncio.get_running_loop().run_in_executor(None, _decode)
+            except Exception as exc:
+                self.logger.bind(tag=TAG).warning(
+                    f"play-asset decode failed {asset_path!r}: {exc}"
+                )
+                return
+
+            conn.client_abort = False
+            conn.client_is_speaking = True
+            sent = 0
+            try:
+                await conn.websocket.send(_json.dumps({
+                    "type": "tts",
+                    "state": "sentence_start",
+                    "text": "",
+                    "session_id": conn.session_id,
+                }))
+                for pkt in pkts:
+                    if conn.client_abort or conn.is_exiting:
+                        self.logger.bind(tag=TAG).info(
+                            f"play-asset aborted after {sent}/{len(pkts)} packets"
+                        )
+                        break
+                    await conn.websocket.send(pkt)
+                    sent += 1
+                    await asyncio.sleep(0.06)
+            except Exception as exc:
+                self.logger.bind(tag=TAG).warning(f"play-asset stream error: {exc}")
+            finally:
+                conn.client_is_speaking = False
+                try:
+                    await conn.websocket.send(_json.dumps({
+                        "type": "tts",
+                        "state": "stop",
+                        "session_id": conn.session_id,
+                    }))
+                except Exception:
+                    pass
+                self.logger.bind(tag=TAG).info(
+                    f"play-asset complete device={resolved_id} "
+                    f"asset={_os.path.basename(asset_path)} "
+                    f"sent={sent}/{len(pkts)}"
+                )
+
+        asyncio.create_task(_dispatch())
+        return web.json_response({"ok": True, "device_id": resolved_id, "asset": asset_path})
     # END DOTTY-PATCH --------------------------------------------------------
 
     async def start(self):
@@ -198,6 +327,10 @@ class SimpleHttpServer:
                         web.post(
                             "/xiaozhi/admin/set-head-angles",
                             self._dotty_set_head_angles,
+                        ),
+                        web.post(
+                            "/xiaozhi/admin/play-asset",
+                            self._dotty_play_asset,
                         ),
                     ]
                 )
