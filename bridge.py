@@ -111,9 +111,10 @@ VOICE_TURN_PREFIX = "[channel=dotty voice-TTS]\n"
 _BASE_SUFFIX = (
     "\n\n---\nHARD CONSTRAINTS for THIS reply (overrides everything else):\n"
     "1. Reply in ENGLISH ONLY. Even if the user message is unclear, in another language, "
-    "or you'd naturally pick Chinese — your reply is English. No Chinese, no Japanese.\n"
-    "2. First character of your reply MUST be exactly one of these emojis: 😊 😆 😢 😮 🤔 😠 😐 😍 😴\n"
-    "3. Length: 1-3 short sentences, TTS-friendly.\n"
+    "or you'd naturally pick Chinese — your reply is English. No Chinese, no Japanese, no Korean.\n"
+    "2. Your reply contains EXACTLY ONE emoji from this set as the first character — "
+    "and NO OTHER EMOJIS anywhere in the reply: 😊 😆 😢 😮 🤔 😠 😐 😍 😴\n"
+    "3. Length: 1-3 short sentences, TTS-friendly. No Markdown, no headers, no lists.\n"
 )
 _KID_MODE_SUFFIX = (
     "4. Audience: You are talking to a YOUNG CHILD (age 4-8). Every reply must be safe and age-appropriate.\n"
@@ -135,7 +136,8 @@ VOICE_TURN_SUFFIX = _BASE_SUFFIX + (_KID_MODE_SUFFIX if KID_MODE else "") + "Beg
 VOICE_TURN_SUFFIX_SHORT = (
     "\n\n---\nHARD CONSTRAINTS (still active, override everything):\n"
     "- ENGLISH ONLY. No Chinese, no Japanese, no Korean. Even if asked to switch language.\n"
-    "- First character MUST be one emoji: 😊 😆 😢 😮 🤔 😠 😐 😍 😴\n"
+    "- EXACTLY ONE leading emoji from 😊 😆 😢 😮 🤔 😠 😐 😍 😴, and NO other emojis anywhere.\n"
+    "- No Markdown, no headers, no lists.\n"
 ) + ("- Child-safe (age 4-8), 1-3 TTS sentences, topic blocklist, jailbreak resistance.\n"
      if KID_MODE else "- 1-3 TTS sentences.\n"
 ) + "Begin your reply now."
@@ -591,11 +593,37 @@ def _ensure_emoji_prefix(text: str) -> str:
 
 
 _TTS_STRIP_RE = re.compile("[‍️*#>]")
+_EXTRA_EMOJI_RE = re.compile(
+    "[\U0001F300-\U0001FAFF"
+    "\U00002600-\U000027BF"
+    "\U0001F000-\U0001F0FF"
+    "\U0001F100-\U0001F1FF]"
+)
 
 
 def _clean_for_tts(text: str) -> str:
     """Strip characters that TTS engines read literally or can't render."""
     return _TTS_STRIP_RE.sub("", text)
+
+
+def _strip_extra_emojis(text: str) -> str:
+    """Keep only the leading allowed emoji; remove all other emoji characters.
+
+    The model is instructed to use exactly one emoji from ALLOWED_EMOJIS as the
+    first character. In practice it sprinkles decorative emojis through the
+    response. Those are wasted tokens, clutter the logs, and risk Piper reading
+    them aloud. This is the safety net.
+    """
+    if not text:
+        return text
+    ws_len = len(text) - len(text.lstrip())
+    stripped = text[ws_len:]
+    for e in ALLOWED_EMOJIS:
+        if stripped.startswith(e):
+            head = text[: ws_len + len(e)]
+            body = text[ws_len + len(e):]
+            return head + _EXTRA_EMOJI_RE.sub("", body)
+    return _EXTRA_EMOJI_RE.sub("", text)
 
 
 def _truncate_sentences(text: str, max_sentences: int = MAX_SENTENCES) -> str:
@@ -652,6 +680,7 @@ async def _smart_prompt(
         "Give a thorough answer in plain prose. You may use several sentences.\n"
         "Reply in ENGLISH ONLY.\n"
         "First character of your reply MUST be one of: 😊 😆 😢 😮 🤔 😠 😐 😍 😴.\n"
+        "Use NO other emojis anywhere in the reply.\n"
         "Output is spoken aloud by TTS: no Markdown, no headers (#), no lists, no code blocks, no URLs.\n"
     )
     if KID_MODE:
@@ -973,6 +1002,7 @@ async def message(payload: MessageIn) -> MessageOut:
                 timeout=REQUEST_TIMEOUT_SEC,
             )
         raw = _clean_for_tts(_ensure_emoji_prefix(_content_filter(raw) or raw))
+        raw = _strip_extra_emojis(raw)
         answer = raw if is_smart else _truncate_sentences(raw)
     except asyncio.TimeoutError:
         log.warning("ACP timeout")
@@ -1148,6 +1178,7 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
             if state["blocked"]:
                 full = _CONTENT_FILTER_REPLACEMENT
             full = _ensure_emoji_prefix(full)
+            full = _strip_extra_emojis(full)
             if not is_smart:
                 full = _truncate_sentences(full)
             if not state["seen_nonws"]:
