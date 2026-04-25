@@ -1,0 +1,19 @@
+# Macarena lyrics in hiragana — pysinsy ships only the Japanese dictionary
+# but Japanese mora pronunciations of "ma-ka-re-na" are essentially identical
+# to the Spanish/English ones.
+へ
+ま
+か
+れ
+な
+へ
+ま
+か
+れ
+な
+へ
+ま
+か
+れ
+な
+あ

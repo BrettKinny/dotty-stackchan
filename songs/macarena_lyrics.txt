@@ -1,0 +1,18 @@
+# Macarena lyrics — one syllable per line; looped if shorter than note count.
+# pyphen handles English syllabification when lines contain spaces.
+hey
+ma
+ca
+re
+na
+hey
+ma
+ca
+re
+na
+hey
+ma
+ca
+re
+na
+ay
