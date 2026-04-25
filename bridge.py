@@ -1964,6 +1964,13 @@ _household_registry: "HouseholdRegistry | None" = None  # noqa: F821
 # `SpeakerResolution` per voice turn. None == disabled (no registry).
 _speaker_resolver: "SpeakerResolver | None" = None  # noqa: F821
 
+# Phase 4 engagement decider — periodic perception-driven arbiter for
+# unprompted utterances ("Dotty notices you walk in and chimes up on
+# its own"). Lazily constructed in lifespan and gated on
+# ENGAGEMENT_ENABLED. None == disabled or init failed; the bridge
+# voice path is unaffected either way.
+_engagement_decider: "EngagementDecider | None" = None  # noqa: F821
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -2063,6 +2070,48 @@ async def lifespan(app: FastAPI):
         )
         _proactive_greeter = None
 
+    # Phase 4: engagement decider — periodic perception-driven arbiter
+    # for unprompted utterances. Sits one layer up from the greeter:
+    # the greeter is the single-purpose face → greeting reactor; the
+    # decider is the general "should we say something now?" arbiter
+    # for all unprompted behaviours (curiosity, time-markers, calendar
+    # reminders, lost-engagement nudges, …).
+    #
+    # Defensive: gated on ENGAGEMENT_ENABLED env (default false). Reuses
+    # the same _PerceptionBusAdapter / _CalendarFacade / _greeter_llm_client
+    # / _greeter_tts_pusher adapters built for the proactive greeter so
+    # the operator surface stays small. Construction or start failure
+    # MUST never block the bridge from booting (voice path comes first).
+    global _engagement_decider
+    if os.environ.get("ENGAGEMENT_ENABLED", "false").lower() in (
+        "1", "true", "yes", "on",
+    ):
+        try:
+            from bridge.engagement_decider import EngagementDecider
+            _engagement_decider = EngagementDecider(
+                perception_bus_adapter=_PerceptionBusAdapter(),
+                llm_client=_greeter_llm_client,
+                calendar_facade=_CalendarFacade(),
+                tts_pusher=_greeter_tts_pusher,
+                kid_mode_provider=lambda: KID_MODE,
+            )
+            try:
+                _engagement_decider.start()
+            except Exception:
+                log.exception(
+                    "EngagementDecider.start() raised — continuing without it",
+                )
+        except Exception:
+            log.exception(
+                "EngagementDecider construction failed — continuing without it",
+            )
+            _engagement_decider = None
+    else:
+        log.info(
+            "engagement decider disabled (ENGAGEMENT_ENABLED=false) — "
+            "set to true to opt in",
+        )
+
     # Phase 2: audio scene classifier (YAMNet). No-ops without a feed
     # source until xiaozhi-server forwards frames to /api/audio-scene/feed.
     global _audio_scene_classifier, _audio_scene_loop
@@ -2113,6 +2162,11 @@ async def lifespan(app: FastAPI):
             await _proactive_greeter.stop()
         except Exception:
             log.exception("ProactiveGreeter.stop() raised")
+    if _engagement_decider is not None:
+        try:
+            await _engagement_decider.stop()
+        except Exception:
+            log.exception("EngagementDecider.stop() raised")
     if _audio_scene_classifier is not None:
         try:
             _audio_scene_classifier.stop()
