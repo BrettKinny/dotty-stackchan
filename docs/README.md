@@ -20,6 +20,7 @@ re-verify claims against the canonical specs rather than trusting our paraphrase
 | Know what the physical robot can do | [hardware.md](./hardware.md) |
 | Understand the voice pipeline (ASR/TTS/VAD) | [voice-pipeline.md](./voice-pipeline.md) |
 | Understand the brain (ZeroClaw + LLM) | [brain.md](./brain.md) |
+| Run different models on voice vs. Discord | [multi-daemon-split.md](./multi-daemon-split.md) |
 | Know what's on the wire between components | [protocols.md](./protocols.md) |
 | See every cross-layer signal at a glance | [interaction-map.md](./interaction-map.md) |
 | Know what mode the robot is in (and what the LEDs mean) | [modes.md](./modes.md) |
@@ -36,6 +37,7 @@ docs/
 ├── hardware.md              ← M5Stack StackChan body + firmware lineage + MCP tool catalog
 ├── voice-pipeline.md        ← xiaozhi-esp32-server, FunASR, VAD, EdgeTTS, Piper
 ├── brain.md                 ← ZeroClaw architecture, Qwen3-30B-A3B, OpenRouter
+├── multi-daemon-split.md    ← split voice + Discord across two ZeroClaw daemons
 ├── protocols.md             ← Xiaozhi WebSocket, MCP-over-WS, ACP JSON-RPC, emotion
 ├── interaction-map.md       ← every cross-layer signal: source, dest, protocol, notes
 ├── modes.md                 ← behavioural mode taxonomy + LED contract + transitions
