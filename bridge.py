@@ -81,6 +81,12 @@ _XIAOZHI_HTTP_PORT = int(os.environ.get("UNRAID_OTA_PORT", "8003"))
 # 2 s grace period during normal head movements.
 FACE_GREET_COOLDOWN_SEC = float(os.environ.get("FACE_GREET_COOLDOWN_SEC", "60"))
 FACE_GREET_TEXT = os.environ.get("FACE_GREET_TEXT", "Hi!")
+# How recently must a greeting have fired for face_lost to abort it.
+# Firmware emits face_lost ~2 s after the face actually leaves frame
+# (FaceTrackingModifier grace period); past this window we assume the
+# greeting / response cycle has wrapped up naturally.
+FACE_LOST_ABORT_WINDOW_SEC = float(
+    os.environ.get("FACE_LOST_ABORT_WINDOW_SEC", "12"))
 # Phase 1.6: head-turn cooldown so the servos don't whip back and forth
 # on rapid sound bursts. 3 s is roughly the time a deliberate noise
 # (clap, doorbell) takes to register and have the user notice the head
@@ -913,6 +919,70 @@ def _update_perception_state(device_id: str, name: str,
         state["last_sound_energy"] = data.get("energy")
 
 
+async def _dispatch_abort(device_id: str) -> None:
+    """Phase 1.2 follow-up: send xiaozhi admin abort to stop in-flight
+    TTS for a device. Reused by the face-lost aborter so Dotty stops
+    talking when its audience walks away mid-response."""
+    if not _XIAOZHI_HOST:
+        return
+    import requests as _req
+    url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/abort"
+    payload = {"device_id": device_id}
+
+    def _post() -> None:
+        try:
+            r = _req.post(url, json=payload, timeout=3)
+            if r.status_code >= 400:
+                log.warning(
+                    "face-lost abort %s: %s", r.status_code, r.text[:200])
+        except Exception as exc:
+            log.warning("face-lost abort failed: %s", exc)
+
+    await asyncio.to_thread(_post)
+
+
+async def _perception_face_lost_aborter() -> None:
+    """On face_lost, if a greeting recently fired and the user hasn't
+    walked back into frame, fire xiaozhi admin abort so Dotty stops
+    talking to empty space.
+
+    Conservative: only acts within FACE_LOST_ABORT_WINDOW_SEC of the
+    last greet, so an unrelated face_lost during a long-finished
+    conversation doesn't kill anything. Side benefit: if the user is
+    actively talking back, they're in frame — face_lost wouldn't fire.
+    """
+    log.info(
+        "perception face-lost aborter started (window=%.0fs)",
+        FACE_LOST_ABORT_WINDOW_SEC,
+    )
+    q = _perception_subscribe()
+    try:
+        while True:
+            event = await q.get()
+            if event.get("name") != "face_lost":
+                continue
+            device_id = event.get("device_id", "")
+            if not device_id or device_id == "unknown":
+                continue
+            now = event.get("ts", 0.0)
+            state = _perception_state.setdefault(device_id, {})
+            last_greet = state.get("last_face_greet_t", 0.0)
+            if now - last_greet > FACE_LOST_ABORT_WINDOW_SEC:
+                continue
+            log.info(
+                "face_lost → abort: device=%s (greet %.1fs ago)",
+                device_id, now - last_greet,
+            )
+            asyncio.create_task(_dispatch_abort(device_id))
+    except asyncio.CancelledError:
+        log.info("perception face-lost aborter cancelled")
+        raise
+    except Exception:
+        log.exception("perception face-lost aborter crashed")
+    finally:
+        _perception_unsubscribe(q)
+
+
 async def _dispatch_face_greeting(device_id: str, text: str) -> None:
     """Phase 1.5 helper: fire-and-forget POST to the xiaozhi admin
     inject-text route, same path the portal greeter uses."""
@@ -1084,6 +1154,7 @@ async def lifespan(app: FastAPI):
     perception_tasks = [
         asyncio.create_task(_perception_face_greeter()),
         asyncio.create_task(_perception_sound_turner()),
+        asyncio.create_task(_perception_face_lost_aborter()),
     ]
     yield
     for t in perception_tasks:
