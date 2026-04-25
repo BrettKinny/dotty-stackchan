@@ -104,7 +104,7 @@ Paths and systemd unit names are env-configurable (`ZEROCLAW_VOICE_CFG`, `ZEROCL
 - **RPi compromise** gives them everything — LLM keys, memory DB, workspace persona files.
 - **OpenRouter compromise** gives them log access to every prompt sent. Treat prompts as non-confidential.
 
-See `../tasks.md` "Security audit" and "Lock down for child-safe operation" items.
+See [`../ROADMAP.md`](../ROADMAP.md) for related backlog items (privacy-indicator LEDs, child-safety hardening).
 
 ## See also
 

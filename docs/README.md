@@ -39,7 +39,7 @@ docs/
 ├── protocols.md             ← Xiaozhi WebSocket, MCP-over-WS, ACP JSON-RPC, emotion
 ├── interaction-map.md       ← every cross-layer signal: source, dest, protocol, notes
 ├── modes.md                 ← behavioural mode taxonomy + LED contract + transitions
-├── latent-capabilities.md   ← upstream features we could wire up (cross-refs tasks.md)
+├── latent-capabilities.md   ← upstream features we could wire up (cross-refs ROADMAP.md)
 ├── llm-backends.md          ← side-by-side comparison of LLM backend options
 └── references.md            ← canonical URLs, licenses, model cards, spec docs
 ```

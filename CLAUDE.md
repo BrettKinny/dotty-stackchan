@@ -148,7 +148,7 @@ Plumbing:
 
 WS lifecycle is the structural fact most easily forgotten: **xiaozhi only opens the WS during a conversation**, not persistently. Anything that needs to fire a server-bound event from idle has to either (a) trigger `OpenAudioChannel()` first or (b) accept that events are session-only. Producer A and B both assume (a) — done in `SendEvent`.
 
-For the design spec see [`docs/modes.md`](./docs/modes.md) "Designed but not yet implemented" and the plan at `~/.claude/plans/let-s-do-a-bit-purrfect-whistle.md` (private, last session).
+For the design spec see [`docs/modes.md`](./docs/modes.md) "Designed but not yet implemented".
 
 ## Deeper reference
 

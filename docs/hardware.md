@@ -74,7 +74,7 @@ The device acts as an **MCP server** — after the WS `hello` handshake, it adve
 
 Tool names follow the dotted-namespace convention from the `78/xiaozhi-esp32` MCP protocol doc (e.g. `self.audio_speaker.set_volume`, `self.get_device_status`). The **registration sites** in the firmware use `McpServer::AddTool` for public tools and `McpServer::AddUserOnlyTool` for privileged/hidden ones.
 
-Per `tasks.md`, the live firmware advertises **11 tools**. The mapping below is from internal deployment observation plus the `m5stack/StackChan` README's feature list — **verify against the handshake logs** (`docker logs xiaozhi-esp32-server | grep tools/list`) before relying on exact tool names:
+Per internal deployment observation, the live firmware advertises **11 tools**. The mapping below is from that observation plus the `m5stack/StackChan` README's feature list — **verify against the handshake logs** (`docker logs xiaozhi-esp32-server | grep tools/list`) before relying on exact tool names:
 
 | # | Tool (functional) | Hardware touched |
 |---|---|---|
@@ -108,8 +108,8 @@ These are real hardware features with no documented MCP tool in the default firm
 
 ## Safety-relevant hardware facts
 
-- **Mic is I2S via ES7210.** Hot whenever the firmware chooses — there is no hardware mic-mute. The privacy-LED task in `tasks.md` exists because of this.
-- **Servos can move fast.** Feedback servos in a kids' environment can startle. The StackChan kit uses the M5Stack Avatar library's ease functions; the velocity cap is a firmware-side choice, not a hardware limit. See `tasks.md` "Tame violent servo motion".
+- **Mic is I2S via ES7210.** Hot whenever the firmware chooses — there is no hardware mic-mute. The privacy-indicator LED item in [`ROADMAP.md`](../ROADMAP.md) exists because of this.
+- **Servos can move fast.** Feedback servos in a kids' environment can startle. The StackChan kit uses the M5Stack Avatar library's ease functions; the velocity cap is a firmware-side choice, not a hardware limit. See the "Servo speed caps" item in [`ROADMAP.md`](../ROADMAP.md).
 - **Camera has no shutter.** Software-only enable. The `take_photo` MCP tool should always co-activate a distinct LED state (see child-safety task).
 
 ## See also

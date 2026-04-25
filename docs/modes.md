@@ -193,7 +193,7 @@ Anything we want to design fits inside this primitive set — no new firmware pr
 1. **Firmware** (`face_tracking.cpp` Idle → Tracking edge): emit a server-bound event, e.g. `{"type":"event","name":"face_detected"}`, via the same outbound JSON channel used for `listen` / `abort` frames.
 2. **Server** (`receiveAudioHandle.py`): on `face_detected`, send `{"type":"listen","state":"start","mode":"manual"}` to the device, start a 5 s timer. If VAD trips within the window → normal conversation flow takes over. If timer expires without VAD → send `{"type":"listen","state":"stop"}` and remain in face-tracking.
 
-**Why it's deferred.** This requires firmware changes (new outbound event) which mean an OTA reflash. Captured here so the design is durable; implementation tracked in `tasks.md`.
+**Why it's deferred.** This requires firmware changes (new outbound event) which mean an OTA reflash. Captured here so the design is durable; implementation tracked in [`ROADMAP.md`](../ROADMAP.md).
 
 ### Hybrid smart-mode LED (deferred)
 
@@ -221,7 +221,7 @@ These are documented as design-space placeholders so contributors know where the
 | `story_time` | conversation | dimmed warm `(100, 40, 0)` | Longer-form narration, no sentence truncation, lower TTS rate. |
 | `game` | performance | mode-specific palette | Turn-based interactions (rock-paper-scissors, Simon Says). |
 
-See `tasks.md` and `ROADMAP.md` (private repo) for current priority on each.
+See [`ROADMAP.md`](../ROADMAP.md) for current priority on each.
 
 ## See also
 
