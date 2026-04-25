@@ -309,7 +309,16 @@ async def _handle_dance(conn: "ConnectionHandler", dance_name: str) -> None:
     opus_packets = None
     if has_audio:
         try:
-            opus_packets = await _encode_song_to_opus(audio_file, conn.sample_rate)
+            ext = os.path.splitext(audio_file)[1].lower()
+            if ext in (".mid", ".midi"):
+                opus_packets = await _encode_midi_to_opus(
+                    audio_file,
+                    conn.sample_rate,
+                    target_tempo_bpm=dance.get("audio_tempo_bpm"),
+                    max_duration_ms=dance.get("duration_ms"),
+                )
+            else:
+                opus_packets = await _encode_song_to_opus(audio_file, conn.sample_rate)
         except Exception as exc:
             conn.logger.bind(tag=TAG).error(f"Dance mode: audio decode failed: {exc}")
             has_audio = False
@@ -356,6 +365,122 @@ async def _handle_dance(conn: "ConnectionHandler", dance_name: str) -> None:
             f"Say a SHORT excited one-liner intro (under 15 words). "
             f"Example: '\U0001f606 {dance['intro']}'",
         )
+
+
+_MIDI_RENDER_CACHE: dict[tuple, list[bytes]] = {}
+FLUID_SOUNDFONT = "/usr/share/sounds/sf2/FluidR3_GM.sf2"
+
+
+async def _encode_midi_to_opus(
+    midi_path: str,
+    target_rate: int,
+    target_tempo_bpm: float | None = None,
+    max_duration_ms: int | None = None,
+) -> list[bytes]:
+    """Render a MIDI file to Opus 60ms frames via fluidsynth.
+
+    Cached in-memory by (midi_path, mtime, target_rate, tempo, duration) so a
+    repeat dance is instant. Optionally rewrites the MIDI's tempo events
+    (`target_tempo_bpm`) so the music matches the choreography BPM.
+    """
+    import os as _os
+    mtime = _os.path.getmtime(midi_path)
+    cache_key = (midi_path, mtime, target_rate, target_tempo_bpm, max_duration_ms)
+    cached = _MIDI_RENDER_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    def _render():
+        import subprocess
+        import tempfile
+        import wave as _wave
+        import numpy as np
+        from scipy import signal as _scipy_signal
+        from math import gcd
+        from core.utils import opus_encoder_utils
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mid_to_render = midi_path
+            if target_tempo_bpm is not None:
+                import mido
+                src = mido.MidiFile(midi_path)
+                new_tempo = mido.bpm2tempo(target_tempo_bpm)
+                for track in src.tracks:
+                    has_tempo = False
+                    for msg in track:
+                        if msg.type == "set_tempo":
+                            msg.tempo = new_tempo
+                            has_tempo = True
+                    if not has_tempo and track is src.tracks[0]:
+                        track.insert(0, mido.MetaMessage("set_tempo", tempo=new_tempo, time=0))
+                mid_to_render = f"{tmpdir}/retempo.mid"
+                src.save(mid_to_render)
+
+            wav_path = f"{tmpdir}/render.wav"
+            subprocess.run(
+                [
+                    "fluidsynth", "-ni",
+                    "-r", str(target_rate),
+                    "-g", "0.7",
+                    "-F", wav_path,
+                    FLUID_SOUNDFONT,
+                    mid_to_render,
+                ],
+                check=True, capture_output=True, timeout=60,
+            )
+
+            with _wave.open(wav_path, "rb") as wf:
+                src_rate = wf.getframerate()
+                channels = wf.getnchannels()
+                sampwidth = wf.getsampwidth()
+                raw = wf.readframes(wf.getnframes())
+
+            if sampwidth != 2:
+                raise RuntimeError(f"fluidsynth produced sampwidth={sampwidth}, expected 2")
+            pcm = np.frombuffer(raw, dtype=np.int16)
+            if channels == 2:
+                pcm = pcm.reshape(-1, 2).mean(axis=1).astype(np.int16)
+
+            if src_rate != target_rate:
+                g = gcd(src_rate, target_rate)
+                up = target_rate // g
+                down = src_rate // g
+                pcm = _scipy_signal.resample_poly(pcm.astype(np.float32), up, down)
+                pcm = np.clip(pcm, -32768, 32767).astype(np.int16)
+
+            if max_duration_ms is not None:
+                max_samples = int(max_duration_ms / 1000.0 * target_rate)
+                if len(pcm) > max_samples:
+                    pcm = pcm[:max_samples]
+                elif len(pcm) < max_samples:
+                    pcm = np.concatenate([pcm, np.zeros(max_samples - len(pcm), dtype=np.int16)])
+
+            encoder = opus_encoder_utils.OpusEncoderUtils(
+                sample_rate=target_rate, channels=1, frame_size_ms=60
+            )
+            frame_samples = int(target_rate * 60 / 1000)
+            frame_bytes = frame_samples * 2
+            pcm_bytes = pcm.tobytes()
+            packets: list[bytes] = []
+
+            def _collect(opus_bytes):
+                if opus_bytes:
+                    packets.append(opus_bytes)
+
+            for i in range(0, len(pcm_bytes), frame_bytes):
+                chunk = pcm_bytes[i : i + frame_bytes]
+                if len(chunk) < frame_bytes:
+                    chunk += b"\x00" * (frame_bytes - len(chunk))
+                encoder.encode_pcm_to_opus_stream(
+                    chunk, end_of_stream=(i + frame_bytes >= len(pcm_bytes)),
+                    callback=_collect,
+                )
+            encoder.close()
+            return packets
+
+    packets = await asyncio.get_running_loop().run_in_executor(None, _render)
+    _MIDI_RENDER_CACHE[cache_key] = packets
+    return packets
 
 
 async def _encode_song_to_opus(wav_path: str, target_rate: int) -> list[bytes]:

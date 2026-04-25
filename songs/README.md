@@ -1,36 +1,33 @@
 # Songs
 
-Pre-rendered song WAV files played during dance/singing mode.
+Audio files played during dance mode. Two supported formats:
 
-## Format requirements
+## MIDI files (`.mid`) — recommended
 
-All files in this directory MUST be:
-- **Sample rate**: 24000 Hz
-- **Channels**: Mono
-- **Bit depth**: 16-bit signed PCM
-- **Container**: WAV
+Rendered on demand by fluidsynth inside the xiaozhi-server container against the FluidR3 General MIDI soundfont (installed via the `Dockerfile`). The `_encode_midi_to_opus()` helper in `receiveAudioHandle.py` handles tempo override, downmix, resample, and Opus encoding, then caches the result in memory keyed by (path, mtime, rate, tempo, duration).
 
-This matches the device's downlink sample rate. `audio_to_data()` in xiaozhi-server reads the file and Opus-encodes it for the WebSocket stream.
+Example registry entry (in `dances.py`):
+```python
+"macarena": {
+    "audio_file": "config/assets/songs/macarena.mid",
+    "audio_tempo_bpm": 103,   # rewrites MIDI tempo events; choreography is locked to BEAT_MS=582
+    "duration_ms": BEAT_MS * 48,
+    ...
+}
+```
+
+MIDI files are gitignored — most public MIDI transcriptions are derivative works of copyrighted compositions. Source them yourself (BitMidi, MidiWorld, etc.) and drop into this directory. For Macarena specifically: any sequence at any source tempo works; the runtime helper rewrites it via mido.
+
+## Pre-rendered WAV (`.wav`)
+
+24 kHz mono 16-bit signed PCM. Used for songs that need vocal synthesis (Sinsy, DiffSinger output) or any non-MIDI source. The `_encode_song_to_opus()` helper resamples + Opus-encodes at request time.
+
+Generate via `scripts/render_singing_piper.py` (Piper pitch-shift) or `scripts/render_singing_sinsy.py` (HMM singing voice).
 
 ## Naming convention
 
-`<dance_name>.wav` — must match the key in `DANCE_REGISTRY` (in `dances.py`). When the dance is triggered, the matching audio file (if present) is queued into `tts_audio_queue` and plays alongside the choreography.
-
-If no matching file exists, the dance falls back to silent choreography with an LLM-generated spoken intro.
-
-## Generating songs
-
-### Phase 1: Piper pitch-shift (quick prototype)
-```
-python scripts/render_singing_piper.py
-```
-Produces `songs/macarena.wav` using the existing Piper voice model at varying pitch/speed per phrase.
-
-### Phase 2: DiffSinger (higher quality)
-1. Author the song in OpenUtau on the workstation
-2. Render to WAV using a DiffSinger voice bank
-3. Run `python scripts/postprocess_song.py <input.wav> <output.wav>` to normalize to the format above
+`<dance_name>.{mid,wav}` matching the key in `DANCE_REGISTRY`. If the file is missing, the dance falls back to silent choreography with an LLM-generated spoken intro.
 
 ## Mounting
 
-The `songs/` directory is mounted read-only into the xiaozhi-server container at `/opt/xiaozhi-esp32-server/config/assets/songs/` (see `docker-compose.yml`). Reference paths from `DANCE_REGISTRY` use the in-container path: `config/assets/songs/<name>.wav`.
+The `songs/` directory is mounted read-only into the xiaozhi-server container at `/opt/xiaozhi-esp32-server/config/assets/songs/` (see `docker-compose.yml`). Reference paths from `DANCE_REGISTRY` use the in-container path: `config/assets/songs/<name>.<ext>`.
