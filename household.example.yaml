@@ -1,0 +1,120 @@
+# Household registry for Dotty.
+#
+# Copy this file to `~/.zeroclaw/household.yaml` (or wherever
+# HOUSEHOLD_YAML_PATH points) on the bridge host (the RPi) and edit the
+# entries to match your household. The bridge hot-reloads on save — no
+# restart needed.
+#
+# Schema (all fields under each person are optional except display_name):
+#
+#   id (yaml key)            short, lowercase, ascii — used internally
+#   display_name             how Dotty addresses the person ("Sam")
+#   relation                 "parent", "child", "guest"
+#   pronouns                 free-text; flows to LLM verbatim
+#   age                      integer; used for tone-shaping
+#   birthdate                ISO date (YYYY-MM-DD); enables birthday awareness
+#   appearance, voice,       free-text descriptions; the LLM uses these
+#     personality, notes,    to ground its replies. Be specific.
+#     family_context
+#   interests                list of short strings
+#   do_not                   list of "off-limits with this person" rules
+#                            (e.g. "adult topics", "medical advice")
+#   self_id_phrases          list of leading-position phrases that mean
+#                            "this is me speaking" — e.g. "it's sam".
+#                            Match is case-insensitive, leading-position
+#                            anchored. The universal correction handle.
+#   usual_times              soft prior for the speaker resolver. Map of
+#                            day-bucket → list of time-bucket labels.
+#   calendar_prefix          the bracketed tag used in Google Calendar
+#                            ("[Sam]") so events get bucketed per person.
+#   face_enrollment_id       null until Layer 4 face-rec lands; then the
+#                            NVS slot id from the firmware enrollment.
+#   voice_print_id           null until speaker-ID lands; reserved.
+#
+# Privacy: this file lives on the RPi, never egresses. The bridge sends
+# only the *compact_description* of the active person to the LLM (~200
+# chars). Birthdate is used locally for "birthday in N days" — never
+# sent to the LLM in raw ISO form.
+
+default_person: _household
+
+people:
+  parent_one:
+    display_name: Alex
+    relation: parent
+    pronouns: they/them
+    age: 40
+    birthdate: 1985-06-12
+    appearance: tall, glasses
+    voice: low, measured
+    personality: curious, builds things
+    interests: [robotics, hiking]
+    family_context: married to Jordan; parent to Sam and Riley
+    self_id_phrases:
+      - "it's alex"
+      - "i'm alex"
+      - "alex here"
+    usual_times:
+      weekdays: [evening, night]
+      weekends: [any]
+    calendar_prefix: "[Alex]"
+
+  parent_two:
+    display_name: Jordan
+    relation: parent
+    pronouns: she/her
+    age: 38
+    birthdate: 1987-03-04
+    personality: warm, organised, runs the household
+    interests: [reading, gardening, baking]
+    family_context: married to Alex; parent to Sam and Riley
+    self_id_phrases:
+      - "it's jordan"
+      - "i'm jordan"
+      - "mum here"
+    usual_times:
+      weekdays: [morning, evening]
+      weekends: [any]
+    calendar_prefix: "[Jordan]"
+
+  child_one:
+    display_name: Sam
+    relation: child
+    age: 7
+    birthdate: 2018-11-03
+    appearance: short brown hair
+    voice: high, fast, lots of giggles
+    personality: curious, very chatty, loves explaining how things work
+    interests: [lego, dinosaurs, soccer, minecraft]
+    family_context: child of Alex and Jordan; big sibling to Riley
+    do_not:
+      - "adult topics"
+      - "medical advice — redirect to a parent"
+    self_id_phrases:
+      - "it's sam"
+      - "i'm sam"
+      - "sam here"
+    usual_times:
+      weekdays: [after-school, early-evening]
+      weekends: [morning, afternoon]
+    calendar_prefix: "[Sam]"
+
+  child_two:
+    display_name: Riley
+    relation: child
+    age: 4
+    birthdate: 2021-08-19
+    personality: shy, sweet, loves books
+    interests: [picture books, drawing, the cat]
+    family_context: child of Alex and Jordan; younger sibling to Sam
+    do_not:
+      - "adult topics"
+      - "scary stories"
+      - "medical advice — redirect to a parent"
+    self_id_phrases:
+      - "it's riley"
+      - "i'm riley"
+    usual_times:
+      weekdays: [morning, afternoon]
+      weekends: [any]
+    calendar_prefix: "[Riley]"

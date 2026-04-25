@@ -1,10 +1,12 @@
 import asyncio
 import base64
+import functools
 import itertools
 import json
 import logging
 import os
 import re
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -272,10 +274,24 @@ MCP_TOOL_ALLOWLIST: set[str] = {
     "robot.create_reminder",
     "robot.get_reminders",
     "robot.stop_reminder",
+    # Layer 4 face recognition (server-side compute on the bridge):
+    # the firmware tools just stream a JPEG to /api/face/* — see
+    # bridge/face_recognizer.py for the embedding + match service.
+    "camera.face_enroll",
+    "camera.face_recognize",
+    "camera.face_forget",
+    "camera.face_list",
 }
 # === ADMIN_ALLOWLIST_END ===
-# Privacy-sensitive tools denied when KID_MODE is active.
-MCP_TOOL_DENYLIST: set[str] = {"camera.take_photo"} if KID_MODE else set()
+# Privacy-sensitive tools denied when KID_MODE is active. Face capture
+# tools also denied because they take a photo; face_list is read-only
+# (just names) so it stays available for the kid-friendly "who do you
+# know" voice path.
+MCP_TOOL_DENYLIST: set[str] = (
+    {"camera.take_photo", "camera.face_enroll",
+     "camera.face_recognize", "camera.face_forget"}
+    if KID_MODE else set()
+)
 
 FALLBACK_EMOJI = "😐"  # canonical source: textUtils.py
 ALLOWED_EMOJIS = ("😊", "😆", "😢", "😮", "🤔", "😠", "😐", "😍", "😴")  # canonical source: textUtils.py
@@ -612,9 +628,99 @@ def _build_context() -> str:
     return f"[Context: {' | '.join(parts)}]\n"
 
 
-def _wrap_voice(text: str, turn: int) -> str:
+def _wrap_voice(text: str, turn: int, speaker: str | None = None) -> str:
     suffix = VOICE_TURN_SUFFIX if turn == 0 else VOICE_TURN_SUFFIX_SHORT
-    return VOICE_TURN_PREFIX + _build_context() + text + suffix
+    speaker_line = f"[Speaker: {speaker}]\n" if speaker else ""
+    return VOICE_TURN_PREFIX + _build_context() + speaker_line + text + suffix
+
+
+def _wrap_voice_with_block(text: str, turn: int, speaker_block: str) -> str:
+    """Variant of `_wrap_voice` that injects a pre-built multi-line
+    speaker block (e.g. `[Speaking with] Hudson — 7yo, loves Lego.`)
+    instead of the legacy single-line `[Speaker: name]` marker. Used by
+    the SpeakerResolver path; the legacy face-rec path keeps using
+    `_wrap_voice`."""
+    suffix = VOICE_TURN_SUFFIX if turn == 0 else VOICE_TURN_SUFFIX_SHORT
+    return VOICE_TURN_PREFIX + speaker_block + _build_context() + text + suffix
+
+
+def _build_speaker_block(resolution) -> str:
+    """Render a `SpeakerResolution` as a single-line `[Speaking with]`
+    block for the LLM prompt. Returns "" when no person resolved.
+
+    Token budget is small by design (~50 tokens): one line, compact
+    person description, signal trail. Birthdate and other PII are
+    *never* inlined — `compact_description()` enforces that contract.
+    """
+    if resolution is None or not resolution.addressee:
+        return ""
+    if resolution.person_id is None:
+        # Resolver fell through to fallback (`_household` etc.) — no
+        # specific identity to pin. Better to skip the block than to
+        # mislead the model with a generic addressee.
+        return ""
+    line = f"[Speaking with] {resolution.addressee}"
+    if _household_registry is not None:
+        try:
+            person = _household_registry.get(resolution.person_id)
+            if person is not None:
+                line = f"[Speaking with] {person.compact_description(max_chars=180)}"
+        except Exception:
+            log.debug(
+                "speaker block: registry.get raised; using addressee only",
+                exc_info=True,
+            )
+    if resolution.votes:
+        sigs = ",".join(v.signal for v in resolution.votes)
+        line = f"{line}  (signals: {sigs}, conf={resolution.confidence:.2f})"
+    return line + "\n"
+
+
+def _resolve_speaker_for_request(payload):
+    """Resolve who's speaking for the current request. Returns a
+    `SpeakerResolution` or None when the resolver is unavailable. Errors
+    are logged and swallowed so a resolver hiccup never breaks the
+    voice path."""
+    if _speaker_resolver is None:
+        return None
+    try:
+        meta = payload.metadata or {}
+        return _speaker_resolver.resolve(
+            payload.content or "",
+            channel=payload.channel,
+            device_id=meta.get("device_id"),
+        )
+    except Exception:
+        log.exception(
+            "speaker: resolve() raised — voice turn proceeding without enrichment",
+        )
+        return None
+
+
+def _voice_preparer(channel: str | None, resolution=None):
+    """Build a `prepare` callback for `acp.prompt`.
+
+    Two paths:
+      * **Resolver path (preferred)** — when a `SpeakerResolution` is
+        passed in, prepend the rich `[Speaking with]` block built from
+        the household registry. This is the Phase 1 entry point.
+      * **Legacy face-rec path** — when no resolution is supplied (e.g.
+        the resolver isn't configured), fall back to consuming any
+        pending face-recognized identity marker for this channel and
+        emit the historic `[Speaker: name]` line.
+    """
+    if channel not in VOICE_CHANNELS:
+        return None
+    if resolution is not None:
+        block = _build_speaker_block(resolution)
+        if block:
+            return functools.partial(_wrap_voice_with_block, speaker_block=block)
+        # Resolver fired but produced no useful block — still let any
+        # legacy face-rec marker through so we don't regress.
+    speaker = _consume_pending_identity(channel)
+    if speaker is None:
+        return _wrap_voice
+    return functools.partial(_wrap_voice, speaker=speaker)
 
 
 class MessageIn(BaseModel):
@@ -1846,6 +1952,18 @@ async def _greeter_tts_pusher(device_id: str, text: str) -> None:
 # (the greeter reads env on construction).
 _proactive_greeter: "ProactiveGreeter | None" = None  # noqa: F821
 
+# Household registry — single source of truth for who lives here. Loaded
+# from ~/.zeroclaw/household.yaml (overridable via HOUSEHOLD_YAML_PATH).
+# Hot-reloads on file mtime change. None == registry init failed; bridge
+# continues with no-one configured (every identity resolves to _household).
+_household_registry: "HouseholdRegistry | None" = None  # noqa: F821
+
+# Speaker resolver — Phase 1 of the family-companion identity work.
+# Combines self-ID phrases, calendar prefix, time-of-day, and (when
+# Layer 4 ships) face_recognized events into a single best-guess
+# `SpeakerResolution` per voice turn. None == disabled (no registry).
+_speaker_resolver: "SpeakerResolver | None" = None  # noqa: F821
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -1883,6 +2001,48 @@ async def lifespan(app: FastAPI):
     # Layer 5: background calendar refresher (no-op when CALENDAR_IDS empty).
     calendar_task = asyncio.create_task(_calendar_poll_loop())
 
+    # Household registry — load before the greeter so it can enrich
+    # greetings with display name, persona, and birthday awareness. A
+    # missing/malformed file leaves the registry empty, not absent.
+    global _household_registry
+    try:
+        from bridge.household import HouseholdRegistry
+        _household_registry = HouseholdRegistry()
+        log.info(
+            "household registry loaded from %s (%d people)",
+            _household_registry.path,
+            len(tuple(_household_registry.iter())),
+        )
+    except Exception:
+        log.exception(
+            "HouseholdRegistry init failed — continuing without it",
+        )
+        _household_registry = None
+
+    # Speaker resolver — needs the registry to be useful, but can be
+    # constructed even with an empty one (it'll just always fall back).
+    # The resolver itself is dependency-light so failures here are
+    # extremely unlikely; defensive try/except matches the pattern used
+    # by every other lifespan-init component.
+    global _speaker_resolver
+    try:
+        from bridge.speaker import SpeakerResolver
+        _speaker_resolver = SpeakerResolver(
+            registry=_household_registry,
+            calendar_provider=lambda: (_calendar_cache.get("events") or []),
+            # perception_provider stays None until Phase 4 (face-rec
+            # firmware) ships — no recent-events buffer to pull from yet.
+            perception_provider=None,
+        )
+        log.info("SpeakerResolver initialised (sticky=%.0fs ask_threshold=%.2f)",
+                 _speaker_resolver.sticky_seconds,
+                 _speaker_resolver.ask_threshold)
+    except Exception:
+        log.exception(
+            "SpeakerResolver init failed — voice turns will use legacy path",
+        )
+        _speaker_resolver = None
+
     # Layer 6: proactive greeter. Defensive — a construct-or-start failure
     # must never block the bridge from booting (voice path comes first).
     global _proactive_greeter
@@ -1894,6 +2054,7 @@ async def lifespan(app: FastAPI):
             calendar_cache=_CalendarFacade(),
             tts_pusher=_greeter_tts_pusher,
             kid_mode_provider=lambda: KID_MODE,
+            household_registry=_household_registry,
         )
         _proactive_greeter.start()
     except Exception:
@@ -1921,6 +2082,27 @@ async def lifespan(app: FastAPI):
         )
         _audio_scene_classifier = None
 
+    # Layer 4: face recognition service (server-side). Defensive — a
+    # missing face_recognition wheel must NOT block bridge boot. The
+    # endpoints check `_face_recognizer is None` and return 503 in
+    # that case. See bridge/face_recognizer.py for install notes.
+    global _face_recognizer
+    try:
+        from bridge.face_db import FaceDB
+        from bridge.face_recognizer import (
+            FaceRecognizerService, default_db_path,
+        )
+        _face_db = FaceDB(default_db_path())
+        _face_recognizer = FaceRecognizerService(_face_db)
+        log.info("face_recognizer ready: %d enrolled (capacity %d)",
+                 _face_db.count(), FaceDB.CAPACITY)
+    except Exception:
+        log.exception(
+            "FaceRecognizerService start failed — face endpoints "
+            "will return 503 until resolved",
+        )
+        _face_recognizer = None
+
     yield
     for t in perception_tasks:
         t.cancel()
@@ -1936,6 +2118,11 @@ async def lifespan(app: FastAPI):
             _audio_scene_classifier.stop()
         except Exception:
             log.exception("AudioSceneClassifier.stop() raised")
+    if _face_recognizer is not None:
+        try:
+            _face_recognizer.shutdown()
+        except Exception:
+            log.exception("FaceRecognizerService.shutdown() raised")
     await acp.shutdown()
 
 
@@ -2132,6 +2319,64 @@ async def audio_scene_feed(request: Request, device_id: str = "bridge") -> dict:
 _vision_cache: dict[str, dict] = {}
 _vision_events: dict[str, asyncio.Event] = {}
 
+# ---------------------------------------------------------------------------
+# Layer 4 — face recognition state (server-side, see bridge/face_recognizer.py)
+# ---------------------------------------------------------------------------
+# Per-device identity state. Schema:
+#   {
+#     "current": str,                # last recognised name or "unknown"
+#     "last_seen_ts": float,          # perf_counter when current was set
+#     "transition_pending": bool,     # True when current changed; one-shot
+#                                      # consumed by the next voice turn
+#   }
+_identity_state: dict[str, dict] = {}
+
+# Per-channel "next voice turn should mention this speaker" flag. Single
+# device per channel today (Brett's deployment), so we key by channel
+# rather than device_id — voice turns arrive via /api/message which has
+# no device_id field. When multi-device support lands, plumb device_id
+# through MessageIn.metadata and switch this dict's keying.
+_voice_identity_pending: dict[str, str] = {}
+
+# Initialised in lifespan(); None means face recognition is unavailable
+# (module import failed or never wired). All endpoints below check this
+# and return a graceful 503-equivalent JSON instead of crashing.
+_face_recognizer = None  # type: ignore[var-annotated]
+
+
+def _consume_pending_identity(channel: str | None) -> str | None:
+    """Pop the pending speaker marker for a channel, if any. Called once
+    per voice turn from the request handler."""
+    if not channel:
+        return None
+    return _voice_identity_pending.pop(channel, None)
+
+
+def _mark_identity_transition(device_id: str, name: str) -> bool:
+    """Update `_identity_state` for a recognised name. Returns True iff
+    this represents a *transition* (different from the prior `current`).
+
+    Same name N times in a row → no transition, no marker.
+    """
+    state = _identity_state.setdefault(
+        device_id,
+        {"current": "unknown", "last_seen_ts": 0.0,
+         "transition_pending": False},
+    )
+    now = perf_counter()
+    state["last_seen_ts"] = now
+    if state["current"] == name:
+        return False
+    state["current"] = name
+    state["transition_pending"] = True
+    # Per-channel pending marker for the next voice turn. We map device →
+    # voice channel by the deployment convention (single channel "dotty"
+    # per device); future multi-device deployments will need a registry.
+    if name and name != "unknown":
+        for ch in VOICE_CHANNELS:
+            _voice_identity_pending[ch] = name
+    return True
+
 
 def _call_vision_api(b64_image: str, question: str) -> str:
     import requests as req
@@ -2245,6 +2490,88 @@ async def vision_latest(device_id: str):
         _vision_events.pop(device_id, None)
 
 
+# ---------------------------------------------------------------------------
+# Layer 4 — face recognition endpoints
+# ---------------------------------------------------------------------------
+# All four endpoints check `_face_recognizer` and return a graceful 503
+# JSON if the service is unavailable (module import failed). The kid-mode
+# denylist gates camera-touching tools on the firmware side; these
+# endpoints are open since the firmware is the gatekeeper.
+
+def _face_unavailable_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={"ok": False, "error": "face_recognizer_unavailable"},
+    )
+
+
+@app.post("/api/face/enroll")
+async def face_enroll(
+    request: Request,
+    name: str = Form(...),
+    file: UploadFile = File(...),
+):
+    if _face_recognizer is None:
+        return _face_unavailable_response()
+    device_id = request.headers.get("device-id", "unknown")
+    jpeg_bytes = await file.read()
+    log.info("face_enroll device=%s name=%s bytes=%d",
+             device_id, name[:32], len(jpeg_bytes))
+    result = await _face_recognizer.enroll(name, jpeg_bytes)
+    return result
+
+
+@app.post("/api/face/recognize")
+async def face_recognize(
+    request: Request,
+    file: UploadFile = File(...),
+):
+    if _face_recognizer is None:
+        return _face_unavailable_response()
+    device_id = request.headers.get("device-id", "unknown")
+    jpeg_bytes = await file.read()
+    result = await _face_recognizer.recognize(jpeg_bytes)
+    name = result.get("name", "unknown")
+    log.info("face_recognize device=%s name=%s confidence=%.3f",
+             device_id, name, float(result.get("confidence", 0.0)))
+    # Identity-transition bookkeeping. Only emit a perception event on
+    # transitions (and only for known identities) so the proactive
+    # greeter doesn't double-fire.
+    transitioned = _mark_identity_transition(device_id, name)
+    if transitioned and name and name != "unknown":
+        _perception_broadcast({
+            "device_id": device_id,
+            "ts": time.time(),
+            "name": "face_recognized",
+            "data": {
+                "identity": name,
+                "confidence": float(result.get("confidence", 0.0)),
+            },
+        })
+    return result
+
+
+@app.post("/api/face/forget")
+async def face_forget(payload: dict):
+    if _face_recognizer is None:
+        return _face_unavailable_response()
+    name = (payload or {}).get("name", "")
+    if not isinstance(name, str) or not name.strip():
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error": "name_required"},
+        )
+    log.info("face_forget name=%s", name[:32])
+    return await _face_recognizer.forget(name.strip())
+
+
+@app.get("/api/face/list")
+async def face_list():
+    if _face_recognizer is None:
+        return _face_unavailable_response()
+    return await _face_recognizer.list_names()
+
+
 @app.post("/api/message", response_model=MessageOut)
 async def message(payload: MessageIn) -> MessageOut:
     session_id = payload.session_id or str(uuid.uuid4())
@@ -2254,6 +2581,14 @@ async def message(payload: MessageIn) -> MessageOut:
     log.info("msg channel=%s session=%s smart=%s len=%d",
              payload.channel, session_id, is_smart, len(payload.content))
     await _refresh_caches()
+    speaker = _resolve_speaker_for_request(payload)
+    if speaker is not None and speaker.person_id:
+        log.info(
+            "speaker channel=%s person=%s addressee=%s conf=%.2f signals=%s",
+            payload.channel, speaker.person_id, speaker.addressee,
+            speaker.confidence,
+            ",".join(v.signal for v in speaker.votes) or "-",
+        )
     t0 = perf_counter()
     error_msg = None
     try:
@@ -2267,7 +2602,7 @@ async def message(payload: MessageIn) -> MessageOut:
                 acp.prompt(
                     payload.content,
                     xiaozhi_sid=payload.session_id,
-                    prepare=_wrap_voice if payload.channel in VOICE_CHANNELS else None,
+                    prepare=_voice_preparer(payload.channel, speaker),
                 ),
                 timeout=REQUEST_TIMEOUT_SEC,
             )
@@ -2598,6 +2933,14 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
         payload.channel, session_id, is_smart, len(payload.content),
     )
     await _refresh_caches()
+    speaker = _resolve_speaker_for_request(payload)
+    if speaker is not None and speaker.person_id:
+        log.info(
+            "speaker channel=%s person=%s addressee=%s conf=%.2f signals=%s",
+            payload.channel, speaker.person_id, speaker.addressee,
+            speaker.confidence,
+            ",".join(v.signal for v in speaker.votes) or "-",
+        )
 
     # `t_request_start` is captured per-request and read inside on_chunk
     # so the first-audio histogram observes the elapsed time at the
@@ -2668,7 +3011,7 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
                         payload.content,
                         xiaozhi_sid=payload.session_id,
                         chunk_cb=on_chunk,
-                        prepare=_wrap_voice if payload.channel in VOICE_CHANNELS else None,
+                        prepare=_voice_preparer(payload.channel, speaker),
                     ),
                     timeout=REQUEST_TIMEOUT_SEC,
                 )

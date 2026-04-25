@@ -272,5 +272,170 @@ class GreeterTests(unittest.IsolatedAsyncioTestCase):
         broken_tts.assert_awaited_once()
 
 
+class TestHouseholdRegistryEnrichment(unittest.IsolatedAsyncioTestCase):
+    """Greeter should pull display_name, persona, and birthday awareness
+    from the household registry when one is wired in. Without a registry,
+    it falls back to the raw identity string (legacy behaviour)."""
+
+    def _registry_with(self, **kwargs):
+        """Build a tiny in-memory stand-in for the registry. We don't
+        need real YAML loading for greeter tests; we just need an object
+        with a `.get(identity)` method that returns a Person-shaped
+        object."""
+        from bridge.household import Person  # noqa: WPS433
+
+        class _Stub:
+            def __init__(self, person):
+                self._person = person
+
+            def get(self, identity):
+                if not identity:
+                    return None
+                if identity.lower() == self._person.id:
+                    return self._person
+                return None
+
+        return _Stub(Person(id="hudson", display_name="Hudson", **kwargs))
+
+    def _greeter_with_registry(self, registry, **kwargs):
+        from unittest.mock import AsyncMock
+        bus = _FakeBus()
+        cal = _FakeCalendar()
+        llm = AsyncMock(return_value="Hi Hudson!")
+        tts = AsyncMock()
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        now = kwargs.pop(
+            "fixed_now",
+            datetime(2026, 4, 21, 7, 30, tzinfo=ZoneInfo("Australia/Brisbane")),
+        )
+        g = ProactiveGreeter(
+            perception_bus=bus,
+            llm_client=llm,
+            calendar_cache=cal,
+            tts_pusher=tts,
+            kid_mode_provider=lambda: True,
+            household_registry=registry,
+            clock=lambda: now.timestamp(),
+            tz=now.tzinfo,
+        )
+        g._state_path = Path(td.name) / "s.json"  # type: ignore[attr-defined]
+        g._state = {}  # type: ignore[attr-defined]
+        return g, llm, tts
+
+    async def test_display_name_used_in_prompt(self):
+        reg = self._registry_with(age=7, personality="curious")
+        g, llm, tts = self._greeter_with_registry(reg)
+        prompt = g._build_prompt(  # type: ignore[attr-defined]
+            identity="hudson", window="morning", events=[],
+        )
+        self.assertIn("Hudson", prompt)
+        self.assertIn("7yo", prompt)
+        self.assertIn("curious", prompt)
+
+    async def test_no_registry_falls_back_to_raw_identity(self):
+        # Wire registry=None explicitly. Prompt should still produce a
+        # working greeting using the identity string verbatim.
+        from unittest.mock import AsyncMock
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        now = datetime(2026, 4, 21, 7, 30, tzinfo=ZoneInfo("Australia/Brisbane"))
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        g = ProactiveGreeter(
+            perception_bus=_FakeBus(),
+            llm_client=AsyncMock(return_value="Hi!"),
+            calendar_cache=_FakeCalendar(),
+            tts_pusher=AsyncMock(),
+            kid_mode_provider=lambda: True,
+            household_registry=None,  # explicit
+            clock=lambda: now.timestamp(),
+            tz=now.tzinfo,
+        )
+        prompt = g._build_prompt(  # type: ignore[attr-defined]
+            identity="raw_identity", window="morning", events=[],
+        )
+        self.assertIn("raw_identity", prompt)
+        self.assertNotIn("About raw_identity", prompt)  # no enrichment block
+
+    async def test_birthday_today_acknowledged_in_prompt(self):
+        from datetime import date, datetime
+        from zoneinfo import ZoneInfo
+        # Build a registry whose `days_until_birthday()` returns 0
+        # regardless of real-world date, so the test isn't a flake.
+        from bridge.household import Person
+
+        class _ZeroDayPerson:
+            id = "hudson"
+            display_name = "Hudson"
+
+            def compact_description(self, **kwargs):
+                return "Hudson — 7yo"
+
+            def days_until_birthday(self, **kwargs):
+                return 0
+
+        class _Reg:
+            def get(self, identity):
+                return _ZeroDayPerson() if identity == "hudson" else None
+
+        g, _, _ = self._greeter_with_registry(_Reg())
+        prompt = g._build_prompt(  # type: ignore[attr-defined]
+            identity="hudson", window="morning", events=[],
+        )
+        self.assertIn("birthday today", prompt)
+
+    async def test_birthday_in_a_few_days_mentioned_lightly(self):
+        class _SoonPerson:
+            id = "hudson"
+            display_name = "Hudson"
+
+            def compact_description(self, **kwargs):
+                return "Hudson — 7yo"
+
+            def days_until_birthday(self, **kwargs):
+                return 3
+
+        class _Reg:
+            def get(self, identity):
+                return _SoonPerson() if identity == "hudson" else None
+
+        g, _, _ = self._greeter_with_registry(_Reg())
+        prompt = g._build_prompt(  # type: ignore[attr-defined]
+            identity="hudson", window="morning", events=[],
+        )
+        self.assertIn("3 days", prompt)
+        self.assertIn("if it fits", prompt)
+
+    async def test_unknown_identity_no_enrichment(self):
+        reg = self._registry_with(age=7)
+        g, _, _ = self._greeter_with_registry(reg)
+        prompt = g._build_prompt(  # type: ignore[attr-defined]
+            identity="unknown", window="morning", events=[],
+        )
+        self.assertNotIn("Hudson", prompt)
+        self.assertNotIn("7yo", prompt)
+
+    async def test_template_fallback_uses_display_name(self):
+        reg = self._registry_with(age=7)
+        g, _, _ = self._greeter_with_registry(reg)
+        out = g._template_fallback(identity="hudson", window="morning")  # type: ignore[attr-defined]
+        self.assertEqual(out, "Good morning, Hudson!")
+
+    async def test_registry_exception_is_swallowed(self):
+        class _Broken:
+            def get(self, identity):
+                raise RuntimeError("registry broken")
+
+        g, _, _ = self._greeter_with_registry(_Broken())
+        # Must not raise; falls back to raw identity.
+        prompt = g._build_prompt(  # type: ignore[attr-defined]
+            identity="hudson", window="morning", events=[],
+        )
+        self.assertIn("hudson", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()

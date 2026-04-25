@@ -127,6 +127,7 @@ class ProactiveGreeter:
         tts_pusher: Callable[[str, str], Awaitable[Any]],
         kid_mode_provider: Callable[[], bool],
         *,
+        household_registry: Any = None,
         clock: Callable[[], float] = time.time,
         tz: Optional[ZoneInfo] = None,
     ) -> None:
@@ -135,6 +136,10 @@ class ProactiveGreeter:
         self._calendar = calendar_cache
         self._tts = tts_pusher
         self._kid_mode = kid_mode_provider
+        # Optional. When supplied, we enrich greetings with display name,
+        # personality and birthday awareness. None == legacy behaviour
+        # (raw identity string). See bridge/household.py.
+        self._household = household_registry
         self._clock = clock
         tz_name = os.environ.get("TZ", "Australia/Brisbane")
         self._tz = tz or ZoneInfo(tz_name)
@@ -386,18 +391,60 @@ class ProactiveGreeter:
             "\n".join(f"- {e}" for e in events) if events else "(none)"
         )
         max_words = self.greeting_max_words
+
+        # Registry enrichment — display name, compact persona, and
+        # birthday awareness. Fall through to raw identity when absent.
+        person = self._lookup_person(identity)
+        addressee = person.display_name if person else identity
+        persona_line = ""
+        birthday_line = ""
+        if person is not None:
+            descr = person.compact_description(max_chars=180)
+            if descr:
+                persona_line = f"About {addressee}: {descr}\n"
+            days = person.days_until_birthday()
+            if days is not None:
+                if days == 0:
+                    birthday_line = (
+                        f"It is {addressee}'s birthday today — "
+                        f"a warm acknowledgement is welcome.\n"
+                    )
+                elif 1 <= days <= 7:
+                    birthday_line = (
+                        f"{addressee}'s birthday is in {days} day"
+                        f"{'s' if days != 1 else ''} — you may mention "
+                        f"it lightly if it fits.\n"
+                    )
+
         return (
-            f"You are Dotty, a friendly home robot. {identity} just walked into "
-            f"the room. The time of day is {window}. Today's calendar items "
-            f"relevant to {identity}:\n"
+            f"You are Dotty, a friendly home robot. {addressee} just "
+            f"walked into the room. The time of day is {window}.\n"
+            f"{persona_line}"
+            f"{birthday_line}"
+            f"Today's calendar items relevant to {addressee}:\n"
             f"{bullet_block}\n\n"
             f"Write a single short, warm spoken greeting addressed to "
-            f"{identity}. If a calendar item is highly relevant to the "
+            f"{addressee}. If a calendar item is highly relevant to the "
             f"current time-of-day window, you may mention it naturally — "
             f"otherwise just greet them. "
             f"Hard rules: ENGLISH ONLY. {max_words} words or fewer. "
             f"One sentence. No emoji, no Markdown, no lists."
         )
+
+    def _lookup_person(self, identity: str) -> Any:
+        """Look up a person in the registry. Returns None when no
+        registry is wired or identity is unknown to it. Defensive — a
+        registry hiccup must never break the greeter."""
+        if not self._household or not identity or identity == "unknown":
+            return None
+        try:
+            return self._household.get(identity)
+        except Exception:
+            log.debug(
+                "greeter: household registry lookup failed for %s",
+                identity, exc_info=True,
+            )
+            return None
 
     @staticmethod
     def _post_process(text: str) -> str:
@@ -408,7 +455,9 @@ class ProactiveGreeter:
         return cleaned
 
     def _template_fallback(self, *, identity: str, window: str) -> str:
-        return f"Good {window}, {identity}!"
+        person = self._lookup_person(identity)
+        addressee = person.display_name if person else identity
+        return f"Good {window}, {addressee}!"
 
     # ------------------------------------------------------------------
     # Kid-safe sandwich
