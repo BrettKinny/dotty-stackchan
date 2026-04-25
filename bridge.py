@@ -71,6 +71,16 @@ SMART_API_URL = os.environ.get(
 )
 SMART_MAX_TOKENS = int(os.environ.get("SMART_MAX_TOKENS", "2048"))
 CONVO_LOG_DIR = Path(os.environ.get("CONVO_LOG_DIR", "/root/zeroclaw-bridge/logs"))
+# Used by the portal admin path AND by perception-bus consumers (1.5/1.6).
+# Hoisted out of the `if _configure_portal` block so the bus tasks can
+# reach the xiaozhi admin endpoints regardless of portal availability.
+_XIAOZHI_HOST = os.environ.get("UNRAID_HOST", "")
+_XIAOZHI_HTTP_PORT = int(os.environ.get("UNRAID_OTA_PORT", "8003"))
+# Phase 1.5: face-greet cooldown. 60 s prevents the robot from re-greeting
+# the same person every time the face state machine bounces in/out of the
+# 2 s grace period during normal head movements.
+FACE_GREET_COOLDOWN_SEC = float(os.environ.get("FACE_GREET_COOLDOWN_SEC", "60"))
+FACE_GREET_TEXT = os.environ.get("FACE_GREET_TEXT", "Hi!")
 VISION_SYSTEM_PROMPT = (
     "You are describing a photo taken by a small robot's camera (low resolution). "
     + ("Describe what you see in simple, clear language suitable for a young child. "
@@ -893,6 +903,72 @@ def _update_perception_state(device_id: str, name: str,
         state["last_sound_energy"] = data.get("energy")
 
 
+async def _dispatch_face_greeting(device_id: str, text: str) -> None:
+    """Phase 1.5 helper: fire-and-forget POST to the xiaozhi admin
+    inject-text route, same path the portal greeter uses."""
+    if not _XIAOZHI_HOST:
+        log.warning("face greeter: UNRAID_HOST not set; cannot reach xiaozhi-server")
+        return
+    import requests as _req
+    url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/inject-text"
+    payload = {"text": text, "device_id": device_id}
+
+    def _post() -> None:
+        try:
+            r = _req.post(url, json=payload, timeout=3)
+            if r.status_code >= 400:
+                log.warning(
+                    "face greeter inject-text %s: %s",
+                    r.status_code, r.text[:200],
+                )
+        except Exception as exc:
+            log.warning("face greeter inject-text failed: %s", exc)
+
+    await asyncio.to_thread(_post)
+
+
+async def _perception_face_greeter() -> None:
+    """Phase 1.5 consumer: on face_detected events, fire a brief
+    audible greeting through the existing inject-text path so the
+    user knows the robot saw them. Cooldown'd per device.
+
+    The plan called for a 5 s manual-listen window. The xiaozhi
+    protocol's `listen` frames are device→server only, so a true
+    server-driven mic-open requires a firmware change (tracked as
+    a Phase 1.2 follow-up). Greeting the user is the same spirit
+    on the existing surface and is the natural seed for Phase 4
+    curiosity / boredom mode behaviour.
+    """
+    log.info("perception face greeter started (cooldown=%.0fs text=%r)",
+             FACE_GREET_COOLDOWN_SEC, FACE_GREET_TEXT)
+    q = _perception_subscribe()
+    try:
+        while True:
+            event = await q.get()
+            if event.get("name") != "face_detected":
+                continue
+            device_id = event.get("device_id", "")
+            if not device_id or device_id == "unknown":
+                continue
+            now = event.get("ts", 0.0)
+            state = _perception_state.setdefault(device_id, {})
+            last_greet = state.get("last_face_greet_t", 0.0)
+            if now - last_greet < FACE_GREET_COOLDOWN_SEC:
+                continue
+            state["last_face_greet_t"] = now
+            log.info("face_detected → greeting: device=%s", device_id)
+            asyncio.create_task(
+                _dispatch_face_greeting(device_id, FACE_GREET_TEXT),
+            )
+    except asyncio.CancelledError:
+        log.info("perception face greeter cancelled")
+        raise
+    except Exception:
+        log.exception("perception face greeter crashed")
+    finally:
+        _perception_unsubscribe(q)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
@@ -907,7 +983,14 @@ async def lifespan(app: FastAPI):
                  len(_calendar_cache["events"]))
     except Exception:
         log.exception("Initial context fetch failed — will retry on first request")
+    # Phase 1.5: start perception subscriber tasks
+    perception_tasks = [
+        asyncio.create_task(_perception_face_greeter()),
+    ]
     yield
+    for t in perception_tasks:
+        t.cancel()
+    await asyncio.gather(*perception_tasks, return_exceptions=True)
     await acp.shutdown()
 
 
@@ -1138,9 +1221,6 @@ if _configure_portal is not None:
     def _portal_set_kid_mode(enabled: bool) -> None:
         _KID_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         _KID_STATE_FILE.write_text("true" if enabled else "false")
-
-    _XIAOZHI_HOST = os.environ.get("UNRAID_HOST", "")
-    _XIAOZHI_HTTP_PORT = int(os.environ.get("UNRAID_OTA_PORT", "8003"))
 
     async def _portal_abort_device(*, device_id: str = "") -> dict:
         """Fire-and-forget POST to xiaozhi-server's admin abort route."""
