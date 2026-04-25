@@ -1,0 +1,45 @@
+# compose.local.override.yml — fully-local LLM via Ollama
+#
+# Use with compose.all-in-one.yml to run a 100% offline stack:
+#   docker compose -f compose.all-in-one.yml -f compose.local.override.yml up -d
+#
+# Adds an Ollama container for local LLM inference. ASR (FunASR) and
+# TTS (Piper) are already local in the base profile — this closes the
+# last cloud dependency (the LLM call to OpenRouter).
+#
+# Prerequisites:
+#   - GPU with enough VRAM for your chosen model (8B needs ~5GB, 30B needs ~18GB)
+#   - NVIDIA Container Toolkit installed on the Docker host
+#   - Pull your model first: docker exec ollama ollama pull qwen3:8b
+#
+# Then update .config.yaml:
+#   LLM.OpenAICompat.url: http://ollama:11434/v1
+#   LLM.OpenAICompat.model: qwen3:8b
+#   selected_module.LLM: OpenAICompat
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - dotty
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  xiaozhi-server:
+    depends_on:
+      ollama:
+        condition: service_started
+
+volumes:
+  ollama_data:
