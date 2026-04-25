@@ -1004,6 +1004,25 @@ if _configure_portal is not None:
     _XIAOZHI_HOST = os.environ.get("UNRAID_HOST", "")
     _XIAOZHI_HTTP_PORT = int(os.environ.get("UNRAID_OTA_PORT", "8003"))
 
+    async def _portal_abort_device(*, device_id: str = "") -> dict:
+        """Fire-and-forget POST to xiaozhi-server's admin abort route."""
+        if not _XIAOZHI_HOST:
+            return {"ok": False, "error": "UNRAID_HOST not set"}
+        import requests as _req
+        url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/abort"
+        payload: dict = {}
+        if device_id:
+            payload["device_id"] = device_id
+        def _post() -> dict:
+            try:
+                r = _req.post(url, json=payload, timeout=3)
+                if r.status_code == 200:
+                    return {"ok": True, **r.json()}
+                return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
+        return await asyncio.to_thread(_post)
+
     async def _portal_inject_to_device(*, text: str, device_id: str = "") -> dict:
         """Fire-and-forget POST to xiaozhi-server's admin route so the
         named (or first-available) device runs the text through its
@@ -1031,6 +1050,7 @@ if _configure_portal is not None:
         kid_mode_getter=lambda: KID_MODE,
         kid_mode_setter=_portal_set_kid_mode,
         inject_to_device=_portal_inject_to_device,
+        abort_device=_portal_abort_device,
         subscribe_events=_portal_subscribe_events,
         unsubscribe_events=_portal_unsubscribe_events,
     )

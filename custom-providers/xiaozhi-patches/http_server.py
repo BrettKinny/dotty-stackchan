@@ -66,6 +66,34 @@ class SimpleHttpServer:
     async def _dotty_list_devices(self, request: "web.Request") -> "web.Response":
         """GET /xiaozhi/admin/devices — list connected device-ids."""
         return web.json_response({"devices": list(_dotty_active_connections)})
+
+    async def _dotty_abort(self, request: "web.Request") -> "web.Response":
+        """POST /xiaozhi/admin/abort  Body: {"device_id": "<optional>"}
+
+        Stops current TTS, drains queues, sends the device-side stop
+        frame — same path xiaozhi-server takes on barge-in. Fire-and-forget.
+        """
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        device_id = (data.get("device_id") or "").strip() if isinstance(data, dict) else ""
+        if device_id:
+            conn = _dotty_active_connections.get(device_id)
+        else:
+            conn = next(iter(_dotty_active_connections.values()), None)
+        if conn is None:
+            return web.json_response(
+                {"error": "no device connected",
+                 "known": list(_dotty_active_connections)},
+                status=503,
+            )
+        from core.handle.abortHandle import handleAbortMessage
+        asyncio.create_task(handleAbortMessage(conn))
+        return web.json_response({
+            "ok": True,
+            "device_id": (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id,
+        })
     # END DOTTY-PATCH --------------------------------------------------------
 
     async def start(self):
@@ -111,6 +139,9 @@ class SimpleHttpServer:
                         ),
                         web.get(
                             "/xiaozhi/admin/devices", self._dotty_list_devices
+                        ),
+                        web.post(
+                            "/xiaozhi/admin/abort", self._dotty_abort
                         ),
                     ]
                 )

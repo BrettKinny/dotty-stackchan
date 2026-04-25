@@ -1,0 +1,3 @@
+<span class="status-dot status-{{ 'ok' if state == 'online' else ('bad' if state == 'offline' else 'unknown') }}"
+      title="{{ title }}"
+      data-device-state="{{ state }}"></span>

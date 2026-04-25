@@ -8,12 +8,13 @@
       </div>
     </div>
     <input type="hidden" name="enabled" value="{{ 'false' if enabled else 'true' }}">
-    <label class="swap swap-rotate">
-      <input type="checkbox" {% if enabled %}checked{% endif %}
+    <label class="flex items-center gap-2 cursor-pointer">
+      <span class="text-xs text-base-content/60">{{ "on" if enabled else "off" }}</span>
+      <input type="checkbox"
+             class="toggle toggle-success toggle-lg"
+             {% if enabled %}checked{% endif %}
              onchange="this.form.querySelector('[name=enabled]').value = this.checked ? 'true' : 'false'; this.form.requestSubmit();"
              {% if not available %}disabled{% endif %}>
-      <span class="swap-on text-success">●</span>
-      <span class="swap-off text-base-content/40">○</span>
     </label>
   </form>
   <div id="kid-result" class="mt-2 empty:hidden"></div>

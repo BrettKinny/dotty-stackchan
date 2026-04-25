@@ -35,6 +35,7 @@ _state: dict[str, Any] = {
     "kid_mode_getter": None,
     "kid_mode_setter": None,
     "inject_to_device": None,
+    "abort_device": None,
     "subscribe_events": None,
     "unsubscribe_events": None,
 }
@@ -42,7 +43,7 @@ _state: dict[str, Any] = {
 
 def configure(*, send_message: Any = None, vision_cache: dict | None = None,
               kid_mode_getter: Any = None, kid_mode_setter: Any = None,
-              inject_to_device: Any = None,
+              inject_to_device: Any = None, abort_device: Any = None,
               subscribe_events: Any = None,
               unsubscribe_events: Any = None) -> None:
     """Register bridge state with the portal. Idempotent."""
@@ -56,6 +57,8 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
         _state["kid_mode_setter"] = kid_mode_setter
     if inject_to_device is not None:
         _state["inject_to_device"] = inject_to_device
+    if abort_device is not None:
+        _state["abort_device"] = abort_device
     if subscribe_events is not None:
         _state["subscribe_events"] = subscribe_events
     if unsubscribe_events is not None:
@@ -299,6 +302,44 @@ _DANCES = (
 )
 
 
+async def _xiaozhi_device_count() -> int | None:
+    """Count active StackChan WS connections via the admin endpoint.
+    Returns None if xiaozhi is unreachable."""
+    if not UNRAID_HOST:
+        return None
+    url = f"http://{UNRAID_HOST}:{UNRAID_OTA_PORT}/xiaozhi/admin/devices"
+    import urllib.request
+    def _fetch() -> int | None:
+        try:
+            with urllib.request.urlopen(url, timeout=2) as r:
+                if r.status != 200:
+                    return None
+                data = json.loads(r.read())
+                return len(data.get("devices", []))
+        except Exception:
+            return None
+    return await asyncio.to_thread(_fetch)
+
+
+@router.get("/device-status", response_class=HTMLResponse, include_in_schema=False)
+async def device_status(request: Request) -> Any:
+    n = await _xiaozhi_device_count()
+    if n is None:
+        return templates.TemplateResponse(
+            request, "device_status.html",
+            {"state": "unknown", "title": "xiaozhi-server unreachable"},
+        )
+    if n == 0:
+        return templates.TemplateResponse(
+            request, "device_status.html",
+            {"state": "offline", "title": "Dotty offline (sleep / WiFi drop)"},
+        )
+    return templates.TemplateResponse(
+        request, "device_status.html",
+        {"state": "online", "title": f"Dotty online ({n} device)"},
+    )
+
+
 @router.get("/face", response_class=HTMLResponse, include_in_schema=False)
 async def face_partial(request: Request) -> Any:
     """Show the most recent emoji Dotty used today (P9)."""
@@ -351,6 +392,91 @@ async def dance(request: Request, key: str = Form(...)) -> Any:
             {"ok": False, "error": "Unknown dance/song."},
         )
     return await _inject_or_error(request, pick["phrase"], label=pick["phrase"])
+
+
+_PRESETS = {
+    "bedtime": {
+        "label": "Bedtime",
+        "icon": "🌙",
+        "volume": 15,
+        "kid_mode": True,
+        "summary": "volume 15 + kid mode on",
+    },
+    "quiet": {
+        "label": "Quiet",
+        "icon": "🤫",
+        "volume": 10,
+        "summary": "volume 10",
+    },
+    "loud": {
+        "label": "Loud",
+        "icon": "📢",
+        "volume": 70,
+        "summary": "volume 70",
+    },
+    "adult": {
+        "label": "Adult mode",
+        "icon": "🧠",
+        "volume": 50,
+        "kid_mode": False,
+        "summary": "volume 50 + kid mode off",
+    },
+}
+
+
+@router.post("/actions/preset", response_class=HTMLResponse,
+             include_in_schema=False)
+async def preset(request: Request, name: str = Form(...)) -> Any:
+    pick = _PRESETS.get(name)
+    if pick is None:
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": "Unknown preset."},
+        )
+    inject = _state.get("inject_to_device")
+    if inject is None:
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": "Inject path not configured."},
+        )
+    actions_done = []
+    # Volume change runs through the device pipeline (audible ack).
+    if "volume" in pick:
+        v = pick["volume"]
+        try:
+            await inject(text=(
+                f"Set the speaker volume to {v} percent using your "
+                f"audio_speaker.set_volume tool, then reply with just '🔊 {v}'."
+            ))
+            actions_done.append(f"volume {v}")
+        except Exception:
+            log.exception("preset inject volume failed")
+    # Kid-mode change writes the state file + restart (ignore here if same).
+    if "kid_mode" in pick:
+        getter = _state.get("kid_mode_getter")
+        setter = _state.get("kid_mode_setter")
+        if getter and setter and bool(getter()) != bool(pick["kid_mode"]):
+            try:
+                setter(bool(pick["kid_mode"]))
+                actions_done.append(
+                    f"kid mode {'on' if pick['kid_mode'] else 'off'}"
+                )
+                # Spawn restart so kid_mode change takes effect.
+                import subprocess
+                subprocess.Popen(
+                    ["sh", "-c",
+                     "sleep 2 && systemctl restart zeroclaw-bridge"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            except Exception:
+                log.exception("preset kid-mode toggle failed")
+    return templates.TemplateResponse(
+        request, "say_result.html",
+        {"ok": True, "sent": pick["label"],
+         "response": "Applied: " + ", ".join(actions_done) if actions_done
+                     else "(nothing changed — already in this state)"},
+    )
 
 
 @router.post("/actions/volume", response_class=HTMLResponse, include_in_schema=False)
@@ -500,6 +626,36 @@ async def kid_mode_set(request: Request, enabled: str = Form("")) -> Any:
     return templates.TemplateResponse(
         request, "kid_mode_result.html",
         {"ok": True, "new_state": new_state},
+    )
+
+
+# --- Q3: stop / abort current TTS ----------------------------------------
+
+@router.post("/actions/stop", response_class=HTMLResponse,
+             include_in_schema=False)
+async def stop(request: Request) -> Any:
+    abort = _state.get("abort_device")
+    if abort is None:
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": "Abort path not configured."},
+        )
+    try:
+        result = await abort()
+    except Exception as exc:
+        log.exception("portal stop action failed")
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": f"Bridge error: {exc.__class__.__name__}"},
+        )
+    if not result.get("ok"):
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": result.get("error", "abort failed")},
+        )
+    return templates.TemplateResponse(
+        request, "say_result.html",
+        {"ok": True, "sent": "Stop", "response": "Aborted."},
     )
 
 
