@@ -73,11 +73,34 @@ class LLMProvider(LLMProviderBase):
         user_text = self._last_user_text(dialogue)
         metadata = {"provider": "zeroclaw"}
         stripped_user = user_text
-        if user_text.startswith("[SMART_MODE]\n"):
-            stripped_user = user_text[len("[SMART_MODE]\n"):]
+
+        # Description-based identity (Layer 4 server-side, no storage).
+        # receiveAudioHandle prepends "[ROOM_VIEW]\n<description>\n" to
+        # the user text when it has a fresh VLM-generated description of
+        # who's in front of the camera. We strip it here and pass the
+        # description through metadata so the bridge can render it as a
+        # `[Room view] ...` line in the prompt without it surfacing as
+        # part of the user utterance.
+        if stripped_user.startswith("[ROOM_VIEW]\n"):
+            tail = stripped_user[len("[ROOM_VIEW]\n"):]
+            # Description ends at the next "\n"; everything after is
+            # the actual user utterance. If there is no second newline
+            # the whole tail is the description and the user utterance
+            # is empty (legitimate when the trigger comes from a
+            # non-voice path).
+            nl = tail.find("\n")
+            if nl >= 0:
+                metadata["room_description"] = tail[:nl]
+                stripped_user = tail[nl + 1:]
+            else:
+                metadata["room_description"] = tail
+                stripped_user = ""
+
+        if stripped_user.startswith("[SMART_MODE]\n"):
+            stripped_user = stripped_user[len("[SMART_MODE]\n"):]
             metadata["smart_mode"] = True
-        elif user_text.startswith("[SMART_MODE_ACK] "):
-            stripped_user = user_text[len("[SMART_MODE_ACK] "):]
+        elif stripped_user.startswith("[SMART_MODE_ACK] "):
+            stripped_user = stripped_user[len("[SMART_MODE_ACK] "):]
         if stripped_user != user_text:
             dialogue = [dict(msg) for msg in dialogue]
             for msg in reversed(dialogue):

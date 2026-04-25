@@ -24,6 +24,33 @@ MIN_UTTERANCE_CHARS = int(os.environ.get("MIN_UTTERANCE_CHARS", "2"))
 # bypasses the colour-animation tick, so we re-assert this pixel after
 # every full-ring colour change.
 SMART_MODE_LED_INDEX = int(os.environ.get("SMART_MODE_LED_INDEX", "0"))
+# Right-ring pixel held in soft pink whenever kid mode is OFF, as a sustained
+# "guards are down" indicator visible to anyone glancing at the robot. Mirrors
+# the Smart Mode persistent-pixel pattern but on the opposite ring (0-5 left,
+# 6-11 right) so the two indicators never collide.
+KID_MODE_OFF_LED_INDEX = int(os.environ.get("KID_MODE_OFF_LED_INDEX", "6"))
+KID_MODE_OFF_RGB = (168, 80, 100)
+_KID_MODE_STATE_FILE = os.environ.get(
+    "DOTTY_KID_MODE_STATE", "/root/zeroclaw-bridge/state/kid-mode",
+)
+
+
+def _read_kid_mode_state() -> bool:
+    """Mirror of bridge.py's _read_kid_mode but importable from this module
+    without circular-import gymnastics. Single source of truth = the same
+    state file the portal writes."""
+    try:
+        with open(_KID_MODE_STATE_FILE, "r") as f:
+            v = f.read().strip().lower()
+        if v in ("true", "1", "yes"):
+            return True
+        if v in ("false", "0", "no"):
+            return False
+    except OSError:
+        pass
+    return os.environ.get("DOTTY_KID_MODE", "true").lower() in ("1", "true", "yes")
+
+
 _LETTERS_RE = re.compile(r'[a-zA-Z一-鿿぀-ゟ゠-ヿ]')
 
 _ASR_CORRECTIONS: dict[str, str] = {
@@ -203,6 +230,15 @@ async def _send_led_color(conn: "ConnectionHandler", r: int, g: int, b: int) -> 
     # flag is active — a no-op the rest of the time.
     if getattr(conn, "smart_mode_active", False):
         await _send_led_multi(conn, SMART_MODE_LED_INDEX, 168, 0, 168)
+    # Kid-mode-OFF persistent pixel: same reassert pattern, opposite ring.
+    # Cache the flag on the connection so the state file is hit at most once
+    # per connection — subsequent paints just check the boolean.
+    if not hasattr(conn, "kid_mode_off"):
+        conn.kid_mode_off = not _read_kid_mode_state()
+    if conn.kid_mode_off:
+        await _send_led_multi(
+            conn, KID_MODE_OFF_LED_INDEX, *KID_MODE_OFF_RGB,
+        )
 
 
 async def _send_led_multi(
@@ -314,6 +350,137 @@ async def _handle_vision(conn: "ConnectionHandler", text: str) -> str | None:
         conn.logger.bind(tag=TAG).error(f"Vision: bridge poll failed: {exc}")
 
     return None
+
+
+# ---------- Description-based identity (no storage) ----------
+# Capture a one-line natural-language description of who is currently
+# in front of the camera, cache it on `conn`, surface it to the bridge
+# via a `[ROOM_VIEW]\n<desc>\n` prefix on the next user turn so the
+# bridge can render `[Room view] ...` into the prompt. No biometric
+# data is stored anywhere — the cache is per-connection and cleared on
+# face_lost (see textMessageHandlerRegistry.EventTextMessageHandler).
+#
+# Capture is fire-and-forget: triggered by the perception relay on
+# face_detected, runs in the background, beats the user's first voice
+# turn most of the time. If a turn arrives before capture completes,
+# that turn just goes out without a [Room view] line — no extra
+# latency on the voice path.
+
+# The VLM prompt that elicits a useful identity-grounding sentence
+# without straying into name-guessing or scene narration. Tuned for
+# a single short sentence the LLM can fold into addressing the user.
+_ROOM_VIEW_VLM_QUESTION = (
+    "Describe the person you can see in one short sentence — "
+    "approximate age range, hair, clothing, distinguishing features. "
+    "If you cannot see a person, reply with exactly: no one in view. "
+    "Do not guess names. Do not add commentary."
+)
+
+# Sentinel reply the prompt above asks for when the frame is empty.
+# We treat this as "no description" rather than caching the literal
+# string — saves a useless [Room view] line in the next voice turn.
+_ROOM_VIEW_NO_PERSON = "no one in view"
+
+
+async def _capture_room_description_async(
+    conn: "ConnectionHandler",
+) -> None:
+    """Background-capture the current room view description.
+
+    Called from the perception relay on `face_detected` (when no fresh
+    description is cached). Sends a `take_photo` MCP call with a
+    description-focused VLM question, long-polls the bridge for the
+    result, and caches it on `conn._room_description`. Best-effort —
+    a failure leaves the cache empty and the next voice turn proceeds
+    without `[Room view]`.
+    """
+    if not VISION_BRIDGE_URL:
+        return
+    device_id = "unknown"
+    try:
+        device_id = conn.headers.get("device-id", "unknown")
+    except Exception:
+        pass
+
+    # Mark in-flight so concurrent face_detected events don't trigger
+    # a second capture on top of an active one. Cleared in finally.
+    if getattr(conn, "_room_description_in_flight", False):
+        return
+    conn._room_description_in_flight = True
+    try:
+        mcp_call = json.dumps({
+            "session_id": conn.session_id,
+            "type": "mcp",
+            "payload": {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "self.camera.take_photo",
+                    "arguments": {"question": _ROOM_VIEW_VLM_QUESTION},
+                },
+                "id": int(time.time() * 1000) % 0x7FFFFFFF,
+            },
+        })
+        await conn.websocket.send(mcp_call)
+        conn.logger.bind(tag=TAG).info(
+            f"room_view: capture started device={device_id}"
+        )
+        import requests
+        url = f"{VISION_BRIDGE_URL.rstrip('/')}/api/vision/latest/{device_id}"
+        resp = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: requests.get(url, timeout=20),
+        )
+        if resp.status_code != 200:
+            conn.logger.bind(tag=TAG).warning(
+                f"room_view: bridge returned {resp.status_code}"
+            )
+            return
+        description = (resp.json().get("description") or "").strip()
+        if not description:
+            return
+        # Treat the "no one in view" sentinel as a miss so we don't
+        # stuff the prompt with a useless line.
+        if _ROOM_VIEW_NO_PERSON in description.lower():
+            conn._room_description = None
+            conn.logger.bind(tag=TAG).info(
+                "room_view: VLM reports no person; cache cleared"
+            )
+            return
+        conn._room_description = description
+        conn._room_description_ts = time.time()
+        conn.logger.bind(tag=TAG).info(
+            f"room_view: cached len={len(description)} "
+            f"preview={description[:60]!r}"
+        )
+    except Exception as exc:
+        conn.logger.bind(tag=TAG).warning(
+            f"room_view: capture failed: {exc}"
+        )
+    finally:
+        conn._room_description_in_flight = False
+
+
+def _with_room_view_marker(
+    conn: "ConnectionHandler", text: str,
+) -> str:
+    """Prepend `[ROOM_VIEW]\\n<desc>\\n` to `text` if a fresh room
+    description is cached on `conn`. The zeroclaw LLM provider strips
+    this marker and moves the description into request metadata; see
+    `custom-providers/zeroclaw/zeroclaw.py:_payload`."""
+    desc = getattr(conn, "_room_description", None)
+    if not desc:
+        return text
+    return f"[ROOM_VIEW]\n{desc}\n{text}"
+
+
+def _submit_chat(conn: "ConnectionHandler", text: str) -> None:
+    """Submit `text` to the LLM via the connection's executor, with
+    the room-view marker prepended automatically when a fresh
+    description is cached. Single chokepoint for description
+    propagation — every voice path goes through here.
+    """
+    conn.executor.submit(conn.chat, _with_room_view_marker(conn, text))
 
 
 # ---------- Face recognition (Layer 4) ----------
@@ -520,7 +687,7 @@ async def _handle_face_list(conn: "ConnectionHandler") -> bool:
             f"[FACE_LIST_MANY] You know these faces: {joined}. "
             f"Say only: I know {joined}!"
         )
-    conn.executor.submit(conn.chat, ack_prompt)
+    _submit_chat(conn, ack_prompt)
     return True
 
 
@@ -551,7 +718,7 @@ async def _handle_face_forget(
             f"[FACE_FORGET_NAMED] You just forgot {target}'s face. "
             f"Say only: Okay, I've forgotten {target}'s face."
         )
-    conn.executor.submit(conn.chat, ack)
+    _submit_chat(conn, ack)
     return True
 
 
@@ -1031,7 +1198,7 @@ async def startToChat(conn: "ConnectionHandler", text):
         await _send_led_color(conn, 168, 0, 168)
         await _send_led_multi(conn, SMART_MODE_LED_INDEX, 168, 0, 168)
         if remaining_q:
-            conn.executor.submit(conn.chat, f"[SMART_MODE]\n{remaining_q}")
+            _submit_chat(conn, f"[SMART_MODE]\n{remaining_q}")
         else:
             conn.smart_mode_next = True
             conn.executor.submit(
@@ -1046,7 +1213,7 @@ async def startToChat(conn: "ConnectionHandler", text):
         conn.smart_mode_active = True
         await _send_led_color(conn, 168, 0, 168)
         await _send_led_multi(conn, SMART_MODE_LED_INDEX, 168, 0, 168)
-        conn.executor.submit(conn.chat, f"[SMART_MODE]\n{actual_text}")
+        _submit_chat(conn, f"[SMART_MODE]\n{actual_text}")
         return
 
     # Face recognition (Layer 4) must run BEFORE the vision check —
@@ -1070,7 +1237,7 @@ async def startToChat(conn: "ConnectionHandler", text):
                 f'The child said: "{user_text}"\n'
                 f"Respond naturally about what you see, as if looking at it together."
             )
-            conn.executor.submit(conn.chat, vision_prompt)
+            _submit_chat(conn, vision_prompt)
             return
 
     if _is_dance_request(user_text):
@@ -1078,7 +1245,7 @@ async def startToChat(conn: "ConnectionHandler", text):
         await _handle_dance(conn, dance_name)
         return
 
-    conn.executor.submit(conn.chat, actual_text)
+    _submit_chat(conn, actual_text)
 
 
 async def no_voice_close_connect(conn: "ConnectionHandler", have_voice):

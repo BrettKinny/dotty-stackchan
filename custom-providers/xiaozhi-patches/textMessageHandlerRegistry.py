@@ -61,6 +61,45 @@ class EventTextMessageHandler(TextMessageHandler):
             )
             return
 
+        # Description-based identity hooks — see
+        # `receiveAudioHandle._capture_room_description_async`.
+        #
+        # On `face_lost`: invalidate the cached description so the next
+        # `face_detected` triggers a fresh capture. This is what makes
+        # the feature "responsive" when people swap in front of the
+        # camera — the LLM stops claiming the previous person is still
+        # there as soon as the firmware loses the face.
+        #
+        # On `face_detected`: if no description is cached and no
+        # capture is already in flight, kick off a background capture.
+        # By the time the user actually speaks, the description is
+        # usually ready; if not, the voice turn just goes out without
+        # `[Room view]` (no added voice-turn latency either way).
+        event_name = msg_json.get("name", "")
+        if event_name == "face_lost":
+            try:
+                conn._room_description = None
+                conn._room_description_ts = 0.0
+            except Exception:
+                pass
+        elif event_name == "face_detected":
+            try:
+                if (not getattr(conn, "_room_description", None)
+                        and not getattr(
+                            conn, "_room_description_in_flight", False)):
+                    # Imported lazily — receiveAudioHandle imports
+                    # core.* modules that aren't available at module
+                    # import time in some test contexts.
+                    from receiveAudioHandle import (
+                        _capture_room_description_async,
+                    )
+                    asyncio.create_task(
+                        _capture_room_description_async(conn))
+            except Exception as exc:
+                conn.logger.bind(tag=TAG).warning(
+                    f"room_view: failed to start capture: {exc}"
+                )
+
         # Firmware ts is ms-since-boot, not wall-clock — useless for
         # consumer "last N seconds" comparisons across the relay hop.
         # Use server wall-clock and preserve the firmware value in
@@ -74,7 +113,7 @@ class EventTextMessageHandler(TextMessageHandler):
         payload = {
             "device_id": device_id,
             "ts": time.time(),
-            "name": msg_json.get("name", ""),
+            "name": event_name,
             "data": data,
         }
         url = f"{bridge_url.rstrip('/')}/api/perception/event"

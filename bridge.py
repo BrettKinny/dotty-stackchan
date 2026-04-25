@@ -70,6 +70,16 @@ MAX_SENTENCES = int(os.environ.get("MAX_SENTENCES", "3"))
 _KID_STATE_FILE = Path(
     os.environ.get("DOTTY_KID_MODE_STATE", "/root/zeroclaw-bridge/state/kid-mode")
 )
+# Voice-daemon LLM swapped on each kid-mode toggle. Kid mode ON = the small
+# fast safety-tuned model; kid mode OFF = a more capable adult-mode model.
+# Both IDs are OpenRouter-routable since the custom provider already targets
+# OpenRouter.
+KID_MODEL = os.environ.get(
+    "DOTTY_KID_MODEL", "mistralai/mistral-small-3.2-24b-instruct",
+)
+ADULT_MODEL = os.environ.get(
+    "DOTTY_ADULT_MODEL", "anthropic/claude-sonnet-4-6",
+)
 
 
 def _read_kid_mode() -> bool:
@@ -697,26 +707,49 @@ def _resolve_speaker_for_request(payload):
         return None
 
 
-def _voice_preparer(channel: str | None, resolution=None):
+def _voice_preparer(channel: str | None, resolution=None,
+                    room_description: str | None = None):
     """Build a `prepare` callback for `acp.prompt`.
 
-    Two paths:
-      * **Resolver path (preferred)** — when a `SpeakerResolution` is
-        passed in, prepend the rich `[Speaking with]` block built from
-        the household registry. This is the Phase 1 entry point.
-      * **Legacy face-rec path** — when no resolution is supplied (e.g.
-        the resolver isn't configured), fall back to consuming any
-        pending face-recognized identity marker for this channel and
-        emit the historic `[Speaker: name]` line.
+    Three layers of speaker context, additive (any combination may be
+    present per turn):
+
+      * **Resolver path** — a `SpeakerResolution` with a registry
+        `person_id` rolls up self-ID / sticky / calendar / time-of-day
+        into a `[Speaking with] Hudson — 7yo, loves Lego.` block. See
+        `bridge/speaker.py`.
+      * **Room view (description-based, no storage)** — a one-line
+        natural-language description of who is currently in front of
+        the camera (`[Room view] a child with curly brown hair in a
+        striped t-shirt`). Captured by the VLM on `face_detected`,
+        cleared on `face_lost`. Ephemeral; never persists. Useful when
+        the resolver has no `person_id` (visitor / not-yet-self-ID'd)
+        AND when it does (LLM gets both a name and a fresh visual
+        anchor). See `xiaozhi-server` perception relay for the capture
+        side.
+      * **Legacy face-rec path** — when neither of the above produces
+        anything, consume any pending face-recognized identity marker
+        for this channel and emit the historic `[Speaker: name]` line.
     """
     if channel not in VOICE_CHANNELS:
         return None
+    block_parts: list[str] = []
     if resolution is not None:
-        block = _build_speaker_block(resolution)
-        if block:
-            return functools.partial(_wrap_voice_with_block, speaker_block=block)
-        # Resolver fired but produced no useful block — still let any
-        # legacy face-rec marker through so we don't regress.
+        speaker_block = _build_speaker_block(resolution)
+        if speaker_block:
+            block_parts.append(speaker_block)
+    if room_description:
+        cleaned = room_description.strip()
+        # Defensive: cap length so a runaway VLM response can't blow
+        # the prompt budget. 240 is enough for one rich sentence; the
+        # capture-side prompt asks for "one short sentence" already.
+        if len(cleaned) > 240:
+            cleaned = cleaned[:237].rstrip() + "..."
+        block_parts.append(f"[Room view] {cleaned}\n")
+    if block_parts:
+        return functools.partial(
+            _wrap_voice_with_block, speaker_block="".join(block_parts),
+        )
     speaker = _consume_pending_identity(channel)
     if speaker is None:
         return _wrap_voice
@@ -2720,7 +2753,11 @@ async def message(payload: MessageIn) -> MessageOut:
                 acp.prompt(
                     payload.content,
                     xiaozhi_sid=payload.session_id,
-                    prepare=_voice_preparer(payload.channel, speaker),
+                    prepare=_voice_preparer(
+                        payload.channel, speaker,
+                        room_description=(payload.metadata or {}).get(
+                            "room_description"),
+                    ),
                 ),
                 timeout=REQUEST_TIMEOUT_SEC,
             )
@@ -2775,6 +2812,18 @@ if _configure_portal is not None:
 
     def _portal_set_kid_mode(enabled: bool) -> None:
         _write_kid_mode(enabled)
+        # Tied model swap: kid mode ON → small safety-tuned model;
+        # kid mode OFF → capable adult model. Failure is logged but does
+        # NOT block the kid-mode flip — a flipped flag with a stale model
+        # is recoverable; refusing to flip would surprise the user.
+        target_model = KID_MODEL if enabled else ADULT_MODEL
+        try:
+            _apply_model_swap("voice", target_model)
+        except Exception:
+            logging.getLogger("zeroclaw-bridge").exception(
+                "kid_mode flip succeeded but model swap to %r failed",
+                target_model,
+            )
 
     async def _portal_abort_device(*, device_id: str = "") -> dict:
         """Fire-and-forget POST to xiaozhi-server's admin abort route."""
@@ -2937,16 +2986,20 @@ async def _admin_persona(payload: _AdminPersonaIn) -> dict:
     }
 
 
-@_admin_router.post("/model")
-async def _admin_model(payload: _AdminModelIn) -> dict:
-    if payload.daemon not in _ADMIN_DAEMON_CFG:
+def _apply_model_swap(daemon: str, model: str) -> tuple[str, str]:
+    """Rewrite the `model = "..."` line inside the custom-provider section
+    of the named daemon's config.toml. Returns (cfg_path, unit). Caller is
+    responsible for scheduling the systemctl restart so this can be reused
+    from flows that already schedule a restart of their own (e.g. the kid
+    mode toggle)."""
+    if daemon not in _ADMIN_DAEMON_CFG:
         raise HTTPException(
             status_code=400,
             detail=f"daemon must be one of {sorted(_ADMIN_DAEMON_CFG)}",
         )
-    if not re.fullmatch(r"[A-Za-z0-9./:_-]+", payload.model):
+    if not re.fullmatch(r"[A-Za-z0-9./:_-]+", model):
         raise HTTPException(status_code=400, detail="model id has invalid chars")
-    cfg_path, unit = _ADMIN_DAEMON_CFG[payload.daemon]
+    cfg_path, unit = _ADMIN_DAEMON_CFG[daemon]
     cfg_p = Path(cfg_path)
     if not cfg_p.exists():
         raise HTTPException(status_code=404, detail=f"config not found: {cfg_path}")
@@ -2962,12 +3015,18 @@ async def _admin_model(payload: _AdminModelIn) -> dict:
     section = src[sec_start:sec_end]
     new_section, n = re.subn(
         r'^model = ".*"$',
-        f'model = "{payload.model}"',
+        f'model = "{model}"',
         section, count=1, flags=re.MULTILINE,
     )
     if n == 0:
         raise HTTPException(status_code=500, detail="model line not found")
     cfg_p.write_text(src[:sec_start] + new_section + src[sec_end:])
+    return (cfg_path, unit)
+
+
+@_admin_router.post("/model")
+async def _admin_model(payload: _AdminModelIn) -> dict:
+    cfg_path, unit = _apply_model_swap(payload.daemon, payload.model)
     _admin_schedule_restart(unit)
     return {
         "ok": True, "daemon": payload.daemon, "model": payload.model,
@@ -3129,7 +3188,11 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
                         payload.content,
                         xiaozhi_sid=payload.session_id,
                         chunk_cb=on_chunk,
-                        prepare=_voice_preparer(payload.channel, speaker),
+                        prepare=_voice_preparer(
+                        payload.channel, speaker,
+                        room_description=(payload.metadata or {}).get(
+                            "room_description"),
+                    ),
                     ),
                     timeout=REQUEST_TIMEOUT_SEC,
                 )
