@@ -36,7 +36,8 @@ setup: ## Interactive first-run wizard (prompts for IPs, names, timezone)
 	@read -rp "UNRAID_IP  (LAN IP of Docker host, e.g. 192.168.1.10): " UNRAID_IP && \
 	 read -rp "RPI_IP     (LAN IP of Raspberry Pi,  e.g. 192.168.1.20): " RPI_IP && \
 	 read -rp "RPI_USER   (SSH user on the Pi,       e.g. dietpi):       " RPI_USER && \
-	 read -rp "ROBOT_NAME (name the robot calls itself, e.g. Dotty):     " ROBOT_NAME && \
+	 read -rp "ROBOT_NAME (name the robot calls itself) [Dotty]:          " ROBOT_NAME && \
+	 ROBOT_NAME=$${ROBOT_NAME:-Dotty} && \
 	 read -rp "YOUR_NAME  (your name / org,           e.g. Brett):       " YOUR_NAME && \
 	 read -rp "Timezone   (TZ identifier,             e.g. Australia/Brisbane): " TZ_VALUE && \
 	 echo "" && \
@@ -50,7 +51,7 @@ setup: ## Interactive first-run wizard (prompts for IPs, names, timezone)
 	     sed -i "s|<UNRAID_IP>|$$UNRAID_IP|g"   "$$f"; \
 	     sed -i "s|<RPI_IP>|$$RPI_IP|g"         "$$f"; \
 	     sed -i "s|<RPI_USER>|$$RPI_USER|g"     "$$f"; \
-	     sed -i "s|<ROBOT_NAME>|$$ROBOT_NAME|g" "$$f"; \
+	     sed -i "s|<ROBOT_NAME>|$$ROBOT_NAME|g; s|You are Dotty,|You are $$ROBOT_NAME,|g" "$$f"; \
 	     sed -i "s|<YOUR_NAME>|$$YOUR_NAME|g"   "$$f"; \
 	     echo "  $$f — done"; \
 	   else \
