@@ -837,6 +837,62 @@ def _portal_broadcast_turn(*, channel: str, request_text: str,
             pass
 
 
+# --- Perception event bus (Phase 1) --------------------------------------
+# In-process pub/sub for ambient perception events emitted by firmware
+# producers (face_detected, face_lost, sound_event, ...) via the
+# xiaozhi-server event relay, and later by server-side classifiers
+# (audio scene, vision). Mirrors the _portal_event_listeners pattern.
+# Phase 1 has no consumers wired yet — landed standalone so producers
+# and tests can validate the surface before consumers are added.
+_perception_listeners: list[asyncio.Queue] = []
+_perception_state: dict[str, dict] = {}
+
+
+def _perception_subscribe() -> asyncio.Queue:
+    q: asyncio.Queue = asyncio.Queue(maxsize=200)
+    _perception_listeners.append(q)
+    return q
+
+
+def _perception_unsubscribe(q: asyncio.Queue) -> None:
+    try:
+        _perception_listeners.remove(q)
+    except ValueError:
+        pass
+
+
+def _perception_broadcast(event: dict) -> None:
+    if not _perception_listeners:
+        return
+    for q in list(_perception_listeners):
+        try:
+            q.put_nowait(event)
+        except asyncio.QueueFull:
+            log.warning(
+                "perception queue full, dropping event: %s",
+                event.get("name"),
+            )
+
+
+def _update_perception_state(device_id: str, name: str,
+                             data: dict, ts: float) -> None:
+    """Mutate per-device state. Convenience fields read by the
+    engagement gate (Phase 4) and Phase 1 consumers."""
+    state = _perception_state.setdefault(device_id, {})
+    state["last_event_t"] = ts
+    state["last_event_name"] = name
+    if name == "face_detected":
+        state["face_present"] = True
+        state["last_face_t"] = ts
+    elif name == "face_lost":
+        state["face_present"] = False
+        state["last_face_lost_t"] = ts
+    elif name == "sound_event":
+        state["last_sound_dir"] = data.get("direction")
+        state["last_sound_t"] = ts
+        state["last_sound_energy"] = data.get("energy")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
@@ -875,6 +931,53 @@ async def health() -> dict:
         "cached_session": acp._sid is not None,
         "session_turns": acp._sid_turns,
     }
+
+
+# ---------------------------------------------------------------------------
+# Perception — ambient event ingest (Phase 1)
+# ---------------------------------------------------------------------------
+
+
+class PerceptionEventIn(BaseModel):
+    device_id: str = "unknown"
+    ts: float | None = None
+    name: str
+    data: dict = {}
+
+
+@app.post("/api/perception/event", status_code=204)
+async def perception_event(payload: PerceptionEventIn) -> None:
+    """Ingest an ambient-perception event. Producers: firmware (via the
+    xiaozhi-server relay) for face_detected / face_lost / sound_event,
+    later phases add server-side audio scene + vision classifiers.
+    Updates per-device state and broadcasts to all in-process
+    subscribers (no consumers in Phase 1.1; added in 1.5 / 1.6)."""
+    import time as _time
+    ts = payload.ts if payload.ts is not None else _time.time()
+    event = {
+        "device_id": payload.device_id,
+        "ts": ts,
+        "name": payload.name,
+        "data": payload.data or {},
+    }
+    _update_perception_state(
+        payload.device_id, payload.name, event["data"], ts,
+    )
+    _perception_broadcast(event)
+    log.info(
+        "perception event: device=%s name=%s data=%s",
+        payload.device_id, payload.name, event["data"],
+    )
+    return None
+
+
+@app.get("/api/perception/state")
+async def perception_state(device_id: str = "") -> dict:
+    """Debug introspection — current per-device perception state.
+    Used by Phase 1 verification + later by the portal."""
+    if device_id:
+        return {device_id: _perception_state.get(device_id, {})}
+    return dict(_perception_state)
 
 
 # ---------------------------------------------------------------------------
