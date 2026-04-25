@@ -67,13 +67,24 @@ class LLMProvider(LLMProviderBase):
         return [p for p in pieces if p]
 
     def _payload(self, session_id, dialogue):
-        content = self._compose(dialogue)
+        # Marker detection runs on the raw user text. _compose() prepends
+        # "[Context] …\n\n[User] ", so a check on the composed string would
+        # never match — startswith() would see the prefix, not the marker.
+        user_text = self._last_user_text(dialogue)
         metadata = {"provider": "zeroclaw"}
-        if content.startswith("[SMART_MODE]\n"):
-            content = content[len("[SMART_MODE]\n"):]
+        stripped_user = user_text
+        if user_text.startswith("[SMART_MODE]\n"):
+            stripped_user = user_text[len("[SMART_MODE]\n"):]
             metadata["smart_mode"] = True
-        elif content.startswith("[SMART_MODE_ACK] "):
-            content = content[len("[SMART_MODE_ACK] "):]
+        elif user_text.startswith("[SMART_MODE_ACK] "):
+            stripped_user = user_text[len("[SMART_MODE_ACK] "):]
+        if stripped_user != user_text:
+            dialogue = [dict(msg) for msg in dialogue]
+            for msg in reversed(dialogue):
+                if msg.get("role") == "user":
+                    msg["content"] = stripped_user
+                    break
+        content = self._compose(dialogue)
         return {
             "content": content,
             "channel": self.channel,
