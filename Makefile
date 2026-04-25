@@ -8,7 +8,7 @@ PIPER_ONNX       := en_GB-cori-medium.onnx
 PIPER_JSON       := en_GB-cori-medium.onnx.json
 WHISPER_REPO     := https://huggingface.co/Systran/faster-whisper-small.en
 WHISPER_DIR      := models/whisper-small.en-ct2
-WHISPER_FILES    := config.json model.bin tokenizer.json vocabulary.json preprocessor_config.json
+WHISPER_FILES    := config.json model.bin tokenizer.json vocabulary.txt
 
 # ── Colours ──────────────────────────────────────────────────────────
 GREEN  := \033[0;32m
