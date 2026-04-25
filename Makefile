@@ -15,7 +15,7 @@ BOLD   := \033[1m
 RESET  := \033[0m
 
 # ── Targets ──────────────────────────────────────────────────────────
-.PHONY: help setup fetch-models doctor up down logs status
+.PHONY: help setup fetch-models doctor audit up down logs status
 
 help: ## Show this help
 	@echo ""
@@ -179,6 +179,81 @@ doctor: ## Run health checks on config, models, and services
 	 fi; \
 	 echo ""; \
 	 echo -e "$(BOLD)Results: $$PASS passed, $$FAIL failed.$(RESET)"; \
+	 echo ""; \
+	 if [ $$FAIL -gt 0 ]; then exit 1; fi
+
+# ─────────────────────────────────────────────────────────────────────
+# audit — verify "local except LLM" network claim
+# ─────────────────────────────────────────────────────────────────────
+audit: ## Audit outbound network connections (verify local-except-LLM claim)
+	@echo ""
+	@echo -e "$(BOLD)Network audit — verifying 'local except LLM' claim$(RESET)"
+	@echo ""
+	@UNRAID_IP=$$(grep -oP 'ws://\K[0-9.]+' .config.yaml 2>/dev/null | head -1); \
+	 RPI_IP=$$(grep -oP 'url: http://\K[0-9.]+' .config.yaml 2>/dev/null | head -1); \
+	 PASS=0; FAIL=0; WARN=0; \
+	 echo -e "$(BOLD)Server host (Docker):$(RESET)"; \
+	 if [ -n "$$UNRAID_IP" ]; then \
+	   echo "  Checking outbound connections on $$UNRAID_IP..."; \
+	   CONNS=$$(ssh -o ConnectTimeout=5 root@$$UNRAID_IP \
+	     'ss -tnp | grep -v "127.0.0.1\|::1" | grep "ESTAB"' 2>/dev/null); \
+	   if [ -z "$$CONNS" ]; then \
+	     echo -e "  $(GREEN)PASS$(RESET)  No outbound connections (fully local)"; \
+	     PASS=$$((PASS+1)); \
+	   else \
+	     echo "$$CONNS" | while read line; do echo "  $$line"; done; \
+	     LLM=$$(echo "$$CONNS" | grep -cE "openrouter|cloudflare|anthropic" || true); \
+	     OTHER=$$(echo "$$CONNS" | grep -cvE "openrouter|cloudflare|anthropic|tailscale|100\." || true); \
+	     if [ "$$OTHER" -gt 0 ]; then \
+	       echo -e "  $(RED)FAIL$(RESET)  Unexpected external connections detected"; \
+	       FAIL=$$((FAIL+1)); \
+	     else \
+	       echo -e "  $(GREEN)PASS$(RESET)  Only LLM/Tailscale connections (expected)"; \
+	       PASS=$$((PASS+1)); \
+	     fi; \
+	   fi; \
+	 else \
+	   echo -e "  $(YELLOW)SKIP$(RESET)  Could not extract server IP from config"; \
+	   WARN=$$((WARN+1)); \
+	 fi; \
+	 echo ""; \
+	 echo -e "$(BOLD)Bridge host (RPi):$(RESET)"; \
+	 if [ -n "$$RPI_IP" ]; then \
+	   echo "  Checking outbound connections on $$RPI_IP..."; \
+	   CONNS=$$(ssh -o ConnectTimeout=5 dietpi@$$RPI_IP \
+	     'ss -tnp | grep -v "127.0.0.1\|::1" | grep "ESTAB"' 2>/dev/null); \
+	   if [ -z "$$CONNS" ]; then \
+	     echo -e "  $(GREEN)PASS$(RESET)  No outbound connections"; \
+	     PASS=$$((PASS+1)); \
+	   else \
+	     echo "$$CONNS" | while read line; do echo "  $$line"; done; \
+	     OTHER=$$(echo "$$CONNS" | grep -cvE "openrouter|cloudflare|anthropic|tailscale|100\." || true); \
+	     if [ "$$OTHER" -gt 0 ]; then \
+	       echo -e "  $(RED)FAIL$(RESET)  Unexpected external connections detected"; \
+	       FAIL=$$((FAIL+1)); \
+	     else \
+	       echo -e "  $(GREEN)PASS$(RESET)  Only LLM/Tailscale connections (expected)"; \
+	       PASS=$$((PASS+1)); \
+	     fi; \
+	   fi; \
+	 else \
+	   echo -e "  $(YELLOW)SKIP$(RESET)  Could not extract bridge IP from config"; \
+	   WARN=$$((WARN+1)); \
+	 fi; \
+	 echo ""; \
+	 echo -e "$(BOLD)Docker container (no external mounts):$(RESET)"; \
+	 MOUNTS=$$(docker compose exec -T xiaozhi-esp32-server mount 2>/dev/null | \
+	   grep -v "overlay\|proc\|sys\|dev\|tmpfs\|cgroup\|mqueue\|shm" || true); \
+	 if [ -z "$$MOUNTS" ]; then \
+	   echo -e "  $(GREEN)PASS$(RESET)  No unexpected filesystem mounts"; \
+	   PASS=$$((PASS+1)); \
+	 else \
+	   echo "$$MOUNTS" | while read line; do echo "  $$line"; done; \
+	   echo -e "  $(YELLOW)WARN$(RESET)  Review mounts above"; \
+	   WARN=$$((WARN+1)); \
+	 fi; \
+	 echo ""; \
+	 echo -e "$(BOLD)Results: $$PASS passed, $$FAIL failed, $$WARN warnings.$(RESET)"; \
 	 echo ""; \
 	 if [ $$FAIL -gt 0 ]; then exit 1; fi
 
