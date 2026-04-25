@@ -10,7 +10,15 @@ built from the commit log.
 
 ## [Unreleased]
 
+### Changed
+- **Rebranded to Dotty.** Project identity renamed from `stackchan-infra` to Dotty (`dotty-stackchan`). Default robot name is "Dotty" (customizable via `make setup`). Channel identifier `stackchan` → `dotty` (both accepted during transition). Python constants `STACKCHAN_TURN_*` → `VOICE_TURN_*`. All docs, config, and build files updated.
+- **3-sentence response limit** enforced in both `/api/message` and `/api/message/stream` endpoints. `MAX_SENTENCES` env var (default 3).
+- **Streaming `final` line** now always includes emoji prefix correction.
+
 ### Added
+- **ASR noise filter** — `_is_noise()` rejects punctuation-only or very short ASR results before they trigger a thinking animation or LLM call. Configurable via `MIN_UTTERANCE_CHARS`.
+- **ASR name correction** — `_apply_asr_corrections()` fixes common SenseVoice misrecognitions of the robot name.
+- **Content-filter test probes** — 10 new adversarial prompts targeting the `_BLOCKED_WORDS_RE` regex filter.
 - **Custom LLM provider (ZeroClawLLM)** — `zeroclaw.py` proxies xiaozhi-esp32-server LLM calls to the ZeroClaw agent on the RPi via the FastAPI bridge.
 - **FastAPI bridge (`bridge.py`)** — HTTP-to-ACP translator on the RPi; speaks JSON-RPC 2.0 over stdio to a long-running `zeroclaw acp` child process.
 - **ACP session caching** — reuses a single ZeroClaw session across turns instead of creating/destroying one per request; rotates on idle timeout, turn count, or wall-clock age. Shaves ~1-2 s off first-audio latency.

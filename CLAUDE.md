@@ -1,8 +1,8 @@
-# StackChan Infrastructure
+# Dotty
 
 ## What This Is
 
-A self-hosted voice stack for the M5Stack **StackChan** desktop robot. Hardware is the StackChan body; the agent persona (what ZeroClaw runs) is configurable — this repo ships a default that uses the hardware name, swap in anything you want via the `<ROBOT_NAME>` placeholder. Voice I/O routes through a self-hosted xiaozhi-esp32-server; brain is ZeroClaw on the RPi. No cloud AI services — fully self-hosted except for EdgeTTS (replaceable with local Piper).
+Your self-hosted StackChan robot assistant. A fully self-hosted voice stack for the M5Stack **StackChan** desktop robot. The default persona is "Dotty" (customizable via `make setup`). Voice I/O routes through a self-hosted xiaozhi-esp32-server; brain is ZeroClaw on the RPi. No cloud AI services — fully self-hosted except for the LLM call (replaceable with local Ollama).
 
 ## Architecture
 
