@@ -1,23 +1,38 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Dotty — Live Sensor Feed</title>
 <style>
+  :root[data-theme="dark"] {
+    --bg: #0f0f0f; --fg: #e0e0e0; --fg-dim: #aaa; --fg-faint: #666;
+    --evt-bg: #1a1a1a; --evt-border: #2a2a2a; --evt-accent: #555;
+    --btn-bg: #333; --btn-fg: #ccc; --btn-border: #555; --btn-hover: #444;
+    --ok-bg: #1a4a1a; --ok-fg: #5cde5c; --err-bg: #4a1a1a; --err-fg: #de5c5c;
+    --dev-fg: #6699cc;
+  }
+  :root[data-theme="light"] {
+    --bg: #f5f5f5; --fg: #1a1a1a; --fg-dim: #444; --fg-faint: #888;
+    --evt-bg: #ffffff; --evt-border: #e0e0e0; --evt-accent: #aaa;
+    --btn-bg: #e4e4e4; --btn-fg: #333; --btn-border: #ccc; --btn-hover: #d4d4d4;
+    --ok-bg: #d4f0d4; --ok-fg: #1a6a1a; --err-bg: #f0d4d4; --err-fg: #7a1a1a;
+    --dev-fg: #2266aa;
+  }
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: ui-monospace, "Cascadia Code", "Menlo", monospace;
-         background: #0f0f0f; color: #e0e0e0; padding: 1rem; }
-  h1 { font-size: 1.1rem; letter-spacing: .05em; color: #aaa; margin-bottom: .75rem; }
+         background: var(--bg); color: var(--fg); padding: 1rem; }
+  h1 { font-size: 1.1rem; letter-spacing: .05em; color: var(--fg-dim); margin-bottom: .75rem; }
   #toolbar { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
   #status { font-size: .85rem; padding: .25rem .6rem; border-radius: 999px; }
-  .connected    { background: #1a4a1a; color: #5cde5c; }
-  .disconnected { background: #4a1a1a; color: #de5c5c; }
-  button { background: #333; color: #ccc; border: 1px solid #555;
+  .connected    { background: var(--ok-bg); color: var(--ok-fg); }
+  .disconnected { background: var(--err-bg); color: var(--err-fg); }
+  button { background: var(--btn-bg); color: var(--btn-fg); border: 1px solid var(--btn-border);
            padding: .3rem .8rem; border-radius: 4px; cursor: pointer; font-size: .85rem; }
-  button:hover { background: #444; }
+  button:hover { background: var(--btn-hover); }
   #feed { display: flex; flex-direction: column; gap: .4rem; max-width: 900px; }
-  .event { background: #1a1a1a; border: 1px solid #2a2a2a; border-left: 3px solid #555;
+  .event { background: var(--evt-bg); border: 1px solid var(--evt-border);
+           border-left: 3px solid var(--evt-accent);
            border-radius: 4px; padding: .5rem .75rem; font-size: .82rem; }
   .event-header { display: flex; align-items: center; gap: .5rem; margin-bottom: .25rem; }
   .badge { font-size: .72rem; padding: .15rem .45rem; border-radius: 3px; font-weight: bold; }
@@ -26,9 +41,9 @@
   .badge-sound_event     { background:#4a2a00; color:#ffa040; }
   .badge-head_pet_started,.badge-head_pet_ended { background:#2a1a4a; color:#aa88ff; }
   .badge-unknown         { background:#2a2a2a; color:#888; }
-  .ts    { color: #666; font-size: .75rem; }
-  .dev   { color: #6699cc; font-size: .75rem; }
-  .data  { color: #aaa; word-break: break-all; }
+  .ts    { color: var(--fg-faint); font-size: .75rem; }
+  .dev   { color: var(--dev-fg); font-size: .75rem; }
+  .data  { color: var(--fg-dim); word-break: break-all; }
 </style>
 </head>
 <body>
@@ -36,14 +51,16 @@
 <div id="toolbar">
   <span id="status" class="disconnected">Disconnected</span>
   <button onclick="clearFeed()">Clear</button>
-  <span id="count" style="color:#666;font-size:.8rem">0 events</span>
+  <button id="themeBtn" onclick="toggleTheme()">☀ Light</button>
+  <span id="count" style="color:var(--fg-faint);font-size:.8rem">0 events</span>
 </div>
 <div id="feed"></div>
 
 <script>
-const feed    = document.getElementById('feed');
+const feed     = document.getElementById('feed');
 const statusEl = document.getElementById('status');
 const countEl  = document.getElementById('count');
+const themeBtn = document.getElementById('themeBtn');
 let count = 0;
 
 const BADGE_CLASS = {
@@ -81,6 +98,22 @@ function addEvent(ev) {
 }
 
 function clearFeed() { feed.innerHTML = ''; count = 0; countEl.textContent = '0 events'; }
+
+function toggleTheme() {
+  const root = document.documentElement;
+  const next = root.dataset.theme === 'dark' ? 'light' : 'dark';
+  root.dataset.theme = next;
+  themeBtn.textContent = next === 'dark' ? '☀ Light' : '☾ Dark';
+  localStorage.setItem('dotty-feed-theme', next);
+}
+
+(function initTheme() {
+  const saved = localStorage.getItem('dotty-feed-theme');
+  if (saved === 'light') {
+    document.documentElement.dataset.theme = 'light';
+    themeBtn.textContent = '☾ Dark';
+  }
+})();
 
 const es = new EventSource('/api/perception/feed');
 es.onopen = () => {
