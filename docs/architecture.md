@@ -84,10 +84,23 @@ It does **not** know about ACP, ZeroClaw workspace files, or the OpenRouter key.
 
 **ZeroClaw** knows everything agent-side — provider keys, memory, tools, persona files. It does **not** know what host/channel the request came from beyond the `channel` string passed in.
 
+## Bridge admin endpoints (`/admin/*`)
+
+The bridge exposes a small localhost-only HTTP surface for runtime configuration mutations. Useful when an external operator (a script, a cron job, a separately-running ZeroClaw daemon on a more capable model) needs to flip behaviour without an interactive SSH session. Bound to `127.0.0.1` only — LAN callers get `403`.
+
+| Endpoint | Effect | Restart |
+|---|---|---|
+| `POST /admin/kid-mode` `{enabled: bool}` | Writes the kid-mode state file. | bridge (delayed 2 s so the response flushes) |
+| `POST /admin/persona` `{file, content}` | Overwrites a workspace persona file (`SOUL.md`, `IDENTITY.md`, `USER.md`, `AGENTS.md`, `TOOLS.md`, `BOOTSTRAP.md`, `HEARTBEAT.md`, `MEMORY.md`). Atomic via `.new` + rename. | none |
+| `POST /admin/model` `{daemon, model}` | TOML-edits `default_model` in the chosen daemon's `config.toml`. | named daemon |
+| `POST /admin/safety` `{action, tool}` | Adds/removes a tool in `MCP_TOOL_ALLOWLIST` via the `# === ADMIN_ALLOWLIST_START/END ===` marker block. py_compile-validated; on syntax error the bridge is left untouched. | bridge (self-restart) |
+
+Paths and systemd unit names are env-configurable (`ZEROCLAW_VOICE_CFG`, `ZEROCLAW_VOICE_UNIT`, `ZEROCLAW_DISCORD_CFG`, `ZEROCLAW_DISCORD_UNIT`, `ZEROCLAW_WORKSPACE`); defaults match the documented RPi layout. The endpoints are off-the-shelf — if you don't reach `127.0.0.1:8080/admin/*`, they don't fire.
+
 ## Threat-model implications
 
 - **Device compromise** gives an attacker a WS session to xiaozhi-server and the ability to invoke any server-exposed MCP tool. It does **not** give them the LLM key, ZeroClaw's memory, or network access to OpenRouter beyond what proxied prompts can achieve.
-- **Unraid compromise** gives them access to the bridge over HTTP (no auth currently). Anything the bridge can ask ZeroClaw, the attacker can ask it.
+- **Unraid compromise** gives them access to the bridge over HTTP (no auth currently). Anything the bridge can ask ZeroClaw, the attacker can ask it. The `/admin/*` mutation endpoints are unreachable (they're `127.0.0.1`-only).
 - **RPi compromise** gives them everything — LLM keys, memory DB, workspace persona files.
 - **OpenRouter compromise** gives them log access to every prompt sent. Treat prompts as non-confidential.
 
@@ -100,4 +113,4 @@ See `../tasks.md` "Security audit" and "Lock down for child-safe operation" item
 - [brain.md](./brain.md) — what the Pi runs.
 - [protocols.md](./protocols.md) — what's on the wire.
 
-Last verified: 2026-04-24.
+Last verified: 2026-04-25.

@@ -22,6 +22,8 @@ These features are implemented and running on production hardware.
 - **Multi-host deployment** -- documented split across Docker host + RPi
 - **`make setup` wizard** -- interactive first-run: name your robot, fetch models, validate config
 - **MkDocs Material docs site** -- architecture, protocols, quickstart, troubleshooting, FAQ
+- **Kid Mode channel routing** -- voice channels are kid-safe by default; the bridge's kid-mode sandwich (English-pin, emoji prefix, topic blocklist, jailbreak resistance) only applies when the inbound `channel` is in `VOICE_CHANNELS`, so messaging-platform channels (Discord, Telegram, etc.) skip it automatically. Pair with a separate ZeroClaw daemon on a more capable model for an adult-mode chat surface
+- **Bridge `/admin/*` endpoints** -- localhost-only HTTP API for runtime config mutation: toggle kid-mode (`/admin/kid-mode`), overwrite persona files (`/admin/persona`), swap a daemon's `default_model` in its `config.toml` (`/admin/model`), and amend the MCP tool allowlist (`/admin/safety`, py_compile-validated). Paths and systemd unit names are env-configurable
 
 ## In progress
 
@@ -46,7 +48,6 @@ Designed but not yet started. Roughly in priority order.
 - **Dancing mode** -- choreographed servo sequences synced to audio (Macarena first)
 - **Singing mode** -- lightweight vocal synthesis or pitch-shifted TTS over backing tracks
 - **Privacy-indicator LEDs** -- hardware-guaranteed LED tied to mic/camera peripheral enable (prerequisite for always-on face detection)
-- **Kid Mode channel routing** -- voice channel kid-safe, Discord channel adult-mode by default
 - **Runtime OTA provisioning** -- captive-portal WiFi + OTA URL setup on first boot (no rebuild to retarget)
 
 ## Community wishlist
