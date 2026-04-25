@@ -21,6 +21,7 @@ re-verify claims against the canonical specs rather than trusting our paraphrase
 | Understand the voice pipeline (ASR/TTS/VAD) | [voice-pipeline.md](./voice-pipeline.md) |
 | Understand the brain (ZeroClaw + LLM) | [brain.md](./brain.md) |
 | Know what's on the wire between components | [protocols.md](./protocols.md) |
+| See every cross-layer signal at a glance | [interaction-map.md](./interaction-map.md) |
 | Find features we aren't using yet | [latent-capabilities.md](./latent-capabilities.md) |
 | Pick an LLM backend | [llm-backends.md](./llm-backends.md) |
 | Jump to an upstream repo or spec | [references.md](./references.md) |
@@ -35,6 +36,7 @@ docs/
 ├── voice-pipeline.md        ← xiaozhi-esp32-server, FunASR, VAD, EdgeTTS, Piper
 ├── brain.md                 ← ZeroClaw architecture, Qwen3-30B-A3B, OpenRouter
 ├── protocols.md             ← Xiaozhi WebSocket, MCP-over-WS, ACP JSON-RPC, emotion
+├── interaction-map.md       ← every cross-layer signal: source, dest, protocol, notes
 ├── latent-capabilities.md   ← upstream features we could wire up (cross-refs tasks.md)
 ├── llm-backends.md          ← side-by-side comparison of LLM backend options
 └── references.md            ← canonical URLs, licenses, model cards, spec docs
