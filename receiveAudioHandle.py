@@ -65,6 +65,7 @@ _PHRASE_CORRECTIONS: list[tuple[str, float]] = [
     ("tell me a story", 0.7),
     ("sing a song", 0.7),
     ("dance", 0.8),
+    ("do the macarena", 0.7),
     # Identity questions
     ("what's your name", 0.7),
     ("what is your name", 0.7),
@@ -176,7 +177,27 @@ async def _send_led_color(conn: "ConnectionHandler", r: int, g: int, b: int) -> 
                     "name": "self.robot.set_led_color",
                     "arguments": {"r": r, "g": g, "b": b},
                 },
-                "id": int(time.time() * 1000),
+                "id": int(time.time() * 1000) % 0x7FFFFFFF,
+            },
+        })
+        await conn.websocket.send(msg)
+    except Exception:
+        pass
+
+
+async def _send_head_angles(conn: "ConnectionHandler", yaw: int, pitch: int, speed: int = 150) -> None:
+    try:
+        msg = json.dumps({
+            "session_id": conn.session_id,
+            "type": "mcp",
+            "payload": {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "self.robot.set_head_angles",
+                    "arguments": {"yaw": yaw, "pitch": pitch, "speed": speed},
+                },
+                "id": int(time.time() * 1000) % 0x7FFFFFFF,
             },
         })
         await conn.websocket.send(msg)
@@ -206,7 +227,7 @@ async def _handle_vision(conn: "ConnectionHandler", text: str) -> str | None:
                 "name": "self.camera.take_photo",
                 "arguments": {"question": text},
             },
-            "id": int(time.time() * 1000),
+            "id": int(time.time() * 1000) % 0x7FFFFFFF,
         },
     })
     await conn.websocket.send(mcp_call)
@@ -227,6 +248,68 @@ async def _handle_vision(conn: "ConnectionHandler", text: str) -> str | None:
         conn.logger.bind(tag=TAG).error(f"Vision: bridge poll failed: {exc}")
 
     return None
+
+
+# ---------- Dance mode ----------
+
+_DANCE_PHRASES = (
+    "dance", "do a dance", "let's dance", "can you dance",
+    "dance for me", "do the macarena", "macarena",
+    "dance time", "dance mode",
+)
+
+
+def _is_dance_request(text: str) -> bool:
+    lower = text.lower().strip()
+    return any(phrase in lower for phrase in _DANCE_PHRASES)
+
+
+def _detect_dance_name(text: str) -> str:
+    from core.handle.dances import DANCE_REGISTRY, DEFAULT_DANCE
+    lower = text.lower()
+    for name in DANCE_REGISTRY:
+        if name in lower:
+            return name
+    return DEFAULT_DANCE
+
+
+async def _handle_dance(conn: "ConnectionHandler", dance_name: str) -> None:
+    from core.handle.dances import DANCE_REGISTRY, execute_choreography
+
+    dance = DANCE_REGISTRY.get(dance_name)
+    if not dance:
+        return
+
+    conn.logger.bind(tag=TAG).info(f"Dance mode: {dance_name}")
+
+    await conn.websocket.send(json.dumps({
+        "type": "llm",
+        "text": "\U0001f606",
+        "emotion": "laughing",
+        "session_id": conn.session_id,
+    }))
+    await _send_led_color(conn, 168, 0, 168)
+
+    dance_task = asyncio.create_task(
+        execute_choreography(conn, dance["timeline"], _send_head_angles, _send_led_color)
+    )
+    conn._dance_task = dance_task
+
+    conn.executor.submit(
+        conn.chat,
+        f"[DANCE:{dance_name}] You're about to dance the {dance_name.title()}! "
+        f"Say a SHORT excited one-liner intro (under 15 words). "
+        f"Example: '\U0001f606 {dance['intro']}'",
+    )
+
+    def _on_dance_done(task):
+        async def _cleanup():
+            if task.cancelled():
+                await _send_head_angles(conn, 0, 0, 200)
+            await _send_led_color(conn, 0, 0, 0)
+        asyncio.ensure_future(_cleanup())
+
+    dance_task.add_done_callback(_on_dance_done)
 
 
 async def handleAudioMessage(conn: "ConnectionHandler", audio):
@@ -290,6 +373,9 @@ async def startToChat(conn: "ConnectionHandler", text):
             return
 
     if conn.client_is_speaking and conn.client_listen_mode != "manual":
+        dance_task = getattr(conn, "_dance_task", None)
+        if dance_task and not dance_task.done():
+            dance_task.cancel()
         await handleAbortMessage(conn)
 
     intent_handled = await handle_user_intent(conn, actual_text)
@@ -348,6 +434,11 @@ async def startToChat(conn: "ConnectionHandler", text):
             )
             conn.executor.submit(conn.chat, vision_prompt)
             return
+
+    if _is_dance_request(user_text):
+        dance_name = _detect_dance_name(user_text)
+        await _handle_dance(conn, dance_name)
+        return
 
     conn.executor.submit(conn.chat, actual_text)
 
