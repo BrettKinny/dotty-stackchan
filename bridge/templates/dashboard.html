@@ -58,7 +58,8 @@
   <section>
     <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Recent conversation</h2>
     <div id="logs" class="card bg-base-100 shadow-sm overflow-hidden"
-         hx-get="/ui/logs" hx-trigger="load, every 15s" hx-swap="innerHTML">
+         hx-get="/ui/logs" hx-trigger="load, every 15s" hx-swap="innerHTML"
+         hx-include="#log-date">
       <div class="card-body p-4 animate-pulse">
         <div class="h-4 bg-base-300 rounded w-1/2"></div>
       </div>

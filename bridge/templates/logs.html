@@ -1,4 +1,13 @@
 <div class="card-body p-0">
+  <div class="px-3 pt-3 pb-2 flex items-center justify-between gap-2 border-b border-base-300">
+    <input id="log-date" name="date" type="date" value="{{ date }}"
+           hx-get="/ui/logs" hx-target="#logs" hx-include="this"
+           hx-trigger="change"
+           class="input input-bordered input-xs">
+    <span class="text-xs text-base-content/50">
+      {% if is_today %}today &middot; auto-refresh{% else %}{{ date }}{% endif %}
+    </span>
+  </div>
   {% if entries %}
   <ul class="divide-y divide-base-300">
     {% for entry in entries %}
@@ -11,9 +20,14 @@
         </div>
       </div>
       <div class="text-sm mt-1 break-words">{{ entry.request or "(no input)" }}</div>
-      <details class="mt-1">
-        <summary class="text-xs text-base-content/60 cursor-pointer select-none">
-          response &middot; {{ entry.latency_ms }}ms
+      <details class="mt-1" {% if loop.first %}open{% endif %}>
+        <summary class="text-xs text-base-content/60 cursor-pointer select-none flex items-center gap-2">
+          <span>response &middot; {{ entry.latency_ms }}ms</span>
+          <button class="btn btn-ghost btn-xs ml-auto"
+                  type="button"
+                  onclick="event.preventDefault();event.stopPropagation();const t=this.parentElement.nextElementSibling.innerText;navigator.clipboard.writeText(t);this.textContent='copied';setTimeout(()=>this.textContent='copy',1200);">
+            copy
+          </button>
         </summary>
         <div class="text-sm mt-1 break-words text-base-content/80 whitespace-pre-wrap">{{ entry.response }}</div>
       </details>
@@ -22,7 +36,7 @@
   </ul>
   {% else %}
   <div class="p-6 text-center text-sm text-base-content/50">
-    No conversations logged today yet.
+    No conversations logged for {{ date }}.
   </div>
   {% endif %}
 </div>

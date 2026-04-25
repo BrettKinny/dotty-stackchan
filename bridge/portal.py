@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -77,7 +78,45 @@ def _humanize_age(seconds: float) -> str:
 
 
 def _today_log_path() -> Path:
-    return LOG_DIR / f"convo-{datetime.now().strftime('%Y-%m-%d')}.ndjson"
+    return _log_path_for(datetime.now().strftime("%Y-%m-%d"))
+
+
+def _log_path_for(date_str: str) -> Path:
+    return LOG_DIR / f"convo-{date_str}.ndjson"
+
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _safe_date(date_str: str | None) -> str:
+    """Validate ?date= query; fall back to today on anything weird."""
+    if date_str and _DATE_RE.match(date_str):
+        return date_str
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def _clean_request_text(s: str) -> str:
+    """Strip the wrapped `[Context] ... [User] <payload>` preamble.
+
+    Voice turns from xiaozhi-server arrive with a long persona/context
+    block prepended. The actual user utterance lives after the `[User]`
+    marker, sometimes as raw text and sometimes as a JSON object with
+    a `content` field. Returns the original text if no marker is found.
+    """
+    if not s:
+        return s
+    idx = s.rfind("[User]")
+    if idx == -1:
+        return s
+    after = s[idx + len("[User]"):].strip()
+    if after.startswith("{"):
+        try:
+            obj = json.loads(after)
+            if isinstance(obj, dict) and "content" in obj:
+                return str(obj["content"]).strip()
+        except Exception:
+            pass
+    return after
 
 
 def _parse_ts(ts: str) -> float | None:
@@ -113,8 +152,8 @@ def _stackchan_last_seen() -> float | None:
     return last_voice_ts
 
 
-def _read_recent_log_entries(limit: int = 20) -> list[dict[str, Any]]:
-    path = _today_log_path()
+def _read_recent_log_entries(date_str: str, limit: int = 20) -> list[dict[str, Any]]:
+    path = _log_path_for(date_str)
     if not path.exists():
         return []
     try:
@@ -136,11 +175,12 @@ def _read_recent_log_entries(limit: int = 20) -> list[dict[str, Any]]:
             ).astimezone().strftime("%H:%M:%S")
         except Exception:
             time_str = ts[-8:] if ts else "?"
+        cleaned_request = _clean_request_text(rec.get("request_text") or "")
         out.append({
             "time": time_str,
             "channel": rec.get("channel") or "?",
-            "request": (rec.get("request_text") or "")[:240],
-            "response": (rec.get("response_text") or "")[:600],
+            "request": cleaned_request[:400],
+            "response": (rec.get("response_text") or "")[:1000],
             "latency_ms": rec.get("latency_ms", "?"),
             "error": rec.get("error"),
         })
@@ -205,8 +245,11 @@ async def cards(request: Request) -> Any:
 
 
 @router.get("/logs", response_class=HTMLResponse, include_in_schema=False)
-async def logs(request: Request) -> Any:
-    entries = _read_recent_log_entries(limit=20)
+async def logs(request: Request, date: str | None = None) -> Any:
+    chosen = _safe_date(date)
+    entries = _read_recent_log_entries(chosen, limit=20)
+    today = datetime.now().strftime("%Y-%m-%d")
     return templates.TemplateResponse(
-        request, "logs.html", {"entries": entries}
+        request, "logs.html",
+        {"entries": entries, "date": chosen, "is_today": chosen == today},
     )
