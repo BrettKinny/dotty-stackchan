@@ -102,6 +102,7 @@ MACARENA_TIMELINE: list[tuple[int, str, dict]] = [
 DANCE_REGISTRY: dict[str, dict] = {
     "macarena": {
         "timeline": MACARENA_TIMELINE,
+        "audio_file": "config/assets/songs/macarena.wav",
         "intro": "Ooh yeah! It's Macarena time! Let's dance!",
         "outro": "Heeey Macarena! Ayyy! That was so much fun!",
         "duration_ms": BEAT_MS * 48,

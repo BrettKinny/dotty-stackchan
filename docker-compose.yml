@@ -28,3 +28,4 @@ services:
       - ./receiveAudioHandle.py:/opt/xiaozhi-esp32-server/core/handle/receiveAudioHandle.py:ro
       - ./dances.py:/opt/xiaozhi-esp32-server/core/handle/dances.py:ro
       - ./custom-providers/textUtils.py:/opt/xiaozhi-esp32-server/core/utils/textUtils.py:ro
+      - ./songs:/opt/xiaozhi-esp32-server/config/assets/songs:ro
