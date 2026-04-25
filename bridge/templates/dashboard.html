@@ -68,9 +68,22 @@
   </div>
 </header>
 
+<nav class="px-3 pt-3 max-w-5xl mx-auto sticky top-16 z-[5] bg-base-200/95 backdrop-blur">
+  <div role="tablist" class="tabs tabs-boxed">
+    <a role="tab" data-tab="dotty" class="tab flex-1"
+       onclick="dottyTab('dotty')">Dotty</a>
+    <a role="tab" data-tab="status" class="tab flex-1"
+       onclick="dottyTab('status')">Status</a>
+    <a role="tab" data-tab="logs" class="tab flex-1"
+       onclick="dottyTab('logs')">Logs</a>
+  </div>
+</nav>
+
 <main class="p-3 space-y-5 max-w-5xl mx-auto">
 
   <div id="stop-result" class="px-3 empty:hidden"></div>
+
+  <div data-tab-panel="dotty" class="space-y-5">
 
   <section>
     <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Quick presets</h2>
@@ -143,20 +156,6 @@
   </section>
 
   <section>
-    <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Hosts</h2>
-    <div id="cards" data-poll
-         class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-3"
-         hx-get="/ui/cards" hx-trigger="load, every 10s, dotty-refresh from:window" hx-swap="innerHTML">
-      <div class="card bg-base-100 shadow-sm">
-        <div class="card-body p-4 animate-pulse">
-          <div class="h-4 bg-base-300 rounded w-1/3"></div>
-          <div class="h-3 bg-base-300 rounded w-2/3 mt-2"></div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section>
     <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Faces &amp; dance</h2>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div class="card bg-base-100 shadow-sm">
@@ -187,6 +186,24 @@
             </form>
           </div>
           <div id="dance-result" class="mt-2 empty:hidden"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  </div>  <!-- end data-tab-panel="dotty" -->
+
+  <div data-tab-panel="status" class="space-y-5" hidden>
+
+  <section>
+    <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Hosts</h2>
+    <div id="cards" data-poll
+         class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-3"
+         hx-get="/ui/cards" hx-trigger="load, every 10s, dotty-refresh from:window" hx-swap="innerHTML">
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-4 animate-pulse">
+          <div class="h-4 bg-base-300 rounded w-1/3"></div>
+          <div class="h-3 bg-base-300 rounded w-2/3 mt-2"></div>
         </div>
       </div>
     </div>
@@ -240,6 +257,10 @@
     </div>
   </section>
 
+  </div>  <!-- end data-tab-panel="status" -->
+
+  <div data-tab-panel="logs" class="space-y-5" hidden>
+
   <section>
     <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Recent conversation</h2>
     <div id="logs" data-poll class="card bg-base-100 shadow-sm overflow-hidden"
@@ -250,6 +271,8 @@
       </div>
     </div>
   </section>
+
+  </div>  <!-- end data-tab-panel="logs" -->
 
   <footer class="text-center text-xs text-base-content/40 pt-4 pb-6">
     auto-refresh: hosts 10s &middot; logs 15s
@@ -264,6 +287,26 @@
 </div>
 
 <script>
+  // Q5: simple tabbed layout. Polling tiles inside hidden panels still
+  // poll (htmx doesn't pause on `hidden` — they stay in the DOM).
+  function dottyTab(name) {
+    if (['dotty','status','logs'].indexOf(name) === -1) name = 'dotty';
+    document.querySelectorAll('[data-tab-panel]').forEach(function (p) {
+      p.hidden = (p.dataset.tabPanel !== name);
+    });
+    document.querySelectorAll('[role="tab"][data-tab]').forEach(function (t) {
+      t.classList.toggle('tab-active', t.dataset.tab === name);
+    });
+    history.replaceState(null, '', '#' + name);
+    try { localStorage.setItem('dotty-tab', name); } catch (e) {}
+  }
+  (function initTab() {
+    var fromHash = (location.hash || '').replace('#', '');
+    var saved;
+    try { saved = localStorage.getItem('dotty-tab'); } catch (e) {}
+    dottyTab(fromHash || saved || 'dotty');
+  })();
+
   (function () {
     if (typeof EventSource === 'undefined') return;
     var src = new EventSource('/ui/events');
