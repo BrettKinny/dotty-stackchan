@@ -1718,6 +1718,55 @@ async def _greeter_tts_pusher(device_id: str, text: str) -> None:
 _proactive_greeter: "ProactiveGreeter | None" = None  # noqa: F821
 
 
+# ---------------------------------------------------------------------------
+# AudioSceneClassifier (Phase 2 YAMNet) — wiring scaffold
+# ---------------------------------------------------------------------------
+# bridge.py does NOT see raw 16 kHz PCM frames pre-ASR — those are
+# consumed inside xiaozhi-server. Until a server-side forwarder is added
+# that POSTs frames to `/api/audio-scene/feed`, the classifier sits idle.
+# We still construct it on startup so:
+#   1. Configuration / model-load problems surface in the bridge's logs
+#      at boot rather than silently when the first frame arrives.
+#   2. Callers can verify the deployment by hitting the (empty-response)
+#      feed endpoint without further bridge changes once forwarding lands.
+#
+# The classifier's emissions go through `_audio_scene_emit_from_thread`,
+# which marshals the synchronous worker-thread callback onto the asyncio
+# loop where `_perception_broadcast` is safe to call (it touches the
+# in-process listener queues used by every other perception consumer).
+# TODO: bridge.py doesn't see raw audio frames; xiaozhi-server side
+#       needs a forwarder that POSTs PCM bytes to /api/audio-scene/feed.
+
+_audio_scene_classifier: "AudioSceneClassifier | None" = None  # noqa: F821
+_audio_scene_loop: "asyncio.AbstractEventLoop | None" = None
+
+
+def _audio_scene_emit_from_thread(event: dict) -> None:
+    """Bus callable handed to AudioSceneClassifier. Called from the
+    classifier's inference worker thread. We must not touch the
+    perception listener queues directly from a thread — schedule the
+    broadcast onto the bridge's asyncio loop instead."""
+    loop = _audio_scene_loop
+    if loop is None or loop.is_closed():
+        return
+    try:
+        # Update per-device state for sound_event so other consumers
+        # (e.g. clap-waker) see the same view they get from the firmware
+        # path.
+        device_id = event.get("device_id") or "bridge"
+        ts = float(event.get("ts") or 0.0)
+        data = event.get("data") or {}
+        loop.call_soon_threadsafe(
+            _update_perception_state,
+            device_id, "sound_event", data, ts,
+        )
+        loop.call_soon_threadsafe(_perception_broadcast, event)
+    except Exception:
+        log.exception(
+            "audio_scene: failed to schedule bus emission on loop",
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
