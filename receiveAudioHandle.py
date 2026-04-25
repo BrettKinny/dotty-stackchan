@@ -309,17 +309,10 @@ async def _handle_dance(conn: "ConnectionHandler", dance_name: str) -> None:
     opus_packets = None
     if has_audio:
         try:
-            opus_packets = await audio_to_data(audio_file)
+            opus_packets = await _encode_song_to_opus(audio_file, conn.sample_rate)
         except Exception as exc:
             conn.logger.bind(tag=TAG).error(f"Dance mode: audio decode failed: {exc}")
             has_audio = False
-
-    if has_audio and opus_packets is not None:
-        conn.tts.tts_audio_queue.put((SentenceType.FIRST, opus_packets, None))
-        conn.tts.tts_audio_queue.put((SentenceType.LAST, [], None))
-        conn.logger.bind(tag=TAG).info(
-            f"Dance mode: queued singing audio {audio_file} ({len(opus_packets)} packets)"
-        )
 
     # Only delay choreography for audio sync when we actually queued audio.
     from core.handle.dances import AUDIO_LATENCY_OFFSET_MS
@@ -333,14 +326,6 @@ async def _handle_dance(conn: "ConnectionHandler", dance_name: str) -> None:
     )
     conn._dance_task = dance_task
 
-    if not has_audio:
-        conn.executor.submit(
-            conn.chat,
-            f"[DANCE:{dance_name}] You're about to dance the {dance_name.title()}! "
-            f"Say a SHORT excited one-liner intro (under 15 words). "
-            f"Example: '\U0001f606 {dance['intro']}'",
-        )
-
     def _on_dance_done(task):
         async def _cleanup():
             if task.cancelled():
@@ -349,6 +334,128 @@ async def _handle_dance(conn: "ConnectionHandler", dance_name: str) -> None:
         asyncio.ensure_future(_cleanup())
 
     dance_task.add_done_callback(_on_dance_done)
+
+    if has_audio and opus_packets is not None:
+        # Direct send: bypass tts_audio_queue and the rate controller. The
+        # consumer's future.result(timeout=tts_timeout) trips on a 28-second
+        # clip (tts_timeout defaults to 15s), and the upstream audio_to_data
+        # hardcodes 16kHz Opus regardless of the negotiated output rate. Pace
+        # by sleeping 60ms between packets, matching the device's
+        # frame_duration handshake parameter.
+        conn.client_abort = False
+        conn.client_is_speaking = True
+        asyncio.create_task(_stream_singing(conn, opus_packets))
+        conn.logger.bind(tag=TAG).info(
+            f"Dance mode: streaming singing audio {audio_file} "
+            f"({len(opus_packets)} packets @ {conn.sample_rate}Hz)"
+        )
+    else:
+        conn.executor.submit(
+            conn.chat,
+            f"[DANCE:{dance_name}] You're about to dance the {dance_name.title()}! "
+            f"Say a SHORT excited one-liner intro (under 15 words). "
+            f"Example: '\U0001f606 {dance['intro']}'",
+        )
+
+
+async def _encode_song_to_opus(wav_path: str, target_rate: int) -> list[bytes]:
+    """Read a WAV file and return Opus-encoded 60ms frames at target_rate.
+
+    The upstream audio_to_data() hardcodes 16kHz, but the device negotiates
+    a different output rate via the welcome handshake (24kHz on this StackChan).
+    Decoding 16kHz Opus when the device expects 24kHz silently produces no
+    audible output. This helper resamples to target_rate and encodes Opus at
+    the same rate, matching what Piper's TTS provider does.
+    """
+    from core.utils import opus_encoder_utils
+    import numpy as np
+    from scipy import signal as scipy_signal
+    from math import gcd
+    from pydub import AudioSegment
+
+    def _decode_and_encode():
+        audio = AudioSegment.from_file(
+            wav_path, format="wav", parameters=["-nostdin"]
+        )
+        audio = audio.set_channels(1).set_sample_width(2)
+        src_rate = audio.frame_rate
+        pcm = np.frombuffer(audio.raw_data, dtype=np.int16)
+
+        if src_rate != target_rate:
+            g = gcd(src_rate, target_rate)
+            up = target_rate // g
+            down = src_rate // g
+            resampled = scipy_signal.resample_poly(pcm, up, down)
+            pcm = np.clip(resampled, -32768, 32767).astype(np.int16)
+
+        encoder = opus_encoder_utils.OpusEncoderUtils(
+            sample_rate=target_rate, channels=1, frame_size_ms=60
+        )
+        frame_samples = int(target_rate * 60 / 1000)
+        frame_bytes = frame_samples * 2
+
+        pcm_bytes = pcm.tobytes()
+        packets: list[bytes] = []
+
+        def _collect(opus_bytes):
+            if opus_bytes:
+                packets.append(opus_bytes)
+
+        for i in range(0, len(pcm_bytes), frame_bytes):
+            chunk = pcm_bytes[i : i + frame_bytes]
+            if len(chunk) < frame_bytes:
+                chunk += b"\x00" * (frame_bytes - len(chunk))
+            encoder.encode_pcm_to_opus_stream(
+                chunk, end_of_stream=(i + frame_bytes >= len(pcm_bytes)),
+                callback=_collect,
+            )
+        encoder.close()
+        return packets
+
+    return await asyncio.get_running_loop().run_in_executor(None, _decode_and_encode)
+
+
+async def _stream_singing(conn: "ConnectionHandler", opus_packets: list) -> None:
+    """Send a list of Opus packets to the device with 60 ms pacing.
+
+    Bypasses tts_audio_queue because the consumer's future.result
+    (tts_timeout=15s default) trips on long clips. Sends packets directly to
+    the WebSocket, paced by asyncio.sleep. Respects client_abort for barge-in.
+    """
+    frame_s = 0.06
+    sent = 0
+    try:
+        # Match what sendAudioMessage(FIRST, ...) does: emit a sentence_start
+        # so the device firmware transitions into "playing" state. Without
+        # this, Opus frames arrive but get dropped on the floor.
+        await conn.websocket.send(json.dumps({
+            "type": "tts",
+            "state": "sentence_start",
+            "text": "Macarena",
+            "session_id": conn.session_id,
+        }))
+        for packet in opus_packets:
+            if conn.client_abort or conn.is_exiting:
+                conn.logger.bind(tag=TAG).info(
+                    f"Singing aborted after {sent}/{len(opus_packets)} packets"
+                )
+                break
+            await conn.websocket.send(packet)
+            sent += 1
+            await asyncio.sleep(frame_s)
+    except Exception as exc:
+        conn.logger.bind(tag=TAG).error(f"Singing stream failed: {exc}")
+    finally:
+        conn.client_is_speaking = False
+        try:
+            await conn.websocket.send(json.dumps({
+                "type": "tts",
+                "state": "stop",
+                "session_id": conn.session_id,
+            }))
+        except Exception:
+            pass
+        conn.logger.bind(tag=TAG).info(f"Singing stream complete ({sent} packets sent)")
 
 
 async def handleAudioMessage(conn: "ConnectionHandler", audio):
