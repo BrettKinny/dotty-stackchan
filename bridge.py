@@ -1621,6 +1621,103 @@ async def _perception_purr_player() -> None:
 _FIXED_AUDIO_ASSETS: tuple[Path, ...] = (PURR_AUDIO_PATH,)
 
 
+# ---------------------------------------------------------------------------
+# ProactiveGreeter (Layer 6) — adapters
+# ---------------------------------------------------------------------------
+# The greeter expects an object that exposes ``subscribe()`` ->
+# ``asyncio.Queue`` and ``unsubscribe(q)``. Our perception bus is a pair
+# of free functions (`_perception_subscribe` / `_perception_unsubscribe`)
+# operating on a module-level listener list; the adapter below is the
+# minimum shim needed to bridge the two shapes without altering the
+# in-process bus surface that other consumers already rely on.
+class _PerceptionBusAdapter:
+    """Wraps the free-function perception bus to match the greeter's
+    duck-typed dependency-injection contract."""
+
+    @staticmethod
+    def subscribe() -> asyncio.Queue:
+        return _perception_subscribe()
+
+    @staticmethod
+    def unsubscribe(q: asyncio.Queue) -> None:
+        _perception_unsubscribe(q)
+
+
+class _CalendarFacade:
+    """Wraps `_calendar_cache` + `summarize_for_prompt` into the
+    `get_events()` / `summarize_for_prompt(events, person, include_household)`
+    shape the greeter wants. Reads the cache lazily so a midnight roll or
+    a fresh poll lands without a greeter restart. All branches are
+    defensive — any raise here would propagate into the greeter's
+    handler and be try/except-swallowed there, but we still degrade
+    gracefully so the LLM-prompt path stays valid."""
+
+    @staticmethod
+    def get_events() -> list:
+        try:
+            return list(_calendar_cache.get("events") or [])
+        except Exception:
+            log.debug(
+                "greeter calendar facade: get_events() raised", exc_info=True,
+            )
+            return []
+
+    @staticmethod
+    def summarize_for_prompt(
+        events: list,
+        *,
+        person: str | None = None,
+        include_household: bool = True,
+    ) -> list[str]:
+        try:
+            return summarize_for_prompt(
+                events,
+                person=person,
+                include_household=include_household,
+            )
+        except Exception:
+            log.debug(
+                "greeter calendar facade: summarize_for_prompt raised",
+                exc_info=True,
+            )
+            return []
+
+
+async def _greeter_llm_client(prompt: str) -> str:
+    """LLM adapter for ProactiveGreeter. Routes through the same ACP
+    client voice turns use, but DOES NOT apply `_wrap_voice` — the
+    greeter prompt is already self-contained and the resulting text is
+    sent through `_dispatch_face_greeting` (which goes through the
+    xiaozhi-server inject-text pipeline; that path applies the regular
+    voice wrapping if needed). Failures bubble up to the greeter, which
+    has its own try/except + template fallback."""
+    return await asyncio.wait_for(
+        acp.prompt(prompt),
+        timeout=REQUEST_TIMEOUT_SEC,
+    )
+
+
+async def _greeter_tts_pusher(device_id: str, text: str) -> None:
+    """TTS adapter for ProactiveGreeter. Reuses the same inject-text
+    path the face-greeter uses so the spoken greeting flows through
+    xiaozhi-server's normal post-ASR pipeline (intent detection, MCP,
+    TTS). Errors are logged inside `_dispatch_face_greeting`; we add
+    one more guard so an exception here can NEVER reach the greeter
+    loop."""
+    try:
+        await _dispatch_face_greeting(device_id, text)
+    except Exception:
+        log.exception(
+            "greeter tts pusher: _dispatch_face_greeting raised "
+            "(device=%s)", device_id,
+        )
+
+
+# Lazily constructed in lifespan so unit-import of bridge.py stays cheap
+# (the greeter reads env on construction).
+_proactive_greeter: "ProactiveGreeter | None" = None  # noqa: F821
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
@@ -1644,11 +1741,36 @@ async def lifespan(app: FastAPI):
     ]
     # Layer 5: background calendar refresher (no-op when CALENDAR_IDS empty).
     calendar_task = asyncio.create_task(_calendar_poll_loop())
+
+    # Layer 6: proactive greeter. Defensive — a construct-or-start failure
+    # must never block the bridge from booting (voice path comes first).
+    global _proactive_greeter
+    try:
+        from bridge.proactive_greeter import ProactiveGreeter
+        _proactive_greeter = ProactiveGreeter(
+            perception_bus=_PerceptionBusAdapter(),
+            llm_client=_greeter_llm_client,
+            calendar_cache=_CalendarFacade(),
+            tts_pusher=_greeter_tts_pusher,
+            kid_mode_provider=lambda: KID_MODE,
+        )
+        _proactive_greeter.start()
+    except Exception:
+        log.exception(
+            "ProactiveGreeter start failed — continuing without it",
+        )
+        _proactive_greeter = None
+
     yield
     for t in perception_tasks:
         t.cancel()
     calendar_task.cancel()
     await asyncio.gather(*perception_tasks, calendar_task, return_exceptions=True)
+    if _proactive_greeter is not None:
+        try:
+            await _proactive_greeter.stop()
+        except Exception:
+            log.exception("ProactiveGreeter.stop() raised")
     await acp.shutdown()
 
 
