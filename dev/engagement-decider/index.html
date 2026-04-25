@@ -6,11 +6,11 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Turn off child-safety guardrails to use Dotty as a general-purpose assistant.">
+        <meta name="description" content="Cooldown + mood + time-of-day gate for unprompted utterances. The "Dotty notices you walk in and chimes up on its own" sublayer — default OFF.">
       
       
       
-        <link rel="canonical" href="https://brettkinny.github.io/dotty-stackchan/dev/cookbook/disable-kid-mode/">
+        <link rel="canonical" href="https://brettkinny.github.io/dotty-stackchan/dev/engagement-decider/">
       
       
       
@@ -18,19 +18,19 @@
         
       
       
-      <link rel="icon" href="../../assets/images/favicon.png">
+      <link rel="icon" href="../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>Disable Kid Mode - Dotty</title>
+        <title>Engagement Decider (Phase 4) - Dotty</title>
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -49,7 +49,7 @@
       
     
     
-    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#disable-kid-mode" class="md-skip">
+        <a href="#engagement-decider-phase-4" class="md-skip">
           Skip to content
         </a>
       
@@ -92,7 +92,7 @@
 
 <header class="md-header" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../.." title="Dotty" class="md-header__button md-logo" aria-label="Dotty" data-md-component="logo">
+    <a href=".." title="Dotty" class="md-header__button md-logo" aria-label="Dotty" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Disable Kid Mode
+              Engagement Decider (Phase 4)
             
           </span>
         </div>
@@ -225,7 +225,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../.." class="md-tabs__link">
+      <a href=".." class="md-tabs__link">
         
   
   
@@ -244,7 +244,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../SETUP.md" class="md-tabs__link">
+      <a href="../SETUP.md" class="md-tabs__link">
         
   
   
@@ -263,7 +263,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/architecture.md" class="md-tabs__link">
+      <a href="../docs/architecture.md" class="md-tabs__link">
         
   
   
@@ -284,7 +284,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../docs/hardware.md" class="md-tabs__link">
+        <a href="../docs/hardware.md" class="md-tabs__link">
           
   
   
@@ -302,7 +302,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/voice-pipeline.md" class="md-tabs__link">
+      <a href="../docs/voice-pipeline.md" class="md-tabs__link">
         
   
   
@@ -321,7 +321,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/voice-mode-entry.md" class="md-tabs__link">
+      <a href="../docs/voice-mode-entry.md" class="md-tabs__link">
         
   
   
@@ -340,7 +340,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/voice-catalog.md" class="md-tabs__link">
+      <a href="../docs/voice-catalog.md" class="md-tabs__link">
         
   
   
@@ -359,7 +359,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/brain.md" class="md-tabs__link">
+      <a href="../docs/brain.md" class="md-tabs__link">
         
   
   
@@ -378,7 +378,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/protocols.md" class="md-tabs__link">
+      <a href="../docs/protocols.md" class="md-tabs__link">
         
   
   
@@ -397,7 +397,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/ota-verification.md" class="md-tabs__link">
+      <a href="../docs/ota-verification.md" class="md-tabs__link">
         
   
   
@@ -416,7 +416,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/kid-mode.md" class="md-tabs__link">
+      <a href="../docs/kid-mode.md" class="md-tabs__link">
         
   
   
@@ -435,7 +435,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/rich-mcp.md" class="md-tabs__link">
+      <a href="../docs/rich-mcp.md" class="md-tabs__link">
         
   
   
@@ -454,7 +454,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/llm-backends.md" class="md-tabs__link">
+      <a href="../docs/llm-backends.md" class="md-tabs__link">
         
   
   
@@ -473,7 +473,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/observability.md" class="md-tabs__link">
+      <a href="../docs/observability.md" class="md-tabs__link">
         
   
   
@@ -492,7 +492,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/audio-scene-classifier.md" class="md-tabs__link">
+      <a href="../docs/audio-scene-classifier.md" class="md-tabs__link">
         
   
   
@@ -511,7 +511,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/engagement-decider.md" class="md-tabs__link">
+      <a href="../docs/engagement-decider.md" class="md-tabs__link">
         
   
   
@@ -532,7 +532,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../docs/cookbook/change-persona.md" class="md-tabs__link">
+        <a href="../docs/cookbook/change-persona.md" class="md-tabs__link">
           
   
   
@@ -552,7 +552,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../docs/advanced/multi-host.md" class="md-tabs__link">
+        <a href="../docs/advanced/multi-host.md" class="md-tabs__link">
           
   
   
@@ -572,7 +572,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../docs/emoji-mapping.md" class="md-tabs__link">
+        <a href="../docs/emoji-mapping.md" class="md-tabs__link">
           
   
   
@@ -590,7 +590,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/troubleshooting.md" class="md-tabs__link">
+      <a href="../docs/troubleshooting.md" class="md-tabs__link">
         
   
   
@@ -609,7 +609,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/faq.md" class="md-tabs__link">
+      <a href="../docs/faq.md" class="md-tabs__link">
         
   
   
@@ -628,7 +628,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/about.md" class="md-tabs__link">
+      <a href="../docs/about.md" class="md-tabs__link">
         
   
   
@@ -647,7 +647,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../ROADMAP.md" class="md-tabs__link">
+      <a href="../ROADMAP.md" class="md-tabs__link">
         
   
   
@@ -666,7 +666,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../CONTRIBUTING.md" class="md-tabs__link">
+      <a href="../CONTRIBUTING.md" class="md-tabs__link">
         
   
   
@@ -685,7 +685,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/style.md" class="md-tabs__link">
+      <a href="../docs/style.md" class="md-tabs__link">
         
   
   
@@ -704,7 +704,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../SECURITY.md" class="md-tabs__link">
+      <a href="../SECURITY.md" class="md-tabs__link">
         
   
   
@@ -723,7 +723,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../COMPATIBILITY.md" class="md-tabs__link">
+      <a href="../COMPATIBILITY.md" class="md-tabs__link">
         
   
   
@@ -742,7 +742,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/sbom.md" class="md-tabs__link">
+      <a href="../docs/sbom.md" class="md-tabs__link">
         
   
   
@@ -761,7 +761,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/signed-releases.md" class="md-tabs__link">
+      <a href="../docs/signed-releases.md" class="md-tabs__link">
         
   
   
@@ -780,7 +780,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../docs/versioning.md" class="md-tabs__link">
+      <a href="../docs/versioning.md" class="md-tabs__link">
         
   
   
@@ -799,7 +799,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../CHANGELOG.md" class="md-tabs__link">
+      <a href="../CHANGELOG.md" class="md-tabs__link">
         
   
   
@@ -834,7 +834,7 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../.." title="Dotty" class="md-nav__button md-logo" aria-label="Dotty" data-md-component="logo">
+    <a href=".." title="Dotty" class="md-nav__button md-logo" aria-label="Dotty" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -864,7 +864,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../.." class="md-nav__link">
+      <a href=".." class="md-nav__link">
         
   
   
@@ -891,7 +891,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../SETUP.md" class="md-nav__link">
+      <a href="../SETUP.md" class="md-nav__link">
         
   
   
@@ -918,7 +918,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/architecture.md" class="md-nav__link">
+      <a href="../docs/architecture.md" class="md-nav__link">
         
   
   
@@ -997,7 +997,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/hardware.md" class="md-nav__link">
+      <a href="../docs/hardware.md" class="md-nav__link">
         
   
   
@@ -1025,7 +1025,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/hardware-support.md" class="md-nav__link">
+      <a href="../docs/hardware-support.md" class="md-nav__link">
         
   
   
@@ -1060,7 +1060,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/voice-pipeline.md" class="md-nav__link">
+      <a href="../docs/voice-pipeline.md" class="md-nav__link">
         
   
   
@@ -1087,7 +1087,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/voice-mode-entry.md" class="md-nav__link">
+      <a href="../docs/voice-mode-entry.md" class="md-nav__link">
         
   
   
@@ -1114,7 +1114,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/voice-catalog.md" class="md-nav__link">
+      <a href="../docs/voice-catalog.md" class="md-nav__link">
         
   
   
@@ -1141,7 +1141,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/brain.md" class="md-nav__link">
+      <a href="../docs/brain.md" class="md-nav__link">
         
   
   
@@ -1168,7 +1168,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/protocols.md" class="md-nav__link">
+      <a href="../docs/protocols.md" class="md-nav__link">
         
   
   
@@ -1195,7 +1195,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/ota-verification.md" class="md-nav__link">
+      <a href="../docs/ota-verification.md" class="md-nav__link">
         
   
   
@@ -1222,7 +1222,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/kid-mode.md" class="md-nav__link">
+      <a href="../docs/kid-mode.md" class="md-nav__link">
         
   
   
@@ -1249,7 +1249,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/rich-mcp.md" class="md-nav__link">
+      <a href="../docs/rich-mcp.md" class="md-nav__link">
         
   
   
@@ -1276,7 +1276,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/llm-backends.md" class="md-nav__link">
+      <a href="../docs/llm-backends.md" class="md-nav__link">
         
   
   
@@ -1303,7 +1303,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/observability.md" class="md-nav__link">
+      <a href="../docs/observability.md" class="md-nav__link">
         
   
   
@@ -1330,7 +1330,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/audio-scene-classifier.md" class="md-nav__link">
+      <a href="../docs/audio-scene-classifier.md" class="md-nav__link">
         
   
   
@@ -1357,7 +1357,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/engagement-decider.md" class="md-nav__link">
+      <a href="../docs/engagement-decider.md" class="md-nav__link">
         
   
   
@@ -1436,7 +1436,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/cookbook/change-persona.md" class="md-nav__link">
+      <a href="../docs/cookbook/change-persona.md" class="md-nav__link">
         
   
   
@@ -1464,7 +1464,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/cookbook/swap-voice.md" class="md-nav__link">
+      <a href="../docs/cookbook/swap-voice.md" class="md-nav__link">
         
   
   
@@ -1492,7 +1492,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/cookbook/run-fully-local.md" class="md-nav__link">
+      <a href="../docs/cookbook/run-fully-local.md" class="md-nav__link">
         
   
   
@@ -1520,7 +1520,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/cookbook/add-emoji.md" class="md-nav__link">
+      <a href="../docs/cookbook/add-emoji.md" class="md-nav__link">
         
   
   
@@ -1548,7 +1548,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/cookbook/disable-kid-mode.md" class="md-nav__link">
+      <a href="../docs/cookbook/disable-kid-mode.md" class="md-nav__link">
         
   
   
@@ -1635,7 +1635,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/advanced/multi-host.md" class="md-nav__link">
+      <a href="../docs/advanced/multi-host.md" class="md-nav__link">
         
   
   
@@ -1663,7 +1663,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/advanced/variant-port-guide.md" class="md-nav__link">
+      <a href="../docs/advanced/variant-port-guide.md" class="md-nav__link">
         
   
   
@@ -1750,7 +1750,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/emoji-mapping.md" class="md-nav__link">
+      <a href="../docs/emoji-mapping.md" class="md-nav__link">
         
   
   
@@ -1778,7 +1778,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/interaction-map.md" class="md-nav__link">
+      <a href="../docs/interaction-map.md" class="md-nav__link">
         
   
   
@@ -1806,7 +1806,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/latent-capabilities.md" class="md-nav__link">
+      <a href="../docs/latent-capabilities.md" class="md-nav__link">
         
   
   
@@ -1834,7 +1834,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/references.md" class="md-nav__link">
+      <a href="../docs/references.md" class="md-nav__link">
         
   
   
@@ -1869,7 +1869,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/troubleshooting.md" class="md-nav__link">
+      <a href="../docs/troubleshooting.md" class="md-nav__link">
         
   
   
@@ -1896,7 +1896,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/faq.md" class="md-nav__link">
+      <a href="../docs/faq.md" class="md-nav__link">
         
   
   
@@ -1923,7 +1923,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/about.md" class="md-nav__link">
+      <a href="../docs/about.md" class="md-nav__link">
         
   
   
@@ -1950,7 +1950,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../ROADMAP.md" class="md-nav__link">
+      <a href="../ROADMAP.md" class="md-nav__link">
         
   
   
@@ -1977,7 +1977,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../CONTRIBUTING.md" class="md-nav__link">
+      <a href="../CONTRIBUTING.md" class="md-nav__link">
         
   
   
@@ -2004,7 +2004,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/style.md" class="md-nav__link">
+      <a href="../docs/style.md" class="md-nav__link">
         
   
   
@@ -2031,7 +2031,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../SECURITY.md" class="md-nav__link">
+      <a href="../SECURITY.md" class="md-nav__link">
         
   
   
@@ -2058,7 +2058,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../COMPATIBILITY.md" class="md-nav__link">
+      <a href="../COMPATIBILITY.md" class="md-nav__link">
         
   
   
@@ -2085,7 +2085,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/sbom.md" class="md-nav__link">
+      <a href="../docs/sbom.md" class="md-nav__link">
         
   
   
@@ -2112,7 +2112,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/signed-releases.md" class="md-nav__link">
+      <a href="../docs/signed-releases.md" class="md-nav__link">
         
   
   
@@ -2139,7 +2139,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../docs/versioning.md" class="md-nav__link">
+      <a href="../docs/versioning.md" class="md-nav__link">
         
   
   
@@ -2166,7 +2166,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../CHANGELOG.md" class="md-nav__link">
+      <a href="../CHANGELOG.md" class="md-nav__link">
         
   
   
@@ -2213,10 +2213,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#how-to-disable" class="md-nav__link">
+  <a href="#architecture" class="md-nav__link">
     <span class="md-ellipsis">
       
-        How to disable
+        Architecture
       
     </span>
   </a>
@@ -2224,10 +2224,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-changes-removed" class="md-nav__link">
+  <a href="#mood-scalar" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What changes (removed)
+        Mood scalar
       
     </span>
   </a>
@@ -2235,10 +2235,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-stays-the-same" class="md-nav__link">
+  <a href="#intent-types" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What stays the same
+        Intent types
       
     </span>
   </a>
@@ -2246,10 +2246,104 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#see-also" class="md-nav__link">
+  <a href="#configuration-matrix" class="md-nav__link">
     <span class="md-ellipsis">
       
-        See also
+        Configuration matrix
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#persistence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Persistence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#privacy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Privacy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operator-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator notes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Operator notes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#debugging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debugging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resetting-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resetting state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#disabling-at-runtime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disabling at runtime
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cross-references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cross-references
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Status
       
     </span>
   </a>
@@ -2276,80 +2370,291 @@
   
 
 
-<h1 id="disable-kid-mode">Disable Kid Mode<a class="headerlink" href="#disable-kid-mode" title="Permanent link">&para;</a></h1>
-<p>Kid Mode is <strong>on by default</strong> (<code>DOTTY_KID_MODE=true</code>). Disabling it
-removes child-specific rules while keeping core voice constraints.</p>
-<h2 id="how-to-disable">How to disable<a class="headerlink" href="#how-to-disable" title="Permanent link">&para;</a></h2>
-<p>Set the environment variable (in <code>.env</code> or the shell environment):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">DOTTY_KID_MODE</span><span class="o">=</span><span class="nb">false</span>
-</code></pre></div>
-<p>Restart the bridge: <code>systemctl restart zeroclaw-bridge</code></p>
-<h2 id="what-changes-removed">What changes (removed)<a class="headerlink" href="#what-changes-removed" title="Permanent link">&para;</a></h2>
+<h1 id="engagement-decider-phase-4">Engagement Decider (Phase 4)<a class="headerlink" href="#engagement-decider-phase-4" title="Permanent link">&para;</a></h1>
+<p>The engagement-decision sublayer is the arbiter for <strong>all</strong> unprompted
+behaviours. Where Layer 6's <a href="../proactive-greetings/">Proactive Greeter</a>
+is a single-purpose face → greeting reactor, the engagement decider is
+the general "should we say something now?" gate that sits between the
+perception bus and any future server-initiated speech path.</p>
+<p>This is the headline payoff of Phase 4: <strong>Dotty notices you walk in
+and chimes up on its own</strong> — but with cooldowns, quiet hours, and a
+mood scalar so the robot stays charming rather than chatty.</p>
+<div class="admonition warning">
+<p class="admonition-title">Default OFF</p>
+<p><code>ENGAGEMENT_ENABLED=false</code> by default. This is a big behaviour
+change — the robot starts speaking without being addressed.
+Operators must opt in explicitly.</p>
+</div>
+<h2 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>flowchart LR
+    PB[Perception bus] --&gt;|face_recognized&lt;br/&gt;face_lost&lt;br/&gt;head_pet_started&lt;br/&gt;voice_turn_completed&lt;br/&gt;sound_event| SP[Stimulus pool&lt;br/&gt;bounded deque]
+    SP --&gt; DEC{Decider tick&lt;br/&gt;every 30s}
+    DEC --&gt; CD{Cooldown&lt;br/&gt;clear?}
+    CD -- no --&gt; SKIP[skip]
+    CD -- yes --&gt; QH{Quiet&lt;br/&gt;hours?}
+    QH -- yes --&gt; SKIP
+    QH -- no --&gt; TOD{In active&lt;br/&gt;window?}
+    TOD -- no --&gt; HP{High&lt;br/&gt;priority?}
+    HP -- no --&gt; SKIP
+    HP -- yes --&gt; MF{Mood&lt;br/&gt;&gt;= 0.3?}
+    TOD -- yes --&gt; MF
+    MF -- no --&gt; BYP{Mood&lt;br/&gt;bypass?}
+    BYP -- no --&gt; SKIP
+    BYP -- yes --&gt; ST{Stimulus&lt;br/&gt;matches?}
+    MF -- yes --&gt; ST
+    ST -- no --&gt; SKIP
+    ST -- yes --&gt; GEN[LLM&lt;br/&gt;+ template fallback]
+    GEN --&gt; TTS[push to device]
+    TTS --&gt; BUMP[bump cooldown&lt;br/&gt;+ mood +0.10]</code></pre>
+<p>The decider pulls perception events into a small recent-history
+buffer (the <strong>stimulus pool</strong>) and runs a periodic tick that walks an
+ordered cascade of intent types. The first intent that clears every
+gate fires; everything else waits for the next tick.</p>
+<h2 id="mood-scalar">Mood scalar<a class="headerlink" href="#mood-scalar" title="Permanent link">&para;</a></h2>
+<p>A single <code>[0.0, 1.0]</code> float that decays exponentially toward <code>0.5</code>
+(neutral) with τ = 10 minutes by default. Perception events nudge it
+in either direction; sustained silence pulls it down slowly so a
+quiet room doesn't get a "good morning" out of nowhere when nobody's
+been around for hours.</p>
 <table>
 <thead>
 <tr>
-<th>Rule</th>
-<th>Description</th>
+<th>Event</th>
+<th>Δ mood</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>4</td>
-<td>Age-appropriate audience (4-8) constraint</td>
+<td>TTS push succeeded (any intent)</td>
+<td><strong>+0.10</strong></td>
 </tr>
 <tr>
-<td>5</td>
-<td>Topic blocklist (violence, drugs, sex, horror, hate)</td>
+<td><code>face_recognized</code> (known)</td>
+<td>+0.05</td>
 </tr>
 <tr>
-<td>6</td>
-<td>Self-harm gentle redirect</td>
+<td><code>voice_turn_completed</code></td>
+<td>+0.05</td>
 </tr>
 <tr>
-<td>7</td>
-<td>Jailbreak resistance ("ignore previous", "DAN", etc.)</td>
+<td><code>head_pet_started</code></td>
+<td>+0.10</td>
 </tr>
 <tr>
-<td>8</td>
-<td>Picture-book vocabulary only</td>
+<td><code>face_lost</code></td>
+<td>-0.05</td>
 </tr>
 <tr>
-<td>9</td>
-<td>Fail-toward-safer default</td>
+<td>Per minute of total silence</td>
+<td>-0.02</td>
+</tr>
+<tr>
+<td>Decay toward 0.5</td>
+<td>τ=10 min</td>
 </tr>
 </tbody>
 </table>
-<p><code>VISION_SYSTEM_PROMPT</code> switches to general-purpose image descriptions
-(no child-safe filtering, no restriction on identifying people).</p>
-<h2 id="what-stays-the-same">What stays the same<a class="headerlink" href="#what-stays-the-same" title="Permanent link">&para;</a></h2>
+<p>When mood drops below <code>0.3</code>, only <strong>mood-bypass intents</strong>
+(<code>calendar_reminder</code>) are allowed to fire. Everything else waits for
+mood to recover.</p>
+<div class="admonition note">
+<p class="admonition-title">Tuning warning</p>
+<p>These coefficients are starter values informed by intuition.
+They will need real-world tuning once the loop is wired up; the
+current numbers are visible as constants on the
+<code>EngagementDecider</code> class for easy adjustment.</p>
+</div>
+<h2 id="intent-types">Intent types<a class="headerlink" href="#intent-types" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Rule</th>
-<th>Description</th>
+<th>Intent</th>
+<th>Default cooldown</th>
+<th>Stimulus required</th>
+<th>Kid-mode?</th>
+<th>Time-of-day respect</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>1</td>
-<td>English-only replies</td>
+<td><code>calendar_reminder</code></td>
+<td>2 h</td>
+<td>calendar facade returns events</td>
+<td>yes</td>
+<td>bypasses out-of-window</td>
 </tr>
 <tr>
-<td>2</td>
-<td>Emoji prefix (one of the 9 allowed emojis)</td>
+<td><code>casual_greeting</code></td>
+<td>30 min</td>
+<td>recent <code>face_recognized</code> (known)</td>
+<td>yes</td>
+<td>bypasses out-of-window</td>
 </tr>
 <tr>
-<td>3</td>
-<td>1-3 short sentences, TTS-friendly</td>
+<td><code>time_marker</code></td>
+<td>4 h</td>
+<td>any recent activity</td>
+<td>yes</td>
+<td>active-window only</td>
+</tr>
+<tr>
+<td><code>unknown_face</code></td>
+<td>1 h</td>
+<td>recent <code>face_detected</code> / unknown id (gated by <code>GREETER_GREET_UNKNOWN</code>)</td>
+<td>yes</td>
+<td>active-window only</td>
+</tr>
+<tr>
+<td><code>curiosity</code></td>
+<td>6 h</td>
+<td>any history + mood ≥ 0.5</td>
+<td>yes</td>
+<td>active-window only</td>
 </tr>
 </tbody>
 </table>
-<p>The content filter (<code>_content_filter</code>) and emoji fallback
-(<code>_ensure_emoji_prefix</code>) remain active in both modes.</p>
-<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<p>Quiet hours hard-block <strong>all</strong> of the above — even
+<code>calendar_reminder</code>. If the user is asleep, the robot stays quiet.</p>
+<h2 id="configuration-matrix">Configuration matrix<a class="headerlink" href="#configuration-matrix" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ENGAGEMENT_ENABLED</code></td>
+<td><code>false</code></td>
+<td>Master switch — opt in.</td>
+</tr>
+<tr>
+<td><code>ENGAGEMENT_TICK_SEC</code></td>
+<td><code>30</code></td>
+<td>Tick period in seconds.</td>
+</tr>
+<tr>
+<td><code>ENGAGEMENT_QUIET_HOURS</code></td>
+<td><code>22:00-06:00</code></td>
+<td><code>HH:MM-HH:MM</code>. Wraps midnight.</td>
+</tr>
+<tr>
+<td><code>ENGAGEMENT_ACTIVE_WINDOW</code></td>
+<td><code>06:00-21:00</code></td>
+<td>Outside this, only HP intents pass.</td>
+</tr>
+<tr>
+<td><code>ENGAGEMENT_MOOD_DECAY_MIN</code></td>
+<td><code>10</code></td>
+<td>τ for decay toward neutral.</td>
+</tr>
+<tr>
+<td><code>ENGAGEMENT_UTTERANCE_MAX_WORDS</code></td>
+<td><code>18</code></td>
+<td>Hard cap embedded in the LLM prompt.</td>
+</tr>
+<tr>
+<td><code>ENGAGEMENT_STATE_PATH</code></td>
+<td><code>~/.zeroclaw/engagement_state.json</code></td>
+<td>Atomic-write JSON.</td>
+</tr>
+<tr>
+<td><code>ENGAGEMENT_COOLDOWN_CASUAL_GREETING</code></td>
+<td><code>1800</code></td>
+<td>Seconds. Per-intent override.</td>
+</tr>
+<tr>
+<td><code>ENGAGEMENT_COOLDOWN_CALENDAR_REMINDER</code></td>
+<td><code>7200</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>ENGAGEMENT_COOLDOWN_TIME_MARKER</code></td>
+<td><code>14400</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>ENGAGEMENT_COOLDOWN_CURIOSITY</code></td>
+<td><code>21600</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>ENGAGEMENT_COOLDOWN_UNKNOWN_FACE</code></td>
+<td><code>3600</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>GREETER_GREET_UNKNOWN</code></td>
+<td><code>false</code></td>
+<td>Reused — gates the <code>unknown_face</code> intent.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="persistence">Persistence<a class="headerlink" href="#persistence" title="Permanent link">&para;</a></h2>
+<p>The cooldown registry and mood scalar are persisted on every tick to
+<code>ENGAGEMENT_STATE_PATH</code>. Writes are atomic (<code>temp + os.replace</code>) so a
+mid-write crash leaves the previous state intact. Corrupt or
+non-dict state files are treated as "fresh start" rather than fatal —
+the same defensive contract Layer 6 uses for its greet log.</p>
+<h2 id="privacy">Privacy<a class="headerlink" href="#privacy" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../../kid-mode/">kid-mode.md</a> -- full guardrail architecture.</li>
+<li>The state file is <strong>local</strong>. It contains a single float (mood) and
+  a small dict of <code>intent_type → unix_ts</code> cooldown timestamps.</li>
+<li><strong>No biometric data is stored.</strong> The decider reads identity from
+  perception events but never persists names, faces, or audio.</li>
+<li>The decider does <strong>not</strong> enable face recognition. It only consumes
+  events that Layer 4 (a still-scaffold layer) would otherwise emit.</li>
+<li>All external calls (LLM, TTS, calendar, filesystem, perception bus)
+  are try/except guarded; a decider failure cannot break the
+  perception bus or the voice path.</li>
 </ul>
+<h2 id="operator-notes">Operator notes<a class="headerlink" href="#operator-notes" title="Permanent link">&para;</a></h2>
+<h3 id="debugging">Debugging<a class="headerlink" href="#debugging" title="Permanent link">&para;</a></h3>
+<p>Set the bridge log level to <code>DEBUG</code> and watch journalctl for
+<code>engagement_tick</code> lines:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>journalctl<span class="w"> </span>-u<span class="w"> </span>zeroclaw-bridge<span class="w"> </span>-f<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>engagement
+</code></pre></div>
+<p>Each tick logs mood, active-window state, pool size, and the
+suppression reason for any intent that didn't pass. A successful fire
+logs at <code>INFO</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>engagement_tick: fired intent=casual_greeting device=dev-1 text=&#39;Good morning, Hudson!&#39;
+</code></pre></div>
+<h3 id="resetting-state">Resetting state<a class="headerlink" href="#resetting-state" title="Permanent link">&para;</a></h3>
+<p>Stop the bridge, delete <code>~/.zeroclaw/engagement_state.json</code>, restart.
+Mood will reset to <code>0.5</code> and all cooldowns will clear.</p>
+<h3 id="disabling-at-runtime">Disabling at runtime<a class="headerlink" href="#disabling-at-runtime" title="Permanent link">&para;</a></h3>
+<p>Set <code>ENGAGEMENT_ENABLED=false</code> in the bridge environment and restart
+<code>zeroclaw-bridge.service</code>. The decider treats the env as
+construction-time configuration; toggling without a restart is
+deliberately not supported.</p>
+<h2 id="cross-references">Cross-references<a class="headerlink" href="#cross-references" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong><a href="../proactive-greetings/">Proactive Greeter (Layer 6)</a></strong> — the
+  existing single-purpose greeter. A future change can route its
+  greetings through the engagement decider for unified cooldown
+  discipline; until that ships, the two run independently with
+  separate cooldowns. (Operators who enable both will see the
+  greeter fire on <code>face_recognized</code> AND the decider's
+  <code>casual_greeting</code> intent fire on its tick — pick one or stagger
+  cooldowns until the merge happens.)</li>
+<li><strong>Layer 4 — face recognition</strong>: scaffold; emits the
+  <code>face_recognized</code> events the decider keys on for
+  <code>casual_greeting</code>.</li>
+<li><strong>Layer 5 — calendar facade</strong>: source of <code>calendar_reminder</code>
+  evidence via <code>get_events()</code> + <code>summarize_for_prompt(...)</code>.</li>
+<li><strong><a href="../modes/">Modes</a></strong> — interaction-mode taxonomy. The decider is
+  active in normal smart-mode; a future iteration may suppress it in
+  story-mode and similar focused modes.</li>
+</ul>
+<h2 id="status">Status<a class="headerlink" href="#status" title="Permanent link">&para;</a></h2>
+<p><strong>Scaffolded; bridge wiring deferred.</strong> This module ships as a new
+file with full unit-test coverage. The <code>bridge.py</code> lifespan hook that
+will instantiate it lives behind the public-repo concurrency boundary
+and is being added in a follow-up commit. Until that lands, the
+decider is dormant — it will not start, even with
+<code>ENGAGEMENT_ENABLED=true</code>.</p>
 
 
 
@@ -2408,10 +2713,10 @@ removes child-specific rules while keeping core voice constraints.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>
