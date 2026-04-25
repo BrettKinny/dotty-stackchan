@@ -14,6 +14,7 @@ Out of the box, Dotty ships in **Kid Mode** -- age-appropriate language, safety 
 - **Streaming responses** -- the bridge streams LLM output to the voice pipeline for lower perceived latency.
 - **Emoji expressions** -- every response starts with an emoji that the firmware maps to a face animation (smile, laugh, sad, surprise, thinking, angry, love, sleepy, neutral).
 - **MCP tools** -- ZeroClaw exposes tools (web search, memory, etc.) to the LLM via the Model Context Protocol.
+- **Behavioural modes** -- face-tracking idle, conversation (listen / think / talk), smart mode, dance, sing, vision -- each with its own LED contract on the 12-LED ring. See [`docs/modes.md`](./docs/modes.md) for the taxonomy + transition diagram.
 - **Vision (camera)** -- the StackChan's built-in camera can capture images for multimodal LLM queries.
 - **Persona system** -- swappable persona prompts in `personas/`. Change the robot's personality without touching code.
 - **Calendar context** -- optional calendar integration feeds upcoming events into the conversation context.
@@ -36,6 +37,7 @@ This README covers deployment. For what the stack *is* underneath — hardware s
 - [docs/voice-pipeline.md](./docs/voice-pipeline.md) — xiaozhi-esp32-server internals, FunASR/SenseVoice, VAD, TTS.
 - [docs/brain.md](./docs/brain.md) — ZeroClaw architecture, Qwen3-30B-A3B facts, OpenRouter role.
 - [docs/protocols.md](./docs/protocols.md) — Xiaozhi WS framing, MCP-over-WS, ACP JSON-RPC, emotion channel.
+- [docs/modes.md](./docs/modes.md) — behavioural mode taxonomy + LED contract + transition diagram.
 - [docs/latent-capabilities.md](./docs/latent-capabilities.md) — features upstream supports that we aren't using yet.
 - [docs/references.md](./docs/references.md) — canonical upstream URLs, model cards, licenses.
 

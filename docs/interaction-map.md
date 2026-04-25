@@ -59,3 +59,7 @@ One-page reference for every cross-layer signal in the Dotty stack.
 | listen | StackChan | xiaozhi | WebSocket JSON `{"type":"listen"}` | `state:"start"/"stop"`, `mode:"auto"/"manual"`; controls when audio is processed |
 | abort | StackChan | xiaozhi | WebSocket JSON | Sent when user speaks during TTS playback; cancels current response |
 | OTA check | StackChan | xiaozhi :8003 | HTTP GET `/xiaozhi/ota/` | Returns WebSocket URL and config on boot; firmware connects to the returned URL |
+
+## Modes & LED
+
+For the *behavioural* layer that consumes these signals -- what mode the robot is in, what LED plays, and how modes hand off to one another -- see [modes.md](./modes.md). That doc is the canonical taxonomy (ambient / conversation / performance / maintenance), the per-mode trigger reference, and the LED contract table. This file remains the wire-level signal reference; `modes.md` is the state-machine view on top of it.

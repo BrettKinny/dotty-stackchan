@@ -105,7 +105,7 @@ Run `make help` for the full list. Key targets:
 
 ## Deeper reference
 
-For hardware specs, protocol details, model internals, and latent capabilities, see [`docs/README.md`](./docs/README.md) and its linked files (`architecture.md`, `hardware.md`, `voice-pipeline.md`, `brain.md`, `protocols.md`, `latent-capabilities.md`, `references.md`).
+For hardware specs, protocol details, model internals, latent capabilities, and the behavioural mode + LED contract, see [`docs/README.md`](./docs/README.md) and its linked files (`architecture.md`, `hardware.md`, `voice-pipeline.md`, `brain.md`, `protocols.md`, `modes.md`, `latent-capabilities.md`, `references.md`).
 
 ## Tech Stack Refs
 
