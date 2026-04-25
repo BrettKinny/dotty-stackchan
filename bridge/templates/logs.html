@@ -1,0 +1,28 @@
+<div class="card-body p-0">
+  {% if entries %}
+  <ul class="divide-y divide-base-300">
+    {% for entry in entries %}
+    <li class="p-3">
+      <div class="flex justify-between items-baseline gap-2">
+        <span class="text-xs text-base-content/50 font-mono">{{ entry.time }}</span>
+        <div class="flex gap-1 items-center">
+          {% if entry.error %}<span class="badge badge-error badge-sm">err</span>{% endif %}
+          <span class="badge badge-ghost badge-sm">{{ entry.channel }}</span>
+        </div>
+      </div>
+      <div class="text-sm mt-1 break-words">{{ entry.request or "(no input)" }}</div>
+      <details class="mt-1">
+        <summary class="text-xs text-base-content/60 cursor-pointer select-none">
+          response &middot; {{ entry.latency_ms }}ms
+        </summary>
+        <div class="text-sm mt-1 break-words text-base-content/80 whitespace-pre-wrap">{{ entry.response }}</div>
+      </details>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="p-6 text-center text-sm text-base-content/50">
+    No conversations logged today yet.
+  </div>
+  {% endif %}
+</div>

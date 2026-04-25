@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1d232a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Dotty Admin</title>
+<script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
+<link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  html, body { -webkit-tap-highlight-color: transparent; }
+  .status-dot { width: 12px; height: 12px; border-radius: 9999px; flex-shrink: 0; }
+  .status-ok { background: #22c55e; box-shadow: 0 0 8px rgba(34,197,94,0.5); }
+  .status-warn { background: #f59e0b; box-shadow: 0 0 8px rgba(245,158,11,0.5); }
+  .status-bad { background: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,0.5); }
+  .status-unknown { background: #6b7280; }
+  .htmx-request .spin-on-load { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body class="min-h-screen bg-base-200">
+
+<header class="navbar bg-base-100 sticky top-0 z-10 shadow-sm safe-top">
+  <div class="flex-1 px-2 flex items-center gap-3">
+    <span class="text-lg font-semibold tracking-tight">Dotty</span>
+    <span class="text-xs text-base-content/50 hidden sm:inline">admin</span>
+  </div>
+  <div class="flex-none">
+    <button class="btn btn-ghost btn-circle"
+            hx-get="/ui/cards" hx-target="#cards" hx-swap="innerHTML"
+            hx-on::after-request="htmx.ajax('GET','/ui/logs',{target:'#logs',swap:'innerHTML'})"
+            aria-label="Refresh">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 spin-on-load" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v6h6M20 20v-6h-6M5 19a9 9 0 0114-7M19 5a9 9 0 00-14 7"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<main class="p-3 space-y-5 max-w-5xl mx-auto">
+
+  <section>
+    <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Hosts</h2>
+    <div id="cards"
+         class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-3"
+         hx-get="/ui/cards" hx-trigger="load, every 10s" hx-swap="innerHTML">
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-4 animate-pulse">
+          <div class="h-4 bg-base-300 rounded w-1/3"></div>
+          <div class="h-3 bg-base-300 rounded w-2/3 mt-2"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Recent conversation</h2>
+    <div id="logs" class="card bg-base-100 shadow-sm overflow-hidden"
+         hx-get="/ui/logs" hx-trigger="load, every 15s" hx-swap="innerHTML">
+      <div class="card-body p-4 animate-pulse">
+        <div class="h-4 bg-base-300 rounded w-1/2"></div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="text-center text-xs text-base-content/40 pt-4 pb-6">
+    auto-refresh: hosts 10s &middot; logs 15s
+  </footer>
+
+</main>
+
+</body>
+</html>
