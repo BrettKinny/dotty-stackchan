@@ -99,7 +99,18 @@ class EventTextMessageHandler(TextMessageHandler):
                 conn._room_match_person_id = None
             except Exception:
                 pass
-        elif event_name == "face_detected":
+        # Also accept `face_recognized` with identity="unknown" — the
+        # firmware's dormant biometric path emits that name (vs. the
+        # bare `face_detected`) when face_recognizer.cpp returns
+        # kUnknown, which is its current always-return state. Without
+        # this branch the room_view capture never fires on the live
+        # device. We deliberately skip recognized faces with a known
+        # identity (when biometrics ever come back online, no need to
+        # double-spend a VLM call to re-identify someone already named).
+        elif event_name == "face_detected" or (
+            event_name == "face_recognized"
+            and (msg_json.get("data") or {}).get("identity", "unknown") == "unknown"
+        ):
             try:
                 if (not getattr(conn, "_room_description", None)
                         and not getattr(
