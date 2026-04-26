@@ -296,10 +296,11 @@
               Restart bridge
             </button>
             <button class="btn btn-outline btn-sm w-full"
-                    hx-post="/ui/actions/update-bridge"
-                    hx-target="#restart-result" hx-swap="innerHTML"
-                    hx-confirm="Pull the latest bridge code from GitHub and restart? The previous version is kept as bridge.py.prev / bridge.prev.">
-              Update from GitHub
+                    hx-post="/ui/actions/preview-update"
+                    hx-target="#update-modal-content" hx-swap="innerHTML"
+                    hx-disabled-elt="this"
+                    hx-on::after-request="document.getElementById('update-modal').showModal()">
+              Update from GitHub…
             </button>
           </div>
           <div id="restart-result" class="mt-2 empty:hidden"></div>
@@ -363,6 +364,15 @@
       <form method="dialog">
         <button class="btn btn-sm">Close</button>
       </form>
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop"><button>close</button></form>
+</dialog>
+
+<dialog id="update-modal" class="modal">
+  <div class="modal-box max-w-2xl">
+    <div id="update-modal-content">
+      <div class="text-sm text-base-content/50">Loading update preview…</div>
     </div>
   </div>
   <form method="dialog" class="modal-backdrop"><button>close</button></form>

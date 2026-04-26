@@ -1,0 +1,36 @@
+{% if not ok %}
+<h3 class="text-lg font-semibold mb-2">Update preview failed</h3>
+<div class="alert alert-error py-2 text-sm">{{ error }}</div>
+{% elif up_to_date %}
+<h3 class="text-lg font-semibold mb-2">Already up to date</h3>
+<p class="text-sm">Running <span class="font-mono">{{ current_sha }}</span> — same as remote main. No update needed.</p>
+{% else %}
+<h3 class="text-lg font-semibold mb-1">Update preview</h3>
+<div class="text-xs text-base-content/60 mb-3">
+  <span class="font-mono">{{ current_sha }}</span> → <span class="font-mono">{{ new_sha }}</span>
+  {% if not used_range %}
+  <span class="text-warning">— couldn't compute exact range (deployed SHA outside shallow clone); showing latest 10 commits</span>
+  {% endif %}
+</div>
+{% if commits %}
+<ul class="space-y-1 max-h-[40vh] overflow-y-auto text-sm border border-base-300 rounded p-2">
+  {% for c in commits %}
+  <li class="flex gap-2"><span class="font-mono text-xs text-base-content/50 shrink-0">{{ c.sha }}</span><span class="break-words">{{ c.msg }}</span></li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="text-sm text-base-content/50">No new commits found.</div>
+{% endif %}
+<div class="modal-action">
+  <button type="button" class="btn btn-sm btn-warning"
+          hx-post="/ui/actions/update-bridge"
+          hx-target="#restart-result" hx-swap="innerHTML"
+          hx-on::after-request="if(event.detail.successful)document.getElementById('update-modal').close()"
+          hx-confirm="Apply update — bridge will restart and the dashboard will reconnect once it's back. OK?">
+    Apply update
+  </button>
+  <form method="dialog">
+    <button class="btn btn-sm">Cancel</button>
+  </form>
+</div>
+{% endif %}

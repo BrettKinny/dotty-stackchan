@@ -849,6 +849,76 @@ BRIDGE_INSTALL_DIR = Path(
 )
 
 
+def _collect_update_preview() -> tuple[bool, dict[str, Any]]:
+    """F16: shallow-clone the repo to a tmpdir, gather the commit list
+    since the currently-deployed SHA. No filesystem mutation outside the
+    tmp clone — caller renders the result for review."""
+    import subprocess
+    import tempfile
+    import shutil
+    work = Path(tempfile.mkdtemp(prefix="dotty-preview-"))
+    try:
+        proc = subprocess.run(
+            ["git", "clone", "--depth", "30", "--branch", "main",
+             GITHUB_REPO, str(work)],
+            capture_output=True, text=True, timeout=60,
+        )
+        if proc.returncode != 0:
+            return False, {"error": f"git clone failed: {proc.stderr.strip()[:300]}"}
+        sha_proc = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(work), capture_output=True, text=True, timeout=5,
+        )
+        new_sha = sha_proc.stdout.strip() if sha_proc.returncode == 0 else ""
+        deployed = BRIDGE_VERSION if BRIDGE_VERSION != "unknown" else ""
+        commits: list[dict[str, str]] = []
+        used_range = False
+        if deployed:
+            log_proc = subprocess.run(
+                ["git", "log", "--oneline", "-30", f"{deployed}..HEAD"],
+                cwd=str(work), capture_output=True, text=True, timeout=5,
+            )
+            if log_proc.returncode == 0 and log_proc.stdout.strip():
+                used_range = True
+                for line in log_proc.stdout.strip().splitlines():
+                    parts = line.split(" ", 1)
+                    if len(parts) == 2:
+                        commits.append({"sha": parts[0], "msg": parts[1]})
+        if not commits and not used_range:
+            # Fallback: deployed SHA isn't in the shallow clone or unknown.
+            log_proc = subprocess.run(
+                ["git", "log", "--oneline", "-10"],
+                cwd=str(work), capture_output=True, text=True, timeout=5,
+            )
+            if log_proc.returncode == 0:
+                for line in log_proc.stdout.strip().splitlines():
+                    parts = line.split(" ", 1)
+                    if len(parts) == 2:
+                        commits.append({"sha": parts[0], "msg": parts[1]})
+        return True, {
+            "current_sha": deployed or "unknown",
+            "new_sha": new_sha or "unknown",
+            "commits": commits,
+            "used_range": used_range,
+            "up_to_date": bool(deployed) and deployed == new_sha,
+        }
+    except Exception as exc:
+        return False, {"error": f"preview error: {exc}"}
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+@router.post("/actions/preview-update",
+             response_class=HTMLResponse, include_in_schema=False)
+async def preview_update(request: Request) -> Any:
+    """F16: render the incoming-commits review for the Update modal."""
+    ok, ctx = await asyncio.to_thread(_collect_update_preview)
+    return templates.TemplateResponse(
+        request, "update_preview.html",
+        {"ok": ok, **ctx},
+    )
+
+
 def _pull_and_install_bridge() -> tuple[bool, str]:
     """git-clone the public repo into a tmpdir and copy bridge.py +
     bridge/ over the install dir. Caller restarts the service."""
