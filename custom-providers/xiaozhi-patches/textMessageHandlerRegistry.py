@@ -99,18 +99,12 @@ class EventTextMessageHandler(TextMessageHandler):
                 conn._room_match_person_id = None
             except Exception:
                 pass
-        # Accept both `face_detected` and `face_recognized` with
-        # identity="unknown". The firmware face_detector currently emits
-        # `face_recognized` (kUnknown identity) because the dormant
-        # FaceRecognizer scaffold is still in the call path; once the
-        # firmware-side cleanup follow-up lands and emission switches to
-        # `face_detected`, the second branch becomes a no-op but is
-        # cheap to keep. Recognized-with-known-identity is skipped to
-        # avoid re-running a VLM match if biometrics ever return.
-        elif event_name == "face_detected" or (
-            event_name == "face_recognized"
-            and (msg_json.get("data") or {}).get("identity", "unknown") == "unknown"
-        ):
+        # Listen on `face_detected`. Prior firmware also emitted
+        # `face_recognized(identity="unknown")` from the dormant dlib
+        # FaceRecognizer scaffold; that scaffold + emission were removed
+        # in fw-v1.3.2 (firmware `ea3f04b`), so the bridge no longer
+        # needs the dual-event handling.
+        elif event_name == "face_detected":
             try:
                 if (not getattr(conn, "_room_description", None)
                         and not getattr(
