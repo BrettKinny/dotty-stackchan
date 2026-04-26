@@ -69,6 +69,26 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
+
+def _read_bridge_version() -> str:
+    """Short git SHA of the deployed bridge. Cached at module load — picks
+    up changes on the next systemd restart, which `Update from GitHub` does
+    automatically."""
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(Path(__file__).parent.parent),
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+        )
+        return out.decode().strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+BRIDGE_VERSION = _read_bridge_version()
+
 # Opt-in HTTP Basic auth. If both env vars are set, every /ui route requires
 # them. Unset → no auth (preserves current LAN-only behaviour).
 _PORTAL_USER = os.environ.get("DOTTY_PORTAL_USER", "")
@@ -275,7 +295,10 @@ def _read_recent_log_entries(date_str: str, limit: int = 20) -> list[dict[str, A
 
 @router.get("", response_class=HTMLResponse, include_in_schema=False)
 async def dashboard(request: Request) -> Any:
-    return templates.TemplateResponse(request, "dashboard.html")
+    return templates.TemplateResponse(
+        request, "dashboard.html",
+        {"version": BRIDGE_VERSION},
+    )
 
 
 @router.get("/cards", response_class=HTMLResponse, include_in_schema=False)
@@ -661,13 +684,24 @@ async def vision_latest(request: Request) -> Any:
     return templates.TemplateResponse(request, "vision.html", ctx)
 
 
+# Voice-daemon LLM swapped on kid-mode toggle. Same defaults as bridge.py
+# so the dashboard reflects what the bridge actually loaded.
+KID_MODEL_NAME = os.environ.get(
+    "DOTTY_KID_MODEL", "mistralai/mistral-small-3.2-24b-instruct",
+)
+ADULT_MODEL_NAME = os.environ.get(
+    "DOTTY_ADULT_MODEL", "anthropic/claude-sonnet-4-6",
+)
+
+
 @router.get("/kid-mode", response_class=HTMLResponse, include_in_schema=False)
 async def kid_mode_partial(request: Request) -> Any:
     getter = _state.get("kid_mode_getter")
     enabled = bool(getter()) if getter else True
     return templates.TemplateResponse(
         request, "kid_mode.html",
-        {"enabled": enabled, "available": getter is not None},
+        {"enabled": enabled, "available": getter is not None,
+         "model": KID_MODEL_NAME if enabled else ADULT_MODEL_NAME},
     )
 
 

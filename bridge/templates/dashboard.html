@@ -77,6 +77,8 @@
   <div role="tablist" class="tabs tabs-boxed">
     <a role="tab" data-tab="dotty" class="tab flex-1"
        onclick="dottyTab('dotty')">Dotty</a>
+    <a role="tab" data-tab="live" class="tab flex-1"
+       onclick="dottyTab('live')">Live</a>
     <a role="tab" data-tab="status" class="tab flex-1"
        onclick="dottyTab('status')">Status</a>
     <a role="tab" data-tab="logs" class="tab flex-1"
@@ -204,6 +206,21 @@
 
   </div>  <!-- end data-tab-panel="dotty" -->
 
+  <div data-tab-panel="live" class="space-y-5" hidden>
+
+  <section>
+    <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Live conversation</h2>
+    <div class="card bg-base-100 shadow-sm overflow-hidden">
+      <div id="live-transcript" class="divide-y divide-base-300 max-h-[70vh] overflow-y-auto">
+        <div id="live-transcript-empty" class="text-sm text-base-content/50 text-center px-3 py-6">
+          Waiting for the next turn…
+        </div>
+      </div>
+    </div>
+  </section>
+
+  </div>  <!-- end data-tab-panel="live" -->
+
   <div data-tab-panel="status" class="space-y-5" hidden>
 
   <section>
@@ -286,7 +303,7 @@
   </div>  <!-- end data-tab-panel="logs" -->
 
   <footer class="text-center text-xs text-base-content/40 pt-4 pb-6">
-    auto-refresh: hosts 10s &middot; logs 15s
+    auto-refresh: hosts 10s &middot; logs 15s{% if version %} &middot; <span class="font-mono">v{{ version }}</span>{% endif %}
   </footer>
 
 </main>
@@ -303,7 +320,7 @@
   // panels (cheaper) and force a refresh when a tab is revealed (instant
   // catch-up on tab-switch).
   function dottyTab(name) {
-    if (['dotty','status','logs'].indexOf(name) === -1) name = 'dotty';
+    if (['dotty','live','status','logs'].indexOf(name) === -1) name = 'dotty';
     document.querySelectorAll('[data-tab-panel]').forEach(function (p) {
       p.hidden = (p.dataset.tabPanel !== name);
     });
@@ -397,6 +414,58 @@
     while (t.children.length > 3) t.removeChild(t.lastElementChild);
   });
 
+  // F8 live transcript — prepend each completed turn to the Live tab.
+  function prependLiveTurn(data) {
+    var feed = document.getElementById('live-transcript');
+    if (!feed) return;
+    var empty = document.getElementById('live-transcript-empty');
+    if (empty) empty.remove();
+
+    var row = document.createElement('div');
+    row.className = 'px-3 py-2';
+
+    var head = document.createElement('div');
+    head.className = 'flex items-baseline gap-2 flex-wrap';
+    var ts = document.createElement('span');
+    ts.className = 'text-xs text-base-content/50 font-mono';
+    var d = new Date((data.ts || (Date.now() / 1000)) * 1000);
+    ts.textContent = d.toLocaleTimeString();
+    head.appendChild(ts);
+    if (data.channel) {
+      var ch = document.createElement('span');
+      ch.className = 'badge badge-ghost badge-xs';
+      ch.textContent = data.channel;
+      head.appendChild(ch);
+    }
+    if (data.error) {
+      var er = document.createElement('span');
+      er.className = 'badge badge-error badge-xs';
+      er.textContent = 'err';
+      head.appendChild(er);
+    }
+    if (typeof data.latency_ms === 'number') {
+      var lat = document.createElement('span');
+      lat.className = 'text-xs text-base-content/50 ml-auto';
+      lat.textContent = data.latency_ms + 'ms';
+      head.appendChild(lat);
+    }
+    row.appendChild(head);
+
+    var req = document.createElement('div');
+    req.className = 'text-sm break-words mt-1';
+    req.textContent = data.request_text || '(no input)';
+    row.appendChild(req);
+
+    var resp = document.createElement('div');
+    resp.className = 'text-sm text-base-content/80 break-words whitespace-pre-wrap mt-1';
+    var emoji = data.emoji_used ? (data.emoji_used + ' ') : '';
+    resp.textContent = emoji + (data.response_text || '');
+    row.appendChild(resp);
+
+    feed.insertBefore(row, feed.firstChild);
+    while (feed.children.length > 50) feed.removeChild(feed.lastElementChild);
+  }
+
   (function () {
     if (typeof EventSource === 'undefined') return;
     var src = new EventSource('/ui/events');
@@ -404,6 +473,8 @@
     src.onmessage = function (ev) {
       var data;
       try { data = JSON.parse(ev.data); } catch (e) { return; }
+      // F8: prepend to the Live tab transcript.
+      prependLiveTurn(data);
       // Live log tail (P13) — fire the same window event the refresh
       // button uses so every polling tile picks up new state immediately.
       window.dispatchEvent(new CustomEvent('dotty-refresh'));
