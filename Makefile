@@ -18,7 +18,7 @@ BOLD   := \033[1m
 RESET  := \033[0m
 
 # ── Targets ──────────────────────────────────────────────────────────
-.PHONY: help setup fetch-models fetch-yamnet doctor audit up down logs status voice-list voice-install sbom verify-firmware
+.PHONY: help setup fetch-models doctor audit up down logs status voice-list voice-install sbom verify-firmware
 
 help: ## Show this help
 	@echo ""
@@ -141,12 +141,6 @@ fetch-models: ## Download SenseVoiceSmall + Piper voice models
 	done
 	@echo ""
 	@echo -e "$(GREEN)All models ready.$(RESET)"
-
-# ─────────────────────────────────────────────────────────────────────
-# fetch-yamnet — download YAMNet TFLite for the audio scene classifier
-# ─────────────────────────────────────────────────────────────────────
-fetch-yamnet: ## Download YAMNet TFLite (Phase 2 audio scene classifier)
-	@./scripts/fetch-yamnet.sh
 
 # ─────────────────────────────────────────────────────────────────────
 # sbom — generate a component+license inventory (sbom.json at repo root)

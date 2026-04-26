@@ -1417,40 +1417,6 @@ _perception_listeners: list[asyncio.Queue] = []
 _perception_state: dict[str, dict] = {}
 _PERCEPTION_STALE_THRESHOLD_S: float = 30.0  # idle > 30 s → stale
 
-# Phase 2 audio scene classifier (YAMNet) lives in a worker thread.
-# Captured at lifespan startup; consumed by `_audio_scene_emit_from_thread`
-# below. None when YAMNet is disabled or its import failed.
-_audio_scene_classifier: Any = None
-_audio_scene_loop: "asyncio.AbstractEventLoop | None" = None
-
-
-def _audio_scene_emit_from_thread(event: dict) -> None:
-    """Thread-safe bridge from the YAMNet worker thread into the asyncio
-    perception bus. AudioSceneClassifier emits from a non-loop thread, so
-    `_perception_broadcast` (which touches asyncio.Queue) must be hopped
-    onto the captured loop via call_soon_threadsafe."""
-    loop = _audio_scene_loop
-    if loop is None or loop.is_closed():
-        return
-    device_id = event.get("device_id") or ""
-    name = event.get("name") or ""
-    data = event.get("data") or {}
-    ts = event.get("ts") or time.time()
-
-    def _emit() -> None:
-        try:
-            _update_perception_state(device_id, name, data, ts)
-            _perception_broadcast(event)
-        except Exception:
-            log.exception("audio_scene emit on loop failed")
-
-    try:
-        loop.call_soon_threadsafe(_emit)
-    except RuntimeError:
-        # Loop closed between the is_closed() check and the call.
-        pass
-
-
 def _perception_subscribe() -> asyncio.Queue:
     q: asyncio.Queue = asyncio.Queue(maxsize=200)
     _perception_listeners.append(q)
@@ -2197,25 +2163,6 @@ async def lifespan(app: FastAPI):
         )
         _proactive_greeter = None
 
-    # Phase 2: audio scene classifier (YAMNet). No-ops without a feed
-    # source until xiaozhi-server forwards frames to /api/audio-scene/feed.
-    global _audio_scene_classifier, _audio_scene_loop
-    try:
-        from bridge.audio_scene import AudioSceneClassifier
-        _audio_scene_loop = asyncio.get_running_loop()
-        _audio_scene_classifier = AudioSceneClassifier(
-            bus=_audio_scene_emit_from_thread,
-            model_path=os.environ.get(
-                "YAMNET_MODEL_PATH", "models/yamnet/yamnet.tflite",
-            ),
-        )
-        _audio_scene_classifier.start()
-    except Exception:
-        log.exception(
-            "AudioSceneClassifier start failed — continuing without it",
-        )
-        _audio_scene_classifier = None
-
     yield
     for t in perception_tasks:
         t.cancel()
@@ -2226,11 +2173,6 @@ async def lifespan(app: FastAPI):
             await _proactive_greeter.stop()
         except Exception:
             log.exception("ProactiveGreeter.stop() raised")
-    if _audio_scene_classifier is not None:
-        try:
-            _audio_scene_classifier.stop()
-        except Exception:
-            log.exception("AudioSceneClassifier.stop() raised")
     await acp.shutdown()
 
 
@@ -2457,40 +2399,6 @@ async def perception_feed(request: Request) -> StreamingResponse:
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-
-
-@app.post("/api/audio-scene/feed")
-async def audio_scene_feed(request: Request, device_id: str = "bridge") -> dict:
-    """Pre-ASR PCM tap point for the YAMNet audio-scene classifier.
-
-    The body is raw 16-bit signed little-endian PCM at 16 kHz mono. The
-    classifier accumulates a sliding 0.96 s window and emits
-    ``sound_event(kind=...)`` perception events on whitelist hits.
-
-    This endpoint exists so a future xiaozhi-server-side change can fan
-    audio out to the bridge by HTTP without further code changes here.
-    Until that forwarder lands, no traffic should reach this route.
-
-    Defensive contract:
-      * Classifier missing or in no-op mode (no tflite/no model) → 200
-        with ``{"ok": true, "fed": 0}``. The voice path must never be
-        impacted by this endpoint returning anything other than 2xx.
-      * Empty body → 200 with ``{"ok": true, "fed": 0}``.
-    """
-    fed = 0
-    try:
-        if _audio_scene_classifier is None:
-            return {"ok": True, "fed": 0, "note": "classifier not initialised"}
-        body = await request.body()
-        if not body:
-            return {"ok": True, "fed": 0}
-        _audio_scene_classifier.feed(body, device_id=device_id)
-        fed = len(body)
-    except Exception:
-        log.exception("audio-scene feed failed")
-        # Still 200: callers must not retry-storm if YAMNet/tflite is broken.
-        return {"ok": False, "fed": 0, "error": "feed failed"}
-    return {"ok": True, "fed": fed}
 
 
 # ---------------------------------------------------------------------------

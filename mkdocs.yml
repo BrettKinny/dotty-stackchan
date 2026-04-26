@@ -50,7 +50,6 @@ nav:
   - Kid Mode: docs/kid-mode.md
   - LLM Backends: docs/llm-backends.md
   - Observability: docs/observability.md
-  - Audio Scene Classifier: docs/audio-scene-classifier.md
   - Cookbook:
       - Change Persona: docs/cookbook/change-persona.md
       - Swap Voice: docs/cookbook/swap-voice.md

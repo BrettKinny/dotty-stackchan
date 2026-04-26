@@ -49,7 +49,6 @@ Actively being worked on or partially complete. **Big push 2026-04-25 evening:**
 - **Layer 4 identity (description-based)** -- shipped + deployed. VLM (Gemini 2.0 Flash) returns a free-form description plus a roster name match against `~/.zeroclaw/household.yaml`'s `appearance:` field. No biometrics, no persistent identifiers. The earlier dlib biometric scaffold (`bridge/face_db.py` + `face_recognizer.py` + on-device `FaceRecognizer` + `ParentalGate` + 4 MCP tools) was removed — description-based covers the use case and biometrics conflicted with the no-storage identity posture.
 - **Layer 6 proactive greetings** -- `bridge/proactive_greeter.py` + lifespan wiring shipped. Cooldown + time-of-day windowing + kid-safe sandwich + calendar-aware prompt + template fallback. Depends on Layer 4 for named greetings; works today with `face_detected` (unknown identity) for generic.
 - **Layer 1 privacy-indicator LEDs** -- firmware scaffold drives mic/camera state via RAII peripheral guards. Camera `VIDIOC_STREAMOFF` wiring deferred (closes the always-streaming hole; queued).
-- **Phase 2 audio scene classifier** -- `bridge/audio_scene.py` YAMNet INT8 scaffold. Whitelist filter + threshold + cooldown emitting `sound_event(class=doorbell|knock|baby-cry|...)`. xiaozhi audio-frame forwarder pending.
 - **Hybrid smart-mode LED** -- both halves shipped (firmware `set_led_multi` MCP tool + bridge `_send_led_multi` helper). Holds purple pixel during smart-mode turns. Re-asserts on color changes since firmware bypasses animation.
 - **Head-pet hold-to-listen wake** -- firmware scaffold (`WakeWordInvoke("head_pet_hold")` after 2s touch). Works in the dark. Also emits `head_pet_started`/`_ended` perception events for purr consumer.
 - **Wake word "Hey Dotty"** -- interim shipped: firmware default switched Chinese → English "Hi, ESP". Custom "Hey Dotty" microWakeWord roadmap documented (`docs/wake-word.md`); needs sample collection + Colab training (~2 weeks calendar).
@@ -72,7 +71,6 @@ Designed but not yet started. Roughly in priority order.
 - **Layer 2.5 stereo mic + camera person tracking** -- sound-source localization + camera fusion for 360° awareness in idle mode
 - **Phase 3 continuous vision classifier** -- EfficientDet/YOLOX at 1Hz on the Unraid GPU once dual RTX 3060s land
 - **Variant board port guide** -- walkthrough for adding support for other ESP32-S3 boards
-- **xiaozhi audio-frame forwarder** -- bridge YAMNet (Phase 2) needs xiaozhi-server-side change to POST audio frames to `/api/audio-scene/feed`
 
 ## Community wishlist
 

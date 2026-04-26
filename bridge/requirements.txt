@@ -17,11 +17,6 @@ prometheus-client>=0.20,<1
 # so Dotty knows who lives here (display names, personality, calendar
 # prefix, self-ID phrases, birthdates). Pure-Python wheel, tiny.
 PyYAML>=6.0,<7
-# Phase 2 audio scene classifier (optional). Install on Unraid only if
-# YAMNet runs there; bridge can still start without it. See
-# bridge/audio_scene.py — module imports cleanly and no-ops with a
-# warning log when this dependency is absent.
-# tflite-runtime>=2.13
-# numpy — used by bridge/audio_scene.py (YAMNet) and was also pulled in
-# transitively by the (now-removed) face-recognition wheel.
+# numpy — used by custom-providers/asr/whisper_local.py, piper_local,
+# receiveAudioHandle.py, and the singing/purr render scripts.
 numpy>=1.24,<3
