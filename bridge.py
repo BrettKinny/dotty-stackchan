@@ -331,22 +331,11 @@ MCP_TOOL_ALLOWLIST: set[str] = {
     "robot.create_reminder",
     "robot.get_reminders",
     "robot.stop_reminder",
-    # Layer 4 face recognition (server-side compute on the bridge):
-    # the firmware tools just stream a JPEG to /api/face/* — see
-    # bridge/face_recognizer.py for the embedding + match service.
-    "camera.face_enroll",
-    "camera.face_recognize",
-    "camera.face_forget",
-    "camera.face_list",
 }
 # === ADMIN_ALLOWLIST_END ===
-# Privacy-sensitive tools denied when KID_MODE is active. Face capture
-# tools also denied because they take a photo; face_list is read-only
-# (just names) so it stays available for the kid-friendly "who do you
-# know" voice path.
+# Privacy-sensitive tools denied when KID_MODE is active.
 MCP_TOOL_DENYLIST: set[str] = (
-    {"camera.take_photo", "camera.face_enroll",
-     "camera.face_recognize", "camera.face_forget"}
+    {"camera.take_photo"}
     if KID_MODE else set()
 )
 
@@ -776,18 +765,16 @@ def _build_context() -> str:
     return f"[Context: {' | '.join(parts)}]\n"
 
 
-def _wrap_voice(text: str, turn: int, speaker: str | None = None) -> str:
+def _wrap_voice(text: str, turn: int) -> str:
     suffix = VOICE_TURN_SUFFIX if turn == 0 else VOICE_TURN_SUFFIX_SHORT
-    speaker_line = f"[Speaker: {speaker}]\n" if speaker else ""
-    return VOICE_TURN_PREFIX + _build_context() + speaker_line + text + suffix
+    return VOICE_TURN_PREFIX + _build_context() + text + suffix
 
 
 def _wrap_voice_with_block(text: str, turn: int, speaker_block: str) -> str:
     """Variant of `_wrap_voice` that injects a pre-built multi-line
     speaker block (e.g. `[Speaking with] Hudson — 7yo, loves Lego.`)
-    instead of the legacy single-line `[Speaker: name]` marker. Used by
-    the SpeakerResolver path; the legacy face-rec path keeps using
-    `_wrap_voice`."""
+    instead of the single-line `[Speaker: name]` marker. Used by the
+    SpeakerResolver path."""
     suffix = VOICE_TURN_SUFFIX if turn == 0 else VOICE_TURN_SUFFIX_SHORT
     return VOICE_TURN_PREFIX + speaker_block + _build_context() + text + suffix
 
@@ -894,10 +881,7 @@ def _voice_preparer(channel: str | None, resolution=None,
         return functools.partial(
             _wrap_voice_with_block, speaker_block="".join(block_parts),
         )
-    speaker = _consume_pending_identity(channel)
-    if speaker is None:
-        return _wrap_voice
-    return functools.partial(_wrap_voice, speaker=speaker)
+    return _wrap_voice
 
 
 class MessageIn(BaseModel):
@@ -2355,27 +2339,6 @@ async def lifespan(app: FastAPI):
         )
         _audio_scene_classifier = None
 
-    # Layer 4: face recognition service (server-side). Defensive — a
-    # missing face_recognition wheel must NOT block bridge boot. The
-    # endpoints check `_face_recognizer is None` and return 503 in
-    # that case. See bridge/face_recognizer.py for install notes.
-    global _face_recognizer
-    try:
-        from bridge.face_db import FaceDB
-        from bridge.face_recognizer import (
-            FaceRecognizerService, default_db_path,
-        )
-        _face_db = FaceDB(default_db_path())
-        _face_recognizer = FaceRecognizerService(_face_db)
-        log.info("face_recognizer ready: %d enrolled (capacity %d)",
-                 _face_db.count(), FaceDB.CAPACITY)
-    except Exception:
-        log.exception(
-            "FaceRecognizerService start failed — face endpoints "
-            "will return 503 until resolved",
-        )
-        _face_recognizer = None
-
     yield
     for t in perception_tasks:
         t.cancel()
@@ -2391,11 +2354,6 @@ async def lifespan(app: FastAPI):
             _audio_scene_classifier.stop()
         except Exception:
             log.exception("AudioSceneClassifier.stop() raised")
-    if _face_recognizer is not None:
-        try:
-            _face_recognizer.shutdown()
-        except Exception:
-            log.exception("FaceRecognizerService.shutdown() raised")
     await acp.shutdown()
 
 
@@ -2664,70 +2622,6 @@ async def audio_scene_feed(request: Request, device_id: str = "bridge") -> dict:
 
 _vision_cache: dict[str, dict] = {}
 _vision_events: dict[str, list[asyncio.Event]] = {}
-
-# ---------------------------------------------------------------------------
-# Layer 4 — face recognition state (server-side, see bridge/face_recognizer.py)
-# ---------------------------------------------------------------------------
-# Per-device identity state. Schema:
-#   {
-#     "current": str,                # last recognised name or "unknown"
-#     "last_seen_ts": float,          # perf_counter when current was set
-#     "transition_pending": bool,     # True when current changed; one-shot
-#                                      # consumed by the next voice turn
-#   }
-_identity_state: dict[str, dict] = {}
-
-# Per-channel "next voice turn should mention this speaker" flag. Single
-# device per channel today (Brett's deployment), so we key by channel
-# rather than device_id — voice turns arrive via /api/message which has
-# no device_id field. When multi-device support lands, plumb device_id
-# through MessageIn.metadata and switch this dict's keying.
-_voice_identity_pending: dict[str, str] = {}
-
-# Initialised in lifespan(); None means face recognition is unavailable
-# (module import failed or never wired). All endpoints below check this
-# and return a graceful 503-equivalent JSON instead of crashing.
-_face_recognizer = None  # type: ignore[var-annotated]
-
-# Last face action per device. Populated by enroll/recognize/forget endpoints.
-# TTL 30 s — poll GET /api/face/last-action/{device_id} to surface real outcome
-# to voice handlers that speak optimistic acks before the operation completes.
-_face_last_action: dict[str, dict] = {}
-
-
-def _consume_pending_identity(channel: str | None) -> str | None:
-    """Pop the pending speaker marker for a channel, if any. Called once
-    per voice turn from the request handler."""
-    if not channel:
-        return None
-    return _voice_identity_pending.pop(channel, None)
-
-
-def _mark_identity_transition(device_id: str, name: str) -> bool:
-    """Update `_identity_state` for a recognised name. Returns True iff
-    this represents a *transition* (different from the prior `current`).
-
-    Same name N times in a row → no transition, no marker.
-    """
-    state = _identity_state.setdefault(
-        device_id,
-        {"current": "unknown", "last_seen_ts": 0.0,
-         "transition_pending": False},
-    )
-    now = perf_counter()
-    state["last_seen_ts"] = now
-    if state["current"] == name:
-        return False
-    state["current"] = name
-    state["transition_pending"] = True
-    # Per-channel pending marker for the next voice turn. We map device →
-    # voice channel by the deployment convention (single channel "dotty"
-    # per device); future multi-device deployments will need a registry.
-    if name and name != "unknown":
-        for ch in VOICE_CHANNELS:
-            _voice_identity_pending[ch] = name
-    return True
-
 
 def _call_vision_api(
     b64_image: str, question: str, *,
@@ -3045,113 +2939,6 @@ async def vision_latest(device_id: str):
             pass
         if not waiters:
             _vision_events.pop(device_id, None)
-
-
-# ---------------------------------------------------------------------------
-# Layer 4 — face recognition endpoints
-# ---------------------------------------------------------------------------
-# All four endpoints check `_face_recognizer` and return a graceful 503
-# JSON if the service is unavailable (module import failed). The kid-mode
-# denylist gates camera-touching tools on the firmware side; these
-# endpoints are open since the firmware is the gatekeeper.
-
-def _face_unavailable_response() -> JSONResponse:
-    return JSONResponse(
-        status_code=503,
-        content={"ok": False, "error": "face_recognizer_unavailable"},
-    )
-
-
-@app.post("/api/face/enroll")
-async def face_enroll(
-    request: Request,
-    name: str = Form(...),
-    file: UploadFile = File(...),
-):
-    if _face_recognizer is None:
-        return _face_unavailable_response()
-    device_id = request.headers.get("device-id", "unknown")
-    jpeg_bytes = await file.read()
-    log.info("face_enroll device=%s name=%s bytes=%d",
-             device_id, name[:32], len(jpeg_bytes))
-    result = await _face_recognizer.enroll(name, jpeg_bytes)
-    _face_last_action[device_id] = {"action": "enroll", "ts": time.time(), "result": result}
-    return result
-
-
-@app.post("/api/face/recognize")
-async def face_recognize(
-    request: Request,
-    file: UploadFile = File(...),
-):
-    if _face_recognizer is None:
-        return _face_unavailable_response()
-    device_id = request.headers.get("device-id", "unknown")
-    jpeg_bytes = await file.read()
-    result = await _face_recognizer.recognize(jpeg_bytes)
-    _face_last_action[device_id] = {"action": "recognize", "ts": time.time(), "result": result}
-    name = result.get("name", "unknown")
-    log.info("face_recognize device=%s name=%s confidence=%.3f",
-             device_id, name, float(result.get("confidence", 0.0)))
-    # Identity-transition bookkeeping. Only emit a perception event on
-    # transitions (and only for known identities) so the proactive
-    # greeter doesn't double-fire.
-    transitioned = _mark_identity_transition(device_id, name)
-    if transitioned and name and name != "unknown":
-        _perception_broadcast({
-            "device_id": device_id,
-            "ts": time.time(),
-            "name": "face_recognized",
-            "data": {
-                "identity": name,
-                "confidence": float(result.get("confidence", 0.0)),
-            },
-        })
-    return result
-
-
-@app.post("/api/face/forget")
-async def face_forget(request: Request, payload: dict):
-    if _face_recognizer is None:
-        return _face_unavailable_response()
-    device_id = request.headers.get("device-id", "unknown")
-    name = (payload or {}).get("name", "")
-    if not isinstance(name, str) or not name.strip():
-        return JSONResponse(
-            status_code=400,
-            content={"ok": False, "error": "name_required"},
-        )
-    log.info("face_forget name=%s", name[:32])
-    result = await _face_recognizer.forget(name.strip())
-    _face_last_action[device_id] = {"action": "forget", "ts": time.time(), "result": result}
-    return result
-
-
-@app.get("/api/face/list")
-async def face_list():
-    if _face_recognizer is None:
-        return _face_unavailable_response()
-    return await _face_recognizer.list_names()
-
-
-
-
-@app.get("/api/face/last-action/{device_id}")
-async def face_last_action(device_id: str):
-    """Last face action result for a device — poll after MCP tool calls.
-
-    Voice handlers speak an optimistic ack immediately; this endpoint lets
-    them poll for the real outcome (e.g. 'no face detected', 'enrolled as
-    Brett'). Results expire after 30 s. Returns ``{"action": null}`` when
-    there is no recent action.
-    """
-    entry = _face_last_action.get(device_id)
-    if entry is None:
-        return {"ok": True, "action": None}
-    if time.time() - entry["ts"] > 30:
-        _face_last_action.pop(device_id, None)
-        return {"ok": True, "action": None}
-    return {"ok": True, **entry}
 
 
 @app.post("/api/message", response_model=MessageOut)

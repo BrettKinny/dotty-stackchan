@@ -27,8 +27,6 @@
 #                            day-bucket → list of time-bucket labels.
 #   calendar_prefix          the bracketed tag used in Google Calendar
 #                            ("[Sam]") so events get bucketed per person.
-#   face_enrollment_id       null until Layer 4 face-rec lands; then the
-#                            NVS slot id from the firmware enrollment.
 #   voice_print_id           null until speaker-ID lands; reserved.
 #
 # Privacy: this file lives on the RPi, never egresses. The bridge sends
