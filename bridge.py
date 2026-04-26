@@ -2499,7 +2499,7 @@ async def audio_scene_feed(request: Request, device_id: str = "bridge") -> dict:
 # ---------------------------------------------------------------------------
 
 _vision_cache: dict[str, dict] = {}
-_vision_events: dict[str, asyncio.Event] = {}
+_vision_events: dict[str, list[asyncio.Event]] = {}
 
 # ---------------------------------------------------------------------------
 # Layer 4 — face recognition state (server-side, see bridge/face_recognizer.py)
@@ -2630,9 +2630,14 @@ async def vision_explain(
             "jpeg_bytes": jpeg_bytes,
             "question": question,
         }
-        event = _vision_events.get(device_id)
-        if event:
-            event.set()
+        # Wake every waiter polling this device. Concurrent callers
+        # (room-view capture from textMessageHandlerRegistry + voice
+        # "what do you see" from receiveAudioHandle) both legitimately
+        # poll vision_latest for the same device_id; the previous
+        # single-event-per-device pattern lost the first waiter when
+        # the second one overwrote the dict entry.
+        for ev in _vision_events.get(device_id, ()):
+            ev.set()
 
         now = perf_counter()
         for k in [k for k, v in _vision_cache.items() if now - v["timestamp"] > VISION_CACHE_TTL_SEC]:
@@ -2663,8 +2668,8 @@ async def vision_explain(
 async def vision_latest(device_id: str):
     _vision_cache.pop(device_id, None)
     event = asyncio.Event()
-    _vision_events[device_id] = event
-
+    waiters = _vision_events.setdefault(device_id, [])
+    waiters.append(event)
     try:
         await asyncio.wait_for(event.wait(), timeout=15.0)
         entry = _vision_cache.get(device_id)
@@ -2674,7 +2679,12 @@ async def vision_latest(device_id: str):
     except asyncio.TimeoutError:
         return JSONResponse(status_code=404, content={"error": "no vision result in time"})
     finally:
-        _vision_events.pop(device_id, None)
+        try:
+            waiters.remove(event)
+        except ValueError:
+            pass
+        if not waiters:
+            _vision_events.pop(device_id, None)
 
 
 # ---------------------------------------------------------------------------
