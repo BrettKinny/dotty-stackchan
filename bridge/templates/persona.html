@@ -9,6 +9,13 @@
       <option value="{{ p }}" {% if p == current %}selected{% endif %}>{{ p }}</option>
       {% endfor %}
     </select>
+    <button type="button" class="btn btn-ghost btn-xs"
+            hx-get="/ui/persona/view"
+            hx-target="#persona-modal-content" hx-swap="innerHTML"
+            hx-on::after-request="document.getElementById('persona-modal').showModal()"
+            title="View the active persona file">
+      view
+    </button>
   </form>
   {% if switching %}
   <div class="alert alert-info py-2 text-xs mt-2">

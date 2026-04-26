@@ -958,6 +958,29 @@ def _current_persona() -> str:
     return "default"
 
 
+@router.get("/persona/view", response_class=HTMLResponse, include_in_schema=False)
+async def persona_view(request: Request, name: str = "") -> Any:
+    """F6: read-only view of a persona file. Restricted to entries in
+    _list_personas() so ?name=../etc/passwd is impossible."""
+    available = _list_personas()
+    name = (name or "").strip() or _current_persona()
+    ctx: dict[str, Any] = {"name": name}
+    if name not in available:
+        ctx["error"] = f"Unknown persona: {name}"
+        return templates.TemplateResponse(request, "persona_view.html", ctx)
+    path = PERSONAS_DIR / f"{name}.md"
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        ctx["error"] = f"Read failed: {exc}"
+        return templates.TemplateResponse(request, "persona_view.html", ctx)
+    # Cap at 50k chars — defensive; persona files are usually small.
+    ctx["content"] = content[:50_000]
+    if len(content) > 50_000:
+        ctx["truncated"] = True
+    return templates.TemplateResponse(request, "persona_view.html", ctx)
+
+
 @router.get("/persona", response_class=HTMLResponse, include_in_schema=False)
 async def persona_partial(request: Request) -> Any:
     return templates.TemplateResponse(
