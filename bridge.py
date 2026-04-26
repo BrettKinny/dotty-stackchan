@@ -2948,6 +2948,8 @@ if _configure_dashboard is not None:
                 r = requests.post(url, json=payload, timeout=3)
                 if r.status_code == 200:
                     return {"ok": True, **r.json()}
+                if r.status_code == 503 and "no device connected" in r.text:
+                    return {"ok": False, "error": "Dotty isn't connected right now — try again in a few seconds."}
                 return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
             except Exception as exc:
                 return {"ok": False, "error": str(exc)}
@@ -2969,6 +2971,8 @@ if _configure_dashboard is not None:
                 r = requests.post(url, json=payload, timeout=3)
                 if r.status_code == 200:
                     return {"ok": True, **r.json()}
+                if r.status_code == 503 and "no device connected" in r.text:
+                    return {"ok": False, "error": "Dotty isn't connected right now — try again in a few seconds."}
                 return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
             except Exception as exc:
                 return {"ok": False, "error": str(exc)}
