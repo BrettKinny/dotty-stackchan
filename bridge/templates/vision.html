@@ -10,11 +10,12 @@
     </div>
   </div>
   {% else %}
-  <div class="text-center py-3 px-2">
+  <div class="flex flex-col items-center text-center py-3 px-2 gap-2">
+    <img src="/ui/hero.svg" alt="" class="w-20 h-20 opacity-50" aria-hidden="true">
     <div class="text-xs text-base-content/50">No recent photo</div>
     <form hx-post="/ui/actions/say" hx-target="#vision-action-result" hx-swap="innerHTML"
           hx-disabled-elt="find button"
-          class="mt-2 inline-block">
+          class="mt-1 inline-block">
       <input type="hidden" name="text" value="take a photo">
       <button type="submit" class="btn btn-primary btn-sm">📸 Take a photo</button>
     </form>
