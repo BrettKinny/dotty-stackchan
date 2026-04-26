@@ -1000,11 +1000,14 @@ async def icon() -> Response:
 
 @router.get("/manifest.json", include_in_schema=False)
 async def manifest() -> JSONResponse:
+    # scope must match (or be a prefix of) start_url; the previous "/ui/"
+    # excluded "/ui" itself, which is what start_url resolves to. Using
+    # "/ui" (no trailing slash) covers both /ui and /ui/anything as in-scope.
     return JSONResponse({
         "name": "Dotty Dashboard",
         "short_name": "Dotty",
         "start_url": "/ui",
-        "scope": "/ui/",
+        "scope": "/ui",
         "display": "standalone",
         "orientation": "portrait",
         "background_color": "#1d232a",
