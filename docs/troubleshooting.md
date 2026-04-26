@@ -116,16 +116,6 @@ Symptom-first lookup table. The [README.md Troubleshooting section](../README.md
 
 ---
 
-## 5+ taps needed to enter voice mode
-
-**Symptom:** After booting, the robot takes many taps on the display before it enters listening mode. Sometimes 5 or more.
-
-**Cause:** Pre-existing firmware startup issue. The StackChan firmware's initialization sequence doesn't reliably register touch events until all subsystems are ready, but the display and touch controller come up before the audio subsystem and WiFi.
-
-**Workaround:** Wait a few seconds after the face appears before tapping. If it still doesn't respond, try a single long press rather than repeated taps.
-
----
-
 ## Bridge unreachable / "(no response)" in the robot's voice
 
 **Symptom:** The robot says something like "no response" or goes silent after you speak. xiaozhi-server logs show a failed HTTP POST to the bridge.

@@ -17,7 +17,6 @@ Post-v0.1 work — code shipped to `main` but not yet deployed live or tagged. ~
 - **Hybrid smart-mode LED bridge half** (`receiveAudioHandle.py`) — `_send_led_multi` helper + `conn.smart_mode_active` flag. Holds index 0 purple while the rest of the ring shows listen/think/talk. Re-asserts on every color change. try/except guarded for old-firmware compatibility.
 - **Face greeter env-tunable** — `FACE_GREET_TEXT` (set "" to disable verbal greet) + `FACE_GREET_MIN_INTERVAL_SEC` (default 30s).
 - **Purr-on-head-pet (server)** (`bridge.py`, `bridge/assets/`) — `_perception_purr_player` consumes `head_pet_started`, pushes purr audio via inject-text. Per-device cooldown. Bypasses kid-mode sandwich (fixed asset). Asset path is a drop-in (not committed; see `bridge/assets/README.md`).
-- **Clap-to-wake** (`bridge.py`, `docs/voice-mode-entry.md`) — `_perception_clap_waker` for dark rooms. `CLAP_WAKE_ENABLED=false` default. Doc compares all 6 voice-mode entry paths (wake word, face, head-pet hold, clap, touchscreen, /admin/inject-text).
 - **Server-side Layer 4 face recognition** (`bridge/face_db.py`, `bridge/face_recognizer.py`) — Option B fallback to the on-device path.
 - **Household roster** (`bridge/household.py`, `household.example.yaml`) — family roster with per-person config.
 - **Speaker voiceprint** (`bridge/speaker.py`) — voiceprint speaker identification module.

@@ -53,7 +53,6 @@ Actively being worked on or partially complete. **Big push 2026-04-25 evening:**
 - **Hybrid smart-mode LED** -- both halves shipped (firmware `set_led_multi` MCP tool + bridge `_send_led_multi` helper). Holds purple pixel during smart-mode turns. Re-asserts on color changes since firmware bypasses animation.
 - **Head-pet hold-to-listen wake** -- firmware scaffold (`WakeWordInvoke("head_pet_hold")` after 2s touch). Works in the dark. Also emits `head_pet_started`/`_ended` perception events for purr consumer.
 - **Wake word "Hey Dotty"** -- interim shipped: firmware default switched Chinese → English "Hi, ESP". Custom "Hey Dotty" microWakeWord roadmap documented (`docs/wake-word.md`); needs sample collection + Colab training (~2 weeks calendar).
-- **Clap-to-wake** -- `_perception_clap_waker` for dark rooms / no-face-match scenarios. `CLAP_WAKE_ENABLED=false` default. `docs/voice-mode-entry.md` compares all 6 entry paths.
 - **Purr-on-head-pet** -- server consumer shipped (`_perception_purr_player`); fires on `head_pet_started`. Asset path `bridge/assets/purr.opus` is a drop-in (asset itself not committed).
 - **Servo speed caps** -- already capped at 100-1000 in firmware; spring-physics damping handles smoothness. No further work planned.
 - **Abort race condition** -- fixed at v0.1 via kill-and-respawn ACP child on barge-in.
