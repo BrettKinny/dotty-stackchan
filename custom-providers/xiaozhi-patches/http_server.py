@@ -159,6 +159,24 @@ class SimpleHttpServer:
             "yaw": yaw, "pitch": pitch, "speed": speed,
         })
 
+    async def _dotty_list_songs(self, request: "web.Request") -> "web.Response":
+        """GET /xiaozhi/admin/songs — list audio files mounted at
+        /opt/xiaozhi-esp32-server/config/assets/songs/.
+
+        Files are sorted by name; only canonical audio extensions are
+        returned (opus, ogg, wav, mp3) so junk files in the mount don't
+        leak through. Used by the dashboard to populate its song picker.
+        """
+        import os as _os
+        base = "/opt/xiaozhi-esp32-server/config/assets/songs"
+        try:
+            names = sorted(_os.listdir(base))
+        except OSError as exc:
+            return web.json_response({"error": str(exc), "base": base}, status=500)
+        ok_ext = {".opus", ".ogg", ".wav", ".mp3"}
+        files = [n for n in names if _os.path.splitext(n)[1].lower() in ok_ext]
+        return web.json_response({"base": base, "files": files})
+
     async def _dotty_play_asset(self, request: "web.Request") -> "web.Response":
         """POST /xiaozhi/admin/play-asset
         Body: {"device_id": "<optional>", "asset": "/abs/path/to/file"}
@@ -343,6 +361,10 @@ class SimpleHttpServer:
                         web.post(
                             "/xiaozhi/admin/play-asset",
                             self._dotty_play_asset,
+                        ),
+                        web.get(
+                            "/xiaozhi/admin/songs",
+                            self._dotty_list_songs,
                         ),
                     ]
                 )

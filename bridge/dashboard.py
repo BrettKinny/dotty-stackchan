@@ -18,6 +18,7 @@ import os
 import re
 import secrets
 import time
+import requests
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -365,10 +366,13 @@ async def cards(request: Request) -> Any:
 
 
 _ALLOWED_EMOJIS = ("😊", "😆", "😢", "😮", "🤔", "😠", "😐", "😍", "😴")
-_DANCES = (
-    {"key": "macarena", "label": "Macarena", "phrase": "do the macarena", "icon": "💃"},
-    {"key": "sing", "label": "Sing a song", "phrase": "sing a song", "icon": "🎤"},
-)
+
+# Songs live on the xiaozhi-server filesystem at this absolute container path
+# (host: /mnt/user/appdata/xiaozhi-server/songs/, mounted :ro). The bridge
+# never touches the files itself — it asks xiaozhi to list them via the admin
+# endpoint, and asks xiaozhi to play one via /xiaozhi/admin/play-asset.
+_SONGS_BASE_PATH = "/opt/xiaozhi-esp32-server/config/assets/songs"
+_SONG_OK_EXT = {".opus", ".ogg", ".wav", ".mp3"}
 
 
 async def _xiaozhi_device_count() -> int | None:
@@ -520,99 +524,76 @@ async def mood(request: Request, emoji: str = Form(...)) -> Any:
 
 
 @router.post("/actions/dance", response_class=HTMLResponse, include_in_schema=False)
-async def dance(request: Request, key: str = Form(...)) -> Any:
-    pick = next((d for d in _DANCES if d["key"] == key), None)
-    if pick is None:
-        return templates.TemplateResponse(
-            request, "say_result.html",
-            {"ok": False, "error": "Unknown dance/song."},
-        )
-    return await _inject_or_error(request, pick["phrase"], label=pick["phrase"])
-
-
-_PRESETS = {
-    "bedtime": {
-        "label": "Bedtime",
-        "icon": "🌙",
-        "volume": 15,
-        "kid_mode": True,
-        "summary": "volume 15 + kid mode on",
-    },
-    "quiet": {
-        "label": "Quiet",
-        "icon": "🤫",
-        "volume": 10,
-        "summary": "volume 10",
-    },
-    "loud": {
-        "label": "Loud",
-        "icon": "📢",
-        "volume": 70,
-        "summary": "volume 70",
-    },
-    "adult": {
-        "label": "Adult mode",
-        "icon": "🧠",
-        "volume": 50,
-        "kid_mode": False,
-        "summary": "volume 50 + kid mode off",
-    },
-}
-
-
-@router.post("/actions/preset", response_class=HTMLResponse,
-             include_in_schema=False)
-async def preset(request: Request, name: str = Form(...)) -> Any:
-    pick = _PRESETS.get(name)
-    if pick is None:
-        return templates.TemplateResponse(
-            request, "say_result.html",
-            {"ok": False, "error": "Unknown preset."},
-        )
-    inject = _state.get("inject_to_device")
-    if inject is None:
-        return templates.TemplateResponse(
-            request, "say_result.html",
-            {"ok": False, "error": "Inject path not configured."},
-        )
-    actions_done = []
-    # Volume change runs through the device pipeline (audible ack).
-    if "volume" in pick:
-        v = pick["volume"]
-        try:
-            await inject(text=(
-                f"Set the speaker volume to {v} percent using your "
-                f"audio_speaker.set_volume tool, then reply with just '🔊 {v}'."
-            ))
-            actions_done.append(f"volume {v}")
-        except Exception:
-            log.exception("preset inject volume failed")
-    # Kid-mode change writes the state file + restart (ignore here if same).
-    if "kid_mode" in pick:
-        getter = _state.get("kid_mode_getter")
-        setter = _state.get("kid_mode_setter")
-        if getter and setter and bool(getter()) != bool(pick["kid_mode"]):
-            try:
-                setter(bool(pick["kid_mode"]))
-                actions_done.append(
-                    f"kid mode {'on' if pick['kid_mode'] else 'off'}"
-                )
-                # Spawn restart so kid_mode change takes effect.
-                import subprocess
-                subprocess.Popen(
-                    ["sh", "-c",
-                     "sleep 2 && systemctl restart zeroclaw-bridge"],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    start_new_session=True,
-                )
-            except Exception:
-                log.exception("preset kid-mode toggle failed")
-    return templates.TemplateResponse(
-        request, "say_result.html",
-        {"ok": True, "sent": pick["label"],
-         "response": "Applied: " + ", ".join(actions_done) if actions_done
-                     else "(nothing changed — already in this state)"},
+async def dance(request: Request) -> Any:
+    """Single 'Dance & sing' button — LLM picks the bit. Replaces the old
+    macarena/sing key-driven endpoint (now collapsed into one phrase)."""
+    return await _inject_or_error(
+        request,
+        "do a dance and sing a song",
+        label="dance & sing",
     )
+
+
+async def _xiaozhi_list_songs() -> tuple[list[str], str | None]:
+    """Fetch the song-file list from xiaozhi's admin endpoint. Returns
+    (files, error). Error is None on success."""
+    if not UNRAID_HOST:
+        return [], "UNRAID_HOST not set"
+    url = f"http://{UNRAID_HOST}:{UNRAID_OTA_PORT}/xiaozhi/admin/songs"
+    import urllib.request
+    def _fetch() -> tuple[list[str], str | None]:
+        try:
+            with urllib.request.urlopen(url, timeout=2) as r:
+                data = json.loads(r.read())
+                files = data.get("files") or []
+                return [f for f in files if isinstance(f, str)], None
+        except Exception as exc:
+            return [], str(exc)
+    return await asyncio.to_thread(_fetch)
+
+
+@router.get("/songs", response_class=HTMLResponse, include_in_schema=False)
+async def songs_list(request: Request) -> Any:
+    """HTML fragment listing the songs available for direct playback."""
+    files, err = await _xiaozhi_list_songs()
+    return templates.TemplateResponse(
+        request, "songs.html",
+        {"songs": files, "error": err, "songs_dir": _SONGS_BASE_PATH},
+    )
+
+
+@router.post("/actions/play-song", response_class=HTMLResponse, include_in_schema=False)
+async def play_song(request: Request, filename: str = Form(...)) -> Any:
+    """Push a single song file to the device via xiaozhi's play-asset.
+    Filename must be a basename (no slashes) with an allowed audio extension —
+    the actual existence check happens server-side in play-asset."""
+    import os.path as _osp
+    base = _osp.basename(filename)
+    if base != filename or _osp.splitext(base)[1].lower() not in _SONG_OK_EXT:
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": "Invalid song filename."},
+        )
+    if not UNRAID_HOST:
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": "UNRAID_HOST not set"},
+        )
+    asset_path = f"{_SONGS_BASE_PATH}/{base}"
+    url = f"http://{UNRAID_HOST}:{UNRAID_OTA_PORT}/xiaozhi/admin/play-asset"
+    def _post() -> dict:
+        try:
+            r = requests.post(url, json={"asset": asset_path}, timeout=3)
+            if r.status_code == 200:
+                return {"ok": True, "sent": base, "response": f"playing {base}"}
+            if r.status_code == 503 and "no device connected" in r.text:
+                return {"ok": False, "error":
+                        "Dotty isn't connected right now — try again in a few seconds."}
+            return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+    result = await asyncio.to_thread(_post)
+    return templates.TemplateResponse(request, "say_result.html", result)
 
 
 _INJECT_WAIT_SEC = 8.0  # Q4: how long to wait for Dotty's reply before

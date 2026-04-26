@@ -1,0 +1,20 @@
+{% if error %}
+<div class="text-xs text-error/80 px-2 py-2">{{ error }}</div>
+{% elif songs %}
+<ul class="menu menu-sm bg-base-200 rounded-box p-1 max-h-64 overflow-y-auto">
+  {% for s in songs %}
+  <li>
+    <form hx-post="/ui/actions/play-song" hx-target="#dance-result" hx-swap="afterbegin"
+          hx-disabled-elt="find button" class="p-0">
+      <input type="hidden" name="filename" value="{{ s }}">
+      <button type="submit" class="w-full text-left font-mono text-xs">🎵 {{ s }}</button>
+    </form>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="text-xs text-base-content/50 px-2 py-2">
+  No songs yet. Drop <code>.opus</code> / <code>.mp3</code> / <code>.wav</code> files into
+  <code>/mnt/user/appdata/xiaozhi-server/songs/</code> on Unraid.
+</div>
+{% endif %}

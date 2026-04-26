@@ -103,26 +103,6 @@
   <div data-tab-panel="dotty" id="panel-dotty" role="tabpanel" aria-labelledby="tab-dotty" tabindex="0" class="space-y-5">
 
   <section>
-    <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Quick presets</h2>
-    <div class="card bg-base-100 shadow-sm">
-      <div class="card-body p-3">
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {% for key, label, icon in [("bedtime","Bedtime","🌙"),("quiet","Quiet","🤫"),("loud","Loud","📢"),("adult","Adult","🧠")] %}
-          <form hx-post="/ui/actions/preset" hx-target="#preset-result" hx-swap="afterbegin"
-                hx-disabled-elt="find button">
-            <input type="hidden" name="name" value="{{ key }}">
-            <button class="btn btn-outline btn-sm w-full min-h-12 gap-1">
-              <span>{{ icon }}</span><span>{{ label }}</span>
-            </button>
-          </form>
-          {% endfor %}
-        </div>
-        <div id="preset-result" class="mt-2 empty:hidden"></div>
-      </div>
-    </div>
-  </section>
-
-  <section>
     <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Mode</h2>
     <div id="kid-card-body" class="card bg-base-100 shadow-sm overflow-hidden"
          hx-get="/ui/kid-mode" hx-trigger="load" hx-swap="outerHTML"
@@ -187,17 +167,15 @@
       <div class="card bg-base-100 shadow-sm">
         <div class="card-body p-3">
           <div class="text-xs text-base-content/60 mb-2">Dance &amp; sing</div>
-          <div class="grid grid-cols-2 gap-2">
-            <form hx-post="/ui/actions/dance" hx-target="#dance-result" hx-swap="afterbegin"
-                  hx-disabled-elt="find button">
-              <input type="hidden" name="key" value="macarena">
-              <button class="btn btn-outline w-full min-h-12">💃 Macarena</button>
-            </form>
-            <form hx-post="/ui/actions/dance" hx-target="#dance-result" hx-swap="afterbegin"
-                  hx-disabled-elt="find button">
-              <input type="hidden" name="key" value="sing">
-              <button class="btn btn-outline w-full min-h-12">🎤 Sing</button>
-            </form>
+          <form hx-post="/ui/actions/dance" hx-target="#dance-result" hx-swap="afterbegin"
+                hx-disabled-elt="find button">
+            <button class="btn btn-outline w-full min-h-12">💃🎤 Dance &amp; sing</button>
+          </form>
+          <div class="text-xs text-base-content/50 mt-3 mb-1 px-1">Or play a specific track</div>
+          <div id="songs-list" hx-get="/ui/songs"
+               hx-trigger="load, every 30s, dotty-refresh from:window"
+               hx-swap="innerHTML">
+            <div class="text-xs text-base-content/40 text-center py-2">Loading…</div>
           </div>
           <div id="dance-result" class="mt-2 empty:hidden"></div>
         </div>
