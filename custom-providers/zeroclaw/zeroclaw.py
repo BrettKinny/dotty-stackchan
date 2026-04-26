@@ -1,7 +1,6 @@
 import json
 import os
 import pathlib
-import re
 import time
 import uuid
 
@@ -11,12 +10,10 @@ _DBG = os.environ.get("ZEROCLAW_STREAM_DEBUG") == "1"
 
 from config.logger import setup_logging
 from core.providers.llm.base import LLMProviderBase
+from core.utils.textUtils import FALLBACK_EMOJI, _SENTENCE_BOUNDARY
 
 TAG = __name__
 logger = setup_logging()
-
-FALLBACK_EMOJI = "😐"  # canonical source: textUtils.py
-_SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?。！？])\s+")
 
 # personas/ is mounted at parents[4]/personas relative to this file
 # inside the xiaozhi-server package tree (/opt/xiaozhi-esp32-server/).
