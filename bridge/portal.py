@@ -70,10 +70,23 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
+_BRIDGE_VERSION_FILE = Path(__file__).parent.parent / ".bridge-version"
+
+
 def _read_bridge_version() -> str:
     """Short git SHA of the deployed bridge. Cached at module load — picks
     up changes on the next systemd restart, which `Update from GitHub` does
-    automatically."""
+    automatically. Reads `.bridge-version` next to bridge.py first (written
+    by `Update from GitHub` since the install dir isn't a git checkout);
+    falls back to `git rev-parse` for dev installs that *are* git
+    checkouts."""
+    try:
+        if _BRIDGE_VERSION_FILE.exists():
+            v = _BRIDGE_VERSION_FILE.read_text().strip()
+            if v:
+                return v[:12]
+    except OSError:
+        pass
     try:
         import subprocess
         out = subprocess.check_output(
@@ -804,6 +817,17 @@ def _pull_and_install_bridge() -> tuple[bool, str]:
         src_bridge_dir = work / "bridge"
         if not src_bridge_py.exists() or not src_bridge_dir.exists():
             return False, "checkout missing bridge.py or bridge/ dir"
+        # Capture the SHA so the dashboard footer reflects what loaded.
+        sha = ""
+        try:
+            sha_proc = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=str(work), capture_output=True, text=True, timeout=5,
+            )
+            if sha_proc.returncode == 0:
+                sha = sha_proc.stdout.strip()
+        except Exception:
+            pass
         # Atomic-ish replace: rename current then copy new in.
         dst_bridge_py = BRIDGE_INSTALL_DIR / "bridge.py"
         dst_bridge_dir = BRIDGE_INSTALL_DIR / "bridge"
@@ -816,7 +840,12 @@ def _pull_and_install_bridge() -> tuple[bool, str]:
         if dst_bridge_py.exists():
             dst_bridge_py.rename(BRIDGE_INSTALL_DIR / "bridge.py.prev")
         shutil.copy2(str(src_bridge_py), str(dst_bridge_py))
-        return True, "Updated. Restarting…"
+        if sha:
+            try:
+                (BRIDGE_INSTALL_DIR / ".bridge-version").write_text(sha)
+            except OSError:
+                pass
+        return True, f"Updated to {sha or 'main'}. Restarting…"
     except Exception as exc:
         return False, f"update error: {exc}"
     finally:
