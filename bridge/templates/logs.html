@@ -23,8 +23,9 @@
       <details class="mt-1" {% if loop.first %}open{% endif %}>
         <summary class="text-xs text-base-content/60 cursor-pointer select-none flex items-center gap-2">
           <span>response &middot; {{ entry.latency_ms }}ms</span>
-          <button class="btn btn-ghost btn-xs ml-auto"
+          <button class="btn btn-ghost btn-sm ml-auto"
                   type="button"
+                  aria-label="Copy response text"
                   onclick="event.preventDefault();event.stopPropagation();dottyCopy(this,this.parentElement.nextElementSibling.innerText);">
             copy
           </button>

@@ -10,8 +10,15 @@
     </div>
   </div>
   {% else %}
-  <div class="text-xs text-base-content/50 text-center py-3 px-2">
-    No recent photo &middot; say <em>"take a photo"</em> to capture
+  <div class="text-center py-3 px-2">
+    <div class="text-xs text-base-content/50">No recent photo</div>
+    <form hx-post="/ui/actions/say" hx-target="#vision-action-result" hx-swap="innerHTML"
+          hx-disabled-elt="find button"
+          class="mt-2 inline-block">
+      <input type="hidden" name="text" value="take a photo">
+      <button type="submit" class="btn btn-primary btn-sm">📸 Take a photo</button>
+    </form>
+    <div id="vision-action-result" class="mt-2 empty:hidden text-left"></div>
   </div>
   {% endif %}
 </div>

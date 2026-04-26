@@ -17,7 +17,7 @@
       <input type="checkbox"
              class="toggle toggle-success toggle-lg"
              {% if enabled %}checked{% endif %}
-             onchange="this.form.querySelector('[name=enabled]').value = this.checked ? 'true' : 'false'; this.form.requestSubmit();"
+             onchange="if(confirm('Switch to {{ 'Adult' if enabled else 'Kid' }} Mode?')){this.form.querySelector('[name=enabled]').value=this.checked?'true':'false';this.form.requestSubmit();}else{this.checked=!this.checked;}"
              {% if not available %}disabled{% endif %}>
     </label>
   </form>
