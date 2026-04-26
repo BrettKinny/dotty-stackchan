@@ -4,6 +4,7 @@ import functools
 import itertools
 import json
 import logging
+import math
 import os
 import re
 import requests
@@ -11,7 +12,7 @@ import sys
 import time
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Awaitable, Callable, Optional, TypedDict
@@ -41,6 +42,7 @@ from textUtils import (
 try:
     from bridge.metrics import (
         dotty_active_acp_sessions,
+        dotty_blind_mode_active,
         dotty_calendar_fetch_failures_total,
         dotty_content_filter_hits_total,
         dotty_kid_mode_active,
@@ -127,6 +129,22 @@ if _METRICS_AVAILABLE:
 
 LOCAL_TZ = ZoneInfo(os.environ.get("TZ", "Australia/Brisbane"))
 WEATHER_LOCATION = os.environ.get("WEATHER_LOCATION", "Brisbane")
+
+# Blind mode — the OV-series camera produces unusable frames in low light.
+# Detection is time-based (civil dusk → civil dawn at the configured
+# location); v2 will OR a camera-luma signal in. Defaults match LOCAL_TZ
+# (Brisbane). Set DOTTY_BLIND_MODE=false to disable the gating entirely.
+DOTTY_BLIND_MODE = os.environ.get("DOTTY_BLIND_MODE", "true").lower() in (
+    "1", "true", "yes",
+)
+DOTTY_BLIND_LAT = float(os.environ.get("DOTTY_BLIND_LAT", "-27.47"))
+DOTTY_BLIND_LON = float(os.environ.get("DOTTY_BLIND_LON", "153.03"))
+# Kid-toned reply substituted for the VLM description when /api/vision/explain
+# is hit during blind mode. Sent up the same speak path as a real description.
+DOTTY_BLIND_PHOTO_REPLY = os.environ.get(
+    "DOTTY_BLIND_PHOTO_REPLY",
+    "It's too dark to see right now. Can you turn a light on?",
+)
 WEATHER_TTL_SEC = float(os.environ.get("WEATHER_TTL_SEC", "1800"))
 CALENDAR_TTL_SEC = float(os.environ.get("CALENDAR_TTL_SEC", "7200"))
 CALENDAR_IDS = [c.strip() for c in os.environ.get("CALENDAR_ID", "").split(",") if c.strip()]
@@ -631,6 +649,97 @@ async def _calendar_poll_loop() -> None:
             await asyncio.sleep(CALENDAR_POLL_SEC)
 
 
+def _civil_twilight_bounds(when: datetime) -> tuple[datetime, datetime]:
+    """Return (civil_dawn, civil_dusk) for `when`'s local date in `when`'s tz.
+
+    NOAA solar-position polynomial; civil twilight = sun 6° below horizon.
+    Accurate to ~1 minute, plenty for "is it dark right now?". The
+    reference UTC date is anchored on `when`'s local noon so dawn and
+    dusk both fall within ±12h of it regardless of timezone offset.
+
+    Polar-day/night edge cases: when the sun never reaches 6° below the
+    horizon at this latitude/season, returns a degenerate window — same
+    midnight for both bounds (always dark) or a full day (never dark).
+    """
+    local_noon = when.replace(hour=12, minute=0, second=0, microsecond=0)
+    utc_noon = local_noon.astimezone(ZoneInfo("UTC"))
+    n = utc_noon.timetuple().tm_yday
+    gamma = 2 * math.pi / 365 * (n - 1 + (utc_noon.hour - 12) / 24)
+    eq_time = 229.18 * (
+        0.000075
+        + 0.001868 * math.cos(gamma)
+        - 0.032077 * math.sin(gamma)
+        - 0.014615 * math.cos(2 * gamma)
+        - 0.040849 * math.sin(2 * gamma)
+    )
+    decl = (
+        0.006918
+        - 0.399912 * math.cos(gamma)
+        + 0.070257 * math.sin(gamma)
+        - 0.006758 * math.cos(2 * gamma)
+        + 0.000907 * math.sin(2 * gamma)
+        - 0.002697 * math.cos(3 * gamma)
+        + 0.00148 * math.sin(3 * gamma)
+    )
+    lat_rad = math.radians(DOTTY_BLIND_LAT)
+    zenith_civil = math.radians(96.0)  # 90° + 6°
+    cos_ha = (
+        math.cos(zenith_civil) - math.sin(lat_rad) * math.sin(decl)
+    ) / (math.cos(lat_rad) * math.cos(decl))
+    base_utc = datetime(
+        utc_noon.year, utc_noon.month, utc_noon.day, tzinfo=ZoneInfo("UTC"),
+    )
+    if cos_ha > 1.0:
+        # Sun never reaches 6° above horizon — polar night, always dark.
+        midnight_local = when.replace(hour=0, minute=0, second=0, microsecond=0)
+        return midnight_local, midnight_local
+    if cos_ha < -1.0:
+        # Sun never sinks 6° below horizon — polar day, never dark.
+        midnight_local = when.replace(hour=0, minute=0, second=0, microsecond=0)
+        return midnight_local, midnight_local + timedelta(days=1)
+    ha = math.degrees(math.acos(cos_ha))
+    solar_noon_min = 720 - 4 * DOTTY_BLIND_LON - eq_time  # UTC min from midnight
+    dawn = (base_utc + timedelta(minutes=solar_noon_min - 4 * ha)).astimezone(
+        when.tzinfo,
+    )
+    dusk = (base_utc + timedelta(minutes=solar_noon_min + 4 * ha)).astimezone(
+        when.tzinfo,
+    )
+    return dawn, dusk
+
+
+def _is_blind(when: datetime | None = None) -> bool:
+    """True if it's currently civil-dark at the configured location.
+
+    Single source of truth for blind-mode gating: face-greeter, the
+    /api/vision/explain short-circuit, and `_build_context()` all consult
+    this. Time-based v1; v2 will OR a camera-luma signal from a firmware
+    perception event. DOTTY_BLIND_MODE=false disables entirely so this
+    always returns False — operator killswitch.
+
+    Side effect: pushes the current state into the
+    `dotty_blind_mode_active` Prometheus gauge so quiet periods (no
+    voice traffic, no perception events) still produce a fresh sample
+    when something does happen to call it.
+    """
+    if not DOTTY_BLIND_MODE:
+        return False
+    if when is None:
+        when = datetime.now(LOCAL_TZ)
+    try:
+        dawn, dusk = _civil_twilight_bounds(when)
+    except Exception:
+        # Defensive — astronomical math should never raise but if it
+        # does, default to "not blind" so vision doesn't silently break
+        # at noon.
+        log.exception("blind: civil_twilight_bounds raised; defaulting to not-blind")
+        return False
+    blind = when < dawn or when >= dusk
+    if _METRICS_AVAILABLE:
+        _safe_metric(dotty_blind_mode_active.set, 1 if blind else 0)
+    return blind
+
+
 def _build_context() -> str:
     parts = []
     now = datetime.now(LOCAL_TZ)
@@ -643,6 +752,11 @@ def _build_context() -> str:
         cleaned = summarize_for_prompt(events)
         if cleaned:
             parts.append("Today: " + "; ".join(cleaned))
+    if _is_blind(now):
+        # Per-turn dynamic context — appears in the [Context: ...] block
+        # which is NOT part of the cached system suffix, so this won't
+        # invalidate per-session prompt caching on the LLM side.
+        parts.append("It's nighttime and Dotty can't see well right now")
     return f"[Context: {' | '.join(parts)}]\n"
 
 
@@ -1711,6 +1825,23 @@ async def _perception_sound_turner() -> None:
         _perception_unsubscribe(q)
 
 
+async def _blind_mode_gauge_refresher() -> None:
+    """Push the current blind state into `dotty_blind_mode_active` every
+    60 s so quiet periods (no voice traffic, no perception events) still
+    produce fresh samples for Grafana. Cheap — `_is_blind` is pure math."""
+    log.info("blind-mode gauge refresher started (60s interval)")
+    try:
+        while True:
+            try:
+                _is_blind()  # side effect: writes the gauge
+            except Exception:
+                log.debug("blind-mode gauge refresh raised", exc_info=True)
+            await asyncio.sleep(60)
+    except asyncio.CancelledError:
+        log.info("blind-mode gauge refresher cancelled")
+        raise
+
+
 async def _perception_face_greeter() -> None:
     """Phase 1.5 consumer: on face_detected events, fire a brief
     audible greeting through the existing inject-text path so the
@@ -1735,6 +1866,15 @@ async def _perception_face_greeter() -> None:
                 continue
             device_id = event.get("device_id", "")
             if not device_id or device_id == "unknown":
+                continue
+            # Blind-mode gate. After civil dusk the camera produces noise
+            # frames that the face detector still trips on; greeting an
+            # empty room at 3 am is the highest-value thing to suppress.
+            if _is_blind():
+                log.debug(
+                    "face_detected → suppressed (blind mode): device=%s",
+                    device_id,
+                )
                 continue
             now = event.get("ts", 0.0)
             state = _perception_state.setdefault(device_id, {})
@@ -2003,6 +2143,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_perception_sound_turner()),
         asyncio.create_task(_perception_face_lost_aborter()),
         asyncio.create_task(_perception_purr_player()),
+        asyncio.create_task(_blind_mode_gauge_refresher()),
     ]
     # Layer 5: background calendar refresher (no-op when CALENDAR_IDS empty).
     calendar_task = asyncio.create_task(_calendar_poll_loop())
@@ -2608,6 +2749,28 @@ async def vision_explain(
             device_id, question[:80], len(jpeg_bytes),
         )
         b64_image = base64.b64encode(jpeg_bytes).decode("ascii")
+
+        # Blind-mode short-circuit. After civil dusk the camera ships
+        # near-black frames the VLM hallucinates over ("a bright light in
+        # a dark room"); return a kid-toned "too dark" reply up the same
+        # speak path instead so the answer is useful. Cache + waiter
+        # events still fire so /api/vision/latest pollers don't hang.
+        if _is_blind():
+            description = DOTTY_BLIND_PHOTO_REPLY
+            log.info(
+                "vision_explain device=%s → blind-mode short-circuit",
+                device_id,
+            )
+            _vision_cache[device_id] = {
+                "description": description,
+                "timestamp": perf_counter(),
+                "jpeg_bytes": jpeg_bytes,
+                "question": question,
+                "room_match_person_id": None,
+            }
+            for ev in _vision_events.get(device_id, ()):
+                ev.set()
+            return {"description": description}
 
         # Room-view roster identification opt-in. The xiaozhi side
         # sends the sentinel in the `question` field when it wants the
