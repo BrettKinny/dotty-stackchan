@@ -24,8 +24,8 @@ DOTTY_KID_MODE=false
 ```
 
 When disabled, Dotty still enforces English-only replies, emoji prefix, and
-the 3-sentence TTS length limit (rules 1-3). Only the child-specific rules
-(4-9) are removed.
+the TTS length rule (default 1-2 short sentences, up to 6 for open-ended
+asks). Only the child-specific rules (4-9) are removed.
 
 ## Guardrail details
 
@@ -135,7 +135,10 @@ HARD CONSTRAINTS for THIS reply (overrides everything else):
 2. First character of your reply MUST be exactly one of these emojis:
    😊 😆 😢 😮 🤔 😠 😐 😍 😴
 
-3. Length: 1-3 short sentences, TTS-friendly.
+3. Length: default 1-2 short TTS-friendly sentences. For open-ended asks
+   (a story, an explanation, a 'why' or 'how', or a request for several
+   things) match the natural length of what was asked, up to 6 sentences.
+   Always plain prose. No Markdown, no headers, no bullet/numbered lists.
 
 4. Audience: You are talking to a YOUNG CHILD (age 4-8). Every reply must be
    safe and age-appropriate.

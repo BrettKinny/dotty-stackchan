@@ -38,7 +38,7 @@ Restart the bridge: `systemctl restart zeroclaw-bridge`
 |---|---|
 | 1 | English-only replies |
 | 2 | Emoji prefix (one of the 9 allowed emojis) |
-| 3 | 1-3 short sentences, TTS-friendly |
+| 3 | Default 1-2 short sentences, up to 6 for open-ended asks; TTS-friendly |
 
 The content filter (`_content_filter`) and emoji fallback
 (`_ensure_emoji_prefix`) remain active in both modes.

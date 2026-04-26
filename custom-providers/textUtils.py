@@ -32,7 +32,10 @@ _BASE_SUFFIX = (
     "or you'd naturally pick Chinese — your reply is English. No Chinese, no Japanese, no Korean.\n"
     "2. Your reply contains EXACTLY ONE emoji from this set as the first character — "
     "and NO OTHER EMOJIS anywhere in the reply: 😊 😆 😢 😮 🤔 😠 😐 😍 😴\n"
-    "3. Length: 1-3 short sentences, TTS-friendly. No Markdown, no headers, no lists.\n"
+    "3. Length: default 1-2 short TTS-friendly sentences. For open-ended asks "
+    "(a story, an explanation, a 'why' or 'how', or a request for several things) "
+    "match the natural length of what was asked, up to 6 sentences. "
+    "Always plain prose. No Markdown, no headers, no bullet/numbered lists.\n"
 )
 _KID_MODE_SUFFIX = (
     "4. Audience: You are talking to a YOUNG CHILD (age 4-8). Every reply must be safe and age-appropriate.\n"

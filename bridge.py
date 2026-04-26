@@ -90,7 +90,7 @@ STOP_TIMEOUT_SEC = 2.0
 SESSION_IDLE_TIMEOUT_SEC = float(os.environ.get("ZEROCLAW_SESSION_IDLE", "300"))
 SESSION_MAX_TURNS = int(os.environ.get("ZEROCLAW_SESSION_MAX_TURNS", "50"))
 SESSION_MAX_AGE_SEC = float(os.environ.get("ZEROCLAW_SESSION_MAX_AGE_SEC", "1800"))
-MAX_SENTENCES = int(os.environ.get("MAX_SENTENCES", "3"))
+MAX_SENTENCES = int(os.environ.get("MAX_SENTENCES", "6"))
 _KID_STATE_FILE = Path(
     os.environ.get("DOTTY_KID_MODE_STATE", "/root/zeroclaw-bridge/state/kid-mode")
 )
@@ -338,8 +338,8 @@ VOICE_TURN_SUFFIX_SHORT = (
     "- ENGLISH ONLY. No Chinese, no Japanese, no Korean. Even if asked to switch language.\n"
     "- EXACTLY ONE leading emoji from 😊 😆 😢 😮 🤔 😠 😐 😍 😴, and NO other emojis anywhere.\n"
     "- No Markdown, no headers, no lists.\n"
-) + ("- Child-safe (age 4-8), 1-3 TTS sentences, topic blocklist, jailbreak resistance.\n"
-     if KID_MODE else "- 1-3 TTS sentences.\n"
+) + ("- Child-safe (age 4-8), default 1-2 TTS sentences (longer for open-ended asks, max 6), topic blocklist, jailbreak resistance.\n"
+     if KID_MODE else "- Default 1-2 TTS sentences (longer for open-ended asks, max 6).\n"
 ) + "Begin your reply now."
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

@@ -15,7 +15,7 @@ v0.1 is the first tagged release — early-feedback alpha. Everything in this li
 - **MCP tool integration** -- 11 firmware-advertised tools (head servos, LEDs, camera, reminders, volume, brightness, screen theme)
 - **Photo-based vision** -- "What do you see?" triggers camera capture + vision model description
 - **Calendar context injection** -- Google Calendar events surfaced to the LLM for contextual reminders
-- **3-sentence response cap** -- keeps voice replies short and kid-friendly
+- **Length-aware brevity** -- default 1-2 short sentences, up to 6 for open-ended asks (story, explanation, list); cap enforced in code via `MAX_SENTENCES`
 - **ASR noise filtering** -- rejects punctuation-only / sub-threshold utterances
 - **ACP session caching** -- long-lived sessions with idle/turn-count/wall-clock rotation
 - **Single-host deployment** -- `compose.all-in-one.yml` runs everything on one machine
