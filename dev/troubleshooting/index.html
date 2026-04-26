@@ -2244,17 +2244,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#5-taps-needed-to-enter-voice-mode" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        5+ taps needed to enter voice mode
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#bridge-unreachable-no-response-in-the-robots-voice" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2417,11 +2406,6 @@
 <p><strong>Symptom:</strong> The robot's head jerks abruptly when changing position, instead of moving smoothly.</p>
 <p><strong>Cause:</strong> Known limitation. The current firmware does not implement a velocity or acceleration cap on servo commands. The feedback servos move at their maximum speed, which can be startling — especially in a household with kids.</p>
 <p><strong>Workaround:</strong> There is no software workaround at this time. This is tracked as a firmware-level fix. See <a href="../hardware/#safety-relevant-hardware-facts">hardware.md</a> for context.</p>
-<hr />
-<h2 id="5-taps-needed-to-enter-voice-mode">5+ taps needed to enter voice mode<a class="headerlink" href="#5-taps-needed-to-enter-voice-mode" title="Permanent link">&para;</a></h2>
-<p><strong>Symptom:</strong> After booting, the robot takes many taps on the display before it enters listening mode. Sometimes 5 or more.</p>
-<p><strong>Cause:</strong> Pre-existing firmware startup issue. The StackChan firmware's initialization sequence doesn't reliably register touch events until all subsystems are ready, but the display and touch controller come up before the audio subsystem and WiFi.</p>
-<p><strong>Workaround:</strong> Wait a few seconds after the face appears before tapping. If it still doesn't respond, try a single long press rather than repeated taps.</p>
 <hr />
 <h2 id="bridge-unreachable-no-response-in-the-robots-voice">Bridge unreachable / "(no response)" in the robot's voice<a class="headerlink" href="#bridge-unreachable-no-response-in-the-robots-voice" title="Permanent link">&para;</a></h2>
 <p><strong>Symptom:</strong> The robot says something like "no response" or goes silent after you speak. xiaozhi-server logs show a failed HTTP POST to the bridge.</p>
