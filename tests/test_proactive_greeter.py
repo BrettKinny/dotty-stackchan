@@ -271,6 +271,43 @@ class GreeterTests(unittest.IsolatedAsyncioTestCase):
         await g._handle(_evt(identity="Hudson"))
         broken_tts.assert_awaited_once()
 
+    async def test_bus_loop_dispatches_face_recognized(self):
+        """End-to-end: event pushed onto the perception bus is picked up
+        by the greeter's `_run` loop and reaches the TTS pusher. Closes
+        the gap left by the per-handler-only test coverage."""
+        now = datetime(2026, 4, 21, 7, 30, tzinfo=ZoneInfo("Australia/Brisbane"))
+        g, bus, llm, cal, tts = _greeter(fixed_now=now)
+        g.start()
+        try:
+            await bus.queue.put(_evt(identity="Hudson", ts=now.timestamp()))
+            # Yield control until the greeter loop drains the queue.
+            for _ in range(50):
+                if tts.await_count >= 1:
+                    break
+                await asyncio.sleep(0.01)
+            self.assertEqual(tts.await_count, 1)
+            args, _ = tts.call_args
+            self.assertEqual(args[0], "dev-1")
+        finally:
+            await g.stop()
+
+    async def test_synthetic_room_view_event_handled(self):
+        """Bridge-side `_perception_broadcast` after roster match emits
+        an event tagged `data.source = "room_view"`. The greeter should
+        treat it identically to a firmware-emitted face_recognized."""
+        now = datetime(2026, 4, 21, 7, 30, tzinfo=ZoneInfo("Australia/Brisbane"))
+        g, bus, llm, cal, tts = _greeter(fixed_now=now)
+        synthetic = {
+            "name": "face_recognized",
+            "device_id": "dev-1",
+            "ts": now.timestamp(),
+            "data": {"identity": "Hudson", "source": "room_view"},
+        }
+        await g._handle(synthetic)
+        self.assertEqual(tts.await_count, 1)
+        _, text = tts.call_args.args
+        self.assertIn("Hi there!", text)
+
 
 class TestHouseholdRegistryEnrichment(unittest.IsolatedAsyncioTestCase):
     """Greeter should pull display_name, persona, and birthday awareness

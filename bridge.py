@@ -250,6 +250,14 @@ SOUND_TURN_COOLDOWN_SEC = float(os.environ.get("SOUND_TURN_COOLDOWN_SEC", "3"))
 # clamps to its own limits.
 SOUND_TURN_YAW_DEG = int(os.environ.get("SOUND_TURN_YAW_DEG", "45"))
 SOUND_TURN_SPEED = int(os.environ.get("SOUND_TURN_SPEED", "250"))
+# Wake-word-bound head turn: deliberate engagement, faster motion, no
+# cooldown. Distinct intent from the ambient sound turner above —
+# this fires when the user explicitly summons Dotty. Skipped when a
+# face is already being tracked (face_tracking modifier owns the gaze
+# in that case). Skipped on direction=centre (no spatial info to act on).
+WAKE_TURN_ENABLED = os.environ.get("WAKE_TURN_ENABLED", "1") not in ("0", "false", "False")
+WAKE_TURN_YAW_DEG = int(os.environ.get("WAKE_TURN_YAW_DEG", "45"))
+WAKE_TURN_SPEED = int(os.environ.get("WAKE_TURN_SPEED", "200"))
 # ---------------------------------------------------------------------------
 # Purr-on-head-pet (server-pushed, Option B)
 # ---------------------------------------------------------------------------
@@ -1746,6 +1754,33 @@ async def _dispatch_face_greeting(device_id: str, text: str) -> None:
     await asyncio.to_thread(_post)
 
 
+async def _dispatch_say(device_id: str, text: str) -> None:
+    """Layer 6 helper: fire-and-forget POST to the xiaozhi admin /say
+    route, which streams TTS opus packets straight to the device WS
+    bypassing the ASR/LLM pipeline. Used by ProactiveGreeter so a
+    server-generated greeting plays as Dotty's speech rather than
+    being treated as a fake user utterance (which is what
+    /admin/inject-text → startToChat does)."""
+    if not _XIAOZHI_HOST:
+        log.warning("greeter say: UNRAID_HOST not set; cannot reach xiaozhi-server")
+        return
+    url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/say"
+    payload = {"text": text, "device_id": device_id}
+
+    def _post() -> None:
+        try:
+            r = requests.post(url, json=payload, timeout=3)
+            if r.status_code >= 400:
+                log.warning(
+                    "greeter say %s: %s",
+                    r.status_code, r.text[:200],
+                )
+        except Exception as exc:
+            log.warning("greeter say failed: %s", exc)
+
+    await asyncio.to_thread(_post)
+
+
 async def _dispatch_set_head_angles(device_id: str, yaw: int,
                                      pitch: int, speed: int) -> None:
     """Phase 1.6 helper: fire-and-forget POST to the new
@@ -1833,6 +1868,73 @@ async def _perception_sound_turner() -> None:
         _perception_unsubscribe(q)
 
 
+async def _perception_wake_word_turner() -> None:
+    """On wake_word_detected, turn the head toward the speaker.
+
+    Distinct intent from _perception_sound_turner above:
+      - sound_turner   = "curious about an ambient noise" (cooldown'd, gentler)
+      - wake_word_turn = "look at the user who summoned me" (deliberate, no cooldown, faster)
+
+    Skips when a face is already being tracked — face_tracking owns the
+    gaze in that case and we don't want to override it. Skips on
+    direction=centre because there's no spatial info to act on.
+
+    Updates state["last_sound_turn_t"] so the ambient sound turner above
+    doesn't immediately re-fire on the user's continued voice.
+    """
+    if not WAKE_TURN_ENABLED:
+        log.info("perception wake-word turner disabled by env")
+        return
+    log.info(
+        "perception wake-word turner started (yaw=±%d speed=%d)",
+        WAKE_TURN_YAW_DEG, WAKE_TURN_SPEED,
+    )
+    q = _perception_subscribe()
+    try:
+        while True:
+            event = await q.get()
+            if event.get("name") != "wake_word_detected":
+                continue
+            device_id = event.get("device_id", "")
+            if not device_id or device_id == "unknown":
+                continue
+            data = event.get("data") or {}
+            direction = data.get("direction", "")
+            if direction not in ("left", "right"):  # skip centre / unknown
+                continue
+
+            state = _perception_state.setdefault(device_id, {})
+            if state.get("face_present"):
+                # Face tracker is already pointing the head at someone;
+                # don't yank it elsewhere on a wake from a different
+                # direction. (Likely the speaker IS the tracked face.)
+                continue
+
+            yaw = -WAKE_TURN_YAW_DEG if direction == "left" else WAKE_TURN_YAW_DEG
+            now = event.get("ts", 0.0)
+            # Suppress the ambient sound turner from immediately re-firing
+            # on the user's continued voice after the wake word.
+            state["last_sound_turn_t"] = now
+
+            log.info(
+                "wake_word_detected → head-turn: device=%s phrase=%r dir=%s yaw=%d",
+                device_id, data.get("phrase", ""), direction, yaw,
+            )
+            _spawn(
+                _dispatch_set_head_angles(
+                    device_id, yaw, 0, WAKE_TURN_SPEED,
+                ),
+                name="dispatch_set_head_angles_wake",
+            )
+    except asyncio.CancelledError:
+        log.info("perception wake-word turner cancelled")
+        raise
+    except Exception:
+        log.exception("perception wake-word turner crashed")
+    finally:
+        _perception_unsubscribe(q)
+
+
 async def _blind_mode_gauge_refresher() -> None:
     """Push the current blind state into `dotty_blind_mode_active` every
     60 s so quiet periods (no voice traffic, no perception events) still
@@ -1882,6 +1984,21 @@ async def _perception_face_greeter() -> None:
                 log.debug(
                     "face_detected → suppressed (blind mode): device=%s",
                     device_id,
+                )
+                continue
+            # Layer 6 hand-off: if the household has a roster (anyone
+            # with an `appearance:` field), the room-view roster match
+            # path will fire its own contextual greeting via
+            # ProactiveGreeter within ~1-2 s. Suppress the bare "Hi!"
+            # to avoid stacking it on top of "Hey Hudson, library day!".
+            # Empty roster (no household.yaml or no appearances) → keep
+            # the bare "Hi!" alive so unconfigured deployments still
+            # acknowledge faces.
+            if _household_registry is not None and \
+                    _household_registry.roster_ids_with_appearance():
+                log.debug(
+                    "face_detected → suppressed (roster owns greeting): "
+                    "device=%s", device_id,
                 )
                 continue
             now = event.get("ts", 0.0)
@@ -2087,12 +2204,11 @@ class _CalendarFacade:
 
 async def _greeter_llm_client(prompt: str) -> str:
     """LLM adapter for ProactiveGreeter. Routes through the same ACP
-    client voice turns use, but DOES NOT apply `_wrap_voice` — the
-    greeter prompt is already self-contained and the resulting text is
-    sent through `_dispatch_face_greeting` (which goes through the
-    xiaozhi-server inject-text pipeline; that path applies the regular
-    voice wrapping if needed). Failures bubble up to the greeter, which
-    has its own try/except + template fallback."""
+    client voice turns use. The resulting text is sent verbatim through
+    `_dispatch_say` (TTS-direct), so we don't want voice wrapping
+    applied here — what the greeter generates is exactly what Dotty
+    speaks. Failures bubble up to the greeter, which has its own
+    try/except + template fallback."""
     return await asyncio.wait_for(
         acp.prompt(prompt),
         timeout=REQUEST_TIMEOUT_SEC,
@@ -2100,17 +2216,18 @@ async def _greeter_llm_client(prompt: str) -> str:
 
 
 async def _greeter_tts_pusher(device_id: str, text: str) -> None:
-    """TTS adapter for ProactiveGreeter. Reuses the same inject-text
-    path the face-greeter uses so the spoken greeting flows through
-    xiaozhi-server's normal post-ASR pipeline (intent detection, MCP,
-    TTS). Errors are logged inside `_dispatch_face_greeting`; we add
-    one more guard so an exception here can NEVER reach the greeter
+    """TTS adapter for ProactiveGreeter. Routes through the
+    /xiaozhi/admin/say endpoint which generates TTS server-side and
+    streams opus straight to the device WS — bypassing the ASR/LLM
+    pipeline entirely so the greeter's pre-generated text is spoken
+    verbatim. Errors are logged inside `_dispatch_say`; we add one
+    more guard so an exception here can NEVER reach the greeter
     loop."""
     try:
-        await _dispatch_face_greeting(device_id, text)
+        await _dispatch_say(device_id, text)
     except Exception:
         log.exception(
-            "greeter tts pusher: _dispatch_face_greeting raised "
+            "greeter tts pusher: _dispatch_say raised "
             "(device=%s)", device_id,
         )
 
@@ -2149,6 +2266,7 @@ async def lifespan(app: FastAPI):
     perception_tasks = [
         asyncio.create_task(_perception_face_greeter()),
         asyncio.create_task(_perception_sound_turner()),
+        asyncio.create_task(_perception_wake_word_turner()),
         asyncio.create_task(_perception_face_lost_aborter()),
         asyncio.create_task(_perception_purr_player()),
         asyncio.create_task(_blind_mode_gauge_refresher()),
@@ -2856,6 +2974,22 @@ async def vision_explain(
         # the second one overwrote the dict entry.
         for ev in _vision_events.get(device_id, ()):
             ev.set()
+
+        # Layer 6 hook — when room-view resolves to a roster member,
+        # broadcast a synthetic `face_recognized` event so perception-bus
+        # consumers (notably ProactiveGreeter) see the resolved identity.
+        # Without this the person_id stays trapped on the connection and
+        # only reaches the next voice turn — never the bus.
+        if room_match_person_id:
+            _perception_broadcast({
+                "name": "face_recognized",
+                "device_id": device_id,
+                "ts": time.time(),
+                "data": {
+                    "identity": room_match_person_id,
+                    "source": "room_view",
+                },
+            })
 
         now = perf_counter()
         for k in [k for k, v in _vision_cache.items() if now - v["timestamp"] > VISION_CACHE_TTL_SEC]:

@@ -305,6 +305,94 @@ class SimpleHttpServer:
 
         _spawn(_dispatch(), name="play_asset_dispatch")
         return web.json_response({"ok": True, "device_id": resolved_id, "asset": asset_path})
+
+    async def _dotty_say(self, request: "web.Request") -> "web.Response":
+        """POST /xiaozhi/admin/say
+        Body: {"text": "...", "device_id": "<optional>"}
+
+        Generates TTS for `text` via the device's configured provider and
+        streams Opus 60 ms frames straight to the WebSocket. Bypasses the
+        ASR/LLM pipeline entirely — the device speaks `text` verbatim and
+        nothing is appended to the chat history. Used by Layer 6
+        ProactiveGreeter so a server-generated greeting plays as Dotty's
+        speech instead of being treated as a fake user utterance.
+        """
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        text = (data.get("text") or "").strip()
+        device_id = (data.get("device_id") or "").strip()
+        if not text:
+            return web.json_response({"error": "text required"}, status=400)
+        if device_id:
+            conn = _dotty_active_connections.get(device_id)
+        else:
+            conn = next(iter(_dotty_active_connections.values()), None)
+        if conn is None:
+            return web.json_response(
+                {"error": "no device connected",
+                 "known": list(_dotty_active_connections)},
+                status=503,
+            )
+        if not getattr(conn, "tts", None):
+            return web.json_response(
+                {"error": "device has no tts provider"}, status=503,
+            )
+        resolved_id = (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id
+
+        async def _dispatch() -> None:
+            import json as _json
+            try:
+                pkts = await asyncio.to_thread(conn.tts.to_tts, text)
+            except Exception as exc:
+                self.logger.bind(tag=TAG).warning(
+                    f"say tts generation failed text={text[:60]!r}: {exc}"
+                )
+                return
+            if not pkts:
+                self.logger.bind(tag=TAG).warning(
+                    f"say tts returned no audio text={text[:60]!r}"
+                )
+                return
+            conn.client_abort = False
+            conn.client_is_speaking = True
+            sent = 0
+            try:
+                await conn.websocket.send(_json.dumps({
+                    "type": "tts",
+                    "state": "sentence_start",
+                    "text": text,
+                    "session_id": conn.session_id,
+                }))
+                for pkt in pkts:
+                    if conn.client_abort or conn.is_exiting:
+                        self.logger.bind(tag=TAG).info(
+                            f"say aborted after {sent}/{len(pkts)} packets"
+                        )
+                        break
+                    await conn.websocket.send(pkt)
+                    sent += 1
+                    await asyncio.sleep(0.06)
+            except Exception as exc:
+                self.logger.bind(tag=TAG).warning(f"say stream error: {exc}")
+            finally:
+                conn.client_is_speaking = False
+                try:
+                    await conn.websocket.send(_json.dumps({
+                        "type": "tts",
+                        "state": "stop",
+                        "session_id": conn.session_id,
+                    }))
+                except Exception:
+                    pass
+                self.logger.bind(tag=TAG).info(
+                    f"say complete device={resolved_id} "
+                    f"text={text[:60]!r} sent={sent}/{len(pkts)}"
+                )
+
+        _spawn(_dispatch(), name="say_dispatch")
+        return web.json_response({"ok": True, "device_id": resolved_id})
     # END DOTTY-PATCH --------------------------------------------------------
 
     async def start(self):
@@ -365,6 +453,10 @@ class SimpleHttpServer:
                         web.get(
                             "/xiaozhi/admin/songs",
                             self._dotty_list_songs,
+                        ),
+                        web.post(
+                            "/xiaozhi/admin/say",
+                            self._dotty_say,
                         ),
                     ]
                 )
