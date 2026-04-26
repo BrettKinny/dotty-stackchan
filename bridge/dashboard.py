@@ -660,6 +660,16 @@ async def say(request: Request, text: str = Form(...)) -> Any:
             request, "say_result.html",
             {"ok": False, "error": "Too long — keep it under 500 characters."},
         )
+    # F17: strip ASCII C0 control chars (incl. NUL, BEL, newline, tab) and
+    # DEL, then collapse whitespace runs. Stops multi-line or null-byte
+    # payloads reaching the TTS pipeline.
+    text = re.sub(r"[\x00-\x1f\x7f]+", " ", text)
+    text = " ".join(text.split())
+    if not text:
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": "Message was empty after sanitisation."},
+        )
     return await _inject_or_error(request, text, label=text)
 
 
