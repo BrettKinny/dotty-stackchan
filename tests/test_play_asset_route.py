@@ -132,7 +132,7 @@ class TestPlayAssetRoute(unittest.TestCase):
         _mock_active["dev1"] = conn
         try:
             with patch("asyncio.create_task") as mock_ct:
-                mock_ct.side_effect = lambda coro: (coro.close() or MagicMock())
+                mock_ct.side_effect = lambda coro, **_kw: (coro.close() or MagicMock())
                 req = _FakeRequest(data={"asset": path, "device_id": "dev1"})
                 resp = _run(self.srv._dotty_play_asset(req))
             self.assertEqual(resp.status, 200)
@@ -156,7 +156,7 @@ class TestPlayAssetRoute(unittest.TestCase):
         _mock_active["dev-b"] = conn_b
         try:
             with patch("asyncio.create_task") as mock_ct:
-                mock_ct.side_effect = lambda coro: (coro.close() or MagicMock())
+                mock_ct.side_effect = lambda coro, **_kw: (coro.close() or MagicMock())
                 req = _FakeRequest(data={"asset": path, "device_id": "dev-b"})
                 resp = _run(self.srv._dotty_play_asset(req))
             self.assertEqual(resp.status, 200)

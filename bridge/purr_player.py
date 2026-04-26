@@ -28,6 +28,17 @@ from typing import Awaitable, Callable
 
 log = logging.getLogger("zeroclaw-bridge.purr_player")
 
+# Pin fire-and-forget tasks so asyncio's weakref doesn't GC them
+# mid-flight. See bridge.py for the same pattern in production hot path.
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+
+
+def _spawn(coro, *, name: str | None = None) -> asyncio.Task:
+    t = asyncio.create_task(coro, name=name)
+    _BACKGROUND_TASKS.add(t)
+    t.add_done_callback(_BACKGROUND_TASKS.discard)
+    return t
+
 PURR_AUDIO_PATH: Path = Path(
     os.environ.get("PURR_AUDIO_PATH", "bridge/assets/purr.opus")
 )
@@ -152,7 +163,7 @@ async def run_purr_consumer(
             state["last_purr_t"] = now
             state["last_chat_t"] = now + duration
             log.info("head_pet_started → purr: device=%s", device_id)
-            asyncio.create_task(dispatch(device_id))
+            _spawn(dispatch(device_id), name="purr_dispatch")
     except asyncio.CancelledError:
         log.info("purr consumer cancelled")
         raise

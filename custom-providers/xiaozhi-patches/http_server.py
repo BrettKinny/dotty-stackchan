@@ -10,6 +10,18 @@ from core.portal_bridge import active_connections as _dotty_active_connections
 
 TAG = __name__
 
+# DOTTY-PATCH: pin fire-and-forget tasks so asyncio's weakref doesn't
+# GC them mid-flight. Use _spawn() in place of bare asyncio.create_task
+# wherever the returned Task isn't kept by the caller.
+_BACKGROUND_TASKS: set = set()
+
+
+def _spawn(coro, *, name: str | None = None):
+    t = asyncio.create_task(coro, name=name)
+    _BACKGROUND_TASKS.add(t)
+    t.add_done_callback(_BACKGROUND_TASKS.discard)
+    return t
+
 
 class SimpleHttpServer:
     def __init__(self, config: dict):
@@ -57,7 +69,7 @@ class SimpleHttpServer:
             )
         # Lazy import to avoid pulling the chat pipeline at server startup.
         from core.handle.receiveAudioHandle import startToChat
-        asyncio.create_task(startToChat(conn, text))
+        _spawn(startToChat(conn, text), name="inject_text_chat")
         return web.json_response({
             "ok": True,
             "device_id": getattr(conn, "headers", {}).get("device-id", "") or device_id,
@@ -89,7 +101,7 @@ class SimpleHttpServer:
                 status=503,
             )
         from core.handle.abortHandle import handleAbortMessage
-        asyncio.create_task(handleAbortMessage(conn))
+        _spawn(handleAbortMessage(conn), name="inject_abort")
         return web.json_response({
             "ok": True,
             "device_id": (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id,
@@ -140,7 +152,7 @@ class SimpleHttpServer:
                 "id": int(time.time() * 1000) % 0x7FFFFFFF,
             },
         })
-        asyncio.create_task(conn.websocket.send(msg))
+        _spawn(conn.websocket.send(msg), name="set_head_angles_send")
         return web.json_response({
             "ok": True,
             "device_id": (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id,
@@ -273,7 +285,7 @@ class SimpleHttpServer:
                     f"sent={sent}/{len(pkts)}"
                 )
 
-        asyncio.create_task(_dispatch())
+        _spawn(_dispatch(), name="play_asset_dispatch")
         return web.json_response({"ok": True, "device_id": resolved_id, "asset": asset_path})
     # END DOTTY-PATCH --------------------------------------------------------
 

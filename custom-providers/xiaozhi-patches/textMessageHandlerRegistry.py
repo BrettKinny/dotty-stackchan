@@ -12,6 +12,18 @@ import os
 import time
 from typing import Any, Dict, Optional
 
+# DOTTY-PATCH: pin fire-and-forget tasks so asyncio's weakref doesn't
+# GC them mid-flight. Use _spawn() in place of bare asyncio.create_task
+# wherever the returned Task isn't kept by the caller.
+_BACKGROUND_TASKS: set = set()
+
+
+def _spawn(coro, *, name: str | None = None):
+    t = asyncio.create_task(coro, name=name)
+    _BACKGROUND_TASKS.add(t)
+    t.add_done_callback(_BACKGROUND_TASKS.discard)
+    return t
+
 from core.handle.textHandler.abortMessageHandler import AbortTextMessageHandler
 from core.handle.textHandler.helloMessageHandler import HelloTextMessageHandler
 from core.handle.textHandler.iotMessageHandler import IotTextMessageHandler
@@ -93,8 +105,10 @@ class EventTextMessageHandler(TextMessageHandler):
                     from receiveAudioHandle import (
                         _capture_room_description_async,
                     )
-                    asyncio.create_task(
-                        _capture_room_description_async(conn))
+                    _spawn(
+                        _capture_room_description_async(conn),
+                        name="room_view_capture",
+                    )
             except Exception as exc:
                 conn.logger.bind(tag=TAG).warning(
                     f"room_view: failed to start capture: {exc}"
@@ -131,7 +145,7 @@ class EventTextMessageHandler(TextMessageHandler):
                     f"perception POST failed: {exc}"
                 )
 
-        asyncio.create_task(asyncio.to_thread(_post))
+        _spawn(asyncio.to_thread(_post), name="perception_event_post")
 
 
 class TextMessageHandlerRegistry:

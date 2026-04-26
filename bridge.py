@@ -345,6 +345,25 @@ log = logging.getLogger("zeroclaw-bridge")
 
 app_lock = asyncio.Lock()
 
+# Fire-and-forget asyncio task pin. asyncio holds Tasks via weakref
+# only — `asyncio.create_task(coro)` without retaining the returned
+# Task may have it GC'd before it runs. Pin to this module-level set
+# and auto-discard on completion.
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+
+
+def _spawn(coro, *, name: str | None = None) -> asyncio.Task:
+    """Spawn an asyncio task that won't be GC'd while it's running.
+
+    Use anywhere you'd write `asyncio.create_task(coro)` and don't
+    need the returned Task locally — fire-and-forget dispatches.
+    Tasks awaited / stored elsewhere don't need this wrapper.
+    """
+    t = asyncio.create_task(coro, name=name)
+    _BACKGROUND_TASKS.add(t)
+    t.add_done_callback(_BACKGROUND_TASKS.discard)
+    return t
+
 # ---------------------------------------------------------------------------
 # Context injection — date/time, weather, calendar
 # ---------------------------------------------------------------------------
@@ -1681,10 +1700,11 @@ async def _perception_sound_turner() -> None:
                 "sound_event → head-turn: device=%s direction=%s yaw=%d",
                 device_id, direction, yaw,
             )
-            asyncio.create_task(
+            _spawn(
                 _dispatch_set_head_angles(
                     device_id, yaw, 0, SOUND_TURN_SPEED,
                 ),
+                name="dispatch_set_head_angles",
             )
     except asyncio.CancelledError:
         log.info("perception sound turner cancelled")
@@ -1738,8 +1758,9 @@ async def _perception_face_greeter() -> None:
                 )
                 continue
             log.info("face_detected → greeting: device=%s", device_id)
-            asyncio.create_task(
+            _spawn(
                 _dispatch_face_greeting(device_id, FACE_GREET_TEXT),
+                name="dispatch_face_greeting",
             )
     except asyncio.CancelledError:
         log.info("perception face greeter cancelled")
@@ -1843,7 +1864,7 @@ async def _perception_purr_player() -> None:
             # turns when last_chat_t is fresh).
             state["last_chat_t"] = now + PURR_DURATION_SEC
             log.info("head_pet_started → purr: device=%s", device_id)
-            asyncio.create_task(_dispatch_purr_audio(device_id))
+            _spawn(_dispatch_purr_audio(device_id), name="dispatch_purr_audio")
     except asyncio.CancelledError:
         log.info("perception purr player cancelled")
         raise
@@ -1926,8 +1947,9 @@ async def _perception_clap_waker() -> None:
             if CLAP_WAKE_TEXT:
                 # Same inject-text path the face-greeter uses → xiaozhi
                 # speaks the cue and then opens its mic for the user.
-                asyncio.create_task(
+                _spawn(
                     _dispatch_face_greeting(device_id, CLAP_WAKE_TEXT),
+                    name="clap_wake_greeting",
                 )
             else:
                 # Empty text → spoken-cue suppressed. The bridge has no
@@ -1936,8 +1958,9 @@ async def _perception_clap_waker() -> None:
                 # silent equivalent the xiaozhi pipeline currently honours.
                 # If this proves audibly distracting in practice, swap for
                 # a dedicated /admin/open-mic route once it lands.
-                asyncio.create_task(
+                _spawn(
                     _dispatch_face_greeting(device_id, " "),
+                    name="clap_wake_silent_open",
                 )
     except asyncio.CancelledError:
         log.info("perception clap waker cancelled")
