@@ -38,7 +38,7 @@
 
 <header class="navbar bg-base-100 sticky top-0 z-10 shadow-sm safe-top">
   <div class="flex-1 px-2 flex items-center gap-3">
-    <img src="/ui/icon.svg" alt="" class="w-7 h-7" aria-hidden="true">
+    <img src="/ui/icon.svg" alt="" class="w-9 h-9" aria-hidden="true">
     <span class="text-lg font-semibold tracking-tight">Dotty</span>
     <span id="dotty-face" data-poll
           hx-get="/ui/face" hx-trigger="load, every 8s, dotty-refresh from:window" hx-swap="innerHTML"
@@ -123,27 +123,6 @@
   </section>
 
   <section>
-    <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Volume</h2>
-    <div class="card bg-base-100 shadow-sm">
-      <div class="card-body p-3">
-        <form hx-post="/ui/actions/volume" hx-target="#vol-result" hx-swap="innerHTML"
-              hx-include="this"
-              hx-disabled-elt="find input"
-              class="flex items-center gap-3">
-          <span class="text-base">🔈</span>
-          <input type="range" name="value" min="0" max="100" step="5" value="50"
-                 oninput="document.getElementById('vol-out').textContent = this.value"
-                 onchange="this.form.requestSubmit()"
-                 class="range range-sm flex-1">
-          <span class="text-base">🔊</span>
-          <output id="vol-out" class="text-sm font-mono w-8 text-right">50</output>
-        </form>
-        <div id="vol-result" class="mt-2 empty:hidden"></div>
-      </div>
-    </div>
-  </section>
-
-  <section>
     <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Mode</h2>
     <div id="kid-card-body" class="card bg-base-100 shadow-sm overflow-hidden"
          hx-get="/ui/kid-mode" hx-trigger="load" hx-swap="outerHTML"
@@ -171,6 +150,18 @@
           </button>
         </form>
         <div id="say-result" class="mt-2 empty:hidden"></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Last turn</h2>
+    <div class="card bg-base-100 shadow-sm">
+      <div id="last-turn" class="card-body p-3">
+        <div id="last-turn-empty" class="flex flex-col items-center text-center py-3 gap-2">
+          <img src="/ui/hero.svg" alt="" class="w-24 h-24 opacity-60" aria-hidden="true">
+          <div class="text-sm text-base-content/50">Say hi to see Dotty's reply.</div>
+        </div>
       </div>
     </div>
   </section>
@@ -222,8 +213,9 @@
     <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Live conversation</h2>
     <div class="card bg-base-100 shadow-sm overflow-hidden">
       <div id="live-transcript" class="divide-y divide-base-300 max-h-[70vh] overflow-y-auto">
-        <div id="live-transcript-empty" class="text-sm text-base-content/50 text-center px-3 py-6">
-          Waiting for the next turn…
+        <div id="live-transcript-empty" class="flex flex-col items-center text-center px-3 py-6 gap-2">
+          <img src="/ui/hero.svg" alt="" class="w-20 h-20 opacity-50" aria-hidden="true">
+          <div class="text-sm text-base-content/50">Waiting for the next turn…</div>
         </div>
       </div>
     </div>
@@ -243,8 +235,9 @@
     </div>
     <div class="card bg-base-100 shadow-sm overflow-hidden">
       <div id="perception-feed" class="divide-y divide-base-300 max-h-[70vh] overflow-y-auto">
-        <div id="perception-feed-empty" class="text-sm text-base-content/50 text-center px-3 py-6">
-          Waiting for perception events…
+        <div id="perception-feed-empty" class="flex flex-col items-center text-center px-3 py-6 gap-2">
+          <img src="/ui/hero.svg" alt="" class="w-20 h-20 opacity-50" aria-hidden="true">
+          <div class="text-sm text-base-content/50">Waiting for perception events…</div>
         </div>
       </div>
     </div>
@@ -634,6 +627,48 @@
     while (feed.children.length > 50) feed.removeChild(feed.lastElementChild);
   }
 
+  function updateLastTurn(data) {
+    var card = document.getElementById('last-turn');
+    if (!card) return;
+    card.innerHTML = '';
+
+    var head = document.createElement('div');
+    head.className = 'flex items-center gap-2 text-xs text-base-content/50';
+    var d = new Date((data.ts || Date.now() / 1000) * 1000);
+    var ts = document.createElement('span');
+    ts.textContent = d.toLocaleTimeString();
+    head.appendChild(ts);
+    if (data.error) {
+      var er = document.createElement('span');
+      er.className = 'badge badge-error badge-xs';
+      er.textContent = 'err';
+      head.appendChild(er);
+    }
+    if (typeof data.latency_ms === 'number') {
+      var lat = document.createElement('span');
+      lat.className = 'ml-auto';
+      lat.textContent = (data.latency_ms / 1000).toFixed(1) + ' s';
+      head.appendChild(lat);
+    }
+    card.appendChild(head);
+
+    var req = document.createElement('div');
+    req.className = 'text-sm break-words mt-1';
+    req.textContent = '🗨 ' + (data.request_text || '(no input)');
+    card.appendChild(req);
+
+    var resp = document.createElement('div');
+    if (data.error) {
+      resp.className = 'text-sm text-error break-words whitespace-pre-wrap mt-1';
+      resp.textContent = '⚠ ' + String(data.error);
+    } else {
+      resp.className = 'text-sm text-base-content/80 break-words whitespace-pre-wrap mt-1';
+      var emoji = data.emoji_used ? (data.emoji_used + ' ') : '';
+      resp.textContent = emoji + (data.response_text || '');
+    }
+    card.appendChild(resp);
+  }
+
   (function () {
     if (typeof EventSource === 'undefined') return;
     var src = new EventSource('/ui/events');
@@ -643,6 +678,9 @@
       try { data = JSON.parse(ev.data); } catch (e) { return; }
       // F8: prepend to the Live tab transcript.
       prependLiveTurn(data);
+      // Latest turn summary on the Dotty tab — single-row peek at what
+      // just happened so users don't need to switch to Live.
+      updateLastTurn(data);
       // Live log tail (P13) — fire the same window event the refresh
       // button uses so every polling tile picks up new state immediately.
       window.dispatchEvent(new CustomEvent('dotty-refresh'));

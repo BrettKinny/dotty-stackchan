@@ -615,27 +615,6 @@ async def preset(request: Request, name: str = Form(...)) -> Any:
     )
 
 
-@router.post("/actions/volume", response_class=HTMLResponse, include_in_schema=False)
-async def volume(request: Request, value: int = Form(...)) -> Any:
-    """Set Dotty's speaker volume by routing the request through the LLM
-    so ZeroClaw fires the existing `audio_speaker.set_volume` MCP tool.
-
-    Caveat: this path goes through the LLM and TTS pipeline — Dotty will
-    briefly acknowledge ("Volume set to N!"). A silent direct-MCP path
-    would require an admin endpoint inside xiaozhi-server (tracked).
-    """
-    if not 0 <= value <= 100:
-        return templates.TemplateResponse(
-            request, "say_result.html",
-            {"ok": False, "error": "Volume must be 0–100."},
-        )
-    prompt = (
-        f"Set the speaker volume to {value} percent using your "
-        f"audio_speaker.set_volume tool, then reply with just '🔊 {value}'."
-    )
-    return await _inject_or_error(request, prompt, label=f"set volume to {value}")
-
-
 _INJECT_WAIT_SEC = 8.0  # Q4: how long to wait for Dotty's reply before
                         #     showing "no response in time" fallback.
 
@@ -1144,6 +1123,19 @@ except OSError:
 @router.get("/icon.svg", include_in_schema=False)
 async def icon() -> Response:
     return Response(content=_ICON_SVG, media_type="image/svg+xml",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
+_DOTTY_HERO_PATH = Path(__file__).parent / "assets" / "dotty-hero.svg"
+try:
+    _HERO_SVG = _DOTTY_HERO_PATH.read_text(encoding="utf-8")
+except OSError:
+    _HERO_SVG = _ICON_SVG
+
+
+@router.get("/hero.svg", include_in_schema=False)
+async def hero() -> Response:
+    return Response(content=_HERO_SVG, media_type="image/svg+xml",
                     headers={"Cache-Control": "public, max-age=86400"})
 
 
