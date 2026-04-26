@@ -310,12 +310,21 @@ class SimpleHttpServer:
         """POST /xiaozhi/admin/say
         Body: {"text": "...", "device_id": "<optional>"}
 
-        Generates TTS for `text` via the device's configured provider and
-        streams Opus 60 ms frames straight to the WebSocket. Bypasses the
-        ASR/LLM pipeline entirely — the device speaks `text` verbatim and
-        nothing is appended to the chat history. Used by Layer 6
-        ProactiveGreeter so a server-generated greeting plays as Dotty's
-        speech instead of being treated as a fake user utterance.
+        Speaks `text` verbatim on the device by pushing it onto the
+        device's existing TTS text queue — the same queue the LLM
+        chat-path uses for tool-call responses. Bypasses ASR + LLM
+        entirely; nothing is appended to dialogue history. Used by
+        Layer 6 ProactiveGreeter so a server-generated greeting plays
+        as Dotty's speech instead of being treated as fake user input.
+
+        Implementation note: the obvious-looking `conn.tts.to_tts(text)`
+        path doesn't work — its `asyncio.run(text_to_speak(...))` wrapper
+        misbehaves with providers (e.g. EdgeTTS) whose `text_to_speak`
+        is structured to spawn a background task and return None
+        synchronously. Each retry erroring on the return value still
+        leaves the side-effect tasks running, producing 3-5× duplicate
+        playback. `tts_one_sentence` is the canonical "say this" API
+        that goes through the same priority threads chat turns use.
         """
         try:
             data = await request.json()
@@ -341,58 +350,60 @@ class SimpleHttpServer:
             )
         resolved_id = (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id
 
-        async def _dispatch() -> None:
-            import json as _json
+        # Lazy imports — keep module load cheap and the dependency on
+        # xiaozhi-server's TTS DTO module local to this handler.
+        import uuid as _uuid
+        from core.providers.tts.dto.dto import (
+            ContentType as _ContentType,
+            SentenceType as _SentenceType,
+            TTSMessageDTO as _TTSMessageDTO,
+        )
+
+        sentence_id = _uuid.uuid4().hex
+
+        def _enqueue() -> None:
             try:
-                pkts = await asyncio.to_thread(conn.tts.to_tts, text)
+                # The consumer thread filters with
+                # `message.sentence_id != self.conn.sentence_id` and
+                # drops anything that doesn't match — so we stamp the
+                # conn with our new id BEFORE putting messages on the
+                # queue. This will pre-empt any in-flight TTS for this
+                # conn, which is acceptable for server-pushed greetings
+                # (they shouldn't race a chat turn in normal operation).
+                #
+                # Frame the utterance with FIRST/MIDDLE/LAST: FIRST inits
+                # consumer state, MIDDLE carries the text into the
+                # buffer, LAST triggers `_process_remaining_text_stream`
+                # which is the actual flush. Skipping LAST is the bug
+                # that left "this should play once." stuck in the buffer
+                # behind a mid-string comma.
+                conn.sentence_id = sentence_id
+                for st, body in (
+                    (_SentenceType.FIRST, ""),
+                    (_SentenceType.MIDDLE, text),
+                    (_SentenceType.LAST, ""),
+                ):
+                    conn.tts.tts_text_queue.put(_TTSMessageDTO(
+                        sentence_id=sentence_id,
+                        sentence_type=st,
+                        content_type=_ContentType.TEXT,
+                        content_detail=body,
+                    ))
             except Exception as exc:
                 self.logger.bind(tag=TAG).warning(
-                    f"say tts generation failed text={text[:60]!r}: {exc}"
-                )
-                return
-            if not pkts:
-                self.logger.bind(tag=TAG).warning(
-                    f"say tts returned no audio text={text[:60]!r}"
-                )
-                return
-            conn.client_abort = False
-            conn.client_is_speaking = True
-            sent = 0
-            try:
-                await conn.websocket.send(_json.dumps({
-                    "type": "tts",
-                    "state": "sentence_start",
-                    "text": text,
-                    "session_id": conn.session_id,
-                }))
-                for pkt in pkts:
-                    if conn.client_abort or conn.is_exiting:
-                        self.logger.bind(tag=TAG).info(
-                            f"say aborted after {sent}/{len(pkts)} packets"
-                        )
-                        break
-                    await conn.websocket.send(pkt)
-                    sent += 1
-                    await asyncio.sleep(0.06)
-            except Exception as exc:
-                self.logger.bind(tag=TAG).warning(f"say stream error: {exc}")
-            finally:
-                conn.client_is_speaking = False
-                try:
-                    await conn.websocket.send(_json.dumps({
-                        "type": "tts",
-                        "state": "stop",
-                        "session_id": conn.session_id,
-                    }))
-                except Exception:
-                    pass
-                self.logger.bind(tag=TAG).info(
-                    f"say complete device={resolved_id} "
-                    f"text={text[:60]!r} sent={sent}/{len(pkts)}"
+                    f"say enqueue failed text={text[:60]!r}: {exc}"
                 )
 
-        _spawn(_dispatch(), name="say_dispatch")
-        return web.json_response({"ok": True, "device_id": resolved_id})
+        # The puts are sync on a thread-safe queue, but we hop a thread
+        # so the aiohttp loop never blocks on producer-side contention.
+        await asyncio.to_thread(_enqueue)
+        self.logger.bind(tag=TAG).info(
+            f"say queued device={resolved_id} sid={sentence_id[:8]} "
+            f"text={text[:60]!r}"
+        )
+        return web.json_response({
+            "ok": True, "device_id": resolved_id, "sentence_id": sentence_id,
+        })
     # END DOTTY-PATCH --------------------------------------------------------
 
     async def start(self):
