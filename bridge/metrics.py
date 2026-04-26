@@ -164,13 +164,6 @@ if _PROMETHEUS_AVAILABLE:
         registry=REGISTRY,
     )
 
-    dotty_blind_mode_active = Gauge(
-        "dotty_blind_mode_active",
-        "1 if blind mode (civil dusk → civil dawn at the configured "
-        "lat/lon) is currently active; the camera produces unusable "
-        "frames in the dark so face-greeter and take_photo are gated.",
-        registry=REGISTRY,
-    )
 else:  # pragma: no cover — exercised only when prometheus_client missing
     REGISTRY = None  # type: ignore[assignment]
     dotty_first_audio_latency_seconds = _NoopMetric()  # type: ignore[assignment]
@@ -183,7 +176,6 @@ else:  # pragma: no cover — exercised only when prometheus_client missing
     dotty_kid_mode_active = _NoopMetric()  # type: ignore[assignment]
     dotty_perception_events_total = _NoopMetric()  # type: ignore[assignment]
     dotty_content_filter_hits_total = _NoopMetric()  # type: ignore[assignment]
-    dotty_blind_mode_active = _NoopMetric()  # type: ignore[assignment]
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +237,6 @@ __all__ = [
     "dotty_kid_mode_active",
     "dotty_perception_events_total",
     "dotty_content_filter_hits_total",
-    "dotty_blind_mode_active",
     "record_first_audio",
     "metrics_app",
 ]
