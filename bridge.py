@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import requests
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -1497,13 +1498,12 @@ async def _dispatch_abort(device_id: str) -> None:
     talking when its audience walks away mid-response."""
     if not _XIAOZHI_HOST:
         return
-    import requests as _req
     url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/abort"
     payload = {"device_id": device_id}
 
     def _post() -> None:
         try:
-            r = _req.post(url, json=payload, timeout=3)
+            r = requests.post(url, json=payload, timeout=3)
             if r.status_code >= 400:
                 log.warning(
                     "face-lost abort %s: %s", r.status_code, r.text[:200])
@@ -1601,13 +1601,12 @@ async def _dispatch_face_greeting(device_id: str, text: str) -> None:
     if not _XIAOZHI_HOST:
         log.warning("face greeter: UNRAID_HOST not set; cannot reach xiaozhi-server")
         return
-    import requests as _req
     url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/inject-text"
     payload = {"text": text, "device_id": device_id}
 
     def _post() -> None:
         try:
-            r = _req.post(url, json=payload, timeout=3)
+            r = requests.post(url, json=payload, timeout=3)
             if r.status_code >= 400:
                 log.warning(
                     "face greeter inject-text %s: %s",
@@ -1627,7 +1626,6 @@ async def _dispatch_set_head_angles(device_id: str, yaw: int,
     if not _XIAOZHI_HOST:
         log.warning("sound turn: UNRAID_HOST not set; cannot reach xiaozhi-server")
         return
-    import requests as _req
     url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/set-head-angles"
     payload = {
         "device_id": device_id, "yaw": yaw, "pitch": pitch, "speed": speed,
@@ -1635,7 +1633,7 @@ async def _dispatch_set_head_angles(device_id: str, yaw: int,
 
     def _post() -> None:
         try:
-            r = _req.post(url, json=payload, timeout=3)
+            r = requests.post(url, json=payload, timeout=3)
             if r.status_code >= 400:
                 log.warning(
                     "sound turn set-head-angles %s: %s",
@@ -1789,13 +1787,12 @@ async def _dispatch_purr_audio(device_id: str) -> bool:
             PURR_AUDIO_PATH,
         )
         return False
-    import requests as _req
     url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/play-asset"
     payload = {"device_id": device_id, "asset": str(PURR_AUDIO_PATH)}
 
     def _post() -> bool:
         try:
-            r = _req.post(url, json=payload, timeout=3)
+            r = requests.post(url, json=payload, timeout=3)
             if r.status_code >= 400:
                 log.warning(
                     "purr play-asset %s: %s",
@@ -2432,11 +2429,10 @@ async def perception_event(payload: PerceptionEventIn) -> None:
     later phases add server-side audio scene + vision classifiers.
     Updates per-device state and broadcasts to all in-process
     subscribers (no consumers in Phase 1.1; added in 1.5 / 1.6)."""
-    import time as _time
     t0 = perf_counter()
     err_kind: str | None = None
     try:
-        ts = payload.ts if payload.ts is not None else _time.time()
+        ts = payload.ts if payload.ts is not None else time.time()
         event = {
             "device_id": payload.device_id,
             "ts": ts,
@@ -2969,14 +2965,14 @@ if _configure_portal is not None:
         """Fire-and-forget POST to xiaozhi-server's admin abort route."""
         if not _XIAOZHI_HOST:
             return {"ok": False, "error": "UNRAID_HOST not set"}
-        import requests as _req
+
         url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/abort"
         payload: dict = {}
         if device_id:
             payload["device_id"] = device_id
         def _post() -> dict:
             try:
-                r = _req.post(url, json=payload, timeout=3)
+                r = requests.post(url, json=payload, timeout=3)
                 if r.status_code == 200:
                     return {"ok": True, **r.json()}
                 return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
@@ -2990,14 +2986,14 @@ if _configure_portal is not None:
         normal post-ASR pipeline — intent detection, MCP tools, TTS."""
         if not _XIAOZHI_HOST:
             return {"ok": False, "error": "UNRAID_HOST not set"}
-        import requests as _req
+
         url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/inject-text"
         payload = {"text": text}
         if device_id:
             payload["device_id"] = device_id
         def _post() -> dict:
             try:
-                r = _req.post(url, json=payload, timeout=3)
+                r = requests.post(url, json=payload, timeout=3)
                 if r.status_code == 200:
                     return {"ok": True, **r.json()}
                 return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
