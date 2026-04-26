@@ -1072,6 +1072,25 @@ async def icon() -> Response:
                     headers={"Cache-Control": "public, max-age=86400"})
 
 
+# F19: 180×180 PNG for iOS apple-touch-icon (iOS doesn't fully render SVG
+# touch icons; an installed Add-to-Home-Screen gets a placeholder otherwise).
+_APPLE_ICON_PATH = Path(__file__).parent / "assets" / "apple-touch-icon.png"
+try:
+    _APPLE_ICON_BYTES: bytes = _APPLE_ICON_PATH.read_bytes()
+except OSError:
+    _APPLE_ICON_BYTES = b""
+
+
+@router.get("/apple-touch-icon.png", include_in_schema=False)
+async def apple_touch_icon() -> Response:
+    if not _APPLE_ICON_BYTES:
+        raise HTTPException(404, "apple-touch-icon.png not bundled")
+    return Response(
+        content=_APPLE_ICON_BYTES, media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 @router.get("/manifest.json", include_in_schema=False)
 async def manifest() -> JSONResponse:
     # scope must match (or be a prefix of) start_url; the previous "/ui/"
@@ -1089,6 +1108,8 @@ async def manifest() -> JSONResponse:
         "icons": [
             {"src": "/ui/icon.svg", "sizes": "any", "type": "image/svg+xml",
              "purpose": "any"},
+            {"src": "/ui/apple-touch-icon.png", "sizes": "180x180",
+             "type": "image/png", "purpose": "any"},
         ],
     })
 
