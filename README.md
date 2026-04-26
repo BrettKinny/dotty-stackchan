@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="bridge/assets/dotty-hero.svg" alt="Dotty mascot" width="200">
+</p>
+
 # Dotty
 
 **Your self-hosted [StackChan](https://github.com/m5stack/StackChan) robot assistant -- kid-safe by default, hackable by design, private by architecture.**

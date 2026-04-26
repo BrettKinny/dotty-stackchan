@@ -1124,16 +1124,21 @@ async def restart_bridge(request: Request) -> Any:
 
 # --- P8: PWA manifest + icon ----------------------------------------------
 
-_ICON_SVG = (
-    '<?xml version="1.0" encoding="UTF-8"?>'
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'
-    '<rect width="512" height="512" rx="96" fill="#1d232a"/>'
-    '<circle cx="180" cy="220" r="36" fill="#22c55e"/>'
-    '<circle cx="332" cy="220" r="36" fill="#22c55e"/>'
-    '<path d="M150 320 q106 80 212 0" stroke="#22c55e" stroke-width="22" '
-    'stroke-linecap="round" fill="none"/>'
-    '</svg>'
-)
+_DOTTY_ICON_PATH = Path(__file__).parent / "assets" / "dotty-icon.svg"
+try:
+    _ICON_SVG = _DOTTY_ICON_PATH.read_text(encoding="utf-8")
+except OSError:
+    # Fallback to a minimal inline placeholder if the asset is missing
+    _ICON_SVG = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'
+        '<rect width="512" height="512" rx="96" fill="#1d232a"/>'
+        '<circle cx="180" cy="220" r="36" fill="#22c55e"/>'
+        '<circle cx="332" cy="220" r="36" fill="#22c55e"/>'
+        '<path d="M150 320 q106 80 212 0" stroke="#22c55e" stroke-width="22" '
+        'stroke-linecap="round" fill="none"/>'
+        '</svg>'
+    )
 
 
 @router.get("/icon.svg", include_in_schema=False)
