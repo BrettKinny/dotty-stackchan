@@ -75,14 +75,18 @@
 </div>
 
 <nav class="px-3 pt-3 max-w-5xl mx-auto sticky top-16 z-[5] bg-base-200/95 backdrop-blur">
-  <div role="tablist" class="tabs tabs-boxed">
-    <a role="tab" data-tab="dotty" class="tab flex-1"
+  <div role="tablist" class="tabs tabs-boxed" id="dotty-tablist">
+    <a role="tab" id="tab-dotty" data-tab="dotty" class="tab flex-1"
+       aria-controls="panel-dotty" aria-selected="true" tabindex="0"
        onclick="dottyTab('dotty')">Dotty</a>
-    <a role="tab" data-tab="live" class="tab flex-1"
+    <a role="tab" id="tab-live" data-tab="live" class="tab flex-1"
+       aria-controls="panel-live" aria-selected="false" tabindex="-1"
        onclick="dottyTab('live')">Live</a>
-    <a role="tab" data-tab="status" class="tab flex-1"
+    <a role="tab" id="tab-status" data-tab="status" class="tab flex-1"
+       aria-controls="panel-status" aria-selected="false" tabindex="-1"
        onclick="dottyTab('status')">Status</a>
-    <a role="tab" data-tab="logs" class="tab flex-1"
+    <a role="tab" id="tab-logs" data-tab="logs" class="tab flex-1"
+       aria-controls="panel-logs" aria-selected="false" tabindex="-1"
        onclick="dottyTab('logs')">Logs</a>
   </div>
 </nav>
@@ -91,7 +95,7 @@
 
   <div id="stop-result" class="px-3 empty:hidden"></div>
 
-  <div data-tab-panel="dotty" class="space-y-5">
+  <div data-tab-panel="dotty" id="panel-dotty" role="tabpanel" aria-labelledby="tab-dotty" tabindex="0" class="space-y-5">
 
   <section>
     <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Quick presets</h2>
@@ -207,7 +211,7 @@
 
   </div>  <!-- end data-tab-panel="dotty" -->
 
-  <div data-tab-panel="live" class="space-y-5" hidden>
+  <div data-tab-panel="live" id="panel-live" role="tabpanel" aria-labelledby="tab-live" tabindex="0" class="space-y-5" hidden>
 
   <section>
     <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Live conversation</h2>
@@ -222,7 +226,7 @@
 
   </div>  <!-- end data-tab-panel="live" -->
 
-  <div data-tab-panel="status" class="space-y-5" hidden>
+  <div data-tab-panel="status" id="panel-status" role="tabpanel" aria-labelledby="tab-status" tabindex="0" class="space-y-5" hidden>
 
   <section>
     <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Hosts</h2>
@@ -288,7 +292,7 @@
 
   </div>  <!-- end data-tab-panel="status" -->
 
-  <div data-tab-panel="logs" class="space-y-5" hidden>
+  <div data-tab-panel="logs" id="panel-logs" role="tabpanel" aria-labelledby="tab-logs" tabindex="0" class="space-y-5" hidden>
 
   <section>
     <h2 class="text-xs uppercase tracking-wider text-base-content/60 mb-2 px-1">Recent conversation</h2>
@@ -345,13 +349,18 @@
   // the data was instant on tab-switch. We now pause polling for hidden
   // panels (cheaper) and force a refresh when a tab is revealed (instant
   // catch-up on tab-switch).
+  var DOTTY_TABS = ['dotty','live','status','logs'];
   function dottyTab(name) {
-    if (['dotty','live','status','logs'].indexOf(name) === -1) name = 'dotty';
+    if (DOTTY_TABS.indexOf(name) === -1) name = 'dotty';
     document.querySelectorAll('[data-tab-panel]').forEach(function (p) {
       p.hidden = (p.dataset.tabPanel !== name);
     });
     document.querySelectorAll('[role="tab"][data-tab]').forEach(function (t) {
-      t.classList.toggle('tab-active', t.dataset.tab === name);
+      var active = t.dataset.tab === name;
+      t.classList.toggle('tab-active', active);
+      // F21: roving tabindex + ARIA selected for screen readers / kbd nav.
+      t.setAttribute('aria-selected', active ? 'true' : 'false');
+      t.setAttribute('tabindex', active ? '0' : '-1');
     });
     history.replaceState(null, '', '#' + name);
     try { localStorage.setItem('dotty-tab', name); } catch (e) {}
@@ -368,6 +377,28 @@
   window.addEventListener('hashchange', function () {
     dottyTab((location.hash || '').replace('#', ''));
   });
+
+  // F21: ←/→/Home/End on the tablist. Follows the WAI-ARIA Tabs pattern:
+  // arrow keys move focus to the next/prev tab and activate it.
+  (function () {
+    var tablist = document.getElementById('dotty-tablist');
+    if (!tablist) return;
+    tablist.addEventListener('keydown', function (e) {
+      var current = document.activeElement;
+      var idx = current && current.dataset ? DOTTY_TABS.indexOf(current.dataset.tab) : -1;
+      if (idx === -1) return;
+      var next = -1;
+      if (e.key === 'ArrowRight') next = (idx + 1) % DOTTY_TABS.length;
+      else if (e.key === 'ArrowLeft') next = (idx - 1 + DOTTY_TABS.length) % DOTTY_TABS.length;
+      else if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = DOTTY_TABS.length - 1;
+      else return;
+      e.preventDefault();
+      dottyTab(DOTTY_TABS[next]);
+      var target = document.getElementById('tab-' + DOTTY_TABS[next]);
+      if (target) target.focus();
+    });
+  })();
 
   // Cancel htmx requests originating inside a hidden tab panel.
   document.body.addEventListener('htmx:beforeRequest', function (evt) {
