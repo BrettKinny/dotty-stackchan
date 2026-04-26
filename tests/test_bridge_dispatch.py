@@ -63,16 +63,6 @@ class DispatchPurrAudioTests(unittest.TestCase):
         )
         self.assertFalse(result)
 
-    def test_returns_false_when_file_missing(self):
-        result = _run(
-            dispatch_purr_audio(
-                "device-1",
-                purr_path=_fake_path(exists=False),
-                unraid_host="192.0.2.1",
-            )
-        )
-        self.assertFalse(result)
-
     def test_returns_true_on_2xx(self):
         mock_resp = MagicMock()
         mock_resp.status_code = 200

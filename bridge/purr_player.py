@@ -70,13 +70,6 @@ async def dispatch_purr_audio(
     if not host:
         log.warning("purr: UNRAID_HOST not set; cannot reach xiaozhi-server")
         return False
-    if not path.exists():
-        log.warning(
-            "purr: asset missing at %s (drop a purr.opus to enable; "
-            "see bridge/assets/README.md)",
-            path,
-        )
-        return False
 
     import requests as _req
 

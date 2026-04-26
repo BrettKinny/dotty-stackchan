@@ -1786,18 +1786,13 @@ async def _dispatch_purr_audio(device_id: str) -> bool:
 
     Defensive contract:
       * Missing UNRAID_HOST → return False (no network attempt).
-      * Missing audio file → return False (skip without raising).
-      * Network/HTTP failure → return False, log warning.
+      * Network/HTTP failure → return False, log warning. Asset existence
+        is checked server-side by xiaozhi-server's /play-asset route,
+        which returns 404 if the path doesn't resolve in its own
+        filesystem — the bridge surfaces that as a play-asset warning.
     """
     if not _XIAOZHI_HOST:
         log.warning("purr: UNRAID_HOST not set; cannot reach xiaozhi-server")
-        return False
-    if not PURR_AUDIO_PATH.exists():
-        log.warning(
-            "purr: asset missing at %s (drop a purr.opus to enable, "
-            "see bridge/assets/README.md)",
-            PURR_AUDIO_PATH,
-        )
         return False
     url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/play-asset"
     payload = {"device_id": device_id, "asset": str(PURR_AUDIO_PATH)}
