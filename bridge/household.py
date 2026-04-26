@@ -155,6 +155,35 @@ class HouseholdRegistry:
         self._reload_if_changed()
         return tuple(self._people.values())
 
+    def render_roster_for_vlm(self, *, max_line_chars: int = 80) -> str:
+        """Render members with a non-empty `appearance:` as one line per
+        person, suitable for inlining into a VLM identification prompt.
+        Lines are sorted by display_name for stable diffing across
+        reloads. Empty appearance is treated as "exclude from roster" —
+        a member with no visual description cannot be identified by
+        photo, so injecting their name into the prompt would only
+        invite the VLM to false-positive on them."""
+        self._reload_if_changed()
+        lines: list[str] = []
+        for p in sorted(self._people.values(), key=lambda x: x.display_name.lower()):
+            appearance = (p.appearance or "").strip()
+            if not appearance:
+                continue
+            if len(appearance) > max_line_chars:
+                appearance = appearance[: max_line_chars - 3].rstrip() + "..."
+            lines.append(f"  {p.display_name}: {appearance}")
+        return "\n".join(lines)
+
+    def roster_ids_with_appearance(self) -> set[str]:
+        """Set of canonical person_ids that have a non-empty appearance.
+        Used by the VLM-response parser to validate that the name the
+        VLM returned is one of the members it was asked to choose from."""
+        self._reload_if_changed()
+        return {
+            p.id for p in self._people.values()
+            if (p.appearance or "").strip()
+        }
+
     def get_by_calendar_prefix(self, prefix: str) -> Optional[Person]:
         """Look up a person by their `[Name]` calendar prefix.
         Case-insensitive; brackets optional."""

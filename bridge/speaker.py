@@ -66,14 +66,24 @@ SIG_STICKY = "sticky"
 SIG_CALENDAR = "calendar"
 SIG_TIME_OF_DAY = "time_of_day"
 SIG_PERCEPTION = "perception"
+SIG_VLM_MATCH = "vlm_match"
 SIG_FALLBACK = "fallback"
 
 # Default weights — small integers chosen so a single self-ID dominates,
 # stickiness carries inertia, and prior-only resolutions stay below the
 # clarification threshold so we ASK rather than guess.
+#
+# SIG_VLM_MATCH is the room_view roster identification (description-based,
+# no biometrics). Weight 0.6 sits between sticky (0.70) and perception
+# (0.40): a fresh visual match should beat the calendar/time priors
+# decisively but should NOT override an explicit self-ID ("no it's
+# Brett") — and should also not flap against a still-warm sticky latch
+# from a previous self-ID, since the latch is the user's expressed
+# intent ("this is who I am") whereas the VLM match is a guess.
 DEFAULT_WEIGHTS: dict[str, float] = {
     SIG_SELF_ID: 0.95,
     SIG_STICKY: 0.70,
+    SIG_VLM_MATCH: 0.60,
     SIG_PERCEPTION: 0.40,  # face_recognized when Layer 4 ships; lower until then
     SIG_CALENDAR: 0.25,
     SIG_TIME_OF_DAY: 0.15,
@@ -221,6 +231,7 @@ class SpeakerResolver:
         *,
         channel: Optional[str] = None,
         device_id: Optional[str] = None,
+        vlm_match_person_id: Optional[str] = None,
     ) -> SpeakerResolution:
         """Run all signals against the inbound utterance and produce a
         single best-guess person.
@@ -228,6 +239,13 @@ class SpeakerResolver:
         `channel` and `device_id` together key the sticky latch — most
         deployments use channel alone (one device per channel) but we
         accept both for future multi-device setups.
+
+        `vlm_match_person_id` carries the description-based room_view
+        identification result (see `bridge.py:_call_vision_api` +
+        `_parse_room_view_response`). When the bridge has a fresh VLM
+        match for one of the household roster members, pass its
+        canonical id here; a SIG_VLM_MATCH vote is appended. Unknown
+        ids are silently ignored.
         """
         sticky_key = self._sticky_key(channel, device_id)
         now = float(self._clock())
@@ -267,6 +285,26 @@ class SpeakerResolver:
         # Signal E — recent perception event.
         for vote in self._signal_perception(now):
             votes.append(vote)
+
+        # Signal F — VLM room_view roster match (description-based,
+        # no biometrics). Validated against the registry so a stale or
+        # mistyped person_id from upstream can't pin the resolver to a
+        # phantom identity.
+        if vlm_match_person_id:
+            normalised = vlm_match_person_id.strip().lower()
+            if normalised and self._registry is not None:
+                try:
+                    person = self._registry.get(normalised)
+                except Exception:
+                    log.debug("speaker: registry.get raised in vlm_match", exc_info=True)
+                    person = None
+                if person is not None:
+                    votes.append(SignalVote(
+                        signal=SIG_VLM_MATCH,
+                        person_id=person.id,
+                        weight=self._weights[SIG_VLM_MATCH],
+                        evidence="room_view VLM matched roster",
+                    ))
 
         resolution = self._combine(votes, now=now)
         try:
@@ -600,4 +638,5 @@ __all__ = [
     "SIG_CALENDAR",
     "SIG_TIME_OF_DAY",
     "SIG_PERCEPTION",
+    "SIG_VLM_MATCH",
 ]

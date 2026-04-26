@@ -366,19 +366,18 @@ async def _handle_vision(conn: "ConnectionHandler", text: str) -> str | None:
 # that turn just goes out without a [Room view] line — no extra
 # latency on the voice path.
 
-# The VLM prompt that elicits a useful identity-grounding sentence
-# without straying into name-guessing or scene narration. Tuned for
-# a single short sentence the LLM can fold into addressing the user.
-_ROOM_VIEW_VLM_QUESTION = (
-    "Describe the person you can see in one short sentence — "
-    "approximate age range, hair, clothing, distinguishing features. "
-    "If you cannot see a person, reply with exactly: no one in view. "
-    "Do not guess names. Do not add commentary."
-)
+# Sentinel placed in the multipart `question` field by the
+# `take_photo` MCP call to opt in to the bridge's roster-aware
+# room_view path. The actual prompt + household roster live on the
+# bridge (see `bridge.py:_build_room_view_question` +
+# `_ROOM_VIEW_SENTINEL`). The xiaozhi side stays roster-agnostic.
+# Versioning is in the sentinel itself for future format revs.
+_ROOM_VIEW_VLM_QUESTION = "__ROOM_VIEW_V1__"
 
-# Sentinel reply the prompt above asks for when the frame is empty.
-# We treat this as "no description" rather than caching the literal
-# string — saves a useless [Room view] line in the next voice turn.
+# Sentinel reply the bridge emits when the frame is empty / no person
+# is visible. Treated as "no description" so we don't stuff a useless
+# [Room view] line into the next voice turn. Mirrors the bridge-side
+# constant of the same name.
 _ROOM_VIEW_NO_PERSON = "no one in view"
 
 
@@ -436,21 +435,32 @@ async def _capture_room_description_async(
                 f"room_view: bridge returned {resp.status_code}"
             )
             return
-        description = (resp.json().get("description") or "").strip()
+        body = resp.json() or {}
+        description = (body.get("description") or "").strip()
+        # `room_match_person_id` is added by the bridge's room_view
+        # path; v1 description-only callers won't see it. Empty / None /
+        # "unknown" all reduce to "no roster match this turn".
+        match_raw = body.get("room_match_person_id")
+        match = (match_raw or "").strip().lower() or None
+        if match == "unknown":
+            match = None
         if not description:
             return
         # Treat the "no one in view" sentinel as a miss so we don't
         # stuff the prompt with a useless line.
         if _ROOM_VIEW_NO_PERSON in description.lower():
             conn._room_description = None
+            conn._room_match_person_id = None
             conn.logger.bind(tag=TAG).info(
                 "room_view: VLM reports no person; cache cleared"
             )
             return
         conn._room_description = description
+        conn._room_match_person_id = match
         conn._room_description_ts = time.time()
         conn.logger.bind(tag=TAG).info(
             f"room_view: cached len={len(description)} "
+            f"match={match or '-'} "
             f"preview={description[:60]!r}"
         )
     except Exception as exc:
@@ -464,14 +474,27 @@ async def _capture_room_description_async(
 def _with_room_view_marker(
     conn: "ConnectionHandler", text: str,
 ) -> str:
-    """Prepend `[ROOM_VIEW]\\n<desc>\\n` to `text` if a fresh room
-    description is cached on `conn`. The zeroclaw LLM provider strips
-    this marker and moves the description into request metadata; see
-    `custom-providers/zeroclaw/zeroclaw.py:_payload`."""
+    """Prepend the [ROOM_VIEW] marker to `text` if a fresh room
+    description is cached on `conn`.
+
+    Two shapes (zeroclaw `_payload` accepts both):
+
+      v1 — description only:
+          [ROOM_VIEW]\\n<desc>\\n<text>
+      v2 — description + roster match (may be empty):
+          [ROOM_VIEW]\\n<desc>\\n<person_id_or_blank>\\n<text>
+
+    We always emit v2 when a room description is cached. The
+    person_id slot is the matched roster id (e.g. `hudson`) or empty
+    string for "no roster match" — both are valid v2 signals. The
+    zeroclaw provider strips the marker and pushes both fields into
+    request metadata; the bridge's SpeakerResolver consumes the
+    person_id as a vote (see `_resolve_speaker_for_request`)."""
     desc = getattr(conn, "_room_description", None)
     if not desc:
         return text
-    return f"[ROOM_VIEW]\n{desc}\n{text}"
+    match = getattr(conn, "_room_match_person_id", None) or ""
+    return f"[ROOM_VIEW]\n{desc}\n{match}\n{text}"
 
 
 def _submit_chat(conn: "ConnectionHandler", text: str) -> None:

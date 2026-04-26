@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Awaitable, Callable, TypedDict
+from typing import Any, Awaitable, Callable, Optional, TypedDict
 from zoneinfo import ZoneInfo
 
 # Sibling import shim — custom-providers/textUtils.py is the canonical
@@ -254,6 +254,30 @@ VISION_SYSTEM_PROMPT = (
     + "If the image is blurry or unclear, describe what you can make out. "
     "Keep your description to 2-3 sentences."
 )
+# Room-view (description + roster identification) system prompt. Used
+# only when the question field carries the _ROOM_VIEW_SENTINEL value
+# below — the bridge then substitutes a roster-aware question with
+# the household members inlined. The "name only from this list, else
+# unknown" framing makes the kid-mode "do not name people" guard
+# unnecessary: the VLM can only emit one of the four roster names or
+# "unknown", so a stranger or hallucinated name is structurally
+# impossible to leak to the LLM downstream.
+VISION_ROOM_VIEW_SYSTEM_PROMPT = (
+    "You are looking at a photo from a small family robot's camera. "
+    "Reply in the EXACT format the user message requests. "
+    "Identify the person ONLY by names from the list the user provides. "
+    "Never invent names; never name anyone outside the list. "
+    "If you are not confident or no match is clear, use the name 'unknown'. "
+    "Keep the description to one short sentence."
+)
+# Sentinel value placed in the multipart `question` field by the
+# xiaozhi-side `_capture_room_description_async` to opt in to the
+# roster-aware path. The bridge owns the actual prompt + roster
+# (which lives in `~/.zeroclaw/household.yaml` on the bridge host),
+# so the xiaozhi side has no roster knowledge — it just signals
+# intent. Versioning is in the sentinel itself for future format
+# revs (`__ROOM_VIEW_V2__` etc.).
+_ROOM_VIEW_SENTINEL = "__ROOM_VIEW_V1__"
 
 # ---------------------------------------------------------------------------
 # MCP tool permission policy
@@ -674,7 +698,12 @@ def _resolve_speaker_for_request(payload):
     """Resolve who's speaking for the current request. Returns a
     `SpeakerResolution` or None when the resolver is unavailable. Errors
     are logged and swallowed so a resolver hiccup never breaks the
-    voice path."""
+    voice path.
+
+    `metadata.room_match_person_id` is shuttled through to the resolver
+    when present — the room_view roster identification path emits it on
+    the second line of the [ROOM_VIEW] marker; see the zeroclaw
+    provider's `_payload`."""
     if _speaker_resolver is None:
         return None
     try:
@@ -683,6 +712,7 @@ def _resolve_speaker_for_request(payload):
             payload.content or "",
             channel=payload.channel,
             device_id=meta.get("device_id"),
+            vlm_match_person_id=meta.get("room_match_person_id"),
         )
     except Exception:
         log.exception(
@@ -2417,7 +2447,10 @@ def _mark_identity_transition(device_id: str, name: str) -> bool:
     return True
 
 
-def _call_vision_api(b64_image: str, question: str) -> str:
+def _call_vision_api(
+    b64_image: str, question: str, *,
+    system_prompt: str = VISION_SYSTEM_PROMPT,
+) -> str:
     import requests as req
 
     if not VISION_API_KEY:
@@ -2426,7 +2459,7 @@ def _call_vision_api(b64_image: str, question: str) -> str:
     payload = {
         "model": VISION_MODEL,
         "messages": [
-            {"role": "system", "content": VISION_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {
                 "role": "user",
                 "content": [
@@ -2458,6 +2491,107 @@ def _call_vision_api(b64_image: str, question: str) -> str:
         return "I couldn't quite see that clearly."
 
 
+# ---------------------------------------------------------------------------
+# Room-view roster identification — description + 4-member name match
+# ---------------------------------------------------------------------------
+# Sentinel question from the xiaozhi side opts in to this path (see
+# `_ROOM_VIEW_SENTINEL` above). The bridge builds the roster-aware
+# question from the household registry on every call so YAML edits are
+# picked up without restart.
+
+# The exact reply format the VLM is asked to produce. Pinned to one
+# line so a streaming or partial completion still parses; `DESC: ` and
+# `NAME: ` are explicit markers the parser anchors on.
+_ROOM_VIEW_PROMPT_TEMPLATE = (
+    "Look at this photo and do TWO things in one reply.\n"
+    "\n"
+    "1. Describe the person in ONE short sentence — approximate age "
+    "range, hair, clothing, distinguishing features.\n"
+    "2. If the person clearly matches one of these family members, "
+    "give that exact name. Otherwise reply with the name 'unknown'.\n"
+    "\n"
+    "Family:\n"
+    "{roster}\n"
+    "\n"
+    "Reply on a SINGLE line in this exact format:\n"
+    "DESC: <one sentence> | NAME: <{name_choices}|unknown>\n"
+    "\n"
+    "If you cannot see a person at all, reply with exactly: no one in view\n"
+    "Do not invent names. Do not add commentary."
+)
+# Sentinel reply for empty frames — same string the v1 prompt used,
+# so existing log-grep regexes keep working.
+_ROOM_VIEW_NO_PERSON = "no one in view"
+# Parser regex. Anchored at start, allows whitespace flexibility, and
+# tolerates trailing punctuation around the name (e.g. `NAME: Hudson.`).
+_ROOM_VIEW_RESP_RE = re.compile(
+    r"^\s*DESC:\s*(?P<desc>.+?)\s*\|\s*NAME:\s*(?P<name>[A-Za-z_][A-Za-z0-9_-]*)\s*[.!?]?\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _build_room_view_question() -> Optional[str]:
+    """Build the roster-aware room_view prompt from the household
+    registry. Returns None when the registry is unavailable or has no
+    members with `appearance:` set — caller should fall back to the
+    v1 description-only prompt."""
+    if _household_registry is None:
+        return None
+    try:
+        roster = _household_registry.render_roster_for_vlm()
+    except Exception:
+        log.exception("room_view: render_roster_for_vlm raised")
+        return None
+    if not roster.strip():
+        return None
+    try:
+        name_choices = "|".join(sorted(
+            p.display_name for p in _household_registry.iter()
+            if (p.appearance or "").strip()
+        ))
+    except Exception:
+        log.exception("room_view: roster name iteration raised")
+        return None
+    return _ROOM_VIEW_PROMPT_TEMPLATE.format(
+        roster=roster, name_choices=name_choices,
+    )
+
+
+def _parse_room_view_response(
+    raw: str, roster_ids: set[str],
+) -> tuple[Optional[str], Optional[str]]:
+    """Parse the VLM's room_view reply into `(description, person_id)`.
+
+    Behaviour:
+      * Empty input  → (None, None)
+      * "no one in view" sentinel → (None, None)
+      * Format match + name in roster → (desc, person_id)
+      * Format match + name == "unknown" or off-roster → (desc, None)
+      * Format mismatch → (raw_stripped, None) — graceful degrade to
+        v1 behaviour so we never lose the description signal even when
+        the model deviates from the requested format.
+    """
+    if not raw:
+        return None, None
+    cleaned = raw.strip()
+    if not cleaned:
+        return None, None
+    if _ROOM_VIEW_NO_PERSON in cleaned.lower():
+        return None, None
+    m = _ROOM_VIEW_RESP_RE.match(cleaned)
+    if not m:
+        # Fall back: treat the whole reply as a description. Mirrors the
+        # v1 path so a botched format never costs us the description.
+        return cleaned, None
+    desc = m.group("desc").strip()
+    name = m.group("name").strip().lower()
+    if not desc:
+        desc = None  # paranoid — regex requires non-empty
+    if name == "unknown" or name not in roster_ids:
+        return desc, None
+    return desc, name
+
+
 @app.post("/api/vision/explain")
 async def vision_explain(
     request: Request,
@@ -2474,13 +2608,57 @@ async def vision_explain(
             device_id, question[:80], len(jpeg_bytes),
         )
         b64_image = base64.b64encode(jpeg_bytes).decode("ascii")
-        description = await asyncio.to_thread(_call_vision_api, b64_image, question)
+
+        # Room-view roster identification opt-in. The xiaozhi side
+        # sends the sentinel in the `question` field when it wants the
+        # bridge to substitute its roster-aware prompt + parse the
+        # combined description-and-name reply. Falls back to the v1
+        # description-only path if the registry is empty / unavailable
+        # so the existing room_view behaviour is preserved.
+        room_view_question = (
+            _build_room_view_question() if question == _ROOM_VIEW_SENTINEL
+            else None
+        )
+        room_match_person_id: str | None = None
+        if room_view_question is not None:
+            roster_ids = (
+                _household_registry.roster_ids_with_appearance()
+                if _household_registry is not None else set()
+            )
+            raw = await asyncio.to_thread(
+                _call_vision_api, b64_image, room_view_question,
+                system_prompt=VISION_ROOM_VIEW_SYSTEM_PROMPT,
+            )
+            parsed_desc, room_match_person_id = _parse_room_view_response(
+                raw, roster_ids,
+            )
+            description = parsed_desc or _ROOM_VIEW_NO_PERSON
+            log.info(
+                "room_view device=%s match=%s desc=%s",
+                device_id, room_match_person_id or "-", description[:120],
+            )
+        else:
+            # v1 path — either a normal "what do you see" call, OR a
+            # sentinel call that fell back because the registry is
+            # empty (no roster to choose from).
+            if question == _ROOM_VIEW_SENTINEL:
+                question = (
+                    "Describe the person you can see in one short "
+                    "sentence — approximate age range, hair, clothing, "
+                    "distinguishing features. If you cannot see a "
+                    "person, reply with exactly: no one in view. "
+                    "Do not guess names."
+                )
+            description = await asyncio.to_thread(
+                _call_vision_api, b64_image, question,
+            )
 
         _vision_cache[device_id] = {
             "description": description,
             "timestamp": perf_counter(),
             "jpeg_bytes": jpeg_bytes,
             "question": question,
+            "room_match_person_id": room_match_person_id,
         }
         # Wake every waiter polling this device. Concurrent callers
         # (room-view capture from textMessageHandlerRegistry + voice
@@ -2526,7 +2704,15 @@ async def vision_latest(device_id: str):
         await asyncio.wait_for(event.wait(), timeout=15.0)
         entry = _vision_cache.get(device_id)
         if entry:
-            return {"description": entry["description"]}
+            # `room_match_person_id` is None for the v1 description-only
+            # path and either a roster id (string) or None for the v2
+            # room_view roster path. Returned alongside `description` so
+            # the caller can shuttle both into the [ROOM_VIEW] marker
+            # (see `_with_room_view_marker` on the xiaozhi side).
+            return {
+                "description": entry["description"],
+                "room_match_person_id": entry.get("room_match_person_id"),
+            }
         return JSONResponse(status_code=500, content={"error": "vision processing failed"})
     except asyncio.TimeoutError:
         return JSONResponse(status_code=404, content={"error": "no vision result in time"})

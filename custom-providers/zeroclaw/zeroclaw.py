@@ -1,10 +1,25 @@
 import json
 import os
 import pathlib
+import re
 import time
 import uuid
 
 import requests
+
+# Person ids in household.yaml are lowercase, short, alnum + underscore
+# + hyphen. Anything not matching this is treated as user text by the
+# v1/v2 marker disambiguator in `_payload`.
+_PERSON_ID_RE = re.compile(r"^[a-z0-9_-]{0,32}$")
+
+
+def _looks_like_person_id(s: str) -> bool:
+    """True for the v2 marker's `<person_id_or_blank>` slot — empty
+    string OR a short alnum/underscore/hyphen token. Deliberately
+    accepts the empty string so the v2 shape with no roster match
+    still parses as v2 (otherwise an empty second line would silently
+    revert to v1)."""
+    return bool(_PERSON_ID_RE.match(s))
 
 _DBG = os.environ.get("ZEROCLAW_STREAM_DEBUG") == "1"
 
@@ -107,25 +122,46 @@ class LLMProvider(LLMProviderBase):
         stripped_user = user_text
 
         # Description-based identity (Layer 4 server-side, no storage).
-        # receiveAudioHandle prepends "[ROOM_VIEW]\n<description>\n" to
-        # the user text when it has a fresh VLM-generated description of
-        # who's in front of the camera. We strip it here and pass the
-        # description through metadata so the bridge can render it as a
-        # `[Room view] ...` line in the prompt without it surfacing as
-        # part of the user utterance.
+        # receiveAudioHandle prepends to the user text when it has a
+        # fresh VLM-generated description of who's in front of the
+        # camera. The marker has two shapes:
+        #
+        #   v1 (description only):
+        #       "[ROOM_VIEW]\n<description>\n<user text>"
+        #
+        #   v2 (description + matched roster id):
+        #       "[ROOM_VIEW]\n<description>\n<person_id_or_blank>\n<user text>"
+        #
+        # We accept both. v2 is the room_view + roster identification
+        # path: the bridge's room_view VLM call returns a `(desc,
+        # person_id)` tuple, and the xiaozhi side passes the matched
+        # id along on the second line. Empty string on the id line is
+        # the explicit "no roster match" signal (vs. v1's no-line-at-
+        # all). Validation against the registry happens bridge-side in
+        # SpeakerResolver — we just shuttle the value across.
         if stripped_user.startswith("[ROOM_VIEW]\n"):
             tail = stripped_user[len("[ROOM_VIEW]\n"):]
-            # Description ends at the next "\n"; everything after is
-            # the actual user utterance. If there is no second newline
-            # the whole tail is the description and the user utterance
-            # is empty (legitimate when the trigger comes from a
-            # non-voice path).
-            nl = tail.find("\n")
-            if nl >= 0:
-                metadata["room_description"] = tail[:nl]
-                stripped_user = tail[nl + 1:]
+            lines = tail.split("\n", 2)
+            # lines[0] = description; lines[1] = person_id (v2) or
+            # the start of user text (v1); lines[2] = user text (v2).
+            if len(lines) >= 3:
+                desc, second, rest = lines[0], lines[1], lines[2]
+                # Heuristic: a person_id is a short, alnum-or-underscore
+                # token. Anything else is treated as the start of v1
+                # user text and we fall back to v1 parsing.
+                if _looks_like_person_id(second):
+                    metadata["room_description"] = desc
+                    if second:
+                        metadata["room_match_person_id"] = second
+                    stripped_user = rest
+                else:
+                    metadata["room_description"] = desc
+                    stripped_user = second + ("\n" + rest if rest else "")
+            elif len(lines) == 2:
+                metadata["room_description"] = lines[0]
+                stripped_user = lines[1]
             else:
-                metadata["room_description"] = tail
+                metadata["room_description"] = lines[0]
                 stripped_user = ""
 
         if stripped_user.startswith("[SMART_MODE]\n"):

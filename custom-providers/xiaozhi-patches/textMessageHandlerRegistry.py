@@ -92,6 +92,11 @@ class EventTextMessageHandler(TextMessageHandler):
             try:
                 conn._room_description = None
                 conn._room_description_ts = 0.0
+                # v2 room_view roster identification: clear the matched
+                # person_id alongside the description so the next
+                # face_detected re-captures from scratch — same
+                # responsiveness contract as the description cache.
+                conn._room_match_person_id = None
             except Exception:
                 pass
         elif event_name == "face_detected":
