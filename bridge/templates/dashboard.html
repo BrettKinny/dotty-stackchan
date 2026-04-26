@@ -16,6 +16,7 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
   html, body { -webkit-tap-highlight-color: transparent; }
+  .safe-top { padding-top: env(safe-area-inset-top); }
   .status-dot { width: 12px; height: 12px; border-radius: 9999px; flex-shrink: 0; }
   .status-ok { background: #22c55e; box-shadow: 0 0 8px rgba(34,197,94,0.5); }
   .status-warn { background: #f59e0b; box-shadow: 0 0 8px rgba(245,158,11,0.5); }
@@ -320,6 +321,10 @@
     try { saved = localStorage.getItem('dotty-tab'); } catch (e) {}
     dottyTab(fromHash || saved || 'dotty');
   })();
+  // Alerts-badge link sets #logs; honour any later hash change.
+  window.addEventListener('hashchange', function () {
+    dottyTab((location.hash || '').replace('#', ''));
+  });
 
   // Cancel htmx requests originating inside a hidden tab panel.
   document.body.addEventListener('htmx:beforeRequest', function (evt) {
@@ -357,6 +362,32 @@
       connState.http = true; refreshConnectionBanner();
     }
   });
+
+  // Clipboard copy that falls back to a hidden textarea for non-secure
+  // contexts (the LAN URL is plain http, so navigator.clipboard rejects).
+  window.dottyCopy = function (btn, text) {
+    var label = btn.textContent;
+    function ok()   { btn.textContent = 'copied';  setTimeout(function () { btn.textContent = label; }, 1200); }
+    function fail() { btn.textContent = 'failed';  setTimeout(function () { btn.textContent = label; }, 1500); }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(ok, fallback);
+    } else {
+      fallback();
+    }
+    function fallback() {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        var done = document.execCommand('copy');
+        document.body.removeChild(ta);
+        done ? ok() : fail();
+      } catch (e) { fail(); }
+    }
+  };
 
   // Cap action-result stacks (preset/mood/dance) at 3 entries; oldest evicted.
   document.body.addEventListener('htmx:afterSwap', function (evt) {

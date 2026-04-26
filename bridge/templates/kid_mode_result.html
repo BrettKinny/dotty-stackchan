@@ -2,7 +2,14 @@
 <div class="alert alert-info py-2 text-sm"
      hx-get="/health" hx-trigger="load delay:3s, every 2s"
      hx-swap="none"
-     hx-on::after-request="if(event.detail.successful){htmx.ajax('GET','/ui/kid-mode',{target:'#kid-card-body',swap:'outerHTML'})}">
+     hx-on::after-request="if(event.detail.successful){htmx.ajax('GET','/ui/kid-mode',{target:'#kid-card-body',swap:'outerHTML'})}"
+     hx-on::load="(function(el){setTimeout(function(){
+       if(!el.isConnected) return;
+       var err=document.createElement('div');
+       err.className='alert alert-error py-2 text-sm';
+       err.textContent='Bridge did not come back after 30s. Check systemctl status zeroclaw-bridge.';
+       el.replaceWith(err);
+     },30000);})(this)">
   Restarting bridge to apply Kid Mode → {{ 'on' if new_state else 'off' }}…
 </div>
 {% else %}

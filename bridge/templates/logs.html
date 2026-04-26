@@ -25,7 +25,7 @@
           <span>response &middot; {{ entry.latency_ms }}ms</span>
           <button class="btn btn-ghost btn-xs ml-auto"
                   type="button"
-                  onclick="event.preventDefault();event.stopPropagation();const t=this.parentElement.nextElementSibling.innerText;navigator.clipboard.writeText(t);this.textContent='copied';setTimeout(()=>this.textContent='copy',1200);">
+                  onclick="event.preventDefault();event.stopPropagation();dottyCopy(this,this.parentElement.nextElementSibling.innerText);">
             copy
           </button>
         </summary>

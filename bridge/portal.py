@@ -16,13 +16,15 @@ import json
 import logging
 import os
 import re
+import secrets
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
 log = logging.getLogger("portal")
@@ -67,7 +69,38 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
-router = APIRouter(prefix="/ui", tags=["portal"])
+# Opt-in HTTP Basic auth. If both env vars are set, every /ui route requires
+# them. Unset → no auth (preserves current LAN-only behaviour).
+_PORTAL_USER = os.environ.get("DOTTY_PORTAL_USER", "")
+_PORTAL_PASS = os.environ.get("DOTTY_PORTAL_PASS", "")
+_basic = HTTPBasic(auto_error=False)
+
+
+def _verify_portal_auth(
+    credentials: HTTPBasicCredentials | None = Depends(_basic),
+) -> None:
+    if not _PORTAL_USER or not _PORTAL_PASS:
+        return
+    if credentials is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": 'Basic realm="dotty"'},
+        )
+    user_ok = secrets.compare_digest(credentials.username, _PORTAL_USER)
+    pass_ok = secrets.compare_digest(credentials.password, _PORTAL_PASS)
+    if not (user_ok and pass_ok):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": 'Basic realm="dotty"'},
+        )
+
+
+router = APIRouter(
+    prefix="/ui", tags=["portal"],
+    dependencies=[Depends(_verify_portal_auth)],
+)
 
 UNRAID_HOST = os.environ.get("UNRAID_HOST", "")
 UNRAID_OTA_PORT = int(os.environ.get("UNRAID_OTA_PORT", "8003"))
