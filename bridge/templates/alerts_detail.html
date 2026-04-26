@@ -1,0 +1,21 @@
+{% if entries %}
+<ul class="divide-y divide-base-300">
+  {% for entry in entries %}
+  <li class="py-2">
+    <div class="flex items-baseline gap-2">
+      <span class="text-xs text-base-content/50 font-mono">{{ entry.time }}</span>
+      <span class="badge badge-ghost badge-xs">{{ entry.channel }}</span>
+    </div>
+    {% if entry.request %}
+    <div class="text-sm break-words mt-1">{{ entry.request }}</div>
+    {% endif %}
+    <div class="text-xs text-error break-words mt-1 whitespace-pre-wrap">{{ entry.error }}</div>
+    {% if entry.response %}
+    <div class="text-xs text-base-content/60 break-words mt-1">{{ entry.response }}</div>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="text-sm text-base-content/50 text-center py-4">No errors today.</div>
+{% endif %}

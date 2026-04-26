@@ -1,6 +1,9 @@
 {% if count > 0 %}
-<a href="#logs" title="{{ count }} errored turn{{ 's' if count != 1 else '' }} today"
-   class="badge badge-error badge-sm gap-1 cursor-pointer">
+<button type="button"
+        title="{{ count }} errored turn{{ 's' if count != 1 else '' }} today — tap for detail"
+        hx-get="/ui/alerts/detail" hx-target="#alerts-modal-content" hx-swap="innerHTML"
+        hx-on::after-request="document.getElementById('alerts-modal').showModal()"
+        class="badge badge-error badge-sm gap-1 cursor-pointer">
   ⚠ {{ count }}
-</a>
+</button>
 {% endif %}

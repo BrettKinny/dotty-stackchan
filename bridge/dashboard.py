@@ -435,6 +435,47 @@ async def alerts_count(request: Request) -> Any:
     )
 
 
+@router.get("/alerts/detail", response_class=HTMLResponse, include_in_schema=False)
+async def alerts_detail(request: Request) -> Any:
+    """F13: render today's errored turns. Opened via the alerts-badge
+    modal in dashboard.html."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    path = _log_path_for(today)
+    entries: list[dict[str, Any]] = []
+    if path.exists():
+        try:
+            lines = path.read_bytes().splitlines()
+        except OSError:
+            lines = []
+        for line in reversed(lines):
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            if not rec.get("error"):
+                continue
+            ts = rec.get("ts", "")
+            try:
+                time_str = datetime.fromisoformat(
+                    ts.replace("Z", "+00:00")
+                ).astimezone().strftime("%H:%M:%S")
+            except Exception:
+                time_str = ts[-8:] if ts else "?"
+            entries.append({
+                "time": time_str,
+                "channel": rec.get("channel") or "?",
+                "request": _clean_request_text(rec.get("request_text") or "")[:400],
+                "response": (rec.get("response_text") or "")[:300],
+                "error": str(rec.get("error"))[:500],
+            })
+    return templates.TemplateResponse(
+        request, "alerts_detail.html",
+        {"entries": entries},
+    )
+
+
 @router.get("/face", response_class=HTMLResponse, include_in_schema=False)
 async def face_partial(request: Request) -> Any:
     """Show the most recent emoji Dotty used today (P9)."""
