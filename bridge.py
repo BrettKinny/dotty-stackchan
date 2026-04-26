@@ -39,6 +39,14 @@ from textUtils import (
 # Observability — every metric call is wrapped in `_safe_metric(...)` so a
 # bug in metrics wiring can NEVER break the request path. The metrics
 # module also degrades to no-ops if prometheus_client is unavailable.
+# Privacy-LED upload-pulse signaller — wraps cloud vision calls so the
+# firmware can pulse the camera privacy LED while data is in flight.
+# Today no transport is wired (avatar WS server isn't deployed); the
+# helper is a no-op-with-debug-log fallback so the call sites are ready
+# the moment a transport is plugged in. Firmware enforces a 2 s failsafe
+# timeout, so a missing `end` is self-healing.
+from bridge.privacy_signal import camera_upload_pulse
+
 try:
     from bridge.metrics import (
         dotty_active_acp_sessions,
@@ -2803,10 +2811,11 @@ async def vision_explain(
                 _household_registry.roster_ids_with_appearance()
                 if _household_registry is not None else set()
             )
-            raw = await asyncio.to_thread(
-                _call_vision_api, b64_image, room_view_question,
-                system_prompt=VISION_ROOM_VIEW_SYSTEM_PROMPT,
-            )
+            async with camera_upload_pulse():
+                raw = await asyncio.to_thread(
+                    _call_vision_api, b64_image, room_view_question,
+                    system_prompt=VISION_ROOM_VIEW_SYSTEM_PROMPT,
+                )
             parsed_desc, room_match_person_id = _parse_room_view_response(
                 raw, roster_ids,
             )
@@ -2827,9 +2836,10 @@ async def vision_explain(
                     "person, reply with exactly: no one in view. "
                     "Do not guess names."
                 )
-            description = await asyncio.to_thread(
-                _call_vision_api, b64_image, question,
-            )
+            async with camera_upload_pulse():
+                description = await asyncio.to_thread(
+                    _call_vision_api, b64_image, question,
+                )
 
         _vision_cache[device_id] = {
             "description": description,
