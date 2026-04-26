@@ -25,13 +25,6 @@
   .status-unknown { background: #6b7280; }
   .htmx-request .spin-on-load { animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  /* Q9: pulse the face when Dotty just spoke */
-  @keyframes dotty-pulse {
-    0%   { transform: scale(1);    filter: drop-shadow(0 0 0px rgba(34,197,94,0)); }
-    25%  { transform: scale(1.25); filter: drop-shadow(0 0 8px rgba(34,197,94,0.8)); }
-    100% { transform: scale(1);    filter: drop-shadow(0 0 0px rgba(34,197,94,0)); }
-  }
-  .dotty-speaking { animation: dotty-pulse 1.6s ease-out; }
 </style>
 </head>
 <body class="min-h-screen bg-base-200">
@@ -42,9 +35,6 @@
   <div class="flex-1 px-2 flex items-center gap-3">
     <svg class="w-9 h-9" aria-hidden="true"><use href="#dotty-icon"/></svg>
     <span class="text-lg font-semibold tracking-tight">Dotty</span>
-    <span id="dotty-face" data-poll
-          hx-get="/ui/face" hx-trigger="load, every 8s, dotty-refresh from:window" hx-swap="innerHTML"
-          class="leading-none inline-block"></span>
     <span id="device-status" data-poll
           hx-get="/ui/device-status" hx-trigger="load, every 5s, dotty-refresh from:window"
           hx-swap="innerHTML"></span>
@@ -664,14 +654,6 @@
       // Live log tail (P13) — fire the same window event the refresh
       // button uses so every polling tile picks up new state immediately.
       window.dispatchEvent(new CustomEvent('dotty-refresh'));
-      // Q9: brief speaking pulse on the face emoji to signal a fresh turn.
-      var face = document.getElementById('dotty-face');
-      if (face) {
-        face.classList.remove('dotty-speaking');
-        // reflow + re-add so the animation restarts on consecutive turns
-        void face.offsetWidth;
-        face.classList.add('dotty-speaking');
-      }
       // Error toast (P12) — surface failed turns even when the dashboard
       // is parked in the background.
       if (data && data.error) {
