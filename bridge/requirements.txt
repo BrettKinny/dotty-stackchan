@@ -22,11 +22,6 @@ PyYAML>=6.0,<7
 # bridge/audio_scene.py — module imports cleanly and no-ops with a
 # warning log when this dependency is absent.
 # tflite-runtime>=2.13
-# Layer 4 face recognition (RPi only). The face_recognition wheel pulls
-# dlib transitively, which is heavy. On DietPi/Raspberry Pi, install with:
-#   pip install face-recognition --extra-index-url https://www.piwheels.org/simple
-# bridge/face_recognizer.py imports defensively and degrades to
-# {"ok": false, "error": "module_unavailable"} when this is absent, so
-# the bridge stays bootable even if the operator hasn't run the install.
-face-recognition>=1.3,<2
+# numpy — used by bridge/audio_scene.py (YAMNet) and was also pulled in
+# transitively by the (now-removed) face-recognition wheel.
 numpy>=1.24,<3

@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Post-v0.1 work — code shipped to `main` but not yet deployed live or tagged. ~26 commits across the public server repo + the StackChan firmware fork during the 2026-04-25 evening sprint.
 
+### Removed — server
+- **dlib biometric face recognition** — `bridge/face_db.py`, `bridge/face_recognizer.py`, the `face-recognition` requirement, the `/api/face/{enroll,recognize,forget,list,last-action}` endpoints, the per-channel `_voice_identity_pending` / `_identity_state` machinery, and the voice-driven enrollment / list / forget intents in `receiveAudioHandle.py`. The description-based identity path (Layer 4 v1.5 — VLM returns a description plus a roster name match against `household.yaml`'s `appearance:` field) is now the sole identity feed. The biometric path was opt-in v2 only, never reached production (dlib won't build on Python 3.13 / DietPi), and conflicted with the project's no-storage identity posture. Firmware-side `FaceRecognizer` + `ParentalGate` + the inert call at `face_detector.cpp:273` will be removed in a follow-up firmware-only PR.
+
 ### Added — server
 - **Calendar polish** (`bridge.py`) — `Event` TypedDict + `by_person` cache, person-tag regex, `summarize_for_prompt()` single privacy chokepoint stripping ISO timestamps + emails before any prompt injection. New `GET /api/calendar/today` endpoint. Background poll loop with exponential backoff. Nightly-flush evicts stale events on date roll-over.
 - **Voice catalog + installer** (`docs/voice-catalog.md`, `scripts/voice-install.sh`) — 12 Piper + 6 EdgeTTS voices curated. `make voice-install VOICE=<key>` and `make voice-list`.

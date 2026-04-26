@@ -73,7 +73,6 @@ class Person:
     self_id_phrases: tuple[str, ...] = ()
     usual_times: dict[str, tuple[str, ...]] = field(default_factory=dict)
     calendar_prefix: Optional[str] = None
-    face_enrollment_id: Optional[str] = None
     voice_print_id: Optional[str] = None
 
     def days_until_birthday(self, *, today: Optional[date] = None) -> Optional[int]:
@@ -372,7 +371,6 @@ class HouseholdRegistry:
             self_id_phrases=_to_str_tuple(entry.get("self_id_phrases")),
             usual_times=usual_times,
             calendar_prefix=_opt_str(entry.get("calendar_prefix")),
-            face_enrollment_id=_opt_str(entry.get("face_enrollment_id")),
             voice_print_id=_opt_str(entry.get("voice_print_id")),
         )
 
