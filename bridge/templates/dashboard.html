@@ -36,9 +36,11 @@
 </head>
 <body class="min-h-screen bg-base-200">
 
+{% include "_svg_defs.html" %}
+
 <header class="navbar bg-base-100 sticky top-0 z-10 shadow-sm safe-top">
   <div class="flex-1 px-2 flex items-center gap-3">
-    <img src="/ui/icon.svg" alt="" class="w-9 h-9" aria-hidden="true">
+    <svg class="w-9 h-9" aria-hidden="true"><use href="#dotty-icon"/></svg>
     <span class="text-lg font-semibold tracking-tight">Dotty</span>
     <span id="dotty-face" data-poll
           hx-get="/ui/face" hx-trigger="load, every 8s, dotty-refresh from:window" hx-swap="innerHTML"
@@ -139,7 +141,7 @@
     <div class="card bg-base-100 shadow-sm">
       <div id="last-turn" class="card-body p-3">
         <div id="last-turn-empty" class="flex flex-col items-center text-center py-3 gap-2">
-          <img src="/ui/hero.svg" alt="" class="w-24 h-24 opacity-60" aria-hidden="true">
+          <svg class="w-24 h-24 opacity-60" aria-hidden="true"><use href="#dotty-hero"/></svg>
           <div class="text-sm text-base-content/50">Say hi to see Dotty's reply.</div>
         </div>
       </div>
@@ -192,7 +194,7 @@
     <div class="card bg-base-100 shadow-sm overflow-hidden">
       <div id="live-transcript" class="divide-y divide-base-300 max-h-[70vh] overflow-y-auto">
         <div id="live-transcript-empty" class="flex flex-col items-center text-center px-3 py-6 gap-2">
-          <img src="/ui/hero.svg" alt="" class="w-20 h-20 opacity-50" aria-hidden="true">
+          <svg class="w-20 h-20 opacity-50" aria-hidden="true"><use href="#dotty-hero"/></svg>
           <div class="text-sm text-base-content/50">Waiting for the next turn…</div>
         </div>
       </div>
@@ -214,7 +216,7 @@
     <div class="card bg-base-100 shadow-sm overflow-hidden">
       <div id="perception-feed" class="divide-y divide-base-300 max-h-[70vh] overflow-y-auto">
         <div id="perception-feed-empty" class="flex flex-col items-center text-center px-3 py-6 gap-2">
-          <img src="/ui/hero.svg" alt="" class="w-20 h-20 opacity-50" aria-hidden="true">
+          <svg class="w-20 h-20 opacity-50" aria-hidden="true"><use href="#dotty-hero"/></svg>
           <div class="text-sm text-base-content/50">Waiting for perception events…</div>
         </div>
       </div>
