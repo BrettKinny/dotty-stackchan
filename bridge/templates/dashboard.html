@@ -82,6 +82,9 @@
     <a role="tab" id="tab-live" data-tab="live" class="tab flex-1"
        aria-controls="panel-live" aria-selected="false" tabindex="-1"
        onclick="dottyTab('live')">Live</a>
+    <a role="tab" id="tab-perception" data-tab="perception" class="tab flex-1"
+       aria-controls="panel-perception" aria-selected="false" tabindex="-1"
+       onclick="dottyTab('perception')">Perception</a>
     <a role="tab" id="tab-status" data-tab="status" class="tab flex-1"
        aria-controls="panel-status" aria-selected="false" tabindex="-1"
        onclick="dottyTab('status')">Status</a>
@@ -226,6 +229,27 @@
 
   </div>  <!-- end data-tab-panel="live" -->
 
+  <div data-tab-panel="perception" id="panel-perception" role="tabpanel" aria-labelledby="tab-perception" tabindex="0" class="space-y-5" hidden>
+
+  <section>
+    <div class="flex items-center justify-between mb-2 px-1">
+      <h2 class="text-xs uppercase tracking-wider text-base-content/60">Perception events</h2>
+      <div class="flex items-center gap-2">
+        <span id="perception-count" class="text-xs text-base-content/40 font-mono">0</span>
+        <button type="button" id="perception-clear" class="btn btn-ghost btn-xs">clear</button>
+      </div>
+    </div>
+    <div class="card bg-base-100 shadow-sm overflow-hidden">
+      <div id="perception-feed" class="divide-y divide-base-300 max-h-[70vh] overflow-y-auto">
+        <div id="perception-feed-empty" class="text-sm text-base-content/50 text-center px-3 py-6">
+          Waiting for perception events…
+        </div>
+      </div>
+    </div>
+  </section>
+
+  </div>  <!-- end data-tab-panel="perception" -->
+
   <div data-tab-panel="status" id="panel-status" role="tabpanel" aria-labelledby="tab-status" tabindex="0" class="space-y-5" hidden>
 
   <section>
@@ -349,7 +373,7 @@
   // the data was instant on tab-switch. We now pause polling for hidden
   // panels (cheaper) and force a refresh when a tab is revealed (instant
   // catch-up on tab-switch).
-  var DOTTY_TABS = ['dotty','live','status','logs'];
+  var DOTTY_TABS = ['dotty','live','perception','status','logs'];
   function dottyTab(name) {
     if (DOTTY_TABS.indexOf(name) === -1) name = 'dotty';
     document.querySelectorAll('[data-tab-panel]').forEach(function (p) {
@@ -470,6 +494,81 @@
     if (t.id !== 'preset-result' && t.id !== 'mood-result' && t.id !== 'dance-result') return;
     while (t.children.length > 3) t.removeChild(t.lastElementChild);
   });
+
+  // F9 perception feed — separate SSE stream from /api/perception/feed
+  // (the bridge's perception bus, not the dashboard's turn stream).
+  var PERCEPTION_BADGE_CLASS = {
+    face_detected: 'badge-success',
+    face_lost: 'badge-error',
+    sound_event: 'badge-warning',
+    head_pet_started: 'badge-info',
+    head_pet_ended: 'badge-info',
+  };
+  var perceptionCount = 0;
+  function prependPerceptionEvent(ev) {
+    var feed = document.getElementById('perception-feed');
+    if (!feed) return;
+    var empty = document.getElementById('perception-feed-empty');
+    if (empty) empty.remove();
+
+    var row = document.createElement('div');
+    row.className = 'px-3 py-2';
+
+    var head = document.createElement('div');
+    head.className = 'flex items-baseline gap-2 flex-wrap';
+
+    var badge = document.createElement('span');
+    badge.className = 'badge badge-xs ' + (PERCEPTION_BADGE_CLASS[ev.name] || 'badge-ghost');
+    badge.textContent = ev.name || '?';
+    head.appendChild(badge);
+
+    if (ev.device_id) {
+      var dev = document.createElement('span');
+      dev.className = 'text-xs text-base-content/50 font-mono';
+      dev.textContent = ev.device_id;
+      head.appendChild(dev);
+    }
+    var ts = document.createElement('span');
+    ts.className = 'text-xs text-base-content/50 ml-auto font-mono';
+    var d = new Date((ev.ts || (Date.now() / 1000)) * 1000);
+    ts.textContent = d.toLocaleTimeString();
+    head.appendChild(ts);
+    row.appendChild(head);
+
+    if (ev.data && Object.keys(ev.data).length > 0) {
+      var data = document.createElement('div');
+      data.className = 'text-xs text-base-content/60 break-words mt-1 font-mono';
+      data.textContent = JSON.stringify(ev.data);
+      row.appendChild(data);
+    }
+
+    feed.insertBefore(row, feed.firstChild);
+    while (feed.children.length > 100) feed.removeChild(feed.lastElementChild);
+    perceptionCount++;
+    var c = document.getElementById('perception-count');
+    if (c) c.textContent = perceptionCount;
+  }
+  (function () {
+    var clearBtn = document.getElementById('perception-clear');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function () {
+        var feed = document.getElementById('perception-feed');
+        if (feed) feed.innerHTML = '';
+        perceptionCount = 0;
+        var c = document.getElementById('perception-count');
+        if (c) c.textContent = '0';
+      });
+    }
+    if (typeof EventSource === 'undefined') return;
+    var psrc = new EventSource('/api/perception/feed');
+    psrc.onmessage = function (ev) {
+      var data;
+      try { data = JSON.parse(ev.data); } catch (e) { return; }
+      prependPerceptionEvent(data);
+    };
+    // Errors are silent — the connection-banner above already covers
+    // bridge-down state via the /ui/events SSE.
+  })();
 
   // F8 live transcript — prepend each completed turn to the Live tab.
   function prependLiveTurn(data) {
