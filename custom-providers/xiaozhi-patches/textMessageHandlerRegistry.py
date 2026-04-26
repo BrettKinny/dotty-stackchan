@@ -117,8 +117,13 @@ class EventTextMessageHandler(TextMessageHandler):
                             conn, "_room_description_in_flight", False)):
                     # Imported lazily — receiveAudioHandle imports
                     # core.* modules that aren't available at module
-                    # import time in some test contexts.
-                    from receiveAudioHandle import (
+                    # import time in some test contexts. The bind-mount
+                    # target inside the xiaozhi container is the
+                    # `core.handle.receiveAudioHandle` package path, NOT
+                    # a top-level module — the bare `from receiveAudioHandle`
+                    # form here originally raised `No module named` and
+                    # silently no-op'd the room_view capture for weeks.
+                    from core.handle.receiveAudioHandle import (
                         _capture_room_description_async,
                     )
                     _spawn(
