@@ -219,60 +219,6 @@
                     "type": "object",
                     "properties": {}
                 }
-            },
-            {
-                "name": "self.robot.face_unlock",
-                "description": "Unlock adult-mode features via face/PIN. `method` is 'face' or 'pin'; `secret` is the PIN string when method='pin'. Adult-mode only.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "method": {
-                            "type": "string",
-                            "enum": ["face", "pin"]
-                        },
-                        "secret": {
-                            "type": "string",
-                            "description": "PIN when method='pin'; ignored for method='face'."
-                        }
-                    },
-                    "required": ["method"]
-                }
-            },
-            {
-                "name": "self.robot.face_enroll",
-                "description": "Enroll a new face under `name`. Adult-mode only — filtered out under kid-mode.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "Identity label, e.g. 'brett'."
-                        }
-                    },
-                    "required": ["name"]
-                }
-            },
-            {
-                "name": "self.robot.face_forget",
-                "description": "Delete an enrolled face by `name`. Adult-mode only — filtered out under kid-mode.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "Identity label to forget."
-                        }
-                    },
-                    "required": ["name"]
-                }
-            },
-            {
-                "name": "self.robot.face_list",
-                "description": "List enrolled face identities. Read-only and safe in any mode.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {}
-                }
             }
         ]
     }

@@ -14,8 +14,6 @@ Post-v0.1 work — code shipped to `main` but not yet deployed live or tagged. ~
 - **Observability** (`bridge/metrics.py`, `monitoring/grafana-dashboard.json`, `docs/observability.md`) — Prometheus `/metrics` with 9 metrics (first-audio latency histogram, request duration/errors per endpoint, ACP session gauge, smart-mode/kid-mode counters, perception event counter, calendar fetch failures). Two-layer defensive guard so metrics regression cannot break request path.
 - **Layer 6 ProactiveGreeter** (`bridge/proactive_greeter.py`, `bridge/server_push.py`, `docs/proactive-greetings.md`) — face_recognized → cooldown + time-of-day windowing + kid-safe sandwich + calendar-aware greeting via inject-tts. Template fallback. 14 unit tests.
 - **Phase 2 AudioSceneClassifier** (`bridge/audio_scene.py`, `bridge/yamnet_classmap.py`, `scripts/fetch-yamnet.sh`, `docs/audio-scene-classifier.md`) — YAMNet INT8 TFLite scaffold. Sliding 0.96s buffer @ 16kHz, whitelist filter (doorbell/knock/cat/dog/baby-cry/music/footsteps/etc.), threshold + per-class cooldown. Emits `sound_event(class=...)`. Defensive — degrades gracefully without `tflite-runtime`. 10 unit tests.
-- **Phase 4 EngagementDecider** (`bridge/engagement_decider.py`, `bridge/intent_templates.py`, `docs/engagement-decider.md`) — the "Dotty notices you walk in and chimes up on its own" sublayer. Per-intent cooldowns, mood scalar in [0,1] decaying toward 0.5, time-of-day active window, hard quiet-hours gate, atomic-write state persistence. 32 unit tests. `ENGAGEMENT_ENABLED=false` default.
-- **DOTTY_RICH_MCP tool surface** (`bridge/rich_mcp.py`, `bridge/rich_mcp_dispatch.py`, `docs/rich-mcp.md`) — exposes 17 firmware MCP tools to the LLM as native tool-use. Kid-mode filter excludes camera + face-enrollment tools (12 in kid mode). Hard allowlist; defensive dispatch. 13 unit tests. `DOTTY_RICH_MCP=false` default.
 - **Hybrid smart-mode LED bridge half** (`receiveAudioHandle.py`) — `_send_led_multi` helper + `conn.smart_mode_active` flag. Holds index 0 purple while the rest of the ring shows listen/think/talk. Re-asserts on every color change. try/except guarded for old-firmware compatibility.
 - **Face greeter env-tunable** — `FACE_GREET_TEXT` (set "" to disable verbal greet) + `FACE_GREET_MIN_INTERVAL_SEC` (default 30s).
 - **Purr-on-head-pet (server)** (`bridge.py`, `bridge/assets/`) — `_perception_purr_player` consumes `head_pet_started`, pushes purr audio via inject-text. Per-device cooldown. Bypasses kid-mode sandwich (fixed asset). Asset path is a drop-in (not committed; see `bridge/assets/README.md`).
@@ -42,11 +40,14 @@ Post-v0.1 work — code shipped to `main` but not yet deployed live or tagged. ~
 - **Camera arbiter TOCTOU race** — fold flag check inside mutex region, eliminating 2s stall window.
 - **Stale `idle_motion_modifier_id_` in `FaceTrackingModifier`** — lookup by stable name at call time instead of caching ID at construction. Added `Modifier::name()` virtual + `StackChan::getModifierByName()` API.
 
+### Removed — server
+- **Rich MCP tool surface** (`bridge/rich_mcp.py`, `bridge/rich_mcp_dispatch.py`, `docs/rich-mcp.md`, 13 tests). Never enabled in production (`DOTTY_RICH_MCP=false` default). Cut as dormant scaffolding — voice-only is the intended product surface; don't re-add.
+- **Phase 4 EngagementDecider** (`bridge/engagement_decider.py`, `bridge/intent_templates.py`, `docs/engagement-decider.md`, 32 tests). Never enabled in production (`ENGAGEMENT_ENABLED=false` default). Cut for the same reason. Proactive utterances remain served by `bridge/proactive_greeter.py`.
+- `docs/mcp-tools-capture.json` trimmed 17 → 13 tools — the 4 `robot.face_*` entries were rich_mcp fabrications (firmware actually exposes `camera.face_*` and has no `face_unlock` tool at all). `set_led_multi` and `get_privacy_state` retained as real firmware tools.
+
 ### Pending wiring (not yet shipped)
-- Bridge wiring round 2 — `RichMCPToolSurface` + `EngagementDecider` into `bridge.py` lifespan + LLM tool-use call site.
 - Camera `VIDIOC_STREAMOFF` peripheral-off when face-detect is paused (closes the Layer 1 privacy LED hole noted in `eb595f2`).
 - Reproducible firmware builds — IDF Dockerfile SHA256 pin + `dependencies.lock` + `make verify-firmware` target.
-- `docs/mcp-tools-capture.json` refresh to add the 6 new MCP tools shipped this session.
 
 ## [0.1.0] - 2026-04-25
 
