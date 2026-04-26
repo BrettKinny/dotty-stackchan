@@ -407,35 +407,65 @@ async def _capture_room_description_async(
         return
     conn._room_description_in_flight = True
     try:
-        mcp_call = json.dumps({
-            "session_id": conn.session_id,
-            "type": "mcp",
-            "payload": {
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "self.camera.take_photo",
-                    "arguments": {"question": _ROOM_VIEW_VLM_QUESTION},
-                },
-                "id": int(time.time() * 1000) % 0x7FFFFFFF,
-            },
-        })
-        await conn.websocket.send(mcp_call)
-        conn.logger.bind(tag=TAG).info(
-            f"room_view: capture started device={device_id}"
-        )
         import requests
         url = f"{VISION_BRIDGE_URL.rstrip('/')}/api/vision/latest/{device_id}"
-        resp = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: requests.get(url, timeout=20),
-        )
-        if resp.status_code != 200:
+        # Background captures lose most races against the live face
+        # detector for the firmware camera arbiter (Capture() returns
+        # false on lock timeout → firmware never POSTs to bridge →
+        # bridge long-poll times out at 15s with 404). Re-send the MCP
+        # call on miss; each retry gives the detector another window
+        # to release the lock between its own ticks. Worst case ~50s
+        # for a fire-and-forget background capture — fine because
+        # late landing just means [Room view] attaches to a later
+        # voice turn instead of the first one. See
+        # probes/identity-description-flow.md and the [~] note in
+        # tasks.md §Layer 4 v1.5 for the full diagnosis.
+        body: dict | None = None
+        for attempt in range(3):
+            mcp_call = json.dumps({
+                "session_id": conn.session_id,
+                "type": "mcp",
+                "payload": {
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "self.camera.take_photo",
+                        "arguments": {"question": _ROOM_VIEW_VLM_QUESTION},
+                    },
+                    "id": int(time.time() * 1000) % 0x7FFFFFFF,
+                },
+            })
+            await conn.websocket.send(mcp_call)
+            if attempt == 0:
+                conn.logger.bind(tag=TAG).info(
+                    f"room_view: capture started device={device_id}"
+                )
+            resp = None
+            try:
+                resp = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: requests.get(url, timeout=20),
+                )
+            except Exception as exc:
+                conn.logger.bind(tag=TAG).warning(
+                    f"room_view: bridge poll exc attempt={attempt + 1}: {exc}"
+                )
+            if resp is not None and resp.status_code == 200:
+                candidate = resp.json() or {}
+                if (candidate.get("description") or "").strip():
+                    body = candidate
+                    break
+            status = resp.status_code if resp is not None else "exception"
+            conn.logger.bind(tag=TAG).info(
+                f"room_view: miss attempt={attempt + 1} status={status}"
+            )
+            if attempt < 2:
+                await asyncio.sleep(0.3 * (2 ** attempt))
+        if not body:
             conn.logger.bind(tag=TAG).warning(
-                f"room_view: bridge returned {resp.status_code}"
+                f"room_view: capture failed after retries device={device_id}"
             )
             return
-        body = resp.json() or {}
         description = (body.get("description") or "").strip()
         # `room_match_person_id` is added by the bridge's room_view
         # path; v1 description-only callers won't see it. Empty / None /
