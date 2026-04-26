@@ -99,7 +99,7 @@ ADULT_MODEL = os.environ.get(
 
 
 def _read_kid_mode() -> bool:
-    """State file overrides env var so the portal can flip kid-mode and
+    """State file overrides env var so the dashboard can flip kid-mode and
     survive a restart without editing the systemd unit. Format: "true" or
     "false" (any other content falls back to the env default)."""
     if _KID_STATE_FILE.exists():
@@ -173,9 +173,9 @@ SMART_API_URL = os.environ.get(
 )
 SMART_MAX_TOKENS = int(os.environ.get("SMART_MAX_TOKENS", "2048"))
 CONVO_LOG_DIR = Path(os.environ.get("CONVO_LOG_DIR", "/root/zeroclaw-bridge/logs"))
-# Used by the portal admin path AND by perception-bus consumers (1.5/1.6).
-# Hoisted out of the `if _configure_portal` block so the bus tasks can
-# reach the xiaozhi admin endpoints regardless of portal availability.
+# Used by the dashboard admin path AND by perception-bus consumers (1.5/1.6).
+# Hoisted out of the `if _configure_dashboard` block so the bus tasks can
+# reach the xiaozhi admin endpoints regardless of dashboard availability.
 _XIAOZHI_HOST = os.environ.get("UNRAID_HOST", "")
 _XIAOZHI_HTTP_PORT = int(os.environ.get("UNRAID_OTA_PORT", "8003"))
 # Phase 1.5: face-greet cooldown. Conservative default keeps the robot
@@ -1348,7 +1348,7 @@ class _ConvoLogger:
             path.chmod(0o600)
         except Exception:
             log.warning("convo log write failed", exc_info=True)
-        _portal_broadcast_turn(
+        _dashboard_broadcast_turn(
             channel=channel or "",
             request_text=request_text,
             response_text=response_text,
@@ -1365,27 +1365,27 @@ _convo_log = _ConvoLogger(CONVO_LOG_DIR)
 # --- Portal event broadcast (P12, P13) -----------------------------------
 # In-process pub/sub for completed turns. Subscribers get an asyncio.Queue
 # they can drain; the bridge pushes to all queues after each log_turn.
-_portal_event_listeners: list[asyncio.Queue] = []
+_dashboard_event_listeners: list[asyncio.Queue] = []
 
 
-def _portal_subscribe_events() -> asyncio.Queue:
+def _dashboard_subscribe_events() -> asyncio.Queue:
     q: asyncio.Queue = asyncio.Queue(maxsize=100)
-    _portal_event_listeners.append(q)
+    _dashboard_event_listeners.append(q)
     return q
 
 
-def _portal_unsubscribe_events(q: asyncio.Queue) -> None:
+def _dashboard_unsubscribe_events(q: asyncio.Queue) -> None:
     try:
-        _portal_event_listeners.remove(q)
+        _dashboard_event_listeners.remove(q)
     except ValueError:
         pass
 
 
-def _portal_broadcast_turn(*, channel: str, request_text: str,
+def _dashboard_broadcast_turn(*, channel: str, request_text: str,
                            response_text: str, latency_ms: float,
                            error: str | None, emoji_used: str,
                            ts_iso: str) -> None:
-    if not _portal_event_listeners:
+    if not _dashboard_event_listeners:
         return
     event = {
         "ts": ts_iso,
@@ -1396,7 +1396,7 @@ def _portal_broadcast_turn(*, channel: str, request_text: str,
         "error": error,
         "emoji_used": emoji_used,
     }
-    for q in list(_portal_event_listeners):
+    for q in list(_dashboard_event_listeners):
         try:
             q.put_nowait(event)
         except asyncio.QueueFull:
@@ -1407,7 +1407,7 @@ def _portal_broadcast_turn(*, channel: str, request_text: str,
 # In-process pub/sub for ambient perception events emitted by firmware
 # producers (face_detected, face_lost, sound_event, ...) via the
 # xiaozhi-server event relay, and later by server-side classifiers
-# (audio scene, vision). Mirrors the _portal_event_listeners pattern.
+# (audio scene, vision). Mirrors the _dashboard_event_listeners pattern.
 # Phase 1 has no consumers wired yet — landed standalone so producers
 # and tests can validate the surface before consumers are added.
 _perception_listeners: list[asyncio.Queue] = []
@@ -1607,7 +1607,7 @@ async def _perception_face_lost_aborter() -> None:
 
 async def _dispatch_face_greeting(device_id: str, text: str) -> None:
     """Phase 1.5 helper: fire-and-forget POST to the xiaozhi admin
-    inject-text route, same path the portal greeter uses."""
+    inject-text route, same path the dashboard greeter uses."""
     if not _XIAOZHI_HOST:
         log.warning("face greeter: UNRAID_HOST not set; cannot reach xiaozhi-server")
         return
@@ -2259,11 +2259,11 @@ if _METRICS_AVAILABLE and metrics_app is not None:
         log.exception("metrics mount failed — /metrics will be unavailable")
 
 try:
-    from bridge.portal import router as _portal_router, configure as _configure_portal
-    app.include_router(_portal_router)
+    from bridge.dashboard import router as _dashboard_router, configure as _configure_dashboard
+    app.include_router(_dashboard_router)
 except Exception:
-    log.exception("portal mount failed — admin UI at /ui will be unavailable")
-    _configure_portal = None  # type: ignore[assignment]
+    log.exception("dashboard mount failed — admin UI at /ui will be unavailable")
+    _configure_dashboard = None  # type: ignore[assignment]
 
 
 @app.get("/health")
@@ -2288,7 +2288,7 @@ async def calendar_today(
     Routes through `summarize_for_prompt` so the response carries the
     same privacy guarantees as prompt injection: no ISO timestamps, no
     email addresses, no raw calendar IDs. Intended for the firmware /
-    portal UI; deliberately NOT registered as an MCP tool because the
+    dashboard UI; deliberately NOT registered as an MCP tool because the
     firmware-side `MCP_TOOL_ALLOWLIST` is closed and we want this stay
     a passive read endpoint, not something the LLM can call.
     """
@@ -2390,7 +2390,7 @@ async def perception_event(payload: PerceptionEventIn) -> None:
 @app.get("/api/perception/state")
 async def perception_state(device_id: str = "") -> dict:
     """Debug introspection — current per-device perception state.
-    Used by Phase 1 verification + later by the portal.
+    Used by Phase 1 verification + later by the dashboard.
 
     Each device entry is annotated with:
       sensor_stale  – True when no event has arrived within
@@ -2871,12 +2871,12 @@ async def message(payload: MessageIn) -> MessageOut:
     return MessageOut(response=answer, session_id=session_id)
 
 
-if _configure_portal is not None:
-    async def _portal_send_message(*, text: str, channel: str = "dotty") -> dict:
+if _configure_dashboard is not None:
+    async def _dashboard_send_message(*, text: str, channel: str = "dotty") -> dict:
         out = await message(MessageIn(content=text, channel=channel))
         return {"response": out.response, "session_id": out.session_id}
 
-    def _portal_set_kid_mode(enabled: bool) -> None:
+    def _dashboard_set_kid_mode(enabled: bool) -> None:
         _write_kid_mode(enabled)
         # Tied model swap: kid mode ON → small safety-tuned model;
         # kid mode OFF → capable adult model. Failure is logged but does
@@ -2891,7 +2891,7 @@ if _configure_portal is not None:
                 target_model,
             )
 
-    async def _portal_abort_device(*, device_id: str = "") -> dict:
+    async def _dashboard_abort_device(*, device_id: str = "") -> dict:
         """Fire-and-forget POST to xiaozhi-server's admin abort route."""
         if not _XIAOZHI_HOST:
             return {"ok": False, "error": "UNRAID_HOST not set"}
@@ -2910,7 +2910,7 @@ if _configure_portal is not None:
                 return {"ok": False, "error": str(exc)}
         return await asyncio.to_thread(_post)
 
-    async def _portal_inject_to_device(*, text: str, device_id: str = "") -> dict:
+    async def _dashboard_inject_to_device(*, text: str, device_id: str = "") -> dict:
         """Fire-and-forget POST to xiaozhi-server's admin route so the
         named (or first-available) device runs the text through its
         normal post-ASR pipeline — intent detection, MCP tools, TTS."""
@@ -2931,15 +2931,15 @@ if _configure_portal is not None:
                 return {"ok": False, "error": str(exc)}
         return await asyncio.to_thread(_post)
 
-    _configure_portal(
-        send_message=_portal_send_message,
+    _configure_dashboard(
+        send_message=_dashboard_send_message,
         vision_cache=_vision_cache,
         kid_mode_getter=lambda: KID_MODE,
-        kid_mode_setter=_portal_set_kid_mode,
-        inject_to_device=_portal_inject_to_device,
-        abort_device=_portal_abort_device,
-        subscribe_events=_portal_subscribe_events,
-        unsubscribe_events=_portal_unsubscribe_events,
+        kid_mode_setter=_dashboard_set_kid_mode,
+        inject_to_device=_dashboard_inject_to_device,
+        abort_device=_dashboard_abort_device,
+        subscribe_events=_dashboard_subscribe_events,
+        unsubscribe_events=_dashboard_unsubscribe_events,
     )
 
 

@@ -114,7 +114,7 @@ class ProactiveGreeter:
         but never propagated.
     kid_mode_provider :
         Callable returning the current kid-mode flag (bool). Sampled
-        every greeting so a portal flip takes effect without a restart.
+        every greeting so a dashboard flip takes effect without a restart.
     """
 
     DEFAULT_STATE_PATH = "~/.zeroclaw/greeter_state.json"

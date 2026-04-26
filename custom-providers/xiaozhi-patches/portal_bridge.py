@@ -2,7 +2,7 @@
 
 Populated by the patched WebSocketServer when devices connect/disconnect;
 read by the patched HTTP server's /xiaozhi/admin/inject-text route so
-the Dotty admin portal can fire `startToChat` against an active device
+the Dotty admin dashboard can fire `startToChat` against an active device
 connection (which is what the bridge needs to make the device actually
 speak / emote / fire MCP tools — the bridge has no WS to the device).
 

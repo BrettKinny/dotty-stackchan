@@ -5,7 +5,7 @@ from core.api.ota_handler import OTAHandler
 from core.api.vision_handler import VisionHandler
 # DOTTY-PATCH: shared registry populated by the patched WebSocketServer
 # and consumed by the /xiaozhi/admin/inject-text route below. Lets the
-# Dotty admin portal fire `startToChat` against an active device WS.
+# Dotty admin dashboard fire `startToChat` against an active device WS.
 from core.portal_bridge import active_connections as _dotty_active_connections
 
 TAG = __name__
@@ -326,7 +326,7 @@ class SimpleHttpServer:
                         web.options(
                             "/mcp/vision/explain", self.vision_handler.handle_options
                         ),
-                        # DOTTY-PATCH: admin routes for portal text injection.
+                        # DOTTY-PATCH: admin routes for dashboard text injection.
                         web.post(
                             "/xiaozhi/admin/inject-text", self._dotty_inject_text
                         ),

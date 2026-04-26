@@ -141,7 +141,7 @@ class SpeakerResolver:
     synchronously on every inbound message. It is thread-safe in the
     asyncio sense: shared mutable state (sticky latches, recent
     perception cache) is guarded by a `threading.Lock` so the rare
-    cross-thread call (e.g. a portal HTTP handler from FastAPI's thread
+    cross-thread call (e.g. a dashboard HTTP handler from FastAPI's thread
     pool) doesn't race with voice traffic.
 
     Parameters
@@ -283,7 +283,7 @@ class SpeakerResolver:
         self, channel: Optional[str], device_id: Optional[str], person_id: str,
     ) -> None:
         """Override the sticky latch programmatically — used by the
-        portal "I am ..." control and by the optional clarification
+        dashboard "I am ..." control and by the optional clarification
         flow ("Is that you, Hudson?" → "yes")."""
         self._set_sticky(
             self._sticky_key(channel, device_id),
@@ -301,7 +301,7 @@ class SpeakerResolver:
     def peek_sticky(
         self, channel: Optional[str] = None, device_id: Optional[str] = None,
     ) -> Optional[str]:
-        """Read-only view used by tests + the /api/speaker/state portal
+        """Read-only view used by tests + the /api/speaker/state dashboard
         endpoint. Returns the person_id if the latch is live, else None."""
         key = self._sticky_key(channel, device_id)
         now = float(self._clock())

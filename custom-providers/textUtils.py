@@ -12,7 +12,7 @@ TAG = __name__
 #   - custom-providers/openai_compat/openai_compat.py (via core.utils.textUtils
 #     bind-mount in xiaozhi container)
 #   - custom-providers/zeroclaw/zeroclaw.py (same path)
-# bridge/portal.py keeps its own _ALLOWED_EMOJIS copy intentionally — it's
+# bridge/dashboard.py keeps its own _ALLOWED_EMOJIS copy intentionally — it's
 # the admin-UI safety check, decoupled from the LLM enforcement path.
 ALLOWED_EMOJIS = ("😊", "😆", "😢", "😮", "🤔", "😠", "😐", "😍", "😴")
 FALLBACK_EMOJI = "😐"

@@ -1,7 +1,7 @@
-"""Mobile-first admin portal for Dotty.
+"""Mobile-first admin dashboard for Dotty.
 
-Mounted at ``/ui`` on the bridge FastAPI app. Read-only MVP: host status
-cards, conversation log tail. No state-mutating actions.
+Mounted at ``/ui`` on the bridge FastAPI app. Host status cards,
+conversation log tail, action endpoints, SSE turn stream.
 
 Host probes are env-driven so this stays generic in the public template:
 set ``UNRAID_HOST`` (and optionally ``WORKSTATION_HOST``) on the bridge
@@ -27,7 +27,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingRes
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
-log = logging.getLogger("portal")
+log = logging.getLogger("dashboard")
 
 # Bridge wires its in-process message handler in via configure(). Lets the
 # "Say" action invoke the same path /api/message uses without an HTTP hop.
@@ -48,7 +48,7 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
               inject_to_device: Any = None, abort_device: Any = None,
               subscribe_events: Any = None,
               unsubscribe_events: Any = None) -> None:
-    """Register bridge state with the portal. Idempotent."""
+    """Register bridge state with the dashboard. Idempotent."""
     if send_message is not None:
         _state["send_message"] = send_message
     if vision_cache is not None:
@@ -104,15 +104,15 @@ BRIDGE_VERSION = _read_bridge_version()
 
 # Opt-in HTTP Basic auth. If both env vars are set, every /ui route requires
 # them. Unset → no auth (preserves current LAN-only behaviour).
-_PORTAL_USER = os.environ.get("DOTTY_PORTAL_USER", "")
-_PORTAL_PASS = os.environ.get("DOTTY_PORTAL_PASS", "")
+_DASHBOARD_USER = os.environ.get("DOTTY_DASHBOARD_USER", "")
+_DASHBOARD_PASS = os.environ.get("DOTTY_DASHBOARD_PASS", "")
 _basic = HTTPBasic(auto_error=False)
 
 
-def _verify_portal_auth(
+def _verify_dashboard_auth(
     credentials: HTTPBasicCredentials | None = Depends(_basic),
 ) -> None:
-    if not _PORTAL_USER or not _PORTAL_PASS:
+    if not _DASHBOARD_USER or not _DASHBOARD_PASS:
         return
     if credentials is None:
         raise HTTPException(
@@ -120,8 +120,8 @@ def _verify_portal_auth(
             detail="Authentication required",
             headers={"WWW-Authenticate": 'Basic realm="dotty"'},
         )
-    user_ok = secrets.compare_digest(credentials.username, _PORTAL_USER)
-    pass_ok = secrets.compare_digest(credentials.password, _PORTAL_PASS)
+    user_ok = secrets.compare_digest(credentials.username, _DASHBOARD_USER)
+    pass_ok = secrets.compare_digest(credentials.password, _DASHBOARD_PASS)
     if not (user_ok and pass_ok):
         raise HTTPException(
             status_code=401,
@@ -131,8 +131,8 @@ def _verify_portal_auth(
 
 
 router = APIRouter(
-    prefix="/ui", tags=["portal"],
-    dependencies=[Depends(_verify_portal_auth)],
+    prefix="/ui", tags=["dashboard"],
+    dependencies=[Depends(_verify_dashboard_auth)],
 )
 
 UNRAID_HOST = os.environ.get("UNRAID_HOST", "")
@@ -202,8 +202,8 @@ def _safe_date(date_str: str | None) -> str:
 def _looks_like_xiaozhi_system_msg(text: str) -> bool:
     """Heuristic: voice-channel turns whose user payload is mostly Chinese
     are xiaozhi-server's automated wrap-up / system-injected prompts, not
-    something the kid actually said. Filter them out of the portal log so
-    the conversation history stays readable."""
+    something the kid actually said. Filter them out of the dashboard log
+    so the conversation history stays readable."""
     if not text:
         return False
     cjk = sum(1 for c in text if 0x4E00 <= ord(c) <= 0x9FFF)
@@ -604,7 +604,7 @@ async def _inject_or_error(request: Request, text: str, label: str) -> Any:
     pipeline so the device actually speaks/emotes/runs MCP tools.
 
     Q4: subscribes to the bridge's event stream BEFORE injecting, then
-    waits up to ~8s for the next turn so the portal can show what Dotty
+    waits up to ~8s for the next turn so the dashboard can show what Dotty
     actually said (not just "Sent…")."""
     inject = _state.get("inject_to_device")
     if inject is None:
@@ -620,7 +620,7 @@ async def _inject_or_error(request: Request, text: str, label: str) -> Any:
         try:
             result = await inject(text=text)
         except Exception as exc:
-            log.exception("portal inject failed")
+            log.exception("dashboard inject failed")
             return templates.TemplateResponse(
                 request, "say_result.html",
                 {"ok": False, "error": f"Bridge error: {exc.__class__.__name__}"},
@@ -772,7 +772,7 @@ async def stop(request: Request) -> Any:
     try:
         result = await abort()
     except Exception as exc:
-        log.exception("portal stop action failed")
+        log.exception("dashboard stop action failed")
         return templates.TemplateResponse(
             request, "say_result.html",
             {"ok": False, "error": f"Bridge error: {exc.__class__.__name__}"},

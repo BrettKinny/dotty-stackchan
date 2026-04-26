@@ -143,7 +143,7 @@ Plumbing:
 
 - **Firmware emit**: `Application::SendEvent(name, data_json)` in upstream `application.cc` (lazy-opens the WS via `OpenAudioChannel()` because xiaozhi WS is otherwise session-scoped — without lazy-open, perception events from idle silently drop).
 - **xiaozhi-server relay**: custom override at `custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py` adds an `EventTextMessageHandler` that POSTs each event frame to the bridge's `/api/perception/event`.
-- **Bridge bus**: `_perception_listeners` pub/sub + `_perception_state[device_id]` per-device state in `bridge.py`, mirrored on the existing `_portal_event_listeners` pattern.
+- **Bridge bus**: `_perception_listeners` pub/sub + `_perception_state[device_id]` per-device state in `bridge.py`, mirrored on the existing `_dashboard_event_listeners` pattern.
 - **Consumers** (also bridge-side): `_perception_face_greeter` (Hi! greeting via `/xiaozhi/admin/inject-text`), `_perception_sound_turner` (head-turn via `/xiaozhi/admin/set-head-angles`), `_perception_face_lost_aborter` (TTS abort when audience walks away).
 
 WS lifecycle is the structural fact most easily forgotten: **xiaozhi only opens the WS during a conversation**, not persistently. Anything that needs to fire a server-bound event from idle has to either (a) trigger `OpenAudioChannel()` first or (b) accept that events are session-only. Producer A and B both assume (a) — done in `SendEvent`.
