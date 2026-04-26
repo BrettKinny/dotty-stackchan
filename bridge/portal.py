@@ -815,7 +815,8 @@ def _current_persona() -> str:
 async def persona_partial(request: Request) -> Any:
     return templates.TemplateResponse(
         request, "persona.html",
-        {"available": _list_personas(), "current": _current_persona()},
+        {"available": _list_personas(), "current": _current_persona(),
+         "personas_dir": str(PERSONAS_DIR)},
     )
 
 
@@ -827,6 +828,7 @@ async def persona_set(request: Request, name: str = Form(...)) -> Any:
         return templates.TemplateResponse(
             request, "persona.html",
             {"available": available, "current": _current_persona(),
+             "personas_dir": str(PERSONAS_DIR),
              "error": f"Unknown persona: {name}"},
         )
     PERSONA_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -844,11 +846,13 @@ async def persona_set(request: Request, name: str = Form(...)) -> Any:
         return templates.TemplateResponse(
             request, "persona.html",
             {"available": available, "current": name,
+             "personas_dir": str(PERSONAS_DIR),
              "error": f"set but restart failed: {exc}"},
         )
     return templates.TemplateResponse(
         request, "persona.html",
-        {"available": available, "current": name, "switching": True},
+        {"available": available, "current": name,
+         "personas_dir": str(PERSONAS_DIR), "switching": True},
     )
 
 

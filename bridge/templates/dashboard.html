@@ -68,6 +68,10 @@
   </div>
 </header>
 
+<div id="connection-banner" class="alert alert-warning rounded-none py-1 px-3 hidden" role="status" aria-live="polite">
+  <span id="connection-banner-msg" class="text-sm"></span>
+</div>
+
 <nav class="px-3 pt-3 max-w-5xl mx-auto sticky top-16 z-[5] bg-base-200/95 backdrop-blur">
   <div role="tablist" class="tabs tabs-boxed">
     <a role="tab" data-tab="dotty" class="tab flex-1"
@@ -91,7 +95,8 @@
       <div class="card-body p-3">
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {% for key, label, icon in [("bedtime","Bedtime","🌙"),("quiet","Quiet","🤫"),("loud","Loud","📢"),("adult","Adult","🧠")] %}
-          <form hx-post="/ui/actions/preset" hx-target="#preset-result" hx-swap="innerHTML">
+          <form hx-post="/ui/actions/preset" hx-target="#preset-result" hx-swap="afterbegin"
+                hx-disabled-elt="find button">
             <input type="hidden" name="name" value="{{ key }}">
             <button class="btn btn-outline btn-sm w-full min-h-12 gap-1">
               <span>{{ icon }}</span><span>{{ label }}</span>
@@ -110,10 +115,12 @@
       <div class="card-body p-3">
         <form hx-post="/ui/actions/volume" hx-target="#vol-result" hx-swap="innerHTML"
               hx-include="this"
+              hx-disabled-elt="find input"
               class="flex items-center gap-3">
           <span class="text-base">🔈</span>
           <input type="range" name="value" min="0" max="100" step="5" value="50"
                  oninput="document.getElementById('vol-out').textContent = this.value"
+                 onchange="this.form.requestSubmit()"
                  class="range range-sm flex-1">
           <span class="text-base">🔊</span>
           <output id="vol-out" class="text-sm font-mono w-8 text-right">50</output>
@@ -163,7 +170,8 @@
           <div class="text-xs text-base-content/60 mb-2">Make a face</div>
           <div class="grid grid-cols-5 gap-1">
             {% for e in ["😊","😆","😢","😮","🤔","😠","😐","😍","😴"] %}
-            <form hx-post="/ui/actions/mood" hx-target="#mood-result" hx-swap="innerHTML">
+            <form hx-post="/ui/actions/mood" hx-target="#mood-result" hx-swap="afterbegin"
+                  hx-disabled-elt="find button">
               <input type="hidden" name="emoji" value="{{ e }}">
               <button type="submit" class="btn btn-ghost text-2xl min-h-12 w-full p-0">{{ e }}</button>
             </form>
@@ -176,11 +184,13 @@
         <div class="card-body p-3">
           <div class="text-xs text-base-content/60 mb-2">Dance &amp; sing</div>
           <div class="grid grid-cols-2 gap-2">
-            <form hx-post="/ui/actions/dance" hx-target="#dance-result" hx-swap="innerHTML">
+            <form hx-post="/ui/actions/dance" hx-target="#dance-result" hx-swap="afterbegin"
+                  hx-disabled-elt="find button">
               <input type="hidden" name="key" value="macarena">
               <button class="btn btn-outline w-full min-h-12">💃 Macarena</button>
             </form>
-            <form hx-post="/ui/actions/dance" hx-target="#dance-result" hx-swap="innerHTML">
+            <form hx-post="/ui/actions/dance" hx-target="#dance-result" hx-swap="afterbegin"
+                  hx-disabled-elt="find button">
               <input type="hidden" name="key" value="sing">
               <button class="btn btn-outline w-full min-h-12">🎤 Sing</button>
             </form>
@@ -287,8 +297,10 @@
 </div>
 
 <script>
-  // Q5: simple tabbed layout. Polling tiles inside hidden panels still
-  // poll (htmx doesn't pause on `hidden` — they stay in the DOM).
+  // Q5 originally shipped with polling tiles updating even on hidden tabs so
+  // the data was instant on tab-switch. We now pause polling for hidden
+  // panels (cheaper) and force a refresh when a tab is revealed (instant
+  // catch-up on tab-switch).
   function dottyTab(name) {
     if (['dotty','status','logs'].indexOf(name) === -1) name = 'dotty';
     document.querySelectorAll('[data-tab-panel]').forEach(function (p) {
@@ -299,6 +311,8 @@
     });
     history.replaceState(null, '', '#' + name);
     try { localStorage.setItem('dotty-tab', name); } catch (e) {}
+    // Now-visible tiles listen for `dotty-refresh` and repaint immediately.
+    window.dispatchEvent(new CustomEvent('dotty-refresh'));
   }
   (function initTab() {
     var fromHash = (location.hash || '').replace('#', '');
@@ -307,9 +321,55 @@
     dottyTab(fromHash || saved || 'dotty');
   })();
 
+  // Cancel htmx requests originating inside a hidden tab panel.
+  document.body.addEventListener('htmx:beforeRequest', function (evt) {
+    var src = evt.detail && evt.detail.elt;
+    if (src && src.closest && src.closest('[data-tab-panel][hidden]')) {
+      evt.preventDefault();
+    }
+  });
+
+  // Connection banner — driven by SSE state primarily, with htmx errors as
+  // a secondary signal. SSE drop usually means the bridge is restarting.
+  var connState = {sse: true, http: true};
+  function refreshConnectionBanner() {
+    var b = document.getElementById('connection-banner');
+    var m = document.getElementById('connection-banner-msg');
+    if (!b || !m) return;
+    if (!connState.sse) {
+      m.textContent = 'Reconnecting to bridge…';
+      b.classList.remove('hidden');
+    } else if (!connState.http) {
+      m.textContent = 'Bridge request failed — retrying…';
+      b.classList.remove('hidden');
+    } else {
+      b.classList.add('hidden');
+    }
+  }
+  document.body.addEventListener('htmx:sendError', function () {
+    connState.http = false; refreshConnectionBanner();
+  });
+  document.body.addEventListener('htmx:responseError', function () {
+    connState.http = false; refreshConnectionBanner();
+  });
+  document.body.addEventListener('htmx:afterRequest', function (evt) {
+    if (evt.detail && evt.detail.successful) {
+      connState.http = true; refreshConnectionBanner();
+    }
+  });
+
+  // Cap action-result stacks (preset/mood/dance) at 3 entries; oldest evicted.
+  document.body.addEventListener('htmx:afterSwap', function (evt) {
+    var t = evt.detail && evt.detail.target;
+    if (!t || !t.id) return;
+    if (t.id !== 'preset-result' && t.id !== 'mood-result' && t.id !== 'dance-result') return;
+    while (t.children.length > 3) t.removeChild(t.lastElementChild);
+  });
+
   (function () {
     if (typeof EventSource === 'undefined') return;
     var src = new EventSource('/ui/events');
+    src.onopen = function () { connState.sse = true; refreshConnectionBanner(); };
     src.onmessage = function (ev) {
       var data;
       try { data = JSON.parse(ev.data); } catch (e) { return; }
@@ -336,7 +396,10 @@
         }
       }
     };
-    src.onerror = function () { /* EventSource auto-reconnects */ };
+    src.onerror = function () {
+      // EventSource auto-reconnects; surface "Reconnecting…" until onopen fires.
+      connState.sse = false; refreshConnectionBanner();
+    };
   })();
 </script>
 

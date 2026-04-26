@@ -83,14 +83,32 @@ function formatTs(ts) {
 function addEvent(ev) {
   const div = document.createElement('div');
   div.className = 'event';
-  const bc = badgeClass(ev.name);
-  div.innerHTML =
-    `<div class="event-header">` +
-      `<span class="badge ${bc}">${ev.name}</span>` +
-      `<span class="dev">${ev.device_id || '—'}</span>` +
-      `<span class="ts">${formatTs(ev.ts)}</span>` +
-    `</div>` +
-    `<div class="data">${JSON.stringify(ev.data)}</div>`;
+
+  const header = document.createElement('div');
+  header.className = 'event-header';
+
+  const badge = document.createElement('span');
+  badge.className = 'badge ' + badgeClass(ev.name);
+  badge.textContent = ev.name;
+  header.appendChild(badge);
+
+  const dev = document.createElement('span');
+  dev.className = 'dev';
+  dev.textContent = ev.device_id || '—';
+  header.appendChild(dev);
+
+  const ts = document.createElement('span');
+  ts.className = 'ts';
+  ts.textContent = formatTs(ev.ts);
+  header.appendChild(ts);
+
+  div.appendChild(header);
+
+  const data = document.createElement('div');
+  data.className = 'data';
+  data.textContent = JSON.stringify(ev.data);
+  div.appendChild(data);
+
   feed.insertBefore(div, feed.firstChild);
   count++;
   countEl.textContent = count + ' event' + (count === 1 ? '' : 's');
