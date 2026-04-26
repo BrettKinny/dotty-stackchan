@@ -2293,6 +2293,21 @@ except Exception:
     log.exception("dashboard mount failed — admin UI at /ui will be unavailable")
     _configure_dashboard = None  # type: ignore[assignment]
 
+# Vendored JS/CSS + PWA icons for the dashboard. Served same-origin so we
+# can attach SRI to the <script>/<link> tags and drop the third-party CDNs
+# (htmx.org / cdn.jsdelivr.net / cdn.tailwindcss.com). Re-build the
+# tailwind bundle with `npm run build:css` after editing templates.
+try:
+    from fastapi.staticfiles import StaticFiles as _StaticFiles
+    from pathlib import Path as _Path
+    _STATIC_DIR = _Path(__file__).parent / "bridge" / "static"
+    if _STATIC_DIR.is_dir():
+        app.mount("/ui/static", _StaticFiles(directory=str(_STATIC_DIR)), name="ui-static")
+    else:
+        log.warning("dashboard static dir missing at %s — vendored assets will 404", _STATIC_DIR)
+except Exception:
+    log.exception("dashboard static mount failed — vendored assets at /ui/static will be unavailable")
+
 
 @app.get("/health")
 async def health() -> dict:

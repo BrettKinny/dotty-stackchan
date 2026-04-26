@@ -1,5 +1,5 @@
 {% if ok %}
-<div class="alert alert-success py-2 text-sm">
+<div class="alert alert-success dotty-alert">
   <div>
     <div class="text-xs text-base-content/60">you said</div>
     <div class="break-words">{{ sent }}</div>
@@ -8,5 +8,5 @@
   </div>
 </div>
 {% else %}
-<div class="alert alert-warning py-2 text-sm">{{ error }}</div>
+<div class="alert alert-warning dotty-alert">{{ error }}</div>
 {% endif %}

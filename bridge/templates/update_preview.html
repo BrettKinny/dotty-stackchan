@@ -1,6 +1,6 @@
 {% if not ok %}
 <h3 class="text-lg font-semibold mb-2">Update preview failed</h3>
-<div class="alert alert-error py-2 text-sm">{{ error }}</div>
+<div class="alert alert-error dotty-alert">{{ error }}</div>
 {% elif up_to_date %}
 <h3 class="text-lg font-semibold mb-2">Already up to date</h3>
 <p class="text-sm">Running <span class="font-mono">{{ current_sha }}</span> — same as remote main. No update needed.</p>

@@ -1,0 +1,12 @@
+{
+  "name": "dotty-stackchan-build",
+  "private": true,
+  "description": "Build-only deps for the Dotty bridge dashboard (Tailwind CSS bundle). Not a runtime dependency — Python is the runtime. Re-run via scripts/build-tailwind.sh after editing templates or tailwind.config.js.",
+  "scripts": {
+    "build:css": "tailwindcss -c bridge/tailwind.config.js -i bridge/static/tailwind-input.css -o bridge/static/tailwind.min.css --minify"
+  },
+  "devDependencies": {
+    "daisyui": "4.12.14",
+    "tailwindcss": "3.4.17"
+  }
+}

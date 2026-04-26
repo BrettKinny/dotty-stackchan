@@ -12,9 +12,12 @@
 <link rel="icon" type="image/svg+xml" href="/ui/icon.svg">
 <link rel="apple-touch-icon" href="/ui/apple-touch-icon.png">
 <title>Dotty Dashboard</title>
-<script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
-<link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet">
-<script src="https://cdn.tailwindcss.com"></script>
+<script src="/ui/static/htmx.min.js"
+        integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"
+        crossorigin="anonymous" defer></script>
+<link href="/ui/static/tailwind.min.css" rel="stylesheet"
+      integrity="sha384-8XNMbtVzGCmDvgyHxA00gw2TvN2Uv+CFlfgv7ottHeJNaxHVAexDpb2o3R70Odcz"
+      crossorigin="anonymous">
 <style>
   html, body { -webkit-tap-highlight-color: transparent; }
   .safe-top { padding-top: env(safe-area-inset-top); }
@@ -25,6 +28,11 @@
   .status-unknown { background: #6b7280; }
   .htmx-request .spin-on-load { animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  /* Shared alert wrapper used by say_result, kid_mode_result, update_result,
+     restart_result, update_preview. The alert-{success,error,warning,info}
+     modifier is still applied per-template; this only consolidates the
+     repeated "py-2 text-sm" boilerplate. */
+  .dotty-alert { padding-top: 0.5rem; padding-bottom: 0.5rem; font-size: 0.875rem; line-height: 1.25rem; }
 </style>
 </head>
 <body class="min-h-screen bg-base-200">

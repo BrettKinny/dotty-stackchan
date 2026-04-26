@@ -1,17 +1,17 @@
 {% if ok %}
-<div class="alert alert-info py-2 text-sm"
+<div class="alert alert-info dotty-alert"
      hx-get="/health" hx-trigger="load delay:5s, every 2s"
      hx-swap="none"
      hx-on::after-request="if(event.detail.successful){this.remove();}"
      hx-on::load="(function(el){setTimeout(function(){
        if(!el.isConnected) return;
        var err=document.createElement('div');
-       err.className='alert alert-error py-2 text-sm';
+       err.className='alert alert-error dotty-alert';
        err.textContent='Bridge did not come back after 30s. Check systemctl status zeroclaw-bridge.';
        el.replaceWith(err);
      },30000);})(this)">
   {{ message }}
 </div>
 {% else %}
-<div class="alert alert-error py-2 text-sm">{{ message }}</div>
+<div class="alert alert-error dotty-alert">{{ message }}</div>
 {% endif %}

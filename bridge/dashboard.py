@@ -1126,6 +1126,12 @@ async def manifest() -> JSONResponse:
              "purpose": "any"},
             {"src": "/ui/apple-touch-icon.png", "sizes": "180x180",
              "type": "image/png", "purpose": "any"},
+            # Raster fallbacks for Android install card / splash. Generated
+            # by scripts/generate-pwa-icons.sh from the same source SVG.
+            {"src": "/ui/static/icon-192.png", "sizes": "192x192",
+             "type": "image/png", "purpose": "any"},
+            {"src": "/ui/static/icon-512.png", "sizes": "512x512",
+             "type": "image/png", "purpose": "any"},
         ],
     })
 
