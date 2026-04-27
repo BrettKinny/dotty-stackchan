@@ -106,6 +106,146 @@ latency is roughly 5 seconds, dominated by the LLM round-trip.
 - [Architecture overview](architecture.md) -- full data flow.
 - [Kid Mode](kid-mode.md) -- on by default, what it enforces.
 
+---
+
+## Placeholders
+
+This repo uses placeholders in place of real IPs, usernames, and filesystem paths. Substitute these everywhere before deploying:
+
+| Placeholder | Meaning |
+|---|---|
+| `<XIAOZHI_HOST>` | LAN IP of the Docker host running xiaozhi-server. StackChan reaches this on WiFi, so it must be a LAN IP, not a Tailscale/VPN IP. |
+| `<XIAOZHI_USER>` | SSH user for the Docker host (whatever your distro defaults to: `root`, `ubuntu`, `dietpi`, etc.). |
+| `<XIAOZHI_HOSTNAME>` | Hostname or Tailscale name of the Docker host (optional, IP works for everything). |
+| `<XIAOZHI_PATH>` | Path on the Docker host where you clone/install xiaozhi-server (e.g. `/opt/xiaozhi-server/` or `/srv/xiaozhi-server/`). |
+| `<ZEROCLAW_HOST>` | LAN IP of the host running ZeroClaw + the bridge. Anything that runs the `zeroclaw` binary works (a small Linux box, your existing home server, or the same Docker host as xiaozhi-server). |
+| `<ZEROCLAW_USER>` | SSH user on the ZeroClaw host (whatever your distro defaults to). |
+| `<ZEROCLAW_HOME>` | Home directory on the ZeroClaw host for the user that owns the bridge (e.g. `/root/` or `/home/<user>/`). |
+| `<BRIDGE_PATH>` | Full path to the zeroclaw-bridge working directory (e.g. `/root/zeroclaw-bridge/`). |
+| `<ZEROCLAW_BIN>` | Absolute path to the `zeroclaw` binary (cargo default: `~/.cargo/bin/zeroclaw`). |
+| `<ZEROCLAW_CFG>` | ZeroClaw config file path (default: `/root/.zeroclaw/config.toml`). |
+| `<YOUR_NAME>` | Your name / org, used in the persona prompt in `.config.yaml`. |
+| `<ROBOT_NAME>` | Name the robot introduces itself as, referenced in the persona prompt in `.config.yaml`. Any string — pick whatever you want. The default example uses the hardware name ("StackChan"). |
+
+Port numbers (`8000`, `8003`, `8080`, `18789`, `42617`) are product-generic and should not be changed unless you also reconfigure the respective services.
+
+Files you will definitely need to edit before first run:
+
+- `.config.yaml` — replace `<XIAOZHI_HOST>`, `<ZEROCLAW_HOST>`, and customise the `prompt:` block.
+- `docker-compose.yml` — set `TZ` to your timezone.
+- `zeroclaw-bridge.service` — adjust paths if the bridge doesn't live at `/root/zeroclaw-bridge/`.
+
+---
+
+## Deployment layout
+
+```mermaid
+flowchart TB
+    subgraph DockerHost_fs["Docker host filesystem - &lt;XIAOZHI_PATH&gt;"]
+        direction TB
+        UA1["data/.config.yaml<br/>(override - voice, persona, endpoints)"]
+        UA2["models/SenseVoiceSmall/<br/>(model.pt + configs)"]
+        UA3["custom-providers/zeroclaw/<br/>(zeroclaw.py + __init__.py)"]
+        UA3b["custom-providers/edge_stream/<br/>(edge_stream.py + __init__.py)"]
+        UA3d["custom-providers/piper_local/<br/>(piper_local.py + __init__.py)"]
+        UA3c["custom-providers/asr/fun_local.py<br/>(patched ASR - language key)"]
+        UA4["tmp/<br/>(TTS audio scratch)"]
+        UA5["repo/<br/>(git clone, reference only)"]
+        UA6["docker-compose.yml"]
+    end
+
+    subgraph ZCHost_fs["ZeroClaw host filesystem"]
+        direction TB
+        RA["&lt;BRIDGE_PATH&gt;"]
+        RA1["bridge.py"]
+        RA2[".venv/<br/>(fastapi + uvicorn)"]
+        RB["/etc/systemd/system/<br/>zeroclaw-bridge.service"]
+        RC["~/.zeroclaw/<br/>(agent persona config)"]
+        RA --> RA1 & RA2
+    end
+```
+
+Container volume mounts:
+
+| Host path | Container path | Purpose |
+|---|---|---|
+| `data/.config.yaml` | `/opt/xiaozhi-esp32-server/data/.config.yaml` | Config override (read-only mount) |
+| `models/SenseVoiceSmall/` | `/opt/xiaozhi-esp32-server/models/SenseVoiceSmall/` | ASR weights |
+| `models/piper/` | `/opt/xiaozhi-esp32-server/models/piper/` | Piper TTS voice models (`.onnx` + `.json`) |
+| `tmp/` | `/opt/xiaozhi-esp32-server/tmp/` | Scratch |
+| `custom-providers/zeroclaw/` | `/opt/xiaozhi-esp32-server/core/providers/llm/zeroclaw/` | Custom LLM provider (directory mount) |
+| `custom-providers/edge_stream/edge_stream.py` | `/opt/xiaozhi-esp32-server/core/providers/tts/edge_stream.py` | Streaming EdgeTTS provider (file mount) |
+| `custom-providers/piper_local/piper_local.py` | `/opt/xiaozhi-esp32-server/core/providers/tts/piper_local.py` | Local Piper TTS provider (file mount) |
+| `custom-providers/asr/fun_local.py` | `/opt/xiaozhi-esp32-server/core/providers/asr/fun_local.py` | Patched FunASR — adds `language` config key so SenseVoiceSmall can be pinned to English |
+
+The full file inventory (with `/etc/systemd/system/` paths and the bare-metal venv) lives in [architecture.md](./architecture.md#deployment-files-this-repo).
+
+---
+
+## Endpoints
+
+| What | URL | Who calls it |
+|---|---|---|
+| OTA (enter into StackChan settings) | `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/` | StackChan device on boot |
+| WebSocket | `ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/` | StackChan device after OTA handshake |
+| Bridge (chat) | `http://<ZEROCLAW_HOST>:8080/api/message` | xiaozhi-server's ZeroClawLLM |
+| Bridge (health) | `http://<ZEROCLAW_HOST>:8080/health` | Humans, monitoring |
+| Bridge (dashboard) | `http://<ZEROCLAW_HOST>:8080/ui` | Humans (LAN-only HTMX UI) |
+| ZeroClaw gateway | `http://127.0.0.1:42617` (host-local) | ZeroClaw's web UI only |
+
+---
+
+## Reboot survival
+
+Both services restart themselves without manual intervention:
+
+| Host | Mechanism |
+|---|---|
+| Docker host | Container `restart: unless-stopped` in `docker-compose.yml` + ensure dockerd starts at boot on your distro. |
+| ZeroClaw host | `zeroclaw-bridge.service` is `enabled`, `Restart=on-failure`. |
+
+Caveat: if you run `docker compose down`, the container is marked stopped and won't come back on reboot. Use `docker compose restart` or `docker restart xiaozhi-esp32-server` for transient restarts instead.
+
+---
+
+## Common operations
+
+```bash
+# Tail xiaozhi-server logs (voice pipeline)
+ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs -f xiaozhi-esp32-server'
+
+# Tail bridge logs
+ssh <ZEROCLAW_USER>@<ZEROCLAW_HOST> 'sudo journalctl -u zeroclaw-bridge -f'
+
+# Restart voice pipeline after config change
+ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'cd <XIAOZHI_PATH> && docker compose restart'
+
+# Restart the bridge
+ssh <ZEROCLAW_USER>@<ZEROCLAW_HOST> 'sudo systemctl restart zeroclaw-bridge'
+
+# Smoke test full round-trip
+curl -X POST http://<ZEROCLAW_HOST>:8080/api/message \
+  -H 'content-type: application/json' \
+  -d '{"content":"hello","channel":"dotty"}'
+
+# Bridge health
+curl http://<ZEROCLAW_HOST>:8080/health
+```
+
+### Changing voice
+The default TTS is `LocalPiper` (offline, runs inside the container). To change the Piper voice, edit `TTS.LocalPiper.voice` and the corresponding `model_path` / `config_path` in `data/.config.yaml`. To switch to cloud EdgeTTS instead, set `selected_module.TTS: EdgeTTS` and edit `TTS.EdgeTTS.voice` (any Microsoft Edge Neural voice ID works, e.g. `en-US-AvaNeural`). Restart the container after changes.
+
+### Changing persona (the robot's personality)
+Primary source: ZeroClaw's own system prompt in `<ZEROCLAW_CFG>` on the ZeroClaw host. The `prompt:` key in `data/.config.yaml` is a secondary hint that the bridge passes to ZeroClaw as context, but ZeroClaw's own prompt wins.
+
+### Changing VAD sensitivity
+`VAD.SileroVAD.min_silence_duration_ms` in `data/.config.yaml`. Default: 700 ms. Lower = cuts off quicker. Higher = waits longer for slow speakers.
+
+### Changing the LLM model
+`default_model` key near the top of `<ZEROCLAW_CFG>` on the ZeroClaw host (provider and encrypted api_key live next to it). ACP mode caches config in the long-running child, so restart the bridge (`sudo systemctl restart zeroclaw-bridge`) after editing. Confirm with `sudo <ZEROCLAW_BIN> status | grep Model`.
+
+---
+
 ## Troubleshooting
 
 ```bash

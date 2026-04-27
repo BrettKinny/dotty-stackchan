@@ -5,7 +5,7 @@ description: Symptom-first lookup table for common and obscure failure modes.
 
 # Troubleshooting
 
-Symptom-first lookup table. The [README.md Troubleshooting section](../README.md#troubleshooting) covers the most common issues; this page goes deeper and covers additional failure modes observed during development.
+Symptom-first lookup table covering common and obscure failure modes. Pair with [quickstart.md](./quickstart.md) for happy-path commands and [voice-pipeline.md](./voice-pipeline.md) for ASR/TTS internals.
 
 ---
 
@@ -144,7 +144,7 @@ Symptom-first lookup table. The [README.md Troubleshooting section](../README.md
 
 ## See also
 
-- [README.md Troubleshooting](../README.md#troubleshooting) — the quick-reference version.
+- [quickstart.md](./quickstart.md) — happy-path setup + common ops + reboot survival.
 - [voice-pipeline.md](./voice-pipeline.md) — details on ASR, TTS, VAD tuning.
 - [protocols.md](./protocols.md) — WebSocket and ACP wire format for debugging.
 - [hardware.md](./hardware.md) — hardware specs and safety notes.

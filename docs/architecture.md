@@ -13,6 +13,41 @@ description: Three-host architecture and message flow for the self-hosted voice 
 - The "xiaozhi ↔ brain" seam is HTTP + ACP-over-stdio, not a library call — so either side can be swapped independently.
 - The robot speaks the **Xiaozhi WebSocket protocol** (see [protocols.md](./protocols.md)). It has no hardcoded knowledge of ZeroClaw.
 
+## Topology
+
+```mermaid
+flowchart LR
+    subgraph Desk["Desk (LAN WiFi)"]
+        SC["M5Stack StackChan<br/>ESP32-S3"]
+    end
+
+    subgraph DockerHost["Docker host - &lt;XIAOZHI_HOST&gt;"]
+        XZ["xiaozhi-esp32-server<br/>(Docker)<br/>:8000 WS + :8003 HTTP"]
+        subgraph XZMods["voice pipeline"]
+            VAD["SileroVAD"]
+            ASR["FunASR<br/>SenseVoiceSmall"]
+            LLM["ZeroClawLLM<br/>(custom provider)"]
+            TTS["TTS<br/>(LocalPiper default,<br/>EdgeTTS available)"]
+        end
+    end
+
+    subgraph ZCHost["ZeroClaw host - &lt;ZEROCLAW_HOST&gt;"]
+        Bridge["zeroclaw-bridge<br/>FastAPI :8080<br/>systemd unit"]
+        ZC["ZeroClaw daemon<br/>(agent persona)"]
+        Cloud["(OpenRouter / GLM / ...)"]
+    end
+
+    SC -->|"WebSocket<br/>Xiaozhi protocol"| XZ
+    XZ --- VAD & ASR & LLM & TTS
+    LLM -->|"HTTP POST<br/>/api/message/stream"| Bridge
+    Bridge -->|"JSON-RPC 2.0<br/>over stdio (ACP)"| ZC
+    ZC -.->|"LLM API call"| Cloud
+    ZC -->|"stdout JSON-RPC"| Bridge
+    Bridge -->|"JSON response"| LLM
+    TTS -->|"audio stream"| XZ
+    XZ -->|"WebSocket"| SC
+```
+
 ## Actors
 
 | Actor | Host | Role | Process |
@@ -106,11 +141,32 @@ Paths and systemd unit names are env-configurable (`ZEROCLAW_VOICE_CFG`, `ZEROCL
 
 See [`../ROADMAP.md`](../ROADMAP.md) for related backlog items (privacy-indicator LEDs, child-safety hardening).
 
+## Deployment files (this repo)
+
+The canonical working copies live in this repo. The deployed copies on each host should match — if they drift, redeploy from here.
+
+| File | Deployed to | Purpose |
+|---|---|---|
+| `bridge.py` | ZeroClaw host `<BRIDGE_PATH>/bridge.py` | FastAPI HTTP→ZeroClaw translator (ACP over stdio) |
+| `bridge/requirements.txt` | bare-metal venv | Pinned Python deps for the bridge (fastapi, uvicorn, pydantic) |
+| `zeroclaw-bridge.service` | ZeroClaw host `/etc/systemd/system/` | systemd unit for bridge |
+| `custom-providers/zeroclaw/zeroclaw.py` | Docker host `core/providers/llm/zeroclaw/zeroclaw.py` | xiaozhi LLM provider, proxies to the ZeroClaw bridge |
+| `custom-providers/zeroclaw/__init__.py` | Docker host `core/providers/llm/zeroclaw/__init__.py` | Python package marker |
+| `custom-providers/edge_stream/edge_stream.py` | Docker host `core/providers/tts/edge_stream.py` | Streaming EdgeTTS provider |
+| `custom-providers/piper_local/piper_local.py` | Docker host `core/providers/tts/piper_local.py` | Local Piper TTS provider (offline alternative to EdgeTTS) |
+| `custom-providers/asr/fun_local.py` | Docker host `core/providers/asr/fun_local.py` | Patched FunASR provider (adds `language` config key) |
+| `.config.yaml` | Docker host `data/.config.yaml` | xiaozhi-server config override |
+| `.env.example` | reference only | Documented environment variables with defaults |
+| `docker-compose.yml` | Docker host `<XIAOZHI_PATH>` | Container definition |
+
+Volume mounts (Docker host) are listed in [quickstart.md](./quickstart.md#deployment-layout).
+
 ## See also
 
 - [hardware.md](./hardware.md) — what the device actually is.
 - [voice-pipeline.md](./voice-pipeline.md) — what the Docker host runs.
 - [brain.md](./brain.md) — what the ZeroClaw host runs.
 - [protocols.md](./protocols.md) — what's on the wire.
+- [quickstart.md](./quickstart.md) — deployment placeholders, volume mounts, common ops.
 
 Last verified: 2026-04-25.
