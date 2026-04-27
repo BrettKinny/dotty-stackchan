@@ -140,7 +140,7 @@ class ProactiveGreeter:
         self.greet_unknown = _env_bool("GREETER_GREET_UNKNOWN", False)
         self.cooldown_seconds = _env_float(
             "GREETER_COOLDOWN_HOURS", 4.0) * 3600.0
-        self.per_day_max = _env_int("GREETER_PER_DAY_MAX", 1)
+        self.per_day_max = _env_int("GREETER_PER_DAY_MAX", 3)
         self.greeting_max_words = _env_int("GREETER_GREETING_MAX_WORDS", 15)
 
         state_path_raw = os.environ.get(

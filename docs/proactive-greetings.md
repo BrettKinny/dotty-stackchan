@@ -80,7 +80,7 @@ while this one targets `face_recognized` (Layer 4 output).
 | `GREETER_USE_FACE_DETECTED` | `false` | Subscribe to `face_detected` as a fallback while Layer 4 isn't wired. Treats every detection as identity=`unknown`. |
 | `GREETER_GREET_UNKNOWN` | `false` | When true, greet unrecognised faces with a generic "Hello! I don't think we've met." |
 | `GREETER_COOLDOWN_HOURS` | `4` | Minimum hours between greetings for the same identity. |
-| `GREETER_PER_DAY_MAX` | `1` | Hard cap on greetings per identity per day. |
+| `GREETER_PER_DAY_MAX` | `3` | Hard cap on greetings per identity per day. The 4h cooldown already prevents back-to-back firings, so this is a safety ceiling rather than a politeness lever — turn it down if 3 greetings/day feels noisy. |
 | `GREETER_STATE_PATH` | `~/.zeroclaw/greeter_state.json` | Persistent greet log so a restart doesn't re-greet everyone. |
 | `GREETER_GREETING_MAX_WORDS` | `15` | Word cap fed to the LLM prompt; the model is also told "one sentence". |
 
