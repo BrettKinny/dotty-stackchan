@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Server-initiated greetings — Dotty speaks first when it recognises a familiar face, with calendar-aware context and time-of-day windowing.">
+        <meta name="description" content="Server-initiated greetings — Dotty speaks first when it recognises a familiar face, with calendar-aware context.">
       
       
       
@@ -2234,8 +2234,12 @@
 </blockquote>
 <p>Layer 6 lets Dotty start a conversation. Instead of only responding to
 voice input, the robot recognises a face, looks up that person in the
-calendar, decides whether the time of day is appropriate, and pushes a
-short spoken greeting through the existing TTS path.</p>
+calendar, and pushes a short spoken greeting through the existing TTS
+path.</p>
+<p>A greeting fires for every recognised face subject to <strong>cooldown</strong> and
+<strong>per-day cap</strong> only — there is no time-of-day gate. The current hour
+is still used to phrase the greeting ("Good morning, Brett!" vs "Good
+evening, …") but never to decide whether to speak.</p>
 <p>This is the first server-initiated speech path in the project. Earlier
 layers were strictly reactive (face detected → "Hi!"). Layer 6 turns
 the same trigger into a context-aware utterance that can mention
@@ -2254,7 +2258,7 @@ today's library trip without the user asking first.</p>
     FW-&gt;&gt;XZ: face_recognized {identity: "Hudson"}
     XZ-&gt;&gt;BR: POST /api/perception/event
     BR--&gt;&gt;PG: perception bus event
-    PG-&gt;&gt;PG: cooldown + time-of-day check
+    PG-&gt;&gt;PG: cooldown + per-day cap check
     PG-&gt;&gt;CAL: summarize_for_prompt(events, person="Hudson")
     CAL--&gt;&gt;PG: ["09:00 [Hudson] Library day"]
     PG-&gt;&gt;LLM: short greeting prompt
@@ -2275,8 +2279,8 @@ while this one targets <code>face_recognized</code> (Layer 4 output).</p>
 <li><strong>Layer 6 — proactive greeter.</strong> Subscribes to <code>face_recognized</code>
    (and optionally <code>face_detected</code> while Layer 4 is being wired —
    see <code>GREETER_USE_FACE_DETECTED</code>).</li>
-<li><strong>Cooldown gate.</strong> Per-person, per-day limits.</li>
-<li><strong>Time-of-day gate.</strong> Morning / afternoon / evening windows.</li>
+<li><strong>Cooldown + per-day cap gate.</strong> Per-person cooldown (default 4h)
+   and per-day cap (default 1) — no time-of-day gating.</li>
 <li><strong>Layer 5 — calendar context.</strong> Person-filtered events for today
    via <code>summarize_for_prompt(events, person=name, include_household=True)</code>.</li>
 <li><strong>LLM.</strong> ≤15-word warm spoken greeting.</li>
@@ -2319,21 +2323,6 @@ while this one targets <code>face_recognized</code> (Layer 4 output).</p>
 <td><code>GREETER_PER_DAY_MAX</code></td>
 <td><code>1</code></td>
 <td>Hard cap on greetings per identity per day.</td>
-</tr>
-<tr>
-<td><code>GREETER_MORNING_WINDOW</code></td>
-<td><code>06:00-09:00</code></td>
-<td>Morning greeting window (<code>HH:MM-HH:MM</code>).</td>
-</tr>
-<tr>
-<td><code>GREETER_AFTERNOON_WINDOW</code></td>
-<td><code>15:00-17:00</code></td>
-<td>Afternoon window.</td>
-</tr>
-<tr>
-<td><code>GREETER_EVENING_WINDOW</code></td>
-<td><code>19:00-21:00</code></td>
-<td>Evening / wind-down window.</td>
 </tr>
 <tr>
 <td><code>GREETER_STATE_PATH</code></td>
@@ -2430,7 +2419,7 @@ keep that change scoped to a single function.</p>
 <ul>
 <li><code>bridge/proactive_greeter.py</code> — <code>ProactiveGreeter</code> class.</li>
 <li><code>bridge/server_push.py</code> — <code>push_greeting_audio()</code> wrapper.</li>
-<li><code>tests/test_proactive_greeter.py</code> — cooldown / window / unknown /
+<li><code>tests/test_proactive_greeter.py</code> — cooldown / per-day cap / unknown /
   template-fallback unit tests.</li>
 </ul>
 
