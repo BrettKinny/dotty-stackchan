@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import collections
 import functools
 import itertools
 import json
@@ -1491,6 +1492,17 @@ _perception_listeners: list[asyncio.Queue] = []
 _perception_state: dict[str, dict] = {}
 _PERCEPTION_STALE_THRESHOLD_S: float = 30.0  # idle > 30 s → stale
 
+# In-memory ring of the most recent perception events per device, used by the
+# dashboard's "Scene context" panel to show what Dotty has lately seen / heard.
+# Bounded so a chatty firmware can't grow the bridge's RSS unbounded; one
+# deque per device, dropped LRU-style when a new device first appears would
+# require an active eviction policy — for a single-device deployment this is
+# effectively a global ring. Text-only: matches the user constraint that no
+# raw media bytes get persisted (these events carry only labels + scalars).
+_PERCEPTION_RECENT_MAX: int = 20
+_perception_recent_events: dict[str, "collections.deque[dict]"] = {}
+
+
 def _perception_subscribe() -> asyncio.Queue:
     q: asyncio.Queue = asyncio.Queue(maxsize=200)
     _perception_listeners.append(q)
@@ -1504,6 +1516,37 @@ def _perception_unsubscribe(q: asyncio.Queue) -> None:
         pass
 
 
+def _perception_recent_append(event: dict) -> None:
+    """Push the event onto the per-device ring buffer (bounded). Mirrors the
+    structure security_watch.RECENT_CYCLES uses but for raw perception events
+    rather than security cycles. Called from the central broadcast hook so
+    every event sees the same fan-out."""
+    device_id = event.get("device_id") or ""
+    if not device_id or device_id == "unknown":
+        return
+    ring = _perception_recent_events.get(device_id)
+    if ring is None:
+        ring = collections.deque(maxlen=_PERCEPTION_RECENT_MAX)
+        _perception_recent_events[device_id] = ring
+    ring.append({
+        "ts": event.get("ts"),
+        "name": event.get("name"),
+        "data": event.get("data") or {},
+    })
+
+
+def get_recent_perception(device_id: str, limit: int | None = None) -> list[dict]:
+    """Return the most-recent perception events for ``device_id`` (newest first)."""
+    ring = _perception_recent_events.get(device_id)
+    if not ring:
+        return []
+    items = list(ring)
+    items.reverse()
+    if limit is not None:
+        items = items[:limit]
+    return items
+
+
 def _perception_broadcast(event: dict) -> None:
     # Bounded label cardinality: only count names we know about so a
     # buggy or malicious payload can't blow up the time-series count.
@@ -1514,6 +1557,10 @@ def _perception_broadcast(event: dict) -> None:
         _safe_metric(
             dotty_perception_events_total.labels(type=name).inc,
         )
+    # Recent-events ring — text-only, in-memory, bounded. Hooks the
+    # dashboard's "Scene context" panel without altering the producer
+    # contract or persisting anything to disk.
+    _perception_recent_append(event)
     if not _perception_listeners:
         return
     for q in list(_perception_listeners):
@@ -2294,6 +2341,46 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_perception_face_lost_aborter()),
         asyncio.create_task(_perception_purr_player()),
     ]
+    # Security state capture loop — text-only photo + audio every
+    # SECURITY_CAPTURE_INTERVAL_SEC, JPEG/audio bytes discarded after
+    # VLM/ASR. See bridge/security_watch.py for the contract.
+    try:
+        from bridge.security_watch import (
+            run_security_consumer, set_vision_cache_writer,
+        )
+
+        def _security_vision_cache_writer(
+            device_id: str,
+            *,
+            jpeg_bytes: bytes,
+            description: str,
+            source: str = "security_capture",
+        ) -> None:
+            """Mutate _vision_cache from a security cycle. The dashboard's
+            /ui/host/robot/photo/{mac} endpoint then serves the JPEG and
+            the new /ui/security/recent/{mac} panel surfaces the source
+            label so the operator can tell apart room_view vs security
+            captures. In-memory only — no disk write — per the user's
+            text-only-storage constraint for media."""
+            try:
+                _vision_cache[device_id] = {
+                    "description": description or "",
+                    "timestamp": perf_counter(),
+                    "wall_ts": time.time(),
+                    "jpeg_bytes": jpeg_bytes,
+                    "question": "security capture",
+                    "room_match_person_id": None,
+                    "source": source,
+                }
+            except Exception:
+                log.warning("security vision_cache write failed", exc_info=True)
+
+        set_vision_cache_writer(_security_vision_cache_writer)
+        perception_tasks.append(asyncio.create_task(
+            run_security_consumer(_perception_subscribe, _perception_unsubscribe)
+        ))
+    except Exception:
+        log.exception("security capture consumer failed to start")
     # sound_turner disabled by default — on-device SoundLocalizer has a
     # stuck-left bias (balance saturates at ~0.998), causing the head to
     # snap to yaw=-45 every few seconds. Re-enable once the firmware
@@ -2804,9 +2891,11 @@ async def vision_explain(
                 _vision_cache[device_id] = {
                     "description": description,
                     "timestamp": perf_counter(),
+                    "wall_ts": time.time(),
                     "jpeg_bytes": jpeg_bytes,
                     "question": question,
                     "room_match_person_id": None,
+                    "source": "room_view",
                 }
                 for ev in _vision_events.get(device_id, ()):
                     ev.set()
@@ -2849,9 +2938,11 @@ async def vision_explain(
         _vision_cache[device_id] = {
             "description": description,
             "timestamp": perf_counter(),
+            "wall_ts": time.time(),
             "jpeg_bytes": jpeg_bytes,
             "question": question,
             "room_match_person_id": room_match_person_id,
+            "source": "room_view",
         }
         # Wake every waiter polling this device. Concurrent callers
         # (room-view capture from textMessageHandlerRegistry + voice
@@ -3132,6 +3223,7 @@ if _configure_dashboard is not None:
         subscribe_events=_dashboard_subscribe_events,
         unsubscribe_events=_dashboard_unsubscribe_events,
         perception_state_getter=_dashboard_perception_state_getter,
+        perception_recent_getter=get_recent_perception,
     )
 
 

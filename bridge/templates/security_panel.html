@@ -1,0 +1,101 @@
+{# Scene context panel — Robot modal. Composes the latest VLM photo +
+   description, a one-line audio summary, the recent perception event
+   ring, and the last 5 security cycles into a single block. Polled
+   every ~7 s by HTMX from /ui/security/recent/{device_id}. #}
+<div class="space-y-3 text-sm">
+
+  {# Top row — latest view (photo + descriptive line) #}
+  <div class="rounded-lg bg-base-200 p-2">
+    <div class="flex items-center justify-between mb-1">
+      <span class="text-xs text-base-content/60">Scene context</span>
+      <span class="text-[10px] uppercase tracking-wide text-base-content/50">
+        state: <span class="font-mono">{{ current_state }}</span>
+      </span>
+    </div>
+    {% if latest_vision %}
+    <div class="flex gap-3 items-start">
+      {% if latest_vision.has_photo %}
+      <img src="/ui/host/robot/photo/{{ device_id }}?t={{ latest_vision.age_label }}"
+           alt="Latest scene"
+           class="w-20 h-20 rounded-md object-cover bg-base-300 flex-shrink-0"
+           onerror="this.style.display='none';">
+      {% else %}
+      <div class="w-20 h-20 rounded-md bg-base-300 flex items-center justify-center flex-shrink-0 text-[10px] text-base-content/50">
+        no photo
+      </div>
+      {% endif %}
+      <div class="min-w-0 flex-1 space-y-1">
+        <div class="text-xs text-base-content/50">
+          <span class="badge badge-ghost badge-xs font-mono">{{ latest_vision.source }}</span>
+          <span class="ml-1">{{ latest_vision.age_label }} ago</span>
+        </div>
+        <div>
+          <span class="text-base-content/60 text-xs">Sees:</span>
+          <span class="break-words">{{ latest_vision.description or "—" }}</span>
+        </div>
+        <div>
+          <span class="text-base-content/60 text-xs">Hears:</span>
+          <span class="break-words">{{ audio_summary }}</span>
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <div class="text-xs text-base-content/50 py-2">
+      No recent scene data. Dotty hasn't captured a view yet.
+    </div>
+    <div class="text-xs">
+      <span class="text-base-content/60">Hears:</span> {{ audio_summary }}
+    </div>
+    {% endif %}
+  </div>
+
+  {# Recent perception events — rolling list of face/sound/state events. #}
+  <div>
+    <div class="text-xs text-base-content/60 mb-1">Recent activity</div>
+    {% if perception_events %}
+    <ul class="text-xs space-y-0.5 font-mono">
+      {% for ev in perception_events %}
+      <li class="flex gap-2 items-baseline">
+        <span class="text-base-content/50 w-10 flex-shrink-0">{{ ev.age_label }}</span>
+        <span class="badge badge-ghost badge-xs">{{ ev.name }}</span>
+        {% if ev.detail %}<span class="text-base-content/70 truncate">{{ ev.detail }}</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="text-xs text-base-content/50">— no perception events yet</div>
+    {% endif %}
+  </div>
+
+  {# Security captures — last few cycles from security_watch. Will be
+     mostly empty / errored until the xiaozhi-server admin route lands. #}
+  <div>
+    <div class="text-xs text-base-content/60 mb-1">Security captures (last 5)</div>
+    {% if cycles %}
+    <ul class="text-xs space-y-1">
+      {% for c in cycles %}
+      <li class="rounded bg-base-200 px-2 py-1">
+        <div class="flex items-baseline gap-2">
+          <span class="font-mono text-base-content/50">{{ c.ts_short }}</span>
+          <span class="break-words flex-1">{{ c.photo_desc or "—" }}</span>
+        </div>
+        <div class="text-[11px] text-base-content/60 mt-0.5">
+          audio: <span class="font-mono">{{ c.audio_transcript }}</span>
+          {% if c.errors %}
+          <span class="ml-2 text-warning">
+            ({% for e in c.errors %}{{ e }}{% if not loop.last %}, {% endif %}{% endfor %})
+          </span>
+          {% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="text-xs text-base-content/50">
+      — no security cycles recorded
+      {% if current_state != "security" %}(security mode not active){% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+</div>

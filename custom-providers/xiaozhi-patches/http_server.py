@@ -255,6 +255,57 @@ class SimpleHttpServer:
             "name": name, "enabled": enabled,
         })
 
+    async def _dotty_take_photo(self, request: "web.Request") -> "web.Response":
+        """POST /xiaozhi/admin/take-photo
+        Body: {"device_id": "<optional>", "question": str}
+
+        Direct MCP self.camera.take_photo call. The firmware grabs a JPEG
+        and POSTs it to the bridge's /api/vision/explain, which runs the
+        VLM and caches the description. Used by bridge/security_watch.py
+        to drive the security-state photo cycle (every 20 s) — same MCP
+        tool the voice "what do you see?" path already uses, just routed
+        through an admin endpoint instead of the chat pipeline.
+        """
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        device_id = (data.get("device_id") or "").strip()
+        question = (data.get("question") or "").strip()
+        if not question:
+            return web.json_response({"error": "question required"}, status=400)
+        if device_id:
+            conn = _dotty_active_connections.get(device_id)
+        else:
+            conn = next(iter(_dotty_active_connections.values()), None)
+        if conn is None:
+            return web.json_response(
+                {"error": "no device connected",
+                 "known": list(_dotty_active_connections)},
+                status=503,
+            )
+        import json
+        import time
+        msg = json.dumps({
+            "session_id": getattr(conn, "session_id", ""),
+            "type": "mcp",
+            "payload": {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "self.camera.take_photo",
+                    "arguments": {"question": question},
+                },
+                "id": int(time.time() * 1000) % 0x7FFFFFFF,
+            },
+        })
+        _spawn(conn.websocket.send(msg), name="take_photo_send")
+        return web.json_response({
+            "ok": True,
+            "device_id": (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id,
+            "question": question,
+        })
+
     async def _dotty_list_songs(self, request: "web.Request") -> "web.Response":
         """GET /xiaozhi/admin/songs — list audio files mounted at
         /opt/xiaozhi-esp32-server/config/assets/songs/.
@@ -560,6 +611,10 @@ class SimpleHttpServer:
                         web.post(
                             "/xiaozhi/admin/set-toggle",
                             self._dotty_set_toggle,
+                        ),
+                        web.post(
+                            "/xiaozhi/admin/take-photo",
+                            self._dotty_take_photo,
                         ),
                         web.post(
                             "/xiaozhi/admin/play-asset",

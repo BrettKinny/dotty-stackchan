@@ -1,7 +1,108 @@
 <h3 class="text-lg font-semibold mb-3">{{ title }}</h3>
+
+{# Robot slug — show the latest VLM-cached photo at the top of the
+   modal so the operator can see what Dotty last saw. The image source
+   is /ui/host/robot/photo/{mac} (served by the bridge dashboard); we
+   deliberately do NOT use /api/vision/latest/{mac} because that
+   endpoint is JSON-only and blocks waiting for a fresh capture. #}
+{% if slug == "robot" %}
+<div class="mb-4">
+  <div class="flex items-center justify-between mb-1">
+    <span class="text-xs text-base-content/60">Latest view</span>
+    {% if photo_device_id %}
+    <button type="button" class="btn btn-xs btn-ghost"
+            onclick="(function(img){
+              if (!img) return;
+              var src = img.dataset.baseSrc || img.src.split('?')[0];
+              img.dataset.baseSrc = src;
+              img.style.display='';
+              var ph = document.getElementById('robot-photo-fallback');
+              if (ph) ph.style.display='none';
+              img.src = src + '?t=' + Date.now();
+            })(document.getElementById('robot-latest-photo'))">
+      Refresh
+    </button>
+    {% endif %}
+  </div>
+  {% if photo_device_id %}
+  <img id="robot-latest-photo"
+       src="/ui/host/robot/photo/{{ photo_device_id }}"
+       alt="Latest view from Dotty"
+       class="w-full rounded-lg bg-base-300 object-cover"
+       style="max-height:280px;"
+       onerror="this.style.display='none'; var ph=document.getElementById('robot-photo-fallback'); if (ph) ph.style.display='';">
+  <div id="robot-photo-fallback"
+       class="text-xs text-base-content/50 text-center py-6 bg-base-200 rounded-lg"
+       style="display:none;">
+    No recent photo cached
+  </div>
+  {% else %}
+  <div class="text-xs text-base-content/50 text-center py-6 bg-base-200 rounded-lg">
+    No recent photo cached
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
 <dl class="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
   {% for k, v in facts %}
   <dt class="text-base-content/60">{{ k }}</dt>
   <dd class="font-mono break-words">{{ v }}</dd>
   {% endfor %}
 </dl>
+
+{# Robot slug — Scene context panel. Shows what Dotty has lately seen
+   and heard (latest VLM photo + description, recent perception events,
+   security cycles). Polls /ui/security/recent/{device_id} every 7 s.
+   Falls back to a placeholder when no device_id is known. #}
+{% if slug == "robot" %}
+<div class="mt-4">
+  {% if photo_device_id %}
+  <div id="robot-scene-context"
+       hx-get="/ui/security/recent/{{ photo_device_id }}"
+       hx-trigger="load, every 7s"
+       hx-swap="innerHTML">
+    <div class="text-xs text-base-content/50 py-2">Loading scene context…</div>
+  </div>
+  {% else %}
+  <div class="text-xs text-base-content/50 py-2 px-2 rounded bg-base-200">
+    No device connected — scene context unavailable.
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{# Bridge slug — host vitals absorbed from the old footer status
+   strip. CPU temp / memory / disk / uptime, with the same warn
+   colouring rules the footer used. #}
+{% if slug == "bridge" and diagnostics %}
+<div class="mt-4">
+  <div class="text-xs text-base-content/60 mb-1">Host vitals</div>
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+    <div class="rounded bg-base-200 px-2 py-1">
+      <div class="text-base-content/50">Temp</div>
+      <div class="font-mono {% if diagnostics.cpu_warn %}text-warning{% endif %}">
+        {% if diagnostics.cpu_c is not none %}{{ "%.0f"|format(diagnostics.cpu_c) }}°C{% else %}n/a{% endif %}
+      </div>
+    </div>
+    <div class="rounded bg-base-200 px-2 py-1">
+      <div class="text-base-content/50">Mem</div>
+      <div class="font-mono {% if diagnostics.mem_warn %}text-warning{% endif %}">
+        {% if diagnostics.mem_pct is not none %}{{ diagnostics.mem_pct }}%{% else %}n/a{% endif %}
+      </div>
+    </div>
+    <div class="rounded bg-base-200 px-2 py-1">
+      <div class="text-base-content/50">Disk</div>
+      <div class="font-mono {% if diagnostics.disk_warn %}text-warning{% endif %}">
+        {% if diagnostics.disk_pct is not none %}{{ diagnostics.disk_pct }}%{% else %}n/a{% endif %}
+      </div>
+    </div>
+    <div class="rounded bg-base-200 px-2 py-1">
+      <div class="text-base-content/50">Uptime</div>
+      <div class="font-mono">
+        {% if diagnostics.uptime %}{{ diagnostics.uptime }}{% else %}n/a{% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
