@@ -1,0 +1,8 @@
+{% if ok %}
+<div class="alert alert-info dotty-alert"
+     hx-get="/ui/state" hx-trigger="load delay:500ms" hx-swap="outerHTML" hx-target="#state-card-body">
+  State → <span class="font-semibold">{{ label }}</span>
+</div>
+{% else %}
+<div class="alert alert-error dotty-alert">{{ error or "State change failed." }}</div>
+{% endif %}

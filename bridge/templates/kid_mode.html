@@ -5,11 +5,8 @@
     <div class="min-w-0">
       <div class="font-semibold text-sm">Kid Mode</div>
       <div class="text-xs text-base-content/60">
-        {% if enabled %}safe model &middot; safety rules &middot; camera off{% else %}adult mode &middot; capable model &middot; pink LED{% endif %}
+        {% if enabled %}safe model, restricted prompt{% else %}full autonomy{% endif %}
       </div>
-      {% if model %}
-      <div class="text-xs text-base-content/50 font-mono mt-0.5 truncate" title="{{ model }}">{{ model }}</div>
-      {% endif %}
     </div>
     <input type="hidden" name="enabled" value="{{ 'false' if enabled else 'true' }}">
     <label class="flex items-center gap-2 cursor-pointer">

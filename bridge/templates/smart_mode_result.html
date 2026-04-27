@@ -1,0 +1,8 @@
+{% if ok %}
+<div class="alert alert-info dotty-alert"
+     hx-get="/ui/smart-mode" hx-trigger="load delay:300ms" hx-swap="outerHTML" hx-target="#smart-card-body">
+  Smart Mode → <span class="font-semibold">{{ "on" if new_state else "off" }}</span>
+</div>
+{% else %}
+<div class="alert alert-error dotty-alert">{{ error or "Smart mode toggle failed." }}</div>
+{% endif %}

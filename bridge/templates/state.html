@@ -1,0 +1,55 @@
+{# LED state-pip colours (dashboard mirrors the firmware's state-pip).
+   Values brightened from the firmware's dim levels so they read on screen;
+   `dance` has no firmware pip (suppressed) — fuchsia is dashboard-only. #}
+{# Mirrors the firmware's chat-state animation: green=listening (the most
+   visible colour during a talk session), even though the state pip itself
+   is dim cyan. #}
+{% set state_led_colors = {
+  "idle":       "#6b7280",
+  "talk":       "#22c55e",
+  "story_time": "#f59e0b",
+  "security":   "#e5e7eb",
+  "sleep":      "#3b82f6",
+  "dance":      "#d946ef"
+} %}
+<div id="state-card-body" data-state="{{ current }}"
+     class="card bg-base-100 shadow-sm overflow-hidden">
+  <div class="card-body p-3">
+    <div class="text-xs text-base-content/60 mb-2 px-1">State</div>
+    <form hx-post="/ui/actions/state" hx-target="#state-result" hx-swap="innerHTML"
+          hx-disabled-elt="find button"
+          class="flex flex-wrap gap-2">
+      {% for s in states %}
+        {% set is_current = (s == current) %}
+        <button type="submit" name="state" value="{{ s }}"
+                class="btn btn-sm flex-1 min-w-[7rem] gap-2 {% if is_current %}btn-primary{% else %}btn-outline{% endif %}"
+                {% if not available %}disabled{% endif %}
+                title="{{ descriptions.get(s, '') }}">
+          {% if s == 'dance' %}
+          <span aria-hidden="true" class="dotty-led-rainbow"
+                style="display:inline-block;width:10px;height:10px;border-radius:9999px;flex-shrink:0;box-shadow:0 0 6px rgba(217,70,239,0.6);"></span>
+          {% else %}
+          <span aria-hidden="true"
+                style="display:inline-block;width:10px;height:10px;border-radius:9999px;flex-shrink:0;background:{{ state_led_colors.get(s, '#6b7280') }};box-shadow:0 0 6px {{ state_led_colors.get(s, '#6b7280') }}80;"></span>
+          {% endif %}
+          {{ labels.get(s, s) }}
+        </button>
+      {% endfor %}
+    </form>
+
+    {% if not available %}
+    <div class="text-xs text-base-content/50 mt-2">
+      State control not available — bridge missing the device-dispatch helper.
+    </div>
+    {% endif %}
+
+    <div id="state-result" class="mt-2 empty:hidden"></div>
+  </div>
+  <script>
+    (function () {
+      document.dispatchEvent(new CustomEvent('dotty-state-change', {
+        detail: {state: {{ current|tojson }}}
+      }));
+    })();
+  </script>
+</div>

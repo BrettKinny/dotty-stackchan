@@ -1,7 +1,7 @@
 <div class="card-body p-3">
   <div class="text-xs text-base-content/60 mb-2">Persona</div>
   {% if available %}
-  <form hx-post="/ui/actions/persona" hx-target="#persona-card" hx-swap="outerHTML"
+  <form hx-post="/ui/actions/persona" hx-target="#persona-card" hx-swap="innerHTML"
         class="flex items-center gap-2">
     <select name="name" class="select select-bordered select-sm flex-1"
             onchange="this.form.requestSubmit()">

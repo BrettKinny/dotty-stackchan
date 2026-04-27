@@ -37,6 +37,10 @@ _state: dict[str, Any] = {
     "vision_cache": None,
     "kid_mode_getter": None,
     "kid_mode_setter": None,
+    "smart_mode_getter": None,
+    "smart_mode_setter": None,
+    "state_getter": None,
+    "state_setter": None,
     "inject_to_device": None,
     "abort_device": None,
     "subscribe_events": None,
@@ -46,6 +50,8 @@ _state: dict[str, Any] = {
 
 def configure(*, send_message: Any = None, vision_cache: dict | None = None,
               kid_mode_getter: Any = None, kid_mode_setter: Any = None,
+              smart_mode_getter: Any = None, smart_mode_setter: Any = None,
+              state_getter: Any = None, state_setter: Any = None,
               inject_to_device: Any = None, abort_device: Any = None,
               subscribe_events: Any = None,
               unsubscribe_events: Any = None) -> None:
@@ -58,6 +64,14 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
         _state["kid_mode_getter"] = kid_mode_getter
     if kid_mode_setter is not None:
         _state["kid_mode_setter"] = kid_mode_setter
+    if smart_mode_getter is not None:
+        _state["smart_mode_getter"] = smart_mode_getter
+    if smart_mode_setter is not None:
+        _state["smart_mode_setter"] = smart_mode_setter
+    if state_getter is not None:
+        _state["state_getter"] = state_getter
+    if state_setter is not None:
+        _state["state_setter"] = state_setter
     if inject_to_device is not None:
         _state["inject_to_device"] = inject_to_device
     if abort_device is not None:
@@ -684,6 +698,17 @@ KID_MODEL_NAME = os.environ.get(
 ADULT_MODEL_NAME = os.environ.get(
     "DOTTY_ADULT_MODEL", "anthropic/claude-sonnet-4-6",
 )
+# Smart-mode is an independent toggle: when ON, the bridge routes turns to
+# `SMART_MODEL` instead of the kid/adult default. When OFF, the regular
+# kid/adult path is used.
+SMART_MODEL_NAME = os.environ.get("SMART_MODEL", "")
+
+
+def _short_model(name: str) -> str:
+    """Strip the provider prefix for compact dashboard display."""
+    if not name:
+        return ""
+    return name.split("/", 1)[1] if "/" in name else name
 
 
 @router.get("/kid-mode", response_class=HTMLResponse, include_in_schema=False)
@@ -692,8 +717,110 @@ async def kid_mode_partial(request: Request) -> Any:
     enabled = bool(getter()) if getter else True
     return templates.TemplateResponse(
         request, "kid_mode.html",
+        {"enabled": enabled, "available": getter is not None},
+    )
+
+
+# Phase 4 — State + Smart-mode dashboard cards. Both are LIVE-update (no
+# daemon restart required). State picker pushes set_state MCP via the bridge
+# helper; smart-mode toggle pushes set_toggle MCP and persists to the state
+# file.
+
+# Display order for the dashboard state picker. Slugs (sent to the firmware
+# via /xiaozhi/admin/set-state) match StateManager::stateName; the order +
+# short labels here are dashboard-only.
+_STATES = ("idle", "talk", "story_time", "security", "dance", "sleep")
+_STATE_LABELS = {
+    "idle":       "Idle",
+    "talk":       "Talk",
+    "story_time": "Story",
+    "security":   "Security",
+    "sleep":      "Sleep",
+    "dance":      "Dance",
+}
+_STATE_DESCRIPTIONS = {
+    "idle":       "Ambient awareness, default",
+    "talk":       "Conversation engaged",
+    "story_time": "Long-running interactive story",
+    "security":   "Wide deliberate scan, periodic capture",
+    "sleep":      "Servos parked, ambient awareness off",
+    "dance":      "Transient performance",
+}
+
+
+@router.get("/state", response_class=HTMLResponse, include_in_schema=False)
+async def state_partial(request: Request) -> Any:
+    getter = _state.get("state_getter")
+    current = (getter() if getter else "idle") or "idle"
+    return templates.TemplateResponse(
+        request, "state.html",
+        {
+            "current": current,
+            "available": getter is not None,
+            "states": _STATES,
+            "labels": _STATE_LABELS,
+            "descriptions": _STATE_DESCRIPTIONS,
+        },
+    )
+
+
+@router.post("/actions/state", response_class=HTMLResponse, include_in_schema=False)
+async def state_set(request: Request, state: str = Form(...)) -> Any:
+    setter = _state.get("state_setter")
+    if setter is None:
+        raise HTTPException(503, "state_setter not configured")
+    if state not in _STATES:
+        return templates.TemplateResponse(
+            request, "state_result.html",
+            {"ok": False, "error": f"unknown state: {state!r}", "state": state},
+        )
+    try:
+        result = await setter(state)
+        ok = bool(result.get("ok") if isinstance(result, dict) else result)
+    except Exception as exc:
+        log.exception("state setter failed")
+        return templates.TemplateResponse(
+            request, "state_result.html",
+            {"ok": False, "error": str(exc), "state": state},
+        )
+    return templates.TemplateResponse(
+        request, "state_result.html",
+        {"ok": ok, "state": state, "label": _STATE_LABELS.get(state, state)},
+    )
+
+
+@router.get("/smart-mode", response_class=HTMLResponse, include_in_schema=False)
+async def smart_mode_partial(request: Request) -> Any:
+    getter = _state.get("smart_mode_getter")
+    enabled = bool(getter()) if getter else False
+    kid_getter = _state.get("kid_mode_getter")
+    kid_enabled = bool(kid_getter()) if kid_getter else True
+    default_model = KID_MODEL_NAME if kid_enabled else ADULT_MODEL_NAME
+    return templates.TemplateResponse(
+        request, "smart_mode.html",
         {"enabled": enabled, "available": getter is not None,
-         "model": KID_MODEL_NAME if enabled else ADULT_MODEL_NAME},
+         "smart_model": _short_model(SMART_MODEL_NAME),
+         "default_model": _short_model(default_model)},
+    )
+
+
+@router.post("/actions/smart-mode", response_class=HTMLResponse, include_in_schema=False)
+async def smart_mode_set(request: Request, enabled: str = Form("")) -> Any:
+    setter = _state.get("smart_mode_setter")
+    if setter is None:
+        raise HTTPException(503, "smart_mode_setter not configured")
+    new_state = enabled.lower() in ("on", "true", "1", "yes")
+    try:
+        await setter(new_state)
+    except Exception as exc:
+        log.exception("smart_mode setter failed")
+        return templates.TemplateResponse(
+            request, "smart_mode_result.html",
+            {"ok": False, "error": str(exc)},
+        )
+    return templates.TemplateResponse(
+        request, "smart_mode_result.html",
+        {"ok": True, "new_state": new_state},
     )
 
 
@@ -1215,6 +1342,155 @@ async def metrics(request: Request) -> Any:
     ]
     return templates.TemplateResponse(
         request, "metrics.html", {"rows": rows}
+    )
+
+
+# Single-page redesign: compact host dots (header placement) + system pills
+# (footer placement). One endpoint, two placements, polled at the same 10s
+# cadence. Replaces /ui/cards + /ui/metrics + /ui/vision/latest in the new
+# layout; the older endpoints remain for compatibility but no longer have
+# callers in dashboard.html.
+@router.get("/status-strip", response_class=HTMLResponse, include_in_schema=False)
+async def status_strip(request: Request, placement: str = "header") -> Any:
+    placement = placement if placement in ("header", "footer") else "header"
+    ctx: dict[str, Any] = {"placement": placement, "version": BRIDGE_VERSION}
+
+    if placement == "header":
+        bridge_uptime = time.time() - _START_TIME
+        xz_ota_ok, xz_ws_ok = await asyncio.gather(
+            _tcp_reachable(XIAOZHI_HOST, XIAOZHI_OTA_PORT),
+            _tcp_reachable(XIAOZHI_HOST, XIAOZHI_WS_PORT),
+        )
+        last_seen_ts = _stackchan_last_seen()
+        if last_seen_ts is None:
+            sc_status = "unknown"
+            sc_tip = "Dotty: no voice activity today"
+        else:
+            age = time.time() - last_seen_ts
+            if age < 600:
+                sc_status, sc_tip = "ok", f"Dotty: active {_humanize_age(age)} ago"
+            elif age < 86400:
+                sc_status, sc_tip = "warn", f"Dotty: idle {_humanize_age(age)} ago"
+            else:
+                sc_status, sc_tip = "bad", f"Dotty: stale {_humanize_age(age)} ago"
+
+        if not XIAOZHI_HOST:
+            xz_status, xz_tip = "unknown", "unraid: XIAOZHI_HOST env not set"
+        elif xz_ota_ok and xz_ws_ok:
+            xz_status, xz_tip = "ok", f"unraid: OTA :{XIAOZHI_OTA_PORT} + WS :{XIAOZHI_WS_PORT}"
+        elif xz_ota_ok or xz_ws_ok:
+            xz_status, xz_tip = "warn", "unraid: partial reachability"
+        else:
+            xz_status, xz_tip = "bad", "unraid: no ports responding"
+
+        ctx["dots"] = [
+            {"slug": "bridge", "label": "bridge",
+             "status": "ok",      "title": f"bridge: up {_humanize_age(bridge_uptime)}"},
+            {"slug": "server", "label": "server",
+             "status": xz_status, "title": xz_tip.replace("unraid:", "server:")},
+            {"slug": "robot",  "label": "robot",
+             "status": sc_status, "title": sc_tip.replace("Dotty:", "robot:")},
+        ]
+    else:
+        cpu_c = _cpu_temp_c()
+        mem = _read_memory_mb()
+        disk = _disk_usage_root()
+        upt = _proc_uptime_sec()
+        pick = _latest_vision_entry()
+        vision_age = ""
+        have_photo = False
+        if pick is not None:
+            _, entry = pick
+            if entry.get("jpeg_bytes"):
+                have_photo = True
+                elapsed = max(
+                    0.0,
+                    time.monotonic() - entry.get("timestamp", time.monotonic()),
+                )
+                vision_age = _humanize_age(elapsed)
+        ctx.update({
+            "have_photo": have_photo,
+            "vision_age": vision_age,
+            "cpu_c": cpu_c,
+            "cpu_warn": cpu_c is not None and cpu_c >= 75,
+            "mem_pct": (
+                int(round((mem[0] / mem[1]) * 100)) if mem and mem[1] else None
+            ),
+            "mem_warn": (
+                bool(mem and mem[1] and (mem[0] / mem[1]) > 0.85)
+            ),
+            "disk_pct": (
+                int(round((disk[0] / disk[1]) * 100)) if disk and disk[1] else None
+            ),
+            "disk_warn": (
+                bool(disk and disk[1] and (disk[0] / disk[1]) > 0.85)
+            ),
+            "uptime": _humanize_age(upt) if upt else None,
+        })
+
+    return templates.TemplateResponse(request, "status_strip.html", ctx)
+
+
+# Host-detail modal: clicked from the header status strip. One slug per
+# host (bridge / xiaozhi / dotty); each gathers a small set of facts.
+@router.get("/host/{slug}", response_class=HTMLResponse,
+            include_in_schema=False)
+async def host_detail(request: Request, slug: str) -> Any:
+    if slug not in ("bridge", "server", "robot"):
+        raise HTTPException(404, "unknown host")
+
+    facts: list[tuple[str, str]] = []
+    title = ""
+
+    if slug == "bridge":
+        title = "Bridge"
+        upt = _proc_uptime_sec()
+        facts = [
+            ("status",    "online"),
+            ("version",   BRIDGE_VERSION),
+            ("uptime",    _humanize_age(time.time() - _START_TIME)),
+            ("host up",   _humanize_age(upt) if upt else "n/a"),
+            ("logs dir",  str(LOG_DIR)),
+            ("kid model", _short_model(KID_MODEL_NAME)),
+            ("adult model", _short_model(ADULT_MODEL_NAME)),
+            ("smart model", _short_model(SMART_MODEL_NAME) or "(unset)"),
+        ]
+    elif slug == "server":
+        title = "Server (xiaozhi-esp32-server)"
+        ota_ok, ws_ok = await asyncio.gather(
+            _tcp_reachable(XIAOZHI_HOST, XIAOZHI_OTA_PORT),
+            _tcp_reachable(XIAOZHI_HOST, XIAOZHI_WS_PORT),
+        )
+        n = await _xiaozhi_device_count()
+        facts = [
+            ("host",     XIAOZHI_HOST or "(unset)"),
+            ("OTA :%d" % XIAOZHI_OTA_PORT, "reachable" if ota_ok else "unreachable"),
+            ("WS :%d"  % XIAOZHI_WS_PORT,  "reachable" if ws_ok  else "unreachable"),
+            ("devices connected",
+             "—" if n is None else f"{n}"),
+        ]
+    else:  # robot
+        title = "Robot (StackChan)"
+        last_seen_ts = _stackchan_last_seen()
+        if last_seen_ts is None:
+            seen = "no voice activity today"
+        else:
+            seen = f"{_humanize_age(time.time() - last_seen_ts)} ago"
+        getter = _state.get("state_getter")
+        current = (getter() if getter else None) or "idle"
+        n = await _xiaozhi_device_count()
+        facts = [
+            ("device class", "M5Stack StackChan (ESP32-S3)"),
+            ("connection",
+             "online" if (n is not None and n > 0)
+             else ("offline" if n == 0 else "unknown")),
+            ("last seen",   seen),
+            ("current state", current),
+        ]
+
+    return templates.TemplateResponse(
+        request, "host_detail.html",
+        {"title": title, "facts": facts, "slug": slug},
     )
 
 

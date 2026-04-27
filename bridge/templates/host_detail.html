@@ -1,0 +1,7 @@
+<h3 class="text-lg font-semibold mb-3">{{ title }}</h3>
+<dl class="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
+  {% for k, v in facts %}
+  <dt class="text-base-content/60">{{ k }}</dt>
+  <dd class="font-mono break-words">{{ v }}</dd>
+  {% endfor %}
+</dl>

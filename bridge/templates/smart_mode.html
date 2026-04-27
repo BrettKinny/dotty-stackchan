@@ -1,0 +1,31 @@
+<div id="smart-card-body" class="card bg-base-100 shadow-sm overflow-hidden">
+  <div class="card-body p-3">
+    <form hx-post="/ui/actions/smart-mode" hx-target="#smart-result" hx-swap="innerHTML"
+          hx-disabled-elt="find input"
+          class="flex items-center justify-between gap-3">
+      <div class="min-w-0 flex-1">
+        <div class="font-semibold text-sm">Smart Mode</div>
+        <div class="text-xs leading-tight mt-0.5 space-y-0.5">
+          <div class="truncate {% if enabled %}font-semibold text-base-content/80{% else %}text-base-content/40{% endif %}"
+               title="on: {{ smart_model or '(unset)' }}">
+            on: <span class="font-mono">{{ smart_model or '—' }}</span>
+          </div>
+          <div class="truncate {% if not enabled %}font-semibold text-base-content/80{% else %}text-base-content/40{% endif %}"
+               title="off: {{ default_model }}">
+            off: <span class="font-mono">{{ default_model }}</span>
+          </div>
+        </div>
+      </div>
+      <input type="hidden" name="enabled" value="{{ 'false' if enabled else 'true' }}">
+      <label class="flex items-center gap-2 cursor-pointer">
+        <span class="text-xs text-base-content/60">{{ "on" if enabled else "off" }}</span>
+        <input type="checkbox"
+               class="toggle toggle-warning toggle-lg"
+               {% if enabled %}checked{% endif %}
+               onchange="this.form.querySelector('[name=enabled]').value=this.checked?'true':'false';this.form.requestSubmit();"
+               {% if not available %}disabled{% endif %}>
+      </label>
+    </form>
+    <div id="smart-result" class="mt-2 empty:hidden"></div>
+  </div>
+</div>

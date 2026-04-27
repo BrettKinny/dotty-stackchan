@@ -1,0 +1,44 @@
+{# Kebab (⋮) menu items for the dashboard header. Wired to existing
+   action endpoints — no new routes. Theme toggle lives here too so the
+   header keeps a single drop-down + a sleek Refresh button. #}
+<ul class="menu menu-sm dropdown-content bg-base-100 rounded-box z-30 w-60 p-2 shadow-lg mt-2">
+  <li>
+    <button type="button" data-gear-item
+            onclick="var d=document.documentElement;var n=d.getAttribute('data-theme')==='dark'?'light':'dark';d.setAttribute('data-theme',n);try{localStorage.setItem('dotty-theme',n)}catch(e){}">
+      <span aria-hidden="true">🌓</span> Toggle theme
+    </button>
+  </li>
+  <li>
+    <button type="button" data-gear-item
+            hx-post="/ui/actions/preview-update"
+            hx-target="#update-modal-content" hx-swap="innerHTML"
+            hx-disabled-elt="this"
+            hx-on::after-request="document.getElementById('update-modal').showModal()">
+      <span aria-hidden="true">⬇</span> Update
+    </button>
+  </li>
+  <li>
+    <button type="button" data-gear-item class="text-warning"
+            hx-post="/ui/actions/restart-bridge"
+            hx-target="#restart-result" hx-swap="innerHTML"
+            hx-confirm="Restart the bridge? Voice and logs will pause for ~5s.">
+      <span aria-hidden="true">↻</span> Restart bridge
+    </button>
+  </li>
+  {# Restart Dotty (device) and Restart server (xiaozhi container) need
+     new backend paths — a firmware MCP reboot tool and an xiaozhi admin
+     endpoint or ssh-to-Unraid respectively. Disabled placeholders until
+     plumbed so the menu shape matches the eventual full set. #}
+  <li>
+    <button type="button" disabled class="text-base-content/40 cursor-not-allowed"
+            title="Not yet wired — needs a firmware reboot MCP tool">
+      <span aria-hidden="true">↻</span> Restart Dotty (TBD)
+    </button>
+  </li>
+  <li>
+    <button type="button" disabled class="text-base-content/40 cursor-not-allowed"
+            title="Not yet wired — needs ssh-to-Unraid or xiaozhi admin endpoint">
+      <span aria-hidden="true">↻</span> Restart server (TBD)
+    </button>
+  </li>
+</ul>

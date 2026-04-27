@@ -1,0 +1,44 @@
+{# Single-page redesign: compact host strip (placement=header) and footer
+   system pills (placement=footer). One template, two layouts. #}
+{% if placement == "header" %}
+<div class="flex items-center gap-3" role="group" aria-label="Host status">
+  {% for d in dots %}
+  <button type="button"
+          class="flex items-center gap-1 hover:text-base-content"
+          title="{{ d.title }} — click for detail"
+          hx-get="/ui/host/{{ d.slug }}"
+          hx-target="#host-modal-body" hx-swap="innerHTML"
+          hx-on::after-request="document.getElementById('host-modal').showModal()">
+    <span class="status-dot status-{{ d.status }}" aria-hidden="true"></span>
+    <span class="text-xs text-base-content/60">{{ d.label }}</span>
+  </button>
+  {% endfor %}
+</div>
+{% else %}
+<div class="flex items-center justify-center gap-3 text-xs text-base-content/60 flex-wrap py-2 px-3">
+  <button type="button"
+          class="inline-flex items-center gap-1 hover:text-base-content leading-none"
+          hx-get="/ui/vision/latest" hx-target="#vision-modal-body" hx-swap="innerHTML"
+          hx-on::after-request="document.getElementById('vision-modal').showModal()"
+          aria-label="Open latest vision capture">
+    <span aria-hidden="true" style="font-size:0.85em;line-height:1;display:inline-block;">📷</span>
+    {% if have_photo %}<span class="font-mono">{{ vision_age }}</span>{% endif %}
+  </button>
+  <span aria-hidden="true">·</span>
+  <span class="font-mono {% if cpu_warn %}text-warning{% endif %}">
+    {% if cpu_c %}{{ "%.0f"|format(cpu_c) }}°C{% else %}n/a{% endif %}
+  </span>
+  <span aria-hidden="true">·</span>
+  <span class="font-mono {% if mem_warn %}text-warning{% endif %}">
+    {% if mem_pct is not none %}mem {{ mem_pct }}%{% else %}mem n/a{% endif %}
+  </span>
+  <span aria-hidden="true">·</span>
+  <span class="font-mono {% if disk_warn %}text-warning{% endif %}">
+    {% if disk_pct is not none %}disk {{ disk_pct }}%{% else %}disk n/a{% endif %}
+  </span>
+  <span aria-hidden="true">·</span>
+  <span class="font-mono">{% if uptime %}up {{ uptime }}{% else %}up n/a{% endif %}</span>
+  <span aria-hidden="true">·</span>
+  <span class="font-mono">v{{ version }}</span>
+</div>
+{% endif %}
