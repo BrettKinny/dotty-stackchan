@@ -216,6 +216,33 @@ FACE_GREET_TEXT = os.environ.get("FACE_GREET_TEXT", "Hi!")
 # END=24 to greet 24/7.
 FACE_GREET_HOUR_START = int(os.environ.get("FACE_GREET_HOUR_START", "6"))
 FACE_GREET_HOUR_END = int(os.environ.get("FACE_GREET_HOUR_END", "21"))
+
+# Named-recognition acknowledger. Fires on `face_recognized` (after the
+# room-view VLM resolves to a roster member) so the user hears explicit
+# proof of recognition. Independent of the bare "Hi!" greeter and of the
+# rich ProactiveGreeter (which is 4h-cooldown'd and may not fire). No
+# time-of-day gate — recognition confirmation should not be silenced.
+FACE_NAME_GREET_MIN_INTERVAL_SEC = float(
+    os.environ.get("FACE_NAME_GREET_MIN_INTERVAL_SEC", "30"),
+)
+FACE_NAME_GREET_TEMPLATE = os.environ.get(
+    "FACE_NAME_GREET_TEMPLATE", "Oh, it's {name}!",
+)
+# Suppress the named greet if a chat happened within this many seconds.
+# Mirrors the sound_turner's last_chat_t gate so the upgrade doesn't
+# stomp the tail of an in-flight TTS turn.
+FACE_NAME_GREET_QUIET_AFTER_CHAT_SEC = float(
+    os.environ.get("FACE_NAME_GREET_QUIET_AFTER_CHAT_SEC", "10"),
+)
+
+# Idle photo cooldown. Autonomous (firmware-initiated, room-view sentinel)
+# photo captures are rate-limited per device to avoid thrashing the VLM
+# every time a face is detected. Voice queries ("what do you see") bypass.
+# A "no photos while talking" hard gate belongs in firmware ModeManager
+# (Phase 4) since the bridge has no real-time TTS state visibility.
+DOTTY_IDLE_VISION_COOLDOWN_SEC = float(
+    os.environ.get("DOTTY_IDLE_VISION_COOLDOWN_SEC", "120"),
+)
 # How recently must a greeting have fired for face_lost to abort it.
 # Firmware emits face_lost ~2 s after the face actually leaves frame
 # (FaceTrackingModifier grace period); past this window we assume the
@@ -1778,6 +1805,54 @@ async def _perception_wake_word_turner() -> None:
         _perception_unsubscribe(q)
 
 
+async def _handle_face_recognized(event: dict) -> None:
+    """Named-recognition acknowledger: on `face_recognized`, look up
+    the identity in the household registry and speak `"Oh, it's
+    <display_name>!"` so the user gets explicit proof of recognition.
+
+    Independent of the bare-greet `face_detected` path and the rich
+    ProactiveGreeter — those still fire on their own cadence. Uses
+    `_dispatch_say` (TTS, bypasses ASR/LLM) so it plays as Dotty's
+    own speech rather than a fake user utterance.
+    """
+    device_id = event.get("device_id", "")
+    if not device_id or device_id == "unknown":
+        return
+    data = event.get("data") or {}
+    identity = data.get("identity") or ""
+    if not identity:
+        return
+    if _household_registry is None:
+        return
+    person = _household_registry.get(identity)
+    if person is None or not person.display_name:
+        log.debug("face_recognized: identity=%s not in roster", identity)
+        return
+    now = event.get("ts", 0.0)
+    state = _perception_state.setdefault(device_id, {})
+    last_chat = state.get("last_chat_t", 0.0)
+    if now - last_chat < FACE_NAME_GREET_QUIET_AFTER_CHAT_SEC:
+        log.debug(
+            "face_recognized → suppressed (chat fresh): device=%s identity=%s",
+            device_id, identity,
+        )
+        return
+    name_greets = state.setdefault("last_name_greet_t", {})
+    last_named = name_greets.get(identity, 0.0)
+    if now - last_named < FACE_NAME_GREET_MIN_INTERVAL_SEC:
+        return
+    name_greets[identity] = now
+    text = FACE_NAME_GREET_TEMPLATE.format(name=person.display_name)
+    log.info(
+        "face_recognized → name-greet: device=%s identity=%s text=%r",
+        device_id, identity, text,
+    )
+    _spawn(
+        _dispatch_say(device_id, text),
+        name="dispatch_name_greet",
+    )
+
+
 async def _perception_face_greeter() -> None:
     """Phase 1.5 consumer: on face_detected events, fire a brief
     audible greeting through the existing inject-text path so the
@@ -1794,11 +1869,20 @@ async def _perception_face_greeter() -> None:
         "perception face greeter started (min_interval=%.0fs text=%r)",
         FACE_GREET_MIN_INTERVAL_SEC, FACE_GREET_TEXT,
     )
+    log.info(
+        "perception named acknowledger active (min_interval=%.0fs template=%r quiet_after_chat=%.0fs)",
+        FACE_NAME_GREET_MIN_INTERVAL_SEC, FACE_NAME_GREET_TEMPLATE,
+        FACE_NAME_GREET_QUIET_AFTER_CHAT_SEC,
+    )
     q = _perception_subscribe()
     try:
         while True:
             event = await q.get()
-            if event.get("name") != "face_detected":
+            ev_name = event.get("name")
+            if ev_name == "face_recognized":
+                await _handle_face_recognized(event)
+                continue
+            if ev_name != "face_detected":
                 continue
             device_id = event.get("device_id", "")
             if not device_id or device_id == "unknown":
@@ -2093,11 +2177,18 @@ async def lifespan(app: FastAPI):
     # Phase 1.5 / 1.6: start perception subscriber tasks
     perception_tasks = [
         asyncio.create_task(_perception_face_greeter()),
-        asyncio.create_task(_perception_sound_turner()),
         asyncio.create_task(_perception_wake_word_turner()),
         asyncio.create_task(_perception_face_lost_aborter()),
         asyncio.create_task(_perception_purr_player()),
     ]
+    # sound_turner disabled by default — on-device SoundLocalizer has a
+    # stuck-left bias (balance saturates at ~0.998), causing the head to
+    # snap to yaw=-45 every few seconds. Re-enable once the firmware
+    # localizer has a calibrated L/R baseline.
+    if os.environ.get("DOTTY_SOUND_TURNER_ENABLED", "0") == "1":
+        perception_tasks.append(asyncio.create_task(_perception_sound_turner()))
+    else:
+        log.info("perception sound turner disabled (DOTTY_SOUND_TURNER_ENABLED!=1)")
     # Layer 5: background calendar refresher (no-op when CALENDAR_IDS empty).
     calendar_task = asyncio.create_task(_calendar_poll_loop())
 
@@ -2582,6 +2673,31 @@ async def vision_explain(
         )
         room_match_person_id: str | None = None
         if room_view_question is not None:
+            # Idle photo cooldown — skip the VLM call if we've already
+            # captured an autonomous photo for this device within the
+            # cooldown window. Cache + waiter wake still happen so the
+            # firmware doesn't time out on /api/vision/latest.
+            wall_now = time.time()
+            state = _perception_state.setdefault(device_id, {})
+            last_capture = state.get("last_room_view_capture_t", 0.0)
+            cooldown_age = wall_now - last_capture
+            if cooldown_age < DOTTY_IDLE_VISION_COOLDOWN_SEC:
+                log.info(
+                    "room_view skipped: device=%s cooldown=%.1fs/%.0fs",
+                    device_id, cooldown_age, DOTTY_IDLE_VISION_COOLDOWN_SEC,
+                )
+                description = _ROOM_VIEW_NO_PERSON
+                _vision_cache[device_id] = {
+                    "description": description,
+                    "timestamp": perf_counter(),
+                    "jpeg_bytes": jpeg_bytes,
+                    "question": question,
+                    "room_match_person_id": None,
+                }
+                for ev in _vision_events.get(device_id, ()):
+                    ev.set()
+                return {"description": description}
+            state["last_room_view_capture_t"] = wall_now
             roster_ids = (
                 _household_registry.roster_ids_with_appearance()
                 if _household_registry is not None else set()
