@@ -72,7 +72,7 @@ Capable-model variant of conversation. Triggered by phrase match in `receiveAudi
 - **One-shot**: `"smart mode, what is the speed of light?"` → trigger phrase + remaining query routed to the capable model in a single turn.
 - **Two-turn**: `"smart mode."` (no query) → robot acknowledges (`"Smart mode! What would you like to know?"`), `conn.smart_mode_next = True` flag set; the next turn is forced through smart routing.
 
-The capable model is configured via `SMART_MODEL` env on the bridge (e.g. Claude Sonnet via OpenRouter); falls through to the default brain if unset. LED: on smart-mode entry `set_led_color(168,0,168)` pulses the ring, then `conn.smart_mode_active = True` is set; subsequently `_send_led_color` re-asserts pixel `SMART_MODE_LED_INDEX` (default 0) purple via `set_led_multi` after every full-ring state change, so the indicator persists until the turn completes (flash-pending: firmware `32163bd`).
+The capable model is configured via `SMART_MODEL` env on the bridge (e.g. Claude Sonnet via OpenRouter); falls through to the default brain if unset. LED: on smart-mode entry `set_led_color(168,0,168)` pulses the ring, then `conn.smart_mode_active = True` is set; subsequently `_send_led_color` re-asserts pixel `SMART_MODE_LED_INDEX` (default 0) purple via `set_led_multi` after every full-ring state change, so the indicator persists until the turn completes (firmware `32163bd`, shipped in `fw-v1.3.2`).
 
 ### vision
 
@@ -151,7 +151,7 @@ The `face_tracking → listening` edge currently fires only when the user speaks
 | `listening` | ring solid red `(32,0,0)` | — |
 | `thinking` | ring solid orange | — |
 | `talking` | ring solid green `(0,32,0)` | — |
-| `smart` (active turn) | one ring LED held purple `(168,0,168)`; remaining 11 LEDs continue listen / think / talk *(proposed)* | purple pulse on entry; held LED clears on exit |
+| `smart` (active turn) | one ring LED held purple `(168,0,168)`; remaining 11 LEDs continue listen / think / talk | purple pulse on entry; held LED clears on exit |
 | `vision` | brief cyan flash on capture *(proposed)* | restores prior mode's LED after capture |
 | `dance` / `sing` | timeline rainbow (choreography-driven) | — |
 | `sleep` *(deferred)* | all off | brief fade-out on entry |
@@ -202,7 +202,7 @@ Anything we want to design fits inside this primitive set.
 
 ### Hybrid smart-mode LED (shipped)
 
-**Shipped** in bridge commit `b72b121` (firmware half: StackChan/dotty `32163bd`, **flash pending**).
+**Shipped** in bridge commit `b72b121` and firmware commit `32163bd` (rolled into `fw-v1.3.2`).
 
 **Behaviour.** On smart-mode entry, `conn.smart_mode_active = True` is set on the `ConnectionHandler`. `_send_led_color()` then re-asserts pixel `SMART_MODE_LED_INDEX` (env var, default `0`) at purple `(168,0,168)` via `_send_led_multi()` after every full-ring colour change. The remaining 11 LEDs continue to show the firmware-automatic listen / think / talk colours. On turn completion `smart_mode_active` is cleared; the ring returns to firmware-automatic behaviour.
 

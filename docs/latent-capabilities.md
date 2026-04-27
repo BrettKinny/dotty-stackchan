@@ -43,7 +43,7 @@ Features xiaozhi-esp32-server supports upstream that aren't turned on or surface
 | **Sherpa-ONNX ASR** | Alternative to FunASR; fully offline, supports different languages | Low | **New-task candidate** |
 | **Custom wake word** | Replace/add to the stock wake word via ESP-SR MultiNet | Low | **New-task candidate** |
 | **Voiceprint speaker ID** | Distinguish family members; apply per-user persona/context | Medium | Cross-refs child-safety task (different guardrails for kids vs adults) |
-| **VLLM (vision LM)** | "What's in this photo?" — camera + VLM pipeline | Medium | Gated on privacy-LED task |
+| **xiaozhi-server VLLM module** | Server-side "What's in this photo?" pipeline | Medium | Already covered by the bridge-side `take_photo` + VLM long-poll path described in [`modes.md`](./modes.md#vision); this row tracks the *upstream* xiaozhi-server VLLM module, which we don't enable. |
 | **PowerMem** | Dual-layer short-term + summarized memory (currently ZeroClaw owns memory) | Low | Would overlap with ZeroClaw's memory — probably don't |
 | **Intent router** (`function_call` mode) | Route simple commands (turn off lights, set timer) without round-tripping to the LLM | Medium | **New-task candidate** |
 | **RagFlow knowledge base** | Retrieval-augmented responses against a household doc store | Low | **New-task candidate** |

@@ -5,6 +5,8 @@ description: Server-initiated greetings — Dotty speaks first when it recognise
 
 # Proactive Greetings (Layer 6)
 
+> **Status:** code complete and deployed; bench-validation pending. Tracked in `tasks.md` under "Layer 6 proactive greetings" until a walk-through confirms greeting + cooldown across a bridge restart.
+
 Layer 6 lets Dotty start a conversation. Instead of only responding to
 voice input, the robot recognises a face, looks up that person in the
 calendar, decides whether the time of day is appropriate, and pushes a

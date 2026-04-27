@@ -14,7 +14,7 @@ StackChan hardware → configured persona
   ▼
 xiaozhi-esp32-server (Docker on Unraid)
   ├─ ASR: FunASR SenseVoiceSmall (local, no cloud)
-  ├─ TTS: EdgeTTS en-AU-WilliamNeural
+  ├─ TTS: LocalPiper (en_US-kristin-medium); EdgeTTS / StreamingEdgeTTS available as alternates
   ├─ LLM: Custom ZeroClawLLM provider (proxies to RPi)
   └─ Emotion: Parsed from emoji in LLM response text
        │  HTTP POST /api/message
@@ -96,7 +96,7 @@ Run `make help` for the full list. Key targets:
 
 ## Common Maintenance Tasks
 
-- **Change TTS voice**: Edit `data/.config.yaml` on Unraid, `TTS.EdgeTTS.voice` / `TTS.StreamingEdgeTTS.voice`. Restart container.
+- **Change TTS voice**: Edit `data/.config.yaml` on Unraid. For the default `LocalPiper`, swap the `voice` + `model_path` + `config_path` keys (download a new `.onnx` / `.onnx.json` pair into `models/piper/`). For `EdgeTTS` / `StreamingEdgeTTS` alternates, change `TTS.EdgeTTS.voice` / `TTS.StreamingEdgeTTS.voice` and switch `selected_module.TTS`. Restart container.
 - **Change system prompt**: Edit `data/.config.yaml` on Unraid, top-level `prompt:` block. Restart container.
 - **Check logs**: `ssh <UNRAID_USER>@<UNRAID_IP> 'docker logs -f xiaozhi-esp32-server'`
 - **Restart pipeline**: `ssh <UNRAID_USER>@<UNRAID_IP> 'cd <UNRAID_XIAOZHI_PATH> && docker compose restart'`
