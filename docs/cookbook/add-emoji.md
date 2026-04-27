@@ -39,7 +39,7 @@ See [protocols.md](../protocols.md) and the upstream
 
 ```bash
 systemctl restart zeroclaw-bridge          # RPi
-docker compose restart xiaozhi-server      # Unraid (if config changed)
+docker compose restart xiaozhi-server      # Docker host (if config changed)
 ```
 
 Current set: 😊 smile, 😆 laugh, 😢 sad, 😮 surprise, 🤔 thinking,

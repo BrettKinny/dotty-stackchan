@@ -7,7 +7,7 @@ description: xiaozhi-esp32-server pipeline stages -- VAD, ASR, LLM proxy, and TT
 
 ## TL;DR
 
-- **Server** is `xinnan-tech/xiaozhi-esp32-server` in Docker on Unraid. Plugin-based: each of VAD, ASR, LLM, TTS, Memory, Intent is a swappable provider picked via `data/.config.yaml`'s `selected_module:` block.
+- **Server** is `xinnan-tech/xiaozhi-esp32-server` running in Docker on a Linux host. Plugin-based: each of VAD, ASR, LLM, TTS, Memory, Intent is a swappable provider picked via `data/.config.yaml`'s `selected_module:` block.
 - Our live pipeline: **SileroVAD** (speech-end detection) → **FunASR SenseVoiceSmall** (ASR, pinned to English via `fun_local.py` patch) → **ZeroClawLLM** custom provider (HTTP POST to RPi bridge) → **LocalPiper** en_GB-cori-medium (TTS, rolled out 2026-04-24; EdgeTTS rollback path intact).
 - **Emotion** is not a pipeline stage — it's extracted post-hoc from the LLM's emoji prefix and emitted as a separate WS frame. See [protocols.md](./protocols.md#emotion-protocol).
 - Custom providers are mounted into the container via Docker volumes at `/opt/xiaozhi-esp32-server/core/providers/{asr,tts,llm}/…`. They override the baked-in files at module-import time.
@@ -36,7 +36,7 @@ From the `xinnan-tech/xiaozhi-esp32-server` README (see [references.md](./refere
 
 ### VAD — SileroVAD
 
-SileroVAD v6.x, JIT model ~2 MB, runs on the Unraid CPU, <1 ms per chunk in practice. 8 kHz or 16 kHz sample rates supported; xiaozhi-server uses 16 kHz to match the device Opus stream.
+SileroVAD v6.x, JIT model ~2 MB, runs on the Docker host CPU, <1 ms per chunk in practice. 8 kHz or 16 kHz sample rates supported; xiaozhi-server uses 16 kHz to match the device Opus stream.
 
 Tunables live under `VAD.SileroVAD.*` in `data/.config.yaml`:
 
@@ -74,7 +74,7 @@ The actual inference happens on the Pi, in ZeroClaw, calling OpenRouter. See [br
 - Engine: piper-tts 1.4.2 on ONNX runtime.
 - Voice: `en_GB-cori-medium` (Piper "medium" quality tier, British English).
 - Voice files (~63 MB total): `.onnx` + `.onnx.json` sibling, fetched from `huggingface.co/rhasspy/piper-voices`.
-- Measured on the i5-3570 Unraid: 0.22 s synth for 2.8 s of audio — 12.7× realtime.
+- Measured on a modest i5-3570 Docker host: 0.22 s synth for 2.8 s of audio — 12.7× realtime.
 - Image: `xiaozhi-esp32-server-piper:local` (local `Dockerfile` extends the upstream image with piper-tts).
 - Runs fully offline — no external HTTP calls.
 - **License note (unverified).** Piper voices are MIT-licensed as a repo, but individual voices carry their own upstream license depending on training data. Verify the Cori-specific voice license before redistributing your robot's recordings beyond personal use. Starting point: [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices).

@@ -83,7 +83,7 @@ def _find_config(hint: Optional[str] = None) -> Optional[Path]:
     return None
 
 
-def _extract_unraid_ip(config_text: str) -> Optional[str]:
+def _extract_xiaozhi_host(config_text: str) -> Optional[str]:
     m = re.search(r"ws://([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)", config_text)
     return m.group(1) if m else None
 
@@ -180,15 +180,15 @@ def run_checks(
         ))
 
     if server_url is None:
-        unraid_ip = _extract_unraid_ip(config_text)
-        if unraid_ip:
-            server_url = f"http://{unraid_ip}:8003/xiaozhi/ota/"
+        xiaozhi_host = _extract_xiaozhi_host(config_text)
+        if xiaozhi_host:
+            server_url = f"http://{xiaozhi_host}:8003/xiaozhi/ota/"
     if server_url:
         results.append(check_http("Xiaozhi OTA endpoint reachable", server_url, timeout))
     else:
         results.append(Result(
             "Xiaozhi OTA endpoint reachable", "skip",
-            "pass --server-url or ensure config has ws://<UNRAID_IP>:8000",
+            "pass --server-url or ensure config has ws://<XIAOZHI_HOST>:8000",
         ))
 
     return results

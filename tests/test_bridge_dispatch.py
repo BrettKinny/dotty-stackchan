@@ -51,15 +51,15 @@ class DispatchPurrAudioTests(unittest.TestCase):
 
     def test_returns_false_when_no_host(self):
         result = _run(
-            dispatch_purr_audio("device-1", purr_path=_fake_path(), unraid_host="")
+            dispatch_purr_audio("device-1", purr_path=_fake_path(), xiaozhi_host="")
         )
         self.assertFalse(result)
 
     def test_returns_false_when_host_falls_back_to_empty_module_default(self):
-        # unraid_host=None falls back to module-level _XIAOZHI_HOST which is
-        # "" in test environments (UNRAID_HOST not set).
+        # xiaozhi_host=None falls back to module-level _XIAOZHI_HOST which is
+        # "" in test environments (XIAOZHI_HOST not set).
         result = _run(
-            dispatch_purr_audio("device-1", purr_path=_fake_path(), unraid_host=None)
+            dispatch_purr_audio("device-1", purr_path=_fake_path(), xiaozhi_host=None)
         )
         self.assertFalse(result)
 
@@ -71,8 +71,8 @@ class DispatchPurrAudioTests(unittest.TestCase):
                 dispatch_purr_audio(
                     "device-1",
                     purr_path=_fake_path(),
-                    unraid_host="192.0.2.1",
-                    unraid_port=8003,
+                    xiaozhi_host="192.0.2.1",
+                    xiaozhi_port=8003,
                 )
             )
         self.assertTrue(result)
@@ -84,7 +84,7 @@ class DispatchPurrAudioTests(unittest.TestCase):
         with patch("requests.post", return_value=mock_resp):
             result = _run(
                 dispatch_purr_audio(
-                    "device-1", purr_path=_fake_path(), unraid_host="192.0.2.1"
+                    "device-1", purr_path=_fake_path(), xiaozhi_host="192.0.2.1"
                 )
             )
         self.assertFalse(result)
@@ -96,7 +96,7 @@ class DispatchPurrAudioTests(unittest.TestCase):
         with patch("requests.post", return_value=mock_resp):
             result = _run(
                 dispatch_purr_audio(
-                    "device-1", purr_path=_fake_path(), unraid_host="192.0.2.1"
+                    "device-1", purr_path=_fake_path(), xiaozhi_host="192.0.2.1"
                 )
             )
         self.assertFalse(result)
@@ -105,7 +105,7 @@ class DispatchPurrAudioTests(unittest.TestCase):
         with patch("requests.post", side_effect=ConnectionError("refused")):
             result = _run(
                 dispatch_purr_audio(
-                    "device-1", purr_path=_fake_path(), unraid_host="192.0.2.1"
+                    "device-1", purr_path=_fake_path(), xiaozhi_host="192.0.2.1"
                 )
             )
         self.assertFalse(result)
@@ -118,8 +118,8 @@ class DispatchPurrAudioTests(unittest.TestCase):
                 dispatch_purr_audio(
                     "dev-42",
                     purr_path=_fake_path(),
-                    unraid_host="10.0.0.1",
-                    unraid_port=8003,
+                    xiaozhi_host="10.0.0.1",
+                    xiaozhi_port=8003,
                 )
             )
         url = mock_post.call_args.args[0]
@@ -131,7 +131,7 @@ class DispatchPurrAudioTests(unittest.TestCase):
         with patch("requests.post", return_value=mock_resp) as mock_post:
             _run(
                 dispatch_purr_audio(
-                    "dev-42", purr_path=_fake_path(), unraid_host="10.0.0.1"
+                    "dev-42", purr_path=_fake_path(), xiaozhi_host="10.0.0.1"
                 )
             )
         payload = mock_post.call_args.kwargs["json"]
@@ -143,7 +143,7 @@ class DispatchPurrAudioTests(unittest.TestCase):
         with patch("requests.post", return_value=mock_resp) as mock_post:
             _run(
                 dispatch_purr_audio(
-                    "dev-42", purr_path=_fake_path(), unraid_host="10.0.0.1"
+                    "dev-42", purr_path=_fake_path(), xiaozhi_host="10.0.0.1"
                 )
             )
         payload = mock_post.call_args.kwargs["json"]

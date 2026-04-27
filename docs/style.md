@@ -80,7 +80,7 @@ instead of bullet points. Tables scan faster and diff cleaner.
 
 ## Placeholders
 
-Use `<UNRAID_IP>`, `<RPI_IP>`, `<RPI_USER>`, etc. for any value that varies
+Use `<XIAOZHI_HOST>`, `<RPI_IP>`, `<RPI_USER>`, etc. for any value that varies
 per deployment. See the full list in `CONTRIBUTING.md`. Never commit real
 IPs, hostnames, or API keys.
 

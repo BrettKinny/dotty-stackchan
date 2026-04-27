@@ -4,7 +4,7 @@ Mounted at ``/ui`` on the bridge FastAPI app. Host status cards,
 conversation log tail, action endpoints, SSE turn stream.
 
 Host probes are env-driven so this stays generic in the public template:
-set ``UNRAID_HOST`` (and optionally ``WORKSTATION_HOST``) on the bridge
+set ``XIAOZHI_HOST`` (and optionally ``WORKSTATION_HOST``) on the bridge
 service. Cards for unset hosts render as "unknown".
 """
 
@@ -136,9 +136,9 @@ router = APIRouter(
     dependencies=[Depends(_verify_dashboard_auth)],
 )
 
-UNRAID_HOST = os.environ.get("UNRAID_HOST", "")
-UNRAID_OTA_PORT = int(os.environ.get("UNRAID_OTA_PORT", "8003"))
-UNRAID_WS_PORT = int(os.environ.get("UNRAID_WS_PORT", "8000"))
+XIAOZHI_HOST = os.environ.get("XIAOZHI_HOST", "")
+XIAOZHI_OTA_PORT = int(os.environ.get("XIAOZHI_OTA_PORT", "8003"))
+XIAOZHI_WS_PORT = int(os.environ.get("XIAOZHI_WS_PORT", "8000"))
 LOG_DIR = Path(os.environ.get("CONVO_LOG_DIR", "/root/zeroclaw-bridge/logs"))
 VOICE_CHANNELS = ("dotty", "stackchan")
 
@@ -319,9 +319,9 @@ async def dashboard(request: Request) -> Any:
 async def cards(request: Request) -> Any:
     rpi_uptime = time.time() - _START_TIME
 
-    unraid_ota_ok, unraid_ws_ok = await asyncio.gather(
-        _tcp_reachable(UNRAID_HOST, UNRAID_OTA_PORT),
-        _tcp_reachable(UNRAID_HOST, UNRAID_WS_PORT),
+    xiaozhi_ota_ok, xiaozhi_ws_ok = await asyncio.gather(
+        _tcp_reachable(XIAOZHI_HOST, XIAOZHI_OTA_PORT),
+        _tcp_reachable(XIAOZHI_HOST, XIAOZHI_WS_PORT),
     )
 
     last_seen_ts = _stackchan_last_seen()
@@ -337,28 +337,28 @@ async def cards(request: Request) -> Any:
             sc_status, sc_detail = "bad", "stale"
         sc_last = f"{_humanize_age(age)} ago"
 
-    if not UNRAID_HOST:
-        unraid_status = "unknown"
-        unraid_detail = "UNRAID_HOST env not set"
-    elif unraid_ota_ok and unraid_ws_ok:
-        unraid_status = "ok"
-        unraid_detail = f"OTA :{UNRAID_OTA_PORT} + WS :{UNRAID_WS_PORT}"
-    elif unraid_ota_ok or unraid_ws_ok:
-        unraid_status = "warn"
-        unraid_detail = "partial: " + (
-            f"OTA :{UNRAID_OTA_PORT}" if unraid_ota_ok else f"WS :{UNRAID_WS_PORT}"
+    if not XIAOZHI_HOST:
+        xiaozhi_status = "unknown"
+        xiaozhi_detail = "XIAOZHI_HOST env not set"
+    elif xiaozhi_ota_ok and xiaozhi_ws_ok:
+        xiaozhi_status = "ok"
+        xiaozhi_detail = f"OTA :{XIAOZHI_OTA_PORT} + WS :{XIAOZHI_WS_PORT}"
+    elif xiaozhi_ota_ok or xiaozhi_ws_ok:
+        xiaozhi_status = "warn"
+        xiaozhi_detail = "partial: " + (
+            f"OTA :{XIAOZHI_OTA_PORT}" if xiaozhi_ota_ok else f"WS :{XIAOZHI_WS_PORT}"
         )
     else:
-        unraid_status = "bad"
-        unraid_detail = "no ports responding"
+        xiaozhi_status = "bad"
+        xiaozhi_detail = "no ports responding"
 
     cards_data = [
         {"name": "StackChan", "kind": "robot", "status": sc_status,
          "detail": sc_detail, "last_seen": sc_last},
         {"name": "RPi (bridge)", "kind": "host", "status": "ok",
          "detail": f"bridge up {_humanize_age(rpi_uptime)}", "last_seen": ""},
-        {"name": "Unraid (xiaozhi)", "kind": "host", "status": unraid_status,
-         "detail": unraid_detail, "last_seen": ""},
+        {"name": "xiaozhi-server", "kind": "host", "status": xiaozhi_status,
+         "detail": xiaozhi_detail, "last_seen": ""},
     ]
     return templates.TemplateResponse(
         request, "cards.html", {"cards": cards_data}
@@ -378,9 +378,9 @@ _SONG_OK_EXT = {".opus", ".ogg", ".wav", ".mp3"}
 async def _xiaozhi_device_count() -> int | None:
     """Count active StackChan WS connections via the admin endpoint.
     Returns None if xiaozhi is unreachable."""
-    if not UNRAID_HOST:
+    if not XIAOZHI_HOST:
         return None
-    url = f"http://{UNRAID_HOST}:{UNRAID_OTA_PORT}/xiaozhi/admin/devices"
+    url = f"http://{XIAOZHI_HOST}:{XIAOZHI_OTA_PORT}/xiaozhi/admin/devices"
     import urllib.request
     def _fetch() -> int | None:
         try:
@@ -505,9 +505,9 @@ async def dance(request: Request) -> Any:
 async def _xiaozhi_list_songs() -> tuple[list[str], str | None]:
     """Fetch the song-file list from xiaozhi's admin endpoint. Returns
     (files, error). Error is None on success."""
-    if not UNRAID_HOST:
-        return [], "UNRAID_HOST not set"
-    url = f"http://{UNRAID_HOST}:{UNRAID_OTA_PORT}/xiaozhi/admin/songs"
+    if not XIAOZHI_HOST:
+        return [], "XIAOZHI_HOST not set"
+    url = f"http://{XIAOZHI_HOST}:{XIAOZHI_OTA_PORT}/xiaozhi/admin/songs"
     import urllib.request
     def _fetch() -> tuple[list[str], str | None]:
         try:
@@ -542,13 +542,13 @@ async def play_song(request: Request, filename: str = Form(...)) -> Any:
             request, "say_result.html",
             {"ok": False, "error": "Invalid song filename."},
         )
-    if not UNRAID_HOST:
+    if not XIAOZHI_HOST:
         return templates.TemplateResponse(
             request, "say_result.html",
-            {"ok": False, "error": "UNRAID_HOST not set"},
+            {"ok": False, "error": "XIAOZHI_HOST not set"},
         )
     asset_path = f"{_SONGS_BASE_PATH}/{base}"
-    url = f"http://{UNRAID_HOST}:{UNRAID_OTA_PORT}/xiaozhi/admin/play-asset"
+    url = f"http://{XIAOZHI_HOST}:{XIAOZHI_OTA_PORT}/xiaozhi/admin/play-asset"
     def _post() -> dict:
         try:
             r = requests.post(url, json={"asset": asset_path}, timeout=3)

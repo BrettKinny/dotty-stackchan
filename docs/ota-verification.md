@@ -7,7 +7,7 @@ description: OTA handshake between StackChan firmware and xiaozhi-esp32-server â
 
 ## TL;DR
 
-- The StackChan firmware contacts `http://<UNRAID_IP>:8003/xiaozhi/ota/` on every boot.
+- The StackChan firmware contacts `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/` on every boot.
 - The OTA response delivers the **WebSocket URL** the device uses for voice â€” this is how the device discovers its server.
 - The same endpoint optionally signals a **firmware update** (version + binary URL).
 - The server also sends **server time**, allowing the device to sync its clock without NTP.
@@ -16,7 +16,7 @@ description: OTA handshake between StackChan firmware and xiaozhi-esp32-server â
 ## Endpoint
 
 ```
-POST http://<UNRAID_IP>:8003/xiaozhi/ota/
+POST http://<XIAOZHI_HOST>:8003/xiaozhi/ota/
 ```
 
 The URL is compiled into the firmware via `CONFIG_OTA_URL` in `sdkconfig.defaults`. The device can also override it at runtime through a Wi-Fi settings key (`ota_url`). If neither is set, the firmware falls back to the upstream default (`https://api.tenclass.net/xiaozhi/ota/`).
@@ -110,7 +110,7 @@ HTTP 200 with a JSON body. The firmware parses five optional top-level sections:
     "password": "..."
   },
   "websocket": {
-    "url": "ws://<UNRAID_IP>:8000/xiaozhi/v1/",
+    "url": "ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/",
     "token": "optional-auth-token"
   },
   "server_time": {
@@ -119,7 +119,7 @@ HTTP 200 with a JSON body. The firmware parses five optional top-level sections:
   },
   "firmware": {
     "version": "1.0.0",
-    "url": "http://<UNRAID_IP>:8003/firmware/stackchan.bin",
+    "url": "http://<XIAOZHI_HOST>:8003/firmware/stackchan.bin",
     "force": 0
   }
 }
@@ -131,7 +131,7 @@ HTTP 200 with a JSON body. The firmware parses five optional top-level sections:
 
 The device stores the `url` key into NVS settings and uses it to open its voice WebSocket connection. **Without this section, the device has no server to talk to.**
 
-Our `.config.yaml` sets `server.websocket: ws://<UNRAID_IP>:8000/xiaozhi/v1/` and the xiaozhi-server includes this in every OTA response.
+Our `.config.yaml` sets `server.websocket: ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/` and the xiaozhi-server includes this in every OTA response.
 
 #### `server_time`
 
@@ -202,10 +202,10 @@ The firmware update uses ESP-IDF's `esp_https_ota` API with A/B partitioning (`o
 
 ```bash
 # Minimal request â€” just GET the endpoint
-curl -s http://<UNRAID_IP>:8003/xiaozhi/ota/
+curl -s http://<XIAOZHI_HOST>:8003/xiaozhi/ota/
 
 # Full POST mimicking the firmware
-curl -s -X POST http://<UNRAID_IP>:8003/xiaozhi/ota/ \
+curl -s -X POST http://<XIAOZHI_HOST>:8003/xiaozhi/ota/ \
   -H "Content-Type: application/json" \
   -H "Device-Id: aa:bb:cc:dd:ee:ff" \
   -H "Client-Id: test-client-001" \
@@ -228,7 +228,7 @@ curl -s -X POST http://<UNRAID_IP>:8003/xiaozhi/ota/ \
 ### Verify the WebSocket URL is returned
 
 ```bash
-curl -s http://<UNRAID_IP>:8003/xiaozhi/ota/ | python3 -m json.tool
+curl -s http://<XIAOZHI_HOST>:8003/xiaozhi/ota/ | python3 -m json.tool
 ```
 
 !!! warning "Unverified"
@@ -240,7 +240,7 @@ If the device fails to connect, verify basic reachability:
 
 ```bash
 # From a machine on the same network as StackChan
-curl -v http://<UNRAID_IP>:8003/xiaozhi/ota/
+curl -v http://<XIAOZHI_HOST>:8003/xiaozhi/ota/
 ```
 
 Common failure modes:

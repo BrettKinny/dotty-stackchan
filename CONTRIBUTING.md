@@ -27,7 +27,7 @@ modifications — please open an issue first to discuss the approach.
   deployment.
 
 - **Check for leaked placeholders or real values:**
-  - Files in this repo must use placeholders (`<UNRAID_IP>`, `<RPI_IP>`,
+  - Files in this repo must use placeholders (`<XIAOZHI_HOST>`, `<RPI_IP>`,
     `<RPI_USER>`, `<ROBOT_NAME>`, etc.) everywhere a real IP, hostname,
     username, or filesystem path would appear. See the "Configuring for your
     environment" table in `README.md` for the full list.
@@ -46,7 +46,7 @@ Changes tend to fall into one of these areas:
 
 | Area | Files | Notes |
 |---|---|---|
-| **Voice pipeline (xiaozhi-server)** | `docker-compose.yml`, `.config.yaml`, custom providers (`zeroclaw.py`, `edge_stream.py`, `fun_local.py`, `piper_local.py`) | These run inside the xiaozhi-server Docker container on the Unraid/Docker host. |
+| **Voice pipeline (xiaozhi-server)** | `docker-compose.yml`, `.config.yaml`, custom providers (`zeroclaw.py`, `edge_stream.py`, `fun_local.py`, `piper_local.py`) | These run inside the xiaozhi-server Docker container on whatever Linux Docker host you've chosen. |
 | **Bridge** | `bridge.py`, `zeroclaw-bridge.service`, `bridge/` | Runs on the RPi. The `bridge/` directory contains the Dockerfile, compose file, and deployment docs. |
 | **Documentation** | `README.md`, `SETUP.md`, `docs/`, `session-prompt.md` | Docs under `docs/` follow conventions listed in `docs/README.md` (TL;DR at top, tables over prose, freshness footer). |
 | **CI** | `.github/workflows/` | Currently just the bridge Docker image build. |
@@ -66,7 +66,7 @@ This is the most important contribution guideline. The repo is designed to be
 forked and configured per-deployment. Every value that varies between
 deployments must use a placeholder:
 
-- `<UNRAID_IP>`, `<UNRAID_USER>`, `<UNRAID_HOST>`, `<UNRAID_XIAOZHI_PATH>`
+- `<XIAOZHI_HOST>`, `<XIAOZHI_USER>`, `<XIAOZHI_HOSTNAME>`, `<XIAOZHI_PATH>`
 - `<RPI_IP>`, `<RPI_USER>`, `<RPI_HOME>`, `<RPI_BRIDGE_PATH>`
 - `<RPI_ZEROCLAW_BIN>`, `<RPI_ZEROCLAW_CFG>`
 - `<YOUR_NAME>`, `<ROBOT_NAME>`

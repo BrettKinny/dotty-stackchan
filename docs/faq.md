@@ -9,7 +9,7 @@ description: Frequently asked questions about hardware, setup, and configuration
 
 ### What hardware do I need?
 
-The verified setup is an **M5Stack CoreS3** mounted in the **M5Stack StackChan servo kit** (2x SG90 servos for pan/tilt, 12 RGB LEDs, 3D-printed chassis). You also need a Docker-capable host on your LAN (Unraid, a spare PC, any Linux box with Docker) and a Raspberry Pi for the agent brain.
+The verified setup is an **M5Stack CoreS3** mounted in the **M5Stack StackChan servo kit** (2x SG90 servos for pan/tilt, 12 RGB LEDs, 3D-printed chassis). You also need a Docker-capable host on your LAN (a spare PC or any Linux box with Docker) and a Raspberry Pi for the agent brain.
 
 See [hardware-support.md](./hardware-support.md) for the full spec table and support tiers.
 
@@ -79,7 +79,7 @@ Yes. The persona is defined in Markdown files on the RPi:
 
 These are hot-read by ZeroClaw — edit them and the next conversation turn picks up the changes, no restart needed.
 
-There's also a secondary `prompt:` key in `data/.config.yaml` on the Unraid host that gets injected as a system message. ZeroClaw's own persona files take precedence, but this is a useful place for voice-pipeline-level hints.
+There's also a secondary `prompt:` key in `data/.config.yaml` on the Docker host that gets injected as a system message. ZeroClaw's own persona files take precedence, but this is a useful place for voice-pipeline-level hints.
 
 ---
 

@@ -22,7 +22,7 @@ What actually happened. Include log output if available.
 - Firmware version/commit:
 - Server image tag/digest:
 - Hardware: [e.g. M5Stack CoreS3 + StackChan servo kit]
-- Host OS: [e.g. Unraid 6.x, Ubuntu 24.04]
+- Host OS: [e.g. Ubuntu 24.04, Debian 12, Fedora 40]
 - Bridge deployment: [Docker / bare metal]
 
 **Logs**

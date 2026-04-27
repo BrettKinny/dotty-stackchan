@@ -8,13 +8,13 @@ Synthesizes the Macarena vocal track using the existing Piper TTS model with per
 
 Run inside the xiaozhi-server container:
 ```
-ssh root@<UNRAID_IP> "docker cp /mnt/user/appdata/xiaozhi-server/scripts/render_singing_piper.py xiaozhi-esp32-server:/opt/xiaozhi-esp32-server/render_singing_piper.py && \
+ssh root@<XIAOZHI_HOST> "docker cp /mnt/user/appdata/xiaozhi-server/scripts/render_singing_piper.py xiaozhi-esp32-server:/opt/xiaozhi-esp32-server/render_singing_piper.py && \
   docker exec xiaozhi-esp32-server python /opt/xiaozhi-esp32-server/render_singing_piper.py"
 ```
 
 The output goes to `/opt/xiaozhi-esp32-server/config/assets/songs/macarena.wav` inside the container — copy it out to the host songs/ directory so it persists across restarts:
 ```
-ssh root@<UNRAID_IP> "docker cp xiaozhi-esp32-server:/opt/xiaozhi-esp32-server/config/assets/songs/macarena.wav /mnt/user/appdata/xiaozhi-server/songs/macarena.wav"
+ssh root@<XIAOZHI_HOST> "docker cp xiaozhi-esp32-server:/opt/xiaozhi-esp32-server/config/assets/songs/macarena.wav /mnt/user/appdata/xiaozhi-server/songs/macarena.wav"
 ```
 
 Edit the `PHRASES` list in the script to tweak lyrics, pitch, or timing.
@@ -45,7 +45,7 @@ The `27936` ms target matches the choreography duration (`BEAT_MS=582 * 48 beats
 4. **Normalize and deploy**:
    ```
    python scripts/postprocess_song.py macarena_diffsinger.wav songs/macarena.wav --duration-ms 27936
-   scp songs/macarena.wav root@<UNRAID_IP>:/mnt/user/appdata/xiaozhi-server/songs/
+   scp songs/macarena.wav root@<XIAOZHI_HOST>:/mnt/user/appdata/xiaozhi-server/songs/
    ```
 
 5. **Test**: trigger "do the macarena" with the device. The mounted file is read directly — no container restart needed (the next dance trigger picks it up fresh).

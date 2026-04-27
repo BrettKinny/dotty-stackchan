@@ -10,13 +10,13 @@ Dotty is a fully self-hosted voice stack for the M5Stack StackChan desktop robot
 
 Out of the box, Dotty ships in **Kid Mode** -- age-appropriate language, safety guardrails, and content filtering are on by default. Disable Kid Mode for a general-purpose assistant. The default persona is named "Dotty" (rename it during `make setup`).
 
-> **v0.1 — early-feedback release.** Dotty works end-to-end on the maintainer's hardware. This first tagged release is to invite real-world feedback before v1.0 polish. **Known issues:** face emoji rendering is missing visual differentiation for 4 of 9 emotions (sad / surprise / love / laughing); sound-direction localizer has a hardware-AEC-related left-bias on M5Stack CoreS3 (energy detection works, direction is unreliable); kid-voice ASR accuracy on SenseVoice has a kid-speech gap that whisper.cpp will close in a follow-up. Full backlog in `tasks.md` (private). Bugs, PRs, and "this didn't work for me" issues all very welcome.
+> **v0.1 - early-feedback release.** Dotty works end-to-end on the maintainer's hardware. This first tagged release is to invite real-world feedback before v1.0 polish. **Known issues:** face emoji rendering is missing visual differentiation for 4 of 9 emotions (sad / surprise / love / laughing); sound-direction localizer has a hardware-AEC-related left-bias on M5Stack CoreS3 (energy detection works, direction is unreliable); kid-voice ASR accuracy on SenseVoice has a kid-speech gap that whisper.cpp will close in a follow-up. Full backlog in `tasks.md` (private). Bugs, PRs, and "this didn't work for me" issues all very welcome.
 
 ## Why I built this
 
-I didn't like the idea of a camera and microphone running in my house unless I could (1) self-host the whole stack end-to-end and (2) understand the whole stack end-to-end. Off-the-shelf voice assistants fail both tests — audio leaves the house, the model is opaque, and you're trusting a vendor's privacy posture forever.
+I didn't like the idea of a camera and microphone running in my house unless I could (1) self-host the whole stack end-to-end and (2) understand the whole stack end-to-end. Off-the-shelf voice assistants fail both tests - audio leaves the house, the model is opaque, and you're trusting a vendor's privacy posture forever.
 
-So Dotty is the version that passes: every component runs on hardware I own, every seam is documented and swappable, and the only thing that can leave the LAN is whatever LLM call I explicitly route out (and even that swaps to a local model with a config change). It's also meant to be fun — a friendly desktop robot for the kids, and an interesting hobby project to keep building on.
+So Dotty is the version that passes: every component runs on hardware I own, every seam is documented and swappable, and the only thing that can leave the LAN is whatever LLM call I explicitly route out (and even that swaps to a local model with a config change). It's also meant to be fun - a friendly desktop robot for the kids, and an interesting hobby project to keep building on.
 
 ## Features
 
@@ -36,31 +36,31 @@ So Dotty is the version that passes: every component runs on hardware I own, eve
 
 - **Hardware**: M5Stack StackChan (CoreS3 + servo kit), firmware built from `m5stack/StackChan`.
 - **Brain**: [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) on a Raspberry Pi, with Mistral Small 3.2 via OpenRouter as the default LLM (Qwen3-30B, Claude, and others are drop-in alternates).
-- **Voice I/O**: xiaozhi-esp32-server on Docker (Unraid here, but single-host works too).
+- **Voice I/O**: xiaozhi-esp32-server on Docker (any Linux Docker host; single-host works too).
 
 ---
 
 ## Deeper reference
 
-This README covers deployment. For what the stack *is* underneath — hardware specs, protocol docs, model facts, and features we aren't using — see [`docs/`](./docs/README.md):
+This README covers deployment. For what the stack *is* underneath - hardware specs, protocol docs, model facts, and features we aren't using - see [`docs/`](./docs/README.md):
 
-- [docs/architecture.md](./docs/architecture.md) — end-to-end data flow, who talks to who, why this shape.
-- [docs/hardware.md](./docs/hardware.md) — M5Stack StackChan body + firmware lineage + on-device MCP tool catalog.
-- [docs/voice-pipeline.md](./docs/voice-pipeline.md) — xiaozhi-esp32-server internals, FunASR/SenseVoice, VAD, TTS.
-- [docs/brain.md](./docs/brain.md) — ZeroClaw architecture, LLM model details, OpenRouter role.
-- [docs/protocols.md](./docs/protocols.md) — Xiaozhi WS framing, MCP-over-WS, ACP JSON-RPC, emotion channel.
-- [docs/modes.md](./docs/modes.md) — behavioural mode taxonomy + LED contract + transition diagram.
-- [docs/latent-capabilities.md](./docs/latent-capabilities.md) — features upstream supports that we aren't using yet.
-- [docs/references.md](./docs/references.md) — canonical upstream URLs, model cards, licenses.
+- [docs/architecture.md](./docs/architecture.md) - end-to-end data flow, who talks to who, why this shape.
+- [docs/hardware.md](./docs/hardware.md) - M5Stack StackChan body + firmware lineage + on-device MCP tool catalog.
+- [docs/voice-pipeline.md](./docs/voice-pipeline.md) - xiaozhi-esp32-server internals, FunASR/SenseVoice, VAD, TTS.
+- [docs/brain.md](./docs/brain.md) - ZeroClaw architecture, LLM model details, OpenRouter role.
+- [docs/protocols.md](./docs/protocols.md) - Xiaozhi WS framing, MCP-over-WS, ACP JSON-RPC, emotion channel.
+- [docs/modes.md](./docs/modes.md) - behavioural mode taxonomy + LED contract + transition diagram.
+- [docs/latent-capabilities.md](./docs/latent-capabilities.md) - features upstream supports that we aren't using yet.
+- [docs/references.md](./docs/references.md) - canonical upstream URLs, model cards, licenses.
 
 ---
 
-## TL;DR — what runs where
+## TL;DR - what runs where
 
 | Component | Host | Notes |
 |---|---|---|
 | StackChan (device) | ESP32-S3 on the desk | Firmware built from `m5stack/StackChan` (see `SETUP.md`) |
-| xiaozhi-esp32-server | Unraid (`<UNRAID_IP>`) | Docker, ports 8000 + 8003 |
+| xiaozhi-esp32-server | Docker host (`<XIAOZHI_HOST>`) | Docker, ports 8000 + 8003 |
 | zeroclaw-bridge | RPi (`<RPI_IP>`) | FastAPI on port 8080, systemd |
 | ZeroClaw daemon | RPi (`<RPI_IP>`) | `<RPI_ZEROCLAW_BIN>` |
 | Admin workstation | any LAN box | Development / `ssh` only |
@@ -73,10 +73,10 @@ This repo uses placeholders in place of real IPs, usernames, and filesystem path
 
 | Placeholder | Meaning |
 |---|---|
-| `<UNRAID_IP>` | LAN IP of the Unraid (or other Docker) host running xiaozhi-server. StackChan reaches this on WiFi, so it must be a LAN IP — not a Tailscale/VPN IP. |
-| `<UNRAID_USER>` | SSH user for the Unraid box (Unraid default: `root`). |
-| `<UNRAID_HOST>` | Unraid hostname or Tailscale name (optional — IP works for everything). |
-| `<UNRAID_XIAOZHI_PATH>` | Path on Unraid where you clone/install xiaozhi-server. Unraid convention: `/mnt/user/appdata/xiaozhi-server/`. |
+| `<XIAOZHI_HOST>` | LAN IP of the Docker host running xiaozhi-server. StackChan reaches this on WiFi, so it must be a LAN IP, not a Tailscale/VPN IP. |
+| `<XIAOZHI_USER>` | SSH user for the Docker host (whatever your distro defaults to: `root`, `ubuntu`, `dietpi`, etc.). |
+| `<XIAOZHI_HOSTNAME>` | Hostname or Tailscale name of the Docker host (optional, IP works for everything). |
+| `<XIAOZHI_PATH>` | Path on the Docker host where you clone/install xiaozhi-server (e.g. `/opt/xiaozhi-server/` or `/srv/xiaozhi-server/`). |
 | `<RPI_IP>` | LAN IP of the Raspberry Pi running ZeroClaw + the bridge. |
 | `<RPI_USER>` | SSH user on the Pi (DietPi default: `dietpi`; root is also common). |
 | `<RPI_HOME>` | Home directory on the Pi for the user that owns the bridge (e.g. `/root/` or `/home/pi/`). |
@@ -84,15 +84,15 @@ This repo uses placeholders in place of real IPs, usernames, and filesystem path
 | `<RPI_ZEROCLAW_BIN>` | Absolute path to the `zeroclaw` binary on the Pi (cargo default: `/root/.cargo/bin/zeroclaw`). |
 | `<RPI_ZEROCLAW_CFG>` | ZeroClaw config file path (default: `/root/.zeroclaw/config.toml`). |
 | `<YOUR_NAME>` | Your name / org, used in the persona prompt in `.config.yaml`. |
-| `<ROBOT_NAME>` | Name the robot introduces itself as, referenced in the persona prompt in `.config.yaml`. Any string — pick whatever you want. The default example uses the hardware name ("StackChan"). |
+| `<ROBOT_NAME>` | Name the robot introduces itself as, referenced in the persona prompt in `.config.yaml`. Any string - pick whatever you want. The default example uses the hardware name ("StackChan"). |
 
 Port numbers (`8000`, `8003`, `8080`, `18789`, `42617`) are product-generic and should not be changed unless you also reconfigure the respective services.
 
 Files you will definitely need to edit before first run:
 
-- `.config.yaml` — replace `<UNRAID_IP>`, `<RPI_IP>`, and customize the `prompt:` block.
-- `docker-compose.yml` — set `TZ` to your timezone.
-- `zeroclaw-bridge.service` — adjust paths if the bridge doesn't live at `/root/zeroclaw-bridge/`.
+- `.config.yaml` - replace `<XIAOZHI_HOST>`, `<RPI_IP>`, and customize the `prompt:` block.
+- `docker-compose.yml` - set `TZ` to your timezone.
+- `zeroclaw-bridge.service` - adjust paths if the bridge doesn't live at `/root/zeroclaw-bridge/`.
 
 ---
 
@@ -104,7 +104,7 @@ flowchart LR
         SC["M5Stack StackChan<br/>ESP32-S3"]
     end
 
-    subgraph Unraid["Unraid — &lt;UNRAID_IP&gt;"]
+    subgraph DockerHost["Docker host - &lt;XIAOZHI_HOST&gt;"]
         XZ["xiaozhi-esp32-server<br/>(Docker)<br/>:8000 WS + :8003 HTTP"]
         subgraph XZMods["voice pipeline"]
             VAD["SileroVAD"]
@@ -114,7 +114,7 @@ flowchart LR
         end
     end
 
-    subgraph RPi["Raspberry Pi — &lt;RPI_IP&gt;"]
+    subgraph RPi["Raspberry Pi - &lt;RPI_IP&gt;"]
         Bridge["zeroclaw-bridge<br/>FastAPI :8080<br/>systemd unit"]
         ZC["ZeroClaw daemon<br/>(agent persona)"]
         Cloud["(OpenRouter / GLM / ...)"]
@@ -176,14 +176,14 @@ Typical end-to-end latency: **~4–5s** per turn, dominated by the LLM call (ASR
 
 ```mermaid
 flowchart TB
-    subgraph Unraid_fs["Unraid filesystem — &lt;UNRAID_XIAOZHI_PATH&gt;"]
+    subgraph DockerHost_fs["Docker host filesystem - &lt;XIAOZHI_PATH&gt;"]
         direction TB
-        UA1["data/.config.yaml<br/>(override — voice, persona, endpoints)"]
+        UA1["data/.config.yaml<br/>(override - voice, persona, endpoints)"]
         UA2["models/SenseVoiceSmall/<br/>(model.pt + configs)"]
         UA3["custom-providers/zeroclaw/<br/>(zeroclaw.py + __init__.py)"]
         UA3b["custom-providers/edge_stream/<br/>(edge_stream.py + __init__.py)"]
         UA3d["custom-providers/piper_local/<br/>(piper_local.py + __init__.py)"]
-        UA3c["custom-providers/asr/fun_local.py<br/>(patched ASR — language key)"]
+        UA3c["custom-providers/asr/fun_local.py<br/>(patched ASR - language key)"]
         UA4["tmp/<br/>(TTS audio scratch)"]
         UA5["repo/<br/>(git clone, reference only)"]
         UA6["docker-compose.yml"]
@@ -211,7 +211,7 @@ Container volume mounts:
 | `custom-providers/zeroclaw/` | `/opt/xiaozhi-esp32-server/core/providers/llm/zeroclaw/` | Custom LLM provider (directory mount) |
 | `custom-providers/edge_stream/edge_stream.py` | `/opt/xiaozhi-esp32-server/core/providers/tts/edge_stream.py` | Streaming EdgeTTS provider (file mount) |
 | `custom-providers/piper_local/piper_local.py` | `/opt/xiaozhi-esp32-server/core/providers/tts/piper_local.py` | Local Piper TTS provider (file mount) |
-| `custom-providers/asr/fun_local.py` | `/opt/xiaozhi-esp32-server/core/providers/asr/fun_local.py` | Patched FunASR — adds `language` config key so SenseVoiceSmall can be pinned to English |
+| `custom-providers/asr/fun_local.py` | `/opt/xiaozhi-esp32-server/core/providers/asr/fun_local.py` | Patched FunASR - adds `language` config key so SenseVoiceSmall can be pinned to English |
 
 ---
 
@@ -219,8 +219,8 @@ Container volume mounts:
 
 | What | URL | Who calls it |
 |---|---|---|
-| OTA (enter into StackChan settings) | `http://<UNRAID_IP>:8003/xiaozhi/ota/` | StackChan device on boot |
-| WebSocket | `ws://<UNRAID_IP>:8000/xiaozhi/v1/` | StackChan device after OTA handshake |
+| OTA (enter into StackChan settings) | `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/` | StackChan device on boot |
+| WebSocket | `ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/` | StackChan device after OTA handshake |
 | Bridge (chat) | `http://<RPI_IP>:8080/api/message` | xiaozhi-server's ZeroClawLLM |
 | Bridge (health) | `http://<RPI_IP>:8080/health` | Humans, monitoring |
 | ZeroClaw gateway | `http://127.0.0.1:42617` (RPi-local) | ZeroClaw's web UI only |
@@ -233,11 +233,11 @@ Both services restart themselves without manual intervention:
 
 | Host | Mechanism |
 |---|---|
-| Unraid | Array auto-start (`startArray=yes`) + Docker service auto-start (`DOCKER_ENABLED=yes`) + container `restart: unless-stopped`. dockerd starts containers that were running and weren't explicitly `docker stop`ped. |
+| Docker host | Container `restart: unless-stopped` in `docker-compose.yml` + ensure dockerd starts at boot on your distro. |
 | RPi | `zeroclaw-bridge.service` is `enabled`, `Restart=on-failure`. |
 
-Caveat: if you run `docker compose down` on Unraid, the container is marked
-stopped and won't come back on reboot. Use `docker compose restart` or
+Caveat: if you run `docker compose down`, the container is marked stopped
+and won't come back on reboot. Use `docker compose restart` or
 `docker restart xiaozhi-esp32-server` for transient restarts instead.
 
 ---
@@ -246,13 +246,13 @@ stopped and won't come back on reboot. Use `docker compose restart` or
 
 ```bash
 # Tail xiaozhi-server logs (voice pipeline)
-ssh <UNRAID_USER>@<UNRAID_IP> 'docker logs -f xiaozhi-esp32-server'
+ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs -f xiaozhi-esp32-server'
 
 # Tail bridge logs
 ssh <RPI_USER>@<RPI_IP> 'sudo journalctl -u zeroclaw-bridge -f'
 
 # Restart voice pipeline after config change
-ssh <UNRAID_USER>@<UNRAID_IP> 'cd <UNRAID_XIAOZHI_PATH> && docker compose restart'
+ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'cd <XIAOZHI_PATH> && docker compose restart'
 
 # Restart the bridge
 ssh <RPI_USER>@<RPI_IP> 'sudo systemctl restart zeroclaw-bridge'
@@ -287,19 +287,19 @@ Primary source: ZeroClaw's own system prompt in `<RPI_ZEROCLAW_CFG>` on the RPi.
 | `bridge.py` | RPi `<RPI_BRIDGE_PATH>/bridge.py` | FastAPI HTTP→ZeroClaw translator (ACP over stdio) |
 | `bridge/requirements.txt` | bare-metal venv | Pinned Python deps for the bridge (fastapi, uvicorn, pydantic) |
 | `zeroclaw-bridge.service` | RPi `/etc/systemd/system/` | systemd unit for bridge |
-| `custom-providers/zeroclaw/zeroclaw.py` | Unraid `core/providers/llm/zeroclaw/zeroclaw.py` | xiaozhi LLM provider — proxies to the ZeroClaw bridge |
-| `custom-providers/zeroclaw/__init__.py` | Unraid `core/providers/llm/zeroclaw/__init__.py` | Python package marker |
-| `custom-providers/edge_stream/edge_stream.py` | Unraid `core/providers/tts/edge_stream.py` | Streaming EdgeTTS provider |
-| `custom-providers/edge_stream/__init__.py` | Unraid (not currently mounted) | Python package marker |
-| `custom-providers/piper_local/piper_local.py` | Unraid `core/providers/tts/piper_local.py` | Local Piper TTS provider (offline alternative to EdgeTTS) |
-| `custom-providers/piper_local/__init__.py` | Unraid (not currently mounted) | Python package marker |
-| `custom-providers/asr/fun_local.py` | Unraid `core/providers/asr/fun_local.py` | Patched FunASR provider (adds `language` config key) |
-| `.config.yaml` | Unraid `data/.config.yaml` | xiaozhi-server config override |
+| `custom-providers/zeroclaw/zeroclaw.py` | Docker host `core/providers/llm/zeroclaw/zeroclaw.py` | xiaozhi LLM provider, proxies to the ZeroClaw bridge |
+| `custom-providers/zeroclaw/__init__.py` | Docker host `core/providers/llm/zeroclaw/__init__.py` | Python package marker |
+| `custom-providers/edge_stream/edge_stream.py` | Docker host `core/providers/tts/edge_stream.py` | Streaming EdgeTTS provider |
+| `custom-providers/edge_stream/__init__.py` | Docker host (not currently mounted) | Python package marker |
+| `custom-providers/piper_local/piper_local.py` | Docker host `core/providers/tts/piper_local.py` | Local Piper TTS provider (offline alternative to EdgeTTS) |
+| `custom-providers/piper_local/__init__.py` | Docker host (not currently mounted) | Python package marker |
+| `custom-providers/asr/fun_local.py` | Docker host `core/providers/asr/fun_local.py` | Patched FunASR provider (adds `language` config key) |
+| `.config.yaml` | Docker host `data/.config.yaml` | xiaozhi-server config override |
 | `.env.example` | reference only | Documented environment variables with defaults |
-| `docker-compose.yml` | Unraid `<UNRAID_XIAOZHI_PATH>` | Container definition |
+| `docker-compose.yml` | Docker host `<XIAOZHI_PATH>` | Container definition |
 
 These are the canonical working copies. The deployed files on the servers
-should match — if they drift, redeploy from here.
+should match - if they drift, redeploy from here.
 
 ---
 
@@ -309,10 +309,10 @@ should match — if they drift, redeploy from here.
 The xiaozhi-server couldn't reach the bridge. Check `systemctl status zeroclaw-bridge` on the RPi and `curl http://<RPI_IP>:8080/health` from anywhere on the LAN.
 
 **xiaozhi-server won't start, log says `ModuleNotFoundError`.**
-Check the container logs for the actual missing module. The image ships with most deps but the streaming TTS provider uses `pydub` and `edge-tts` — if they're missing, add them via the compose file or bake a custom image.
+Check the container logs for the actual missing module. The image ships with most deps but the streaming TTS provider uses `pydub` and `edge-tts` - if they're missing, add them via the compose file or bake a custom image.
 
 **StackChan connects but never responds.**
-Open a test page in your browser: copy `repo/main/xiaozhi-server/test/test_page.html` locally and point its WS URL at `ws://<UNRAID_IP>:8000/xiaozhi/v1/`. If the browser page works but the device doesn't, the device has the wrong OTA URL — re-enter it in the device's Advanced Options.
+Open a test page in your browser: copy `repo/main/xiaozhi-server/test/test_page.html` locally and point its WS URL at `ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/`. If the browser page works but the device doesn't, the device has the wrong OTA URL - re-enter it in the device's Advanced Options.
 
 **No facial expression change on the robot.**
 The response didn't start with a supported emoji. Check bridge logs to see what came back from ZeroClaw; the bridge appends 😐 as a fallback but that means no meaningful animation.

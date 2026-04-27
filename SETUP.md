@@ -1,9 +1,9 @@
 # First-Boot Setup — Bringing Up Your StackChan
 
 Step-by-step for taking a fresh M5Stack StackChan from the box to a working,
-fully-self-hosted voice robot. The backend (xiaozhi-server on Unraid, ZeroClaw
-bridge on the RPi) is assumed to already be deployed — if you're starting
-fresh, skim `README.md` first.
+fully-self-hosted voice robot. The backend (xiaozhi-server on a Docker host,
+ZeroClaw bridge on the RPi) is assumed to already be deployed — if you're
+starting fresh, skim `README.md` first.
 
 > This guide assumes you've already substituted the placeholders from
 > `README.md`'s "Configuring for your environment" section with the real
@@ -17,8 +17,8 @@ Run these from any LAN-connected machine — should all succeed within a
 second or two:
 
 ```bash
-curl -s http://<UNRAID_IP>:8003/xiaozhi/ota/
-# Expect:  OTA接口运行正常，向设备发送的websocket地址是：ws://<UNRAID_IP>:8000/xiaozhi/v1/
+curl -s http://<XIAOZHI_HOST>:8003/xiaozhi/ota/
+# Expect:  OTA接口运行正常，向设备发送的websocket地址是：ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/
 
 curl -s http://<RPI_IP>:8080/health
 # Expect:  {"status":"ok","service":"zeroclaw-bridge","acp_running":true}
@@ -31,7 +31,7 @@ curl -s -X POST http://<RPI_IP>:8080/api/message \
 
 If any fails, fix the backend before dealing with the robot:
 
-- OTA down → `ssh <UNRAID_USER>@<UNRAID_IP> 'docker logs --tail 40 xiaozhi-esp32-server'`
+- OTA down → `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs --tail 40 xiaozhi-esp32-server'`
 - Bridge down → `ssh <RPI_USER>@<RPI_IP> 'sudo journalctl -u zeroclaw-bridge -n 40 --no-pager'`
 
 ---
@@ -78,7 +78,7 @@ Point the firmware at your xiaozhi-server for OTA. Edit
 `firmware/sdkconfig.defaults` and add (or modify) the line:
 
 ```
-CONFIG_OTA_URL="http://<UNRAID_IP>:8003/xiaozhi/ota/"
+CONFIG_OTA_URL="http://<XIAOZHI_HOST>:8003/xiaozhi/ota/"
 ```
 
 Trailing slash matters — that's the path the server exposes.
@@ -117,7 +117,7 @@ flow), use that instead.
   (or, if you left WiFi unconfigured, whatever fallback the upstream
   build offers — consult the xiaozhi-esp32 README for the current default
   behaviour)
-- It POSTs to `http://<UNRAID_IP>:8003/xiaozhi/ota/`, gets back the
+- It POSTs to `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/`, gets back the
   WebSocket endpoint, and connects
 
 Tail the server logs while the device boots so you can watch the
@@ -148,7 +148,7 @@ While the freshly flashed device boots, tail the server logs in one
 terminal:
 
 ```bash
-ssh <UNRAID_USER>@<UNRAID_IP> 'docker logs -f xiaozhi-esp32-server'
+ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs -f xiaozhi-esp32-server'
 ```
 
 Within ~30s of reboot you should see (in order):
@@ -190,7 +190,7 @@ way slower, check `http://<RPI_IP>:8080/health` for `acp_running:true`
 
 ## 6. Tune if needed
 
-All of these are edits to `data/.config.yaml` on Unraid followed by
+All of these are edits to `data/.config.yaml` on the Docker host followed by
 `docker compose restart`, except the LLM model (lives on the RPi).
 
 | Complaint | Edit | File |
@@ -229,7 +229,7 @@ Some older xiaozhi builds expose a SoftAP captive portal on first boot:
    browse to `http://192.168.4.1`.
 3. Pick your 2.4 GHz LAN SSID, enter the password.
 4. Click "Advanced Options" and paste the OTA URL:
-   `http://<UNRAID_IP>:8003/xiaozhi/ota/` (trailing slash required).
+   `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/` (trailing slash required).
 5. Save. Device reboots and connects.
 
 If you have a build where this works, it's the fastest provisioning flow.
@@ -239,7 +239,7 @@ It just isn't what M5Stack ships today.
 
 ## 9. When it's working: bookmark these
 
-- **Tail voice pipeline**: `ssh <UNRAID_USER>@<UNRAID_IP> 'docker logs -f xiaozhi-esp32-server'`
+- **Tail voice pipeline**: `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs -f xiaozhi-esp32-server'`
 - **Tail bridge**: `ssh <RPI_USER>@<RPI_IP> 'sudo journalctl -u zeroclaw-bridge -f'`
 - **Smoke test end-to-end**: `curl -X POST http://<RPI_IP>:8080/api/message -H 'content-type: application/json' -d '{"content":"test"}'`
 - **ZeroClaw's web UI** (for tweaking the agent persona directly):

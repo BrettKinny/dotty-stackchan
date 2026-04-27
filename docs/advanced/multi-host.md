@@ -1,12 +1,12 @@
-# Multi-host deployment (Unraid + Raspberry Pi)
+# Multi-host deployment (Docker host + Raspberry Pi)
 
-The default setup in `compose.all-in-one.yml` runs everything on one Docker host. This document describes the **multi-host** split: xiaozhi-server on an Unraid (or other Docker host) and ZeroClaw + the bridge on a separate Raspberry Pi.
+The default setup in `compose.all-in-one.yml` runs everything on one Docker host. This document describes the **multi-host** split: xiaozhi-server on a Linux Docker host and ZeroClaw + the bridge on a separate Raspberry Pi.
 
 ## When you'd want this
 
 - **Dedicated hardware for the brain.** ZeroClaw runs as a native binary (Rust, not containerized). If you already have a Pi running ZeroClaw for other channels (chat, CLI, other agents), keeping the bridge there avoids duplicating the install.
 - **Resource isolation.** The voice pipeline (ASR model loading, TTS) and the LLM bridge have different resource profiles. Splitting them across hosts avoids contention.
-- **Existing Unraid setup.** If Unraid is already your Docker host and you don't want to install Rust/ZeroClaw tooling on it, the Pi is a natural home for the bridge.
+- **Docker host already in use.** If you already run a Linux Docker host (NAS, home-server, mini-PC) and don't want to install Rust/ZeroClaw tooling on it, the Pi is a natural home for the bridge.
 
 ## How it differs from all-in-one
 
@@ -22,8 +22,8 @@ The default setup in `compose.all-in-one.yml` runs everything on one Docker host
 
 The main [README](../../README.md) already documents this layout in detail. The short version:
 
-1. **Unraid (Docker host):**
-   - Clone this repo to `<UNRAID_XIAOZHI_PATH>`.
+1. **Docker host:**
+   - Clone this repo to `<XIAOZHI_PATH>`.
    - Edit `data/.config.yaml`: set `LLM.ZeroClawLLM.url` to `http://<RPI_IP>:8080/api/message/stream`.
    - Run `docker compose up -d` (uses the standard `docker-compose.yml`).
 
@@ -35,7 +35,7 @@ The main [README](../../README.md) already documents this layout in detail. The 
    - Install the systemd unit: copy `zeroclaw-bridge.service` to `/etc/systemd/system/`, edit paths, then `systemctl enable --now zeroclaw-bridge`.
 
 3. **StackChan device:**
-   - Set OTA URL to `http://<UNRAID_IP>:8003/xiaozhi/ota/`.
+   - Set OTA URL to `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/`.
 
 ## Migrating from all-in-one to multi-host
 

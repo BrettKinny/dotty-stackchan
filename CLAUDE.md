@@ -12,7 +12,7 @@ StackChan hardware → configured persona
   │  ESP32-S3, xiaozhi firmware (built from m5stack/StackChan source)
   │  WiFi / WebSocket (Xiaozhi protocol)
   ▼
-xiaozhi-esp32-server (Docker on Unraid)
+xiaozhi-esp32-server (Docker on a Linux host)
   ├─ ASR: FunASR SenseVoiceSmall (local, no cloud)
   ├─ TTS: LocalPiper (en_US-kristin-medium); EdgeTTS / StreamingEdgeTTS available as alternates
   ├─ LLM: Custom ZeroClawLLM provider (proxies to RPi)
@@ -30,18 +30,18 @@ See `README.md` for the full visual architecture and message-flow diagrams.
 ## Network
 
 - **Admin workstation** (this machine): Development/admin workstation. Runs Claude Code sessions.
-- **Unraid**: Docker host for xiaozhi-esp32-server. Reachable via Tailscale and LAN.
+- **Docker host**: runs xiaozhi-esp32-server. Any Linux box with Docker works. Reachable on the LAN (and optionally Tailscale).
 - **RPi (DietPi)**: Runs ZeroClaw + the HTTP bridge. Reachable via Tailscale and LAN.
 - **StackChan**: On LAN WiFi only (not on Tailnet). Needs LAN IPs for OTA and WebSocket.
 
 SSH access is via Tailscale hostnames. Discover actual Tailscale hostnames at runtime with `tailscale status`.
 
-This repo uses placeholders (`<UNRAID_IP>`, `<RPI_IP>`, `<RPI_USER>`, `<UNRAID_XIAOZHI_PATH>`, etc.) everywhere real values would normally appear — see the "Configuring for your environment" section of `README.md` for the full list.
+This repo uses placeholders (`<XIAOZHI_HOST>`, `<RPI_IP>`, `<RPI_USER>`, `<XIAOZHI_PATH>`, etc.) everywhere real values would normally appear — see the "Configuring for your environment" section of `README.md` for the full list.
 
 ## Key Paths
 
-- **Unraid xiaozhi-server**: `<UNRAID_XIAOZHI_PATH>` (e.g. `/mnt/user/appdata/xiaozhi-server/`)
-- **Unraid custom LLM provider**: mounted into container at `/opt/xiaozhi-server/core/providers/llm/zeroclaw/`
+- **xiaozhi-server install dir** (on the Docker host): `<XIAOZHI_PATH>` (e.g. `/opt/xiaozhi-server/`)
+- **Custom LLM provider** (on the Docker host): mounted into container at `/opt/xiaozhi-server/core/providers/llm/zeroclaw/`
 - **RPi ZeroClaw bridge**: `<RPI_BRIDGE_PATH>` (e.g. `~/zeroclaw-bridge/`)
 - **This project dir**: wherever you cloned `dotty-stackchan`
 
@@ -49,15 +49,15 @@ This repo uses placeholders (`<UNRAID_IP>`, `<RPI_IP>`, `<RPI_USER>`, `<UNRAID_X
 
 | Service | Host | Port | Protocol |
 |---------|------|------|----------|
-| xiaozhi WebSocket | Unraid LAN IP | 8000 | ws:// |
-| xiaozhi OTA/HTTP | Unraid LAN IP | 8003 | http:// |
+| xiaozhi WebSocket | Docker host LAN IP | 8000 | ws:// |
+| xiaozhi OTA/HTTP | Docker host LAN IP | 8003 | http:// |
 | ZeroClaw bridge | RPi LAN IP | 8080 | http:// |
 | ZeroClaw gateway (ws) | RPi localhost | 18789 | ws:// |
 | ZeroClaw gateway (web UI) | RPi localhost | 42617 | http:// |
 
 ## Config Files to Know
 
-- `.config.yaml` (repo root; deployed to Unraid) — the xiaozhi-server override config. Never overwrite wholesale on upgrades; merge keys.
+- `.config.yaml` (repo root; deployed to the Docker host as `data/.config.yaml`) — the xiaozhi-server override config. Never overwrite wholesale on upgrades; merge keys.
 - `custom-providers/zeroclaw/zeroclaw.py` — custom LLM provider. Mounted into the container via docker-compose volume.
 - `custom-providers/edge_stream/edge_stream.py` — custom streaming TTS provider. Mounted similarly.
 - `custom-providers/openai_compat/openai_compat.py` — OpenAI-compatible LLM provider (alternative to ZeroClaw).
@@ -96,10 +96,10 @@ Run `make help` for the full list. Key targets:
 
 ## Common Maintenance Tasks
 
-- **Change TTS voice**: Edit `data/.config.yaml` on Unraid. For the default `LocalPiper`, swap the `voice` + `model_path` + `config_path` keys (download a new `.onnx` / `.onnx.json` pair into `models/piper/`). For `EdgeTTS` / `StreamingEdgeTTS` alternates, change `TTS.EdgeTTS.voice` / `TTS.StreamingEdgeTTS.voice` and switch `selected_module.TTS`. Restart container.
-- **Change system prompt**: Edit `data/.config.yaml` on Unraid, top-level `prompt:` block. Restart container.
-- **Check logs**: `ssh <UNRAID_USER>@<UNRAID_IP> 'docker logs -f xiaozhi-esp32-server'`
-- **Restart pipeline**: `ssh <UNRAID_USER>@<UNRAID_IP> 'cd <UNRAID_XIAOZHI_PATH> && docker compose restart'`
+- **Change TTS voice**: Edit `data/.config.yaml` on the Docker host. For the default `LocalPiper`, swap the `voice` + `model_path` + `config_path` keys (download a new `.onnx` / `.onnx.json` pair into `models/piper/`). For `EdgeTTS` / `StreamingEdgeTTS` alternates, change `TTS.EdgeTTS.voice` / `TTS.StreamingEdgeTTS.voice` and switch `selected_module.TTS`. Restart container.
+- **Change system prompt**: Edit `data/.config.yaml` on the Docker host, top-level `prompt:` block. Restart container.
+- **Check logs**: `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs -f xiaozhi-esp32-server'`
+- **Restart pipeline**: `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'cd <XIAOZHI_PATH> && docker compose restart'`
 - **Test bridge**: `curl http://<RPI_IP>:8080/health`
 - **Test full round-trip**: `curl -X POST http://<RPI_IP>:8080/api/message -H 'Content-Type: application/json' -d '{"content":"hello"}'`
 

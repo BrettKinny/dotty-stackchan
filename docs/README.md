@@ -53,7 +53,7 @@ docs/
 - **Grep-bait headers** — e.g. `## MCP tool handshake`, `## session/prompt` — so you can navigate by header search.
 - **Relative links only** — `[voice-pipeline.md](./voice-pipeline.md)`; never absolute paths.
 - **Freshness footer** — every non-index file ends with `Last verified: YYYY-MM-DD`.
-- **Placeholders for per-deployment values** — `<UNRAID_IP>`, `<RPI_IP>`, etc. (mapping lives with the deployer, not in this repo).
+- **Placeholders for per-deployment values** — `<XIAOZHI_HOST>`, `<RPI_IP>`, etc. (mapping lives with the deployer, not in this repo).
 - **Soft claims where unverified** — if a fact came from a secondary source or we couldn't verify, the text says so rather than pretending to cite upstream.
 
 ## Relationship to the rest of the repo

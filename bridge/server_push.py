@@ -48,10 +48,10 @@ log = logging.getLogger("zeroclaw-bridge.server_push")
 
 # Resolved lazily so tests can patch env without importing bridge.py.
 def _xiaozhi_admin_url() -> Optional[str]:
-    host = os.environ.get("UNRAID_HOST", "")
+    host = os.environ.get("XIAOZHI_HOST", "")
     if not host:
         return None
-    port = int(os.environ.get("UNRAID_OTA_PORT", "8003"))
+    port = int(os.environ.get("XIAOZHI_OTA_PORT", "8003"))
     return f"http://{host}:{port}/xiaozhi/admin/inject-text"
 
 
@@ -91,7 +91,7 @@ async def push_greeting_audio(
     url = _xiaozhi_admin_url()
     if not url:
         log.warning(
-            "push_greeting_audio: UNRAID_HOST not set; cannot reach "
+            "push_greeting_audio: XIAOZHI_HOST not set; cannot reach "
             "xiaozhi-server (device=%s)",
             device_id,
         )

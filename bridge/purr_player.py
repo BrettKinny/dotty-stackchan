@@ -13,9 +13,9 @@ Environment variables (read at import time so test fixtures can patch
   PURR_DURATION_SEC   — approximate playback length; used to extend
                         ``last_chat_t`` so the sound-localiser stays quiet
                         during playback (default: 2.0)
-  UNRAID_HOST         — hostname/IP of the xiaozhi-server HTTP admin API
+  XIAOZHI_HOST         — hostname/IP of the xiaozhi-server HTTP admin API
                         (no default; empty string disables dispatch)
-  UNRAID_OTA_PORT     — xiaozhi-server HTTP port (default: 8003)
+  XIAOZHI_OTA_PORT     — xiaozhi-server HTTP port (default: 8003)
 """
 from __future__ import annotations
 
@@ -45,30 +45,30 @@ PURR_AUDIO_PATH: Path = Path(
 PURR_COOLDOWN_SEC: float = float(os.environ.get("PURR_COOLDOWN_SEC", "5"))
 PURR_DURATION_SEC: float = float(os.environ.get("PURR_DURATION_SEC", "2.0"))
 
-_XIAOZHI_HOST: str = os.environ.get("UNRAID_HOST", "")
-_XIAOZHI_HTTP_PORT: int = int(os.environ.get("UNRAID_OTA_PORT", "8003"))
+_XIAOZHI_HOST: str = os.environ.get("XIAOZHI_HOST", "")
+_XIAOZHI_HTTP_PORT: int = int(os.environ.get("XIAOZHI_OTA_PORT", "8003"))
 
 
 async def dispatch_purr_audio(
     device_id: str,
     *,
     purr_path: Path | None = None,
-    unraid_host: str | None = None,
-    unraid_port: int | None = None,
+    xiaozhi_host: str | None = None,
+    xiaozhi_port: int | None = None,
 ) -> bool:
     """POST the purr asset path to xiaozhi-server's /play-asset admin route.
 
     Returns True on 2xx, False on any failure. Never raises.
 
-    Keyword overrides (purr_path, unraid_host, unraid_port) allow tests to
+    Keyword overrides (purr_path, xiaozhi_host, xiaozhi_port) allow tests to
     supply controlled values without patching environment variables.
     """
     path = purr_path if purr_path is not None else PURR_AUDIO_PATH
-    host = unraid_host if unraid_host is not None else _XIAOZHI_HOST
-    port = unraid_port if unraid_port is not None else _XIAOZHI_HTTP_PORT
+    host = xiaozhi_host if xiaozhi_host is not None else _XIAOZHI_HOST
+    port = xiaozhi_port if xiaozhi_port is not None else _XIAOZHI_HTTP_PORT
 
     if not host:
-        log.warning("purr: UNRAID_HOST not set; cannot reach xiaozhi-server")
+        log.warning("purr: XIAOZHI_HOST not set; cannot reach xiaozhi-server")
         return False
 
     import requests as _req

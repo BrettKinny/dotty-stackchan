@@ -20,20 +20,20 @@ I need you to set up infrastructure across two remote machines for an M5Stack St
 
 ## What you're building
 
-A self-hosted voice pipeline that routes StackChan's audio through a xiaozhi-esp32-server (ASR + TTS) on my Unraid box, with all AI processing forwarded to my ZeroClaw instance running on a Raspberry Pi.
+A self-hosted voice pipeline that routes StackChan's audio through a xiaozhi-esp32-server (ASR + TTS) running on a Linux Docker host, with all AI processing forwarded to a ZeroClaw instance running on a Raspberry Pi.
 
 ## Discovery steps (do these first)
 
-1. Run `tailscale status` to find the Tailscale hostnames and IPs for both Unraid and the RPi. Identify which is which from the OS/hostname.
-2. SSH into the Unraid box. Find its LAN IP (not Tailscale IP) — StackChan will need this because it's on WiFi, not Tailnet. Check `ip addr` or `hostname -I`. Also confirm Docker is available and check where appdata lives (likely `/mnt/user/appdata/`).
+1. Run `tailscale status` (if you use Tailscale) to find the hostnames and IPs for both the Docker host and the RPi. Identify which is which from the OS/hostname.
+2. SSH into the Docker host. Find its LAN IP (not Tailscale IP) — StackChan will need this because it's on WiFi, not Tailnet. Check `ip addr` or `hostname -I`. Also confirm Docker is available and pick a directory for the xiaozhi-server install (e.g. `/opt/xiaozhi-server/` or `/srv/xiaozhi-server/`).
 3. SSH into the RPi. Find its LAN IP similarly. Confirm ZeroClaw is running — check `zeroclaw status` or look for the gateway process on port 18789. Note the exact port and any API endpoints it exposes. Also check what Python version is available and whether pip/fastapi are already installed.
-4. Test basic connectivity: from the Unraid Docker network, can you reach the RPi's LAN IP? You may need to test this from inside a throwaway container (`docker run --rm alpine ping RPI_LAN_IP`).
+4. Test basic connectivity: from the Docker host, can you reach the RPi's LAN IP? You may need to test this from inside a throwaway container (`docker run --rm alpine ping RPI_LAN_IP`).
 
-## Unraid setup (xiaozhi-esp32-server)
+## Docker host setup (xiaozhi-esp32-server)
 
-On the Unraid box:
+On the Docker host:
 
-1. Create the directory structure at `/mnt/user/appdata/xiaozhi-server/` with subdirs: `data/`, `models/SenseVoiceSmall/`, `tmp/`.
+1. Create the directory structure at your chosen install path (e.g. `/opt/xiaozhi-server/`) with subdirs: `data/`, `models/SenseVoiceSmall/`, `tmp/`.
 2. Clone `https://github.com/xinnan-tech/xiaozhi-esp32-server.git` into a `repo/` subdir.
 3. Download the SenseVoiceSmall ASR model (`model.pt`, ~250MB) into `models/SenseVoiceSmall/`. Try ModelScope first: `https://www.modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt`. If that's slow, use HuggingFace: `https://huggingface.co/FunAudioLLM/SenseVoiceSmall/resolve/main/model.pt`. Verify the file is >200MB after download.
 4. Create the custom ZeroClaw LLM provider at `repo/main/xiaozhi-server/core/providers/llm/zeroclaw/zeroclaw.py` plus `__init__.py`. The provider:
@@ -81,7 +81,7 @@ On the Raspberry Pi:
 
 After both sides are up:
 
-1. Curl the bridge health endpoint from the Unraid box (from inside a Docker container to simulate the xiaozhi-server's network perspective).
+1. Curl the bridge health endpoint from the Docker host (from inside a Docker container to simulate the xiaozhi-server's network perspective).
 2. Send a test message through the bridge and confirm you get an emoji-prefixed response back.
 3. Check xiaozhi-server logs to confirm the WebSocket endpoint is listening and the OTA endpoint reports healthy.
 4. If the repo includes a test HTML page (usually at `repo/main/xiaozhi-server/test/test_page.html`), note its location so I can open it in a browser for audio testing.

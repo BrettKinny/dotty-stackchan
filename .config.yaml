@@ -2,7 +2,7 @@ server:
   ip: 0.0.0.0
   port: 8000
   http_port: 8003
-  websocket: ws://<UNRAID_IP>:8000/xiaozhi/v1/
+  websocket: ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/
   vision_explain: http://<RPI_IP>:8080/api/vision/explain
   timezone_offset: +10
 
@@ -38,7 +38,7 @@ prompt: |
 
   Voice and persona:
   - Warm, competent, a little bit playful.
-  - Your brain runs on ZeroClaw on the Raspberry Pi; voice I/O runs on xiaozhi-server on Unraid.
+  - Your brain runs on ZeroClaw on the Raspberry Pi; voice I/O runs on xiaozhi-server on a Docker host.
 
 VAD:
   SileroVAD:

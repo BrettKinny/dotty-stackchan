@@ -69,7 +69,7 @@ Designed but not yet started. Roughly in priority order.
 - **Singing mode** -- vocal synthesis or pitch-shifted TTS over backing tracks (Phase 2 of dance work)
 - **Runtime OTA provisioning** -- captive-portal WiFi + OTA URL setup on first boot (no rebuild to retarget)
 - **Layer 2.5 stereo mic + camera person tracking** -- sound-source localization + camera fusion for 360° awareness in idle mode
-- **Phase 3 continuous vision classifier** -- EfficientDet/YOLOX at 1Hz on the Unraid GPU once dual RTX 3060s land
+- **Phase 3 continuous vision classifier** -- EfficientDet/YOLOX at 1Hz on the Docker host GPU once dual RTX 3060s land
 - **Variant board port guide** -- walkthrough for adding support for other ESP32-S3 boards
 
 ## Community wishlist

@@ -36,7 +36,7 @@ setup: ## Interactive first-run wizard (prompts for IPs, names, timezone)
 	@echo -e "$(BOLD)Dotty setup wizard$(RESET)"
 	@echo "This will substitute placeholders in config files and start the stack."
 	@echo ""
-	@read -rp "UNRAID_IP  (LAN IP of Docker host, e.g. 192.168.1.10): " UNRAID_IP && \
+	@read -rp "XIAOZHI_HOST  (LAN IP of Docker host, e.g. 192.168.1.10): " XIAOZHI_HOST && \
 	 read -rp "RPI_IP     (LAN IP of Raspberry Pi,  e.g. 192.168.1.20): " RPI_IP && \
 	 read -rp "RPI_USER   (SSH user on the Pi,       e.g. dietpi):       " RPI_USER && \
 	 read -rp "ROBOT_NAME (name the robot calls itself) [Dotty]:          " ROBOT_NAME && \
@@ -44,14 +44,14 @@ setup: ## Interactive first-run wizard (prompts for IPs, names, timezone)
 	 read -rp "YOUR_NAME  (your name / org,           e.g. Brett):       " YOUR_NAME && \
 	 read -rp "Timezone   (TZ identifier,             e.g. Australia/Brisbane): " TZ_VALUE && \
 	 echo "" && \
-	 if [ -z "$$UNRAID_IP" ] || [ -z "$$RPI_IP" ] || [ -z "$$RPI_USER" ] || \
+	 if [ -z "$$XIAOZHI_HOST" ] || [ -z "$$RPI_IP" ] || [ -z "$$RPI_USER" ] || \
 	    [ -z "$$ROBOT_NAME" ] || [ -z "$$YOUR_NAME" ] || [ -z "$$TZ_VALUE" ]; then \
 	   echo -e "$(RED)Error: all fields are required.$(RESET)"; exit 1; \
 	 fi && \
 	 echo -e "$(BOLD)Substituting placeholders...$(RESET)" && \
 	 for f in .config.yaml docker-compose.yml zeroclaw-bridge.service; do \
 	   if [ -f "$$f" ]; then \
-	     sed -i "s|<UNRAID_IP>|$$UNRAID_IP|g"   "$$f"; \
+	     sed -i "s|<XIAOZHI_HOST>|$$XIAOZHI_HOST|g"   "$$f"; \
 	     sed -i "s|<RPI_IP>|$$RPI_IP|g"         "$$f"; \
 	     sed -i "s|<RPI_USER>|$$RPI_USER|g"     "$$f"; \
 	     sed -i "s|<ROBOT_NAME>|$$ROBOT_NAME|g; s|You are Dotty,|You are $$ROBOT_NAME,|g" "$$f"; \
@@ -76,7 +76,7 @@ setup: ## Interactive first-run wizard (prompts for IPs, names, timezone)
 	 echo "Next steps:" && \
 	 echo "  1. Flash the StackChan firmware (see SETUP.md or m5stack/StackChan repo)." && \
 	 echo "  2. In the device's Advanced Options, set the OTA URL to:" && \
-	 echo "       http://$$UNRAID_IP:8003/xiaozhi/ota/" && \
+	 echo "       http://$$XIAOZHI_HOST:8003/xiaozhi/ota/" && \
 	 echo "  3. Deploy zeroclaw-bridge.service to the RPi and start it." && \
 	 echo "  4. Run 'make doctor' to verify everything is healthy." && \
 	 echo ""
@@ -176,18 +176,18 @@ doctor: ## Run health checks on config, models, and services
 	 check "models/SenseVoiceSmall/ has files" "ls $(SENSEVOICE_DIR)/*.pt >/dev/null 2>&1 || ls $(SENSEVOICE_DIR)/*.yaml >/dev/null 2>&1"; \
 	 check "models/piper/*.onnx exists" "ls $(PIPER_DIR)/*.onnx >/dev/null 2>&1"; \
 	 check "docker compose config validates" "docker compose config --quiet"; \
-	 UNRAID_IP=$$(grep -oP 'ws://\K[0-9.]+' .config.yaml 2>/dev/null | head -1); \
+	 XIAOZHI_HOST=$$(grep -oP 'ws://\K[0-9.]+' .config.yaml 2>/dev/null | head -1); \
 	 RPI_IP=$$(grep -oP 'url: http://\K[0-9.]+' .config.yaml 2>/dev/null | head -1); \
-	 if [ -n "$$UNRAID_IP" ]; then \
-	   if curl -sf --max-time 3 "http://$$UNRAID_IP:8003/xiaozhi/ota/" >/dev/null 2>&1; then \
-	     echo -e "  $(GREEN)PASS$(RESET)  OTA endpoint reachable ($$UNRAID_IP:8003)"; \
+	 if [ -n "$$XIAOZHI_HOST" ]; then \
+	   if curl -sf --max-time 3 "http://$$XIAOZHI_HOST:8003/xiaozhi/ota/" >/dev/null 2>&1; then \
+	     echo -e "  $(GREEN)PASS$(RESET)  OTA endpoint reachable ($$XIAOZHI_HOST:8003)"; \
 	     PASS=$$((PASS+1)); \
 	   else \
-	     echo -e "  $(RED)FAIL$(RESET)  OTA endpoint reachable ($$UNRAID_IP:8003)"; \
+	     echo -e "  $(RED)FAIL$(RESET)  OTA endpoint reachable ($$XIAOZHI_HOST:8003)"; \
 	     FAIL=$$((FAIL+1)); \
 	   fi; \
 	 else \
-	   echo -e "  $(YELLOW)SKIP$(RESET)  OTA endpoint (could not extract UNRAID_IP from config)"; \
+	   echo -e "  $(YELLOW)SKIP$(RESET)  OTA endpoint (could not extract XIAOZHI_HOST from config)"; \
 	 fi; \
 	 if [ -n "$$RPI_IP" ]; then \
 	   if curl -sf --max-time 3 "http://$$RPI_IP:8080/health" >/dev/null 2>&1; then \
@@ -212,13 +212,13 @@ audit: ## Audit outbound network connections (verify local-except-LLM claim)
 	@echo ""
 	@echo -e "$(BOLD)Network audit — verifying 'local except LLM' claim$(RESET)"
 	@echo ""
-	@UNRAID_IP=$$(grep -oP 'ws://\K[0-9.]+' .config.yaml 2>/dev/null | head -1); \
+	@XIAOZHI_HOST=$$(grep -oP 'ws://\K[0-9.]+' .config.yaml 2>/dev/null | head -1); \
 	 RPI_IP=$$(grep -oP 'url: http://\K[0-9.]+' .config.yaml 2>/dev/null | head -1); \
 	 PASS=0; FAIL=0; WARN=0; \
 	 echo -e "$(BOLD)Server host (Docker):$(RESET)"; \
-	 if [ -n "$$UNRAID_IP" ]; then \
-	   echo "  Checking outbound connections on $$UNRAID_IP..."; \
-	   CONNS=$$(ssh -o ConnectTimeout=5 root@$$UNRAID_IP \
+	 if [ -n "$$XIAOZHI_HOST" ]; then \
+	   echo "  Checking outbound connections on $$XIAOZHI_HOST..."; \
+	   CONNS=$$(ssh -o ConnectTimeout=5 root@$$XIAOZHI_HOST \
 	     'ss -tnp | grep -v "127.0.0.1\|::1" | grep "ESTAB"' 2>/dev/null); \
 	   if [ -z "$$CONNS" ]; then \
 	     echo -e "  $(GREEN)PASS$(RESET)  No outbound connections (fully local)"; \

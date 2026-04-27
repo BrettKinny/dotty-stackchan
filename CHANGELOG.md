@@ -57,7 +57,7 @@ Post-v0.1 work — code shipped to `main` but not yet deployed live or tagged. ~
 
 ## [0.1.0] - 2026-04-25
 
-First tagged release — early-feedback alpha. Works end-to-end on the maintainer's hardware (M5Stack StackChan + Unraid Docker host + Raspberry Pi bridge + ZeroClaw + OpenRouter Mistral Small 3.2). External users welcome; see `ROADMAP.md` for known issues.
+First tagged release — early-feedback alpha. Works end-to-end on the maintainer's hardware (M5Stack StackChan + Docker host + Raspberry Pi bridge + ZeroClaw + OpenRouter Mistral Small 3.2). External users welcome; see `ROADMAP.md` for known issues.
 
 ### Fixed in v0.1.0
 - **Smart Mode marker check.** `zeroclaw.py` `_payload` was matching `[SMART_MODE]\n` against the composed `[Context] … [User] …` payload (marker landed at offset ~2700, so `startswith` was always False). Every voice "smart mode" turn since `434988d` silently fell back to the default voice model. Fix detects markers on the raw user message before `_compose()` wraps it.
@@ -86,7 +86,7 @@ First tagged release — early-feedback alpha. Works end-to-end on the maintaine
 - **Technical documentation suite (`docs/`)** — eight linked markdown files covering architecture, hardware, voice pipeline, brain, protocols, latent capabilities, and upstream references.
 - **Docker packaging for zeroclaw-bridge** — multi-stage Dockerfile (Rust builder to python:3.12-slim runtime), deploy-side compose file, and GitHub Actions workflow publishing multi-arch images (amd64 + arm64) to `ghcr.io/brettkinny/zeroclaw-bridge`.
 - **Dual deployment paths** — both bare-metal systemd and Docker deployment for the bridge, sharing the same `~/.zeroclaw/` state directory.
-- **Placeholder-based configuration** — all real IPs, usernames, and paths replaced with named placeholders (`<UNRAID_IP>`, `<RPI_IP>`, `<ROBOT_NAME>`, etc.) for safe public sharing.
+- **Placeholder-based configuration** — all real IPs, usernames, and paths replaced with named placeholders (`<XIAOZHI_HOST>`, `<RPI_IP>`, `<ROBOT_NAME>`, etc.) for safe public sharing.
 - **systemd unit (`zeroclaw-bridge.service`)** — bare-metal bridge deployment with `Restart=on-failure`.
 - **docker-compose.yml** — container definition for xiaozhi-esp32-server with volume mounts for all custom providers.
 

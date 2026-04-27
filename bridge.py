@@ -185,8 +185,8 @@ CONVO_LOG_DIR = Path(os.environ.get("CONVO_LOG_DIR", "/root/zeroclaw-bridge/logs
 # Used by the dashboard admin path AND by perception-bus consumers (1.5/1.6).
 # Hoisted out of the `if _configure_dashboard` block so the bus tasks can
 # reach the xiaozhi admin endpoints regardless of dashboard availability.
-_XIAOZHI_HOST = os.environ.get("UNRAID_HOST", "")
-_XIAOZHI_HTTP_PORT = int(os.environ.get("UNRAID_OTA_PORT", "8003"))
+_XIAOZHI_HOST = os.environ.get("XIAOZHI_HOST", "")
+_XIAOZHI_HTTP_PORT = int(os.environ.get("XIAOZHI_OTA_PORT", "8003"))
 # Phase 1.5: face-greet cooldown. Conservative default keeps the robot
 # from re-greeting on every casual walk-by while still re-engaging when
 # the user comes back after a real absence.
@@ -1578,7 +1578,7 @@ async def _dispatch_face_greeting(device_id: str, text: str) -> None:
     """Phase 1.5 helper: fire-and-forget POST to the xiaozhi admin
     inject-text route, same path the dashboard greeter uses."""
     if not _XIAOZHI_HOST:
-        log.warning("face greeter: UNRAID_HOST not set; cannot reach xiaozhi-server")
+        log.warning("face greeter: XIAOZHI_HOST not set; cannot reach xiaozhi-server")
         return
     url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/inject-text"
     payload = {"text": text, "device_id": device_id}
@@ -1605,7 +1605,7 @@ async def _dispatch_say(device_id: str, text: str) -> None:
     being treated as a fake user utterance (which is what
     /admin/inject-text → startToChat does)."""
     if not _XIAOZHI_HOST:
-        log.warning("greeter say: UNRAID_HOST not set; cannot reach xiaozhi-server")
+        log.warning("greeter say: XIAOZHI_HOST not set; cannot reach xiaozhi-server")
         return
     url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/say"
     payload = {"text": text, "device_id": device_id}
@@ -1630,7 +1630,7 @@ async def _dispatch_set_head_angles(device_id: str, yaw: int,
     /xiaozhi/admin/set-head-angles route to send a direct MCP
     head-angles frame to the device."""
     if not _XIAOZHI_HOST:
-        log.warning("sound turn: UNRAID_HOST not set; cannot reach xiaozhi-server")
+        log.warning("sound turn: XIAOZHI_HOST not set; cannot reach xiaozhi-server")
         return
     url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/set-head-angles"
     payload = {
@@ -1874,14 +1874,14 @@ async def _dispatch_purr_audio(device_id: str) -> bool:
     perception loop.
 
     Defensive contract:
-      * Missing UNRAID_HOST → return False (no network attempt).
+      * Missing XIAOZHI_HOST → return False (no network attempt).
       * Network/HTTP failure → return False, log warning. Asset existence
         is checked server-side by xiaozhi-server's /play-asset route,
         which returns 404 if the path doesn't resolve in its own
         filesystem — the bridge surfaces that as a play-asset warning.
     """
     if not _XIAOZHI_HOST:
-        log.warning("purr: UNRAID_HOST not set; cannot reach xiaozhi-server")
+        log.warning("purr: XIAOZHI_HOST not set; cannot reach xiaozhi-server")
         return False
     url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/play-asset"
     payload = {"device_id": device_id, "asset": str(PURR_AUDIO_PATH)}
@@ -2809,7 +2809,7 @@ if _configure_dashboard is not None:
     async def _dashboard_abort_device(*, device_id: str = "") -> dict:
         """Fire-and-forget POST to xiaozhi-server's admin abort route."""
         if not _XIAOZHI_HOST:
-            return {"ok": False, "error": "UNRAID_HOST not set"}
+            return {"ok": False, "error": "XIAOZHI_HOST not set"}
 
         url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/abort"
         payload: dict = {}
@@ -2832,7 +2832,7 @@ if _configure_dashboard is not None:
         named (or first-available) device runs the text through its
         normal post-ASR pipeline — intent detection, MCP tools, TTS."""
         if not _XIAOZHI_HOST:
-            return {"ok": False, "error": "UNRAID_HOST not set"}
+            return {"ok": False, "error": "XIAOZHI_HOST not set"}
 
         url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/inject-text"
         payload = {"text": text}

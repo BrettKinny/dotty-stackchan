@@ -4,7 +4,7 @@
 # on one Docker host. The two services talk over a shared Docker network;
 # no real IPs needed between them.
 #
-# For the multi-host (Unraid + RPi) deployment, see docs/advanced/multi-host.md.
+# For the multi-host (Docker host + RPi) deployment, see docs/advanced/multi-host.md.
 #
 # ─── Prerequisites ──────────────────────────────────────────────────────
 #
@@ -22,7 +22,7 @@
 # ─── Quick start ────────────────────────────────────────────────────────
 #
 #   1. Copy .env.example to .env and fill in real values.
-#   2. Edit data/.config.yaml — replace <UNRAID_IP> with this host's LAN IP
+#   2. Edit data/.config.yaml — replace <XIAOZHI_HOST> with this host's LAN IP
 #      (the StackChan device needs a LAN-reachable IP for WebSocket/OTA).
 #      The LLM URL is already set to use the Docker network (http://bridge:8080/...).
 #   3. docker compose -f compose.all-in-one.yml up -d
