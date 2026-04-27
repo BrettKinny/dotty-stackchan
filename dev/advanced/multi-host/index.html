@@ -23,7 +23,7 @@
     
     
       
-        <title>Multi-host deployment (Unraid + Raspberry Pi) - Dotty</title>
+        <title>Multi-host deployment (Docker host + ZeroClaw host) - Dotty</title>
       
     
     
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#multi-host-deployment-unraid-raspberry-pi" class="md-skip">
+        <a href="#multi-host-deployment-docker-host-zeroclaw-host" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Multi-host deployment (Unraid + Raspberry Pi)
+              Multi-host deployment (Docker host + ZeroClaw host)
             
           </span>
         </div>
@@ -2195,13 +2195,13 @@
   
 
 
-<h1 id="multi-host-deployment-unraid-raspberry-pi">Multi-host deployment (Unraid + Raspberry Pi)<a class="headerlink" href="#multi-host-deployment-unraid-raspberry-pi" title="Permanent link">&para;</a></h1>
-<p>The default setup in <code>compose.all-in-one.yml</code> runs everything on one Docker host. This document describes the <strong>multi-host</strong> split: xiaozhi-server on an Unraid (or other Docker host) and ZeroClaw + the bridge on a separate Raspberry Pi.</p>
+<h1 id="multi-host-deployment-docker-host-zeroclaw-host">Multi-host deployment (Docker host + ZeroClaw host)<a class="headerlink" href="#multi-host-deployment-docker-host-zeroclaw-host" title="Permanent link">&para;</a></h1>
+<p>The default setup in <code>compose.all-in-one.yml</code> runs everything on one Docker host. This document describes the <strong>multi-host</strong> split: xiaozhi-server on a Linux Docker host and ZeroClaw + the bridge on a separate ZeroClaw host.</p>
 <h2 id="when-youd-want-this">When you'd want this<a class="headerlink" href="#when-youd-want-this" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Dedicated hardware for the brain.</strong> ZeroClaw runs as a native binary (Rust, not containerized). If you already have a Pi running ZeroClaw for other channels (chat, CLI, other agents), keeping the bridge there avoids duplicating the install.</li>
 <li><strong>Resource isolation.</strong> The voice pipeline (ASR model loading, TTS) and the LLM bridge have different resource profiles. Splitting them across hosts avoids contention.</li>
-<li><strong>Existing Unraid setup.</strong> If Unraid is already your Docker host and you don't want to install Rust/ZeroClaw tooling on it, the Pi is a natural home for the bridge.</li>
+<li><strong>Docker host already in use.</strong> If you already run a Linux Docker host (NAS, home-server, mini-PC) and don't want to install Rust/ZeroClaw tooling on it, the Pi is a natural home for the bridge.</li>
 </ul>
 <h2 id="how-it-differs-from-all-in-one">How it differs from all-in-one<a class="headerlink" href="#how-it-differs-from-all-in-one" title="Permanent link">&para;</a></h2>
 <table>
@@ -2226,7 +2226,7 @@
 <tr>
 <td>LLM URL in <code>.config.yaml</code></td>
 <td><code>http://bridge:8080/api/message/stream</code> (Docker network)</td>
-<td><code>http://&lt;RPI_IP&gt;:8080/api/message/stream</code> (real LAN IP)</td>
+<td><code>http://&lt;ZEROCLAW_HOST&gt;:8080/api/message/stream</code> (real LAN IP)</td>
 </tr>
 <tr>
 <td>ZeroClaw install</td>
@@ -2243,18 +2243,18 @@
 <h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
 <p>The main <a href="../../README.md">README</a> already documents this layout in detail. The short version:</p>
 <ol>
-<li><strong>Unraid (Docker host):</strong></li>
-<li>Clone this repo to <code>&lt;UNRAID_XIAOZHI_PATH&gt;</code>.</li>
-<li>Edit <code>data/.config.yaml</code>: set <code>LLM.ZeroClawLLM.url</code> to <code>http://&lt;RPI_IP&gt;:8080/api/message/stream</code>.</li>
+<li><strong>Docker host:</strong></li>
+<li>Clone this repo to <code>&lt;XIAOZHI_PATH&gt;</code>.</li>
+<li>Edit <code>data/.config.yaml</code>: set <code>LLM.ZeroClawLLM.url</code> to <code>http://&lt;ZEROCLAW_HOST&gt;:8080/api/message/stream</code>.</li>
 <li>
 <p>Run <code>docker compose up -d</code> (uses the standard <code>docker-compose.yml</code>).</p>
 </li>
 <li>
-<p><strong>Raspberry Pi:</strong></p>
+<p><strong>ZeroClaw host:</strong></p>
 </li>
 <li>Install ZeroClaw: <code>cargo install zeroclaw</code> (see <a href="https://github.com/zeroclaw-labs/zeroclaw">zeroclaw-labs/zeroclaw</a>).</li>
 <li>Configure the agent: edit <code>~/.zeroclaw/config.toml</code> with your LLM provider, API keys, and persona.</li>
-<li>Copy <code>bridge.py</code> and <code>bridge/requirements.txt</code> to <code>&lt;RPI_BRIDGE_PATH&gt;</code>.</li>
+<li>Copy <code>bridge.py</code> and <code>bridge/requirements.txt</code> to <code>&lt;BRIDGE_PATH&gt;</code>.</li>
 <li>Create a venv and install deps: <code>python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r requirements.txt</code>.</li>
 <li>
 <p>Install the systemd unit: copy <code>zeroclaw-bridge.service</code> to <code>/etc/systemd/system/</code>, edit paths, then <code>systemctl enable --now zeroclaw-bridge</code>.</p>
@@ -2262,12 +2262,12 @@
 <li>
 <p><strong>StackChan device:</strong></p>
 </li>
-<li>Set OTA URL to <code>http://&lt;UNRAID_IP&gt;:8003/xiaozhi/ota/</code>.</li>
+<li>Set OTA URL to <code>http://&lt;XIAOZHI_HOST&gt;:8003/xiaozhi/ota/</code>.</li>
 </ol>
 <h2 id="migrating-from-all-in-one-to-multi-host">Migrating from all-in-one to multi-host<a class="headerlink" href="#migrating-from-all-in-one-to-multi-host" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Stop the all-in-one stack: <code>docker compose -f compose.all-in-one.yml down</code>.</li>
-<li>Edit <code>data/.config.yaml</code>: change the LLM URL from <code>http://bridge:8080/...</code> to <code>http://&lt;RPI_IP&gt;:8080/...</code>.</li>
+<li>Edit <code>data/.config.yaml</code>: change the LLM URL from <code>http://bridge:8080/...</code> to <code>http://&lt;ZEROCLAW_HOST&gt;:8080/...</code>.</li>
 <li>Set up the Pi as described above.</li>
 <li>Start xiaozhi-server alone: <code>docker compose up -d</code> (standard <code>docker-compose.yml</code>).</li>
 </ol>

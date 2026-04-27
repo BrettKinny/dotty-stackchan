@@ -2278,16 +2278,16 @@
 <li><strong>WiFi signal.</strong> The StackChan's ESP32-S3 is 2.4 GHz only. Check RSSI — anything below -70 dBm will cause packet loss on the WebSocket stream. Move the robot closer to the access point, or reduce 2.4 GHz interference.</li>
 <li><strong>WebSocket abnormal close.</strong> Check xiaozhi-server logs for WS disconnect/reconnect events. The device will silently reconnect, but audio in flight is lost.</li>
 <li><strong>TTS chunk timing.</strong> If using EdgeTTS (cloud), network jitter between the Docker host and Microsoft's edge servers can cause uneven audio delivery. Switching to Piper (local) eliminates this variable entirely.</li>
-<li><strong>Unraid CPU contention.</strong> If other containers are competing for CPU during the ASR or TTS stages, audio processing can stall. Check <code>docker stats</code> on the Unraid host.</li>
+<li><strong>Docker host CPU contention.</strong> If other containers are competing for CPU during the ASR or TTS stages, audio processing can stall. Check <code>docker stats</code> on the Docker host.</li>
 </ul>
 <hr />
 <h2 id="robot-not-responding-after-ota-firmware-update">Robot not responding after OTA / firmware update<a class="headerlink" href="#robot-not-responding-after-ota-firmware-update" title="Permanent link">&para;</a></h2>
 <p><strong>Symptom:</strong> The StackChan boots and connects to WiFi, but never responds to voice. May show a face but no indication of listening.</p>
 <p><strong>Fix:</strong>
-1. Check the bridge health endpoint: <code>curl http://&lt;RPI_IP&gt;:8080/health</code>. If the bridge is down, restart it.
-2. Check xiaozhi-server logs: <code>docker logs -f xiaozhi-esp32-server</code> on Unraid. Look for connection attempts from the device.
-3. Verify the device's OTA URL hasn't changed. After a firmware update, re-enter the OTA URL (<code>http://&lt;UNRAID_IP&gt;:8003/xiaozhi/ota/</code>) in the device's Advanced Options if needed.
-4. Open the browser test page (<code>repo/main/xiaozhi-server/test/test_page.html</code>) and point it at <code>ws://&lt;UNRAID_IP&gt;:8000/xiaozhi/v1/</code>. If the browser page works but the device doesn't, it's a device-side configuration issue.</p>
+1. Check the bridge health endpoint: <code>curl http://&lt;ZEROCLAW_HOST&gt;:8080/health</code>. If the bridge is down, restart it.
+2. Check xiaozhi-server logs: <code>docker logs -f xiaozhi-esp32-server</code> on the Docker host. Look for connection attempts from the device.
+3. Verify the device's OTA URL hasn't changed. After a firmware update, re-enter the OTA URL (<code>http://&lt;XIAOZHI_HOST&gt;:8003/xiaozhi/ota/</code>) in the device's Advanced Options if needed.
+4. Open the browser test page (<code>repo/main/xiaozhi-server/test/test_page.html</code>) and point it at <code>ws://&lt;XIAOZHI_HOST&gt;:8000/xiaozhi/v1/</code>. If the browser page works but the device doesn't, it's a device-side configuration issue.</p>
 <hr />
 <h2 id="modulenotfounderror-on-docker-compose-up">ModuleNotFoundError on docker compose up<a class="headerlink" href="#modulenotfounderror-on-docker-compose-up" title="Permanent link">&para;</a></h2>
 <p><strong>Symptom:</strong> The xiaozhi-server container starts but immediately fails with a Python <code>ModuleNotFoundError</code> in the logs.</p>
@@ -2364,11 +2364,11 @@
 <h2 id="bridge-unreachable-no-response-in-the-robots-voice">Bridge unreachable / "(no response)" in the robot's voice<a class="headerlink" href="#bridge-unreachable-no-response-in-the-robots-voice" title="Permanent link">&para;</a></h2>
 <p><strong>Symptom:</strong> The robot says something like "no response" or goes silent after you speak. xiaozhi-server logs show a failed HTTP POST to the bridge.</p>
 <p><strong>Fix:</strong>
-1. Check bridge status on the RPi:
+1. Check bridge status on the ZeroClaw host:
    - Bare metal: <code>systemctl status zeroclaw-bridge</code>
    - Docker: <code>docker ps | grep zeroclaw-bridge</code>
-2. Test the health endpoint: <code>curl http://&lt;RPI_IP&gt;:8080/health</code>
-3. If the bridge is running but unreachable, check firewall rules on the RPi. Port 8080 must be open for LAN traffic.
+2. Test the health endpoint: <code>curl http://&lt;ZEROCLAW_HOST&gt;:8080/health</code>
+3. If the bridge is running but unreachable, check firewall rules on the ZeroClaw host. Port 8080 must be open for LAN traffic.
 4. If the bridge crashes on startup, check logs for a ZeroClaw binary issue: the bridge spawns <code>zeroclaw acp</code> as a child process. If the binary is missing or the config is invalid, the bridge won't start.</p>
 <hr />
 <h2 id="docker-image-upgrade-breaks-things">Docker image upgrade breaks things<a class="headerlink" href="#docker-image-upgrade-breaks-things" title="Permanent link">&para;</a></h2>

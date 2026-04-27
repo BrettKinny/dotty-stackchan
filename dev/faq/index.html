@@ -2242,13 +2242,13 @@
 <h1 id="faq">FAQ<a class="headerlink" href="#faq" title="Permanent link">&para;</a></h1>
 <hr />
 <h3 id="what-hardware-do-i-need">What hardware do I need?<a class="headerlink" href="#what-hardware-do-i-need" title="Permanent link">&para;</a></h3>
-<p>The verified setup is an <strong>M5Stack CoreS3</strong> mounted in the <strong>M5Stack StackChan servo kit</strong> (2x SG90 servos for pan/tilt, 12 RGB LEDs, 3D-printed chassis). You also need a Docker-capable host on your LAN (Unraid, a spare PC, any Linux box with Docker) and a Raspberry Pi for the agent brain.</p>
+<p>The verified setup is an <strong>M5Stack CoreS3</strong> mounted in the <strong>M5Stack StackChan servo kit</strong> (2x SG90 servos for pan/tilt, 12 RGB LEDs, 3D-printed chassis). You also need a Docker-capable host on your LAN (a spare PC or any Linux box with Docker) and a ZeroClaw host for the agent brain.</p>
 <p>See <a href="../hardware-support/">hardware-support.md</a> for the full spec table and support tiers.</p>
 <hr />
 <h3 id="can-i-use-a-different-llm">Can I use a different LLM?<a class="headerlink" href="#can-i-use-a-different-llm" title="Permanent link">&para;</a></h3>
 <p>Yes. The LLM is pluggable at two levels:</p>
 <ol>
-<li><strong>At the ZeroClaw level</strong> (the brain): change the <code>default_model</code> and provider in ZeroClaw's <code>config.toml</code> on the RPi. ZeroClaw supports OpenAI-compatible APIs, Anthropic, Gemini, Ollama, and 17+ other backends. Restart the bridge after changing.</li>
+<li><strong>At the ZeroClaw level</strong> (the brain): change the <code>default_model</code> and provider in ZeroClaw's <code>config.toml</code> on the ZeroClaw host. ZeroClaw supports OpenAI-compatible APIs, Anthropic, Gemini, Ollama, and 17+ other backends. Restart the bridge after changing.</li>
 <li><strong>At the xiaozhi-server level</strong>: if you want to bypass ZeroClaw entirely, swap the <code>selected_module</code> for LLM in <code>data/.config.yaml</code> to any of the built-in providers (OpenAI-compatible, Ollama, Dify, FastGPT, etc.). You lose ZeroClaw's agent features (memory, tools, persona files) but gain a simpler stack.</li>
 </ol>
 <p>The reference config uses Qwen3-30B-A3B via OpenRouter. Any model that handles English well and can follow emoji-prefix instructions will work. Larger models give better persona adherence; smaller models respond faster.</p>
@@ -2266,7 +2266,7 @@
 <p><strong>Hardware (one-time):</strong>
 - M5Stack StackChan kit: check current pricing on the <a href="https://shop.m5stack.com/">M5Stack store</a>. Expect roughly $60-80 USD for the CoreS3 + servo kit.
 - Docker host: whatever you already have. Any machine that can run Docker and has a few GB of RAM.
-- Raspberry Pi: any Pi 3 or later. The ZeroClaw binary is ~9 MB and uses &lt;5 MB RAM.</p>
+- ZeroClaw host: any Pi 3 or later. The ZeroClaw binary is ~9 MB and uses &lt;5 MB RAM.</p>
 <p><strong>Recurring:</strong>
 - Electricity for the hosts (negligible for most home setups).
 - LLM API costs if using a cloud provider. OpenRouter pricing for Qwen3-30B-A3B is on the order of $0.10-0.30 per million tokens — casual household use is pennies per day. Check <a href="https://openrouter.ai/qwen/qwen3-30b-a3b-instruct-2507">OpenRouter's pricing page</a> for current rates.
@@ -2285,13 +2285,13 @@
 <p>This is a self-hosted system — you control the prompt, the model, and every log. That's more control than any cloud voice assistant gives you, but it's not a substitute for parental judgment.</p>
 <hr />
 <h3 id="can-i-change-the-robots-personality">Can I change the robot's personality?<a class="headerlink" href="#can-i-change-the-robots-personality" title="Permanent link">&para;</a></h3>
-<p>Yes. The persona is defined in Markdown files on the RPi:</p>
+<p>Yes. The persona is defined in Markdown files on the ZeroClaw host:</p>
 <ul>
 <li><code>~/.zeroclaw/workspace/SOUL.md</code> — core identity and values.</li>
 <li><code>~/.zeroclaw/workspace/IDENTITY.md</code> — name, backstory, role.</li>
 </ul>
 <p>These are hot-read by ZeroClaw — edit them and the next conversation turn picks up the changes, no restart needed.</p>
-<p>There's also a secondary <code>prompt:</code> key in <code>data/.config.yaml</code> on the Unraid host that gets injected as a system message. ZeroClaw's own persona files take precedence, but this is a useful place for voice-pipeline-level hints.</p>
+<p>There's also a secondary <code>prompt:</code> key in <code>data/.config.yaml</code> on the Docker host that gets injected as a system message. ZeroClaw's own persona files take precedence, but this is a useful place for voice-pipeline-level hints.</p>
 <hr />
 <h3 id="what-voices-are-available">What voices are available?<a class="headerlink" href="#what-voices-are-available" title="Permanent link">&para;</a></h3>
 <p>Depends on which TTS provider you use:</p>

@@ -2450,7 +2450,7 @@
 <li><strong>WebSocket handshake</strong> — <code>tools/list</code> in the server logs should list all advertised MCP tools.</li>
 <li><strong>Voice round-trip</strong> — speak a simple phrase and confirm ASR → LLM → TTS returns audio to the device.</li>
 <li><strong>MCP tool call</strong> — send a test instruction through the bridge:
-   <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://&lt;RPI_IP&gt;:8080/api/message<span class="w"> </span><span class="se">\</span>
+   <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://&lt;ZEROCLAW_HOST&gt;:8080/api/message<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;Content-Type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;content&quot;:&quot;Turn your head to the right&quot;}&#39;</span>
 </code></pre></div></li>

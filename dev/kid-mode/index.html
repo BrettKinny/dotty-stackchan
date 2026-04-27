@@ -2155,10 +2155,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#layer-1-zeroclaw-agent-prompt-rpi" class="md-nav__link">
+  <a href="#layer-1-zeroclaw-agent-prompt-zeroclaw-host" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Layer 1 -- ZeroClaw Agent Prompt (RPi)
+        Layer 1 -- ZeroClaw Agent Prompt (ZeroClaw host)
       
     </span>
   </a>
@@ -2166,10 +2166,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#layer-2-xiaozhi-server-system-prompt-unraid" class="md-nav__link">
+  <a href="#layer-2-xiaozhi-server-system-prompt-docker-host" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Layer 2 -- xiaozhi-server System Prompt (Unraid)
+        Layer 2 -- xiaozhi-server System Prompt (Docker host)
       
     </span>
   </a>
@@ -2177,10 +2177,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#layer-3-bridge-prefix-suffix-sandwich-rpi-bridgepy" class="md-nav__link">
+  <a href="#layer-3-bridge-prefix-suffix-sandwich-zeroclaw-host-bridgepy" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Layer 3 -- Bridge Prefix + Suffix Sandwich (RPi, bridge.py)
+        Layer 3 -- Bridge Prefix + Suffix Sandwich (ZeroClaw host, bridge.py)
       
     </span>
   </a>
@@ -2491,11 +2491,11 @@ enforcement code lives, and what gaps remain.</p>
 <p>Every voice turn passes through three independent layers before reaching the
 speaker. Each layer reinforces the same rules so that a failure in one layer
 is caught by the next.</p>
-<h3 id="layer-1-zeroclaw-agent-prompt-rpi">Layer 1 -- ZeroClaw Agent Prompt (RPi)<a class="headerlink" href="#layer-1-zeroclaw-agent-prompt-rpi" title="Permanent link">&para;</a></h3>
+<h3 id="layer-1-zeroclaw-agent-prompt-zeroclaw-host">Layer 1 -- ZeroClaw Agent Prompt (ZeroClaw host)<a class="headerlink" href="#layer-1-zeroclaw-agent-prompt-zeroclaw-host" title="Permanent link">&para;</a></h3>
 <p>The ZeroClaw agent's own persona prompt sets the baseline: stay cheerful,
 age-appropriate, begin every reply with an emoji. This is the "inner" system
 prompt that the LLM sees at the top of its context.</p>
-<h3 id="layer-2-xiaozhi-server-system-prompt-unraid">Layer 2 -- xiaozhi-server System Prompt (Unraid)<a class="headerlink" href="#layer-2-xiaozhi-server-system-prompt-unraid" title="Permanent link">&para;</a></h3>
+<h3 id="layer-2-xiaozhi-server-system-prompt-docker-host">Layer 2 -- xiaozhi-server System Prompt (Docker host)<a class="headerlink" href="#layer-2-xiaozhi-server-system-prompt-docker-host" title="Permanent link">&para;</a></h3>
 <p>The <code>prompt:</code> block in <code>.config.yaml</code> is injected by xiaozhi-server as a
 system message. It reinforces the emoji rule and the short-sentence,
 TTS-friendly style. Relevant excerpt:</p>
@@ -2508,7 +2508,7 @@ TTS-friendly style. Relevant excerpt:</p>
 <a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span><span class="no">- Keep replies short and TTS-friendly: complete sentences, no lists, no</span>
 <a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="no">markdown, no code blocks.</span>
 </code></pre></div>
-<h3 id="layer-3-bridge-prefix-suffix-sandwich-rpi-bridgepy">Layer 3 -- Bridge Prefix + Suffix Sandwich (RPi, <code>bridge.py</code>)<a class="headerlink" href="#layer-3-bridge-prefix-suffix-sandwich-rpi-bridgepy" title="Permanent link">&para;</a></h3>
+<h3 id="layer-3-bridge-prefix-suffix-sandwich-zeroclaw-host-bridgepy">Layer 3 -- Bridge Prefix + Suffix Sandwich (ZeroClaw host, <code>bridge.py</code>)<a class="headerlink" href="#layer-3-bridge-prefix-suffix-sandwich-zeroclaw-host-bridgepy" title="Permanent link">&para;</a></h3>
 <p>This is the strongest enforcement layer. Every turn on the <code>stackchan</code>
 channel is wrapped in a prefix and a suffix before being sent to the LLM:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>VOICE_TURN_PREFIX + context + user_message + suffix

@@ -2259,8 +2259,8 @@
 <h1 id="voice-pipeline-xiaozhi-esp32-server">Voice pipeline — xiaozhi-esp32-server<a class="headerlink" href="#voice-pipeline-xiaozhi-esp32-server" title="Permanent link">&para;</a></h1>
 <h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Server</strong> is <code>xinnan-tech/xiaozhi-esp32-server</code> in Docker on Unraid. Plugin-based: each of VAD, ASR, LLM, TTS, Memory, Intent is a swappable provider picked via <code>data/.config.yaml</code>'s <code>selected_module:</code> block.</li>
-<li>Our live pipeline: <strong>SileroVAD</strong> (speech-end detection) → <strong>FunASR SenseVoiceSmall</strong> (ASR, pinned to English via <code>fun_local.py</code> patch) → <strong>ZeroClawLLM</strong> custom provider (HTTP POST to RPi bridge) → <strong>LocalPiper</strong> en_GB-cori-medium (TTS, rolled out 2026-04-24; EdgeTTS rollback path intact).</li>
+<li><strong>Server</strong> is <code>xinnan-tech/xiaozhi-esp32-server</code> running in Docker on a Linux host. Plugin-based: each of VAD, ASR, LLM, TTS, Memory, Intent is a swappable provider picked via <code>data/.config.yaml</code>'s <code>selected_module:</code> block.</li>
+<li>Our live pipeline: <strong>SileroVAD</strong> (speech-end detection) → <strong>FunASR SenseVoiceSmall</strong> (ASR, pinned to English via <code>fun_local.py</code> patch) → <strong>ZeroClawLLM</strong> custom provider (HTTP POST to ZeroClaw host bridge) → <strong>LocalPiper</strong> en_GB-cori-medium (TTS, rolled out 2026-04-24; EdgeTTS rollback path intact).</li>
 <li><strong>Emotion</strong> is not a pipeline stage — it's extracted post-hoc from the LLM's emoji prefix and emitted as a separate WS frame. See <a href="../protocols/#emotion-protocol">protocols.md</a>.</li>
 <li>Custom providers are mounted into the container via Docker volumes at <code>/opt/xiaozhi-esp32-server/core/providers/{asr,tts,llm}/…</code>. They override the baked-in files at module-import time.</li>
 <li><strong>Lots of upstream features are unused</strong> — voiceprint speaker-ID, VLLM vision, knowledge-base RAG, PowerMem, multi-user routing. See <a href="../latent-capabilities/#voice-pipeline-unused">latent-capabilities.md</a>.</li>
@@ -2320,7 +2320,7 @@
 <p><strong>What we use:</strong> SileroVAD + FunASR (patched) + custom ZeroClawLLM + LocalPiper (or EdgeTTS on rollback). Every other row is unused.</p>
 <h2 id="our-deployed-stages">Our deployed stages<a class="headerlink" href="#our-deployed-stages" title="Permanent link">&para;</a></h2>
 <h3 id="vad-silerovad">VAD — SileroVAD<a class="headerlink" href="#vad-silerovad" title="Permanent link">&para;</a></h3>
-<p>SileroVAD v6.x, JIT model ~2 MB, runs on the Unraid CPU, &lt;1 ms per chunk in practice. 8 kHz or 16 kHz sample rates supported; xiaozhi-server uses 16 kHz to match the device Opus stream.</p>
+<p>SileroVAD v6.x, JIT model ~2 MB, runs on the Docker host CPU, &lt;1 ms per chunk in practice. 8 kHz or 16 kHz sample rates supported; xiaozhi-server uses 16 kHz to match the device Opus stream.</p>
 <p>Tunables live under <code>VAD.SileroVAD.*</code> in <code>data/.config.yaml</code>:</p>
 <table>
 <thead>
@@ -2365,14 +2365,14 @@
 <p><strong>Our patch.</strong> Upstream <code>fun_local.py</code> hardcodes <code>language="auto"</code>, which mis-detects short or unclear English as Korean or Japanese. The repo-hosted <code>fun_local.py</code> adds a <code>language</code> config key (read from <code>ASR.FunASR.language</code> in <code>.config.yaml</code>) and passes it through to <code>model.generate</code>. We set <code>language: en</code>.</p>
 <p>Deployment: mounted as a file-level override at <code>/opt/xiaozhi-esp32-server/core/providers/asr/fun_local.py</code>.</p>
 <h3 id="llm-custom-zeroclawllm-provider">LLM — custom ZeroClawLLM provider<a class="headerlink" href="#llm-custom-zeroclawllm-provider" title="Permanent link">&para;</a></h3>
-<p>Not really an LLM — it's a proxy. <code>zeroclaw.py</code> (mounted at <code>/opt/xiaozhi-esp32-server/core/providers/llm/zeroclaw/</code>) implements xiaozhi's LLM provider contract but the <code>response()</code> method is a thin HTTP POST to <code>http://&lt;RPI_IP&gt;:8080/api/message</code>.</p>
+<p>Not really an LLM — it's a proxy. <code>zeroclaw.py</code> (mounted at <code>/opt/xiaozhi-esp32-server/core/providers/llm/zeroclaw/</code>) implements xiaozhi's LLM provider contract but the <code>response()</code> method is a thin HTTP POST to <code>http://&lt;ZEROCLAW_HOST&gt;:8080/api/message</code>.</p>
 <p>The actual inference happens on the Pi, in ZeroClaw, calling OpenRouter. See <a href="../brain/">brain.md</a>.</p>
 <h3 id="tts-localpiper-active-edgetts-rollback">TTS — LocalPiper (active) / EdgeTTS (rollback)<a class="headerlink" href="#tts-localpiper-active-edgetts-rollback" title="Permanent link">&para;</a></h3>
 <p><strong>Active: Piper local.</strong>
 - Engine: piper-tts 1.4.2 on ONNX runtime.
 - Voice: <code>en_GB-cori-medium</code> (Piper "medium" quality tier, British English).
 - Voice files (~63 MB total): <code>.onnx</code> + <code>.onnx.json</code> sibling, fetched from <code>huggingface.co/rhasspy/piper-voices</code>.
-- Measured on the i5-3570 Unraid: 0.22 s synth for 2.8 s of audio — 12.7× realtime.
+- Measured on a modest i5-3570 Docker host: 0.22 s synth for 2.8 s of audio — 12.7× realtime.
 - Image: <code>xiaozhi-esp32-server-piper:local</code> (local <code>Dockerfile</code> extends the upstream image with piper-tts).
 - Runs fully offline — no external HTTP calls.
 - <strong>License note (unverified).</strong> Piper voices are MIT-licensed as a repo, but individual voices carry their own upstream license depending on training data. Verify the Cori-specific voice license before redistributing your robot's recordings beyond personal use. Starting point: <a href="https://huggingface.co/rhasspy/piper-voices">rhasspy/piper-voices</a>.</p>

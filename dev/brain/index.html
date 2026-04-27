@@ -2254,7 +2254,7 @@
 <h1 id="brain-zeroclaw-qwen3-openrouter">Brain — ZeroClaw + Qwen3 + OpenRouter<a class="headerlink" href="#brain-zeroclaw-qwen3-openrouter" title="Permanent link">&para;</a></h1>
 <h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
 <ul>
-<li>The brain is <strong><a href="https://github.com/zeroclaw-labs/zeroclaw">ZeroClaw</a></strong> — a Rust AI-agent runtime (MIT/Apache-2.0 dual-licensed) that runs on the RPi, installed via <code>cargo install</code>.</li>
+<li>The brain is <strong><a href="https://github.com/zeroclaw-labs/zeroclaw">ZeroClaw</a></strong> — a Rust AI-agent runtime (MIT/Apache-2.0 dual-licensed) that runs on the ZeroClaw host, installed via <code>cargo install</code>.</li>
 <li>A <strong>FastAPI bridge</strong> (<code>bridge.py</code>) accepts HTTP POSTs from xiaozhi-server's LLM provider and translates them into <strong>ACP (Agent Client Protocol) JSON-RPC 2.0 over stdio</strong> against a long-running <code>zeroclaw acp</code> child process.</li>
 <li>The LLM is <strong><a href="https://huggingface.co/Qwen/Qwen3-30B-A3B-Instruct-2507">Qwen3-30B-A3B-Instruct-2507</a></strong> — a 30.5 B-param MoE with 3.3 B active per token — accessed via <strong>OpenRouter</strong>.</li>
 <li>Persona lives in Markdown files under <code>~/.zeroclaw/workspace/</code> (<code>SOUL.md</code>, <code>IDENTITY.md</code>, <code>MEMORY.md</code>, <code>AGENTS.md</code>, and optionally <code>USER.md</code>). These are hot-read — no rebuild to change the persona.</li>
@@ -2345,7 +2345,7 @@
 <p>Our bridge uses the <strong>second</strong> one. The robot's autonomy mode is whatever ZeroClaw's <code>config.toml</code> sets (likely <code>Supervised</code>), and is separate from the stdio protocol.</p>
 <p>See <a href="../protocols/#acp">protocols.md</a> for the ACP wire format.</p>
 <h2 id="the-bridge-bridgepy">The bridge — <code>bridge.py</code><a class="headerlink" href="#the-bridge-bridgepy" title="Permanent link">&para;</a></h2>
-<p>Lives at <code>&lt;RPI_BRIDGE_PATH&gt;/bridge.py</code>, runs under systemd (<code>zeroclaw-bridge.service</code>).</p>
+<p>Lives at <code>&lt;BRIDGE_PATH&gt;/bridge.py</code>, runs under systemd (<code>zeroclaw-bridge.service</code>).</p>
 <p><strong>Responsibilities:</strong></p>
 <table>
 <thead>

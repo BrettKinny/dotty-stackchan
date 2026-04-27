@@ -2231,9 +2231,9 @@
 <h1 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h1>
 <h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Three hosts: <strong>StackChan</strong> (the robot on your desk) → <strong>Unraid</strong> (runs xiaozhi-esp32-server) → <strong>Raspberry Pi</strong> (runs ZeroClaw + a FastAPI bridge).</li>
-<li>Audio goes device → Unraid → (text) → RPi → (response text) → Unraid → (audio) → device. The RPi never touches audio.</li>
-<li>Everything is LAN-local <strong>except</strong> the LLM call, which goes out to OpenRouter from the Pi. EdgeTTS is cloud too when it's the selected TTS; Piper is fully local.</li>
+<li>Three hosts: <strong>StackChan</strong> (the robot on your desk) → <strong>Docker host</strong> (runs xiaozhi-esp32-server) → <strong>ZeroClaw host</strong> (runs ZeroClaw + a FastAPI bridge).</li>
+<li>Audio goes device → Docker host → (text) → ZeroClaw host → (response text) → Docker host → (audio) → device. The ZeroClaw host never touches audio.</li>
+<li>Everything is LAN-local <strong>except</strong> the LLM call, which goes out to OpenRouter from the ZeroClaw host. EdgeTTS is cloud too when it's the selected TTS; Piper is fully local.</li>
 <li>The "xiaozhi ↔ brain" seam is HTTP + ACP-over-stdio, not a library call — so either side can be swapped independently.</li>
 <li>The robot speaks the <strong>Xiaozhi WebSocket protocol</strong> (see <a href="../protocols/">protocols.md</a>). It has no hardcoded knowledge of ZeroClaw.</li>
 </ul>
@@ -2256,25 +2256,25 @@
 </tr>
 <tr>
 <td><strong>xiaozhi-esp32-server</strong></td>
-<td>Unraid</td>
+<td>Docker host</td>
 <td>VAD → ASR → LLM (proxy) → TTS pipeline, emotion dispatch, OTA</td>
 <td>Docker container</td>
 </tr>
 <tr>
 <td><strong>ZeroClawLLM custom provider</strong></td>
-<td>Unraid (inside container)</td>
+<td>Docker host (inside container)</td>
 <td>Translates xiaozhi's LLM-provider interface to an HTTP POST</td>
 <td>Python, mounted via volume</td>
 </tr>
 <tr>
 <td><strong>zeroclaw-bridge</strong></td>
-<td>RPi</td>
+<td>ZeroClaw host</td>
 <td>Accepts HTTP POSTs, spawns/holds a <code>zeroclaw acp</code> child, speaks ACP JSON-RPC to it</td>
 <td>FastAPI + uvicorn under systemd</td>
 </tr>
 <tr>
 <td><strong>ZeroClaw daemon</strong></td>
-<td>RPi</td>
+<td>ZeroClaw host</td>
 <td>The configured persona — runs the agent loop, calls the LLM, consults <code>SOUL.md</code>/<code>IDENTITY.md</code>/<code>MEMORY.md</code></td>
 <td>Rust binary (<code>zeroclaw acp</code>)</td>
 </tr>
@@ -2291,9 +2291,9 @@
     autonumber
     participant User
     participant SC as StackChan
-    participant XZ as xiaozhi-server&lt;br/&gt;(Unraid)
-    participant Br as zeroclaw-bridge&lt;br/&gt;(RPi)
-    participant ZC as ZeroClaw&lt;br/&gt;(RPi)
+    participant XZ as xiaozhi-server&lt;br/&gt;(Docker host)
+    participant Br as zeroclaw-bridge&lt;br/&gt;(ZeroClaw host)
+    participant ZC as ZeroClaw&lt;br/&gt;(ZeroClaw host)
     participant LLM as OpenRouter&lt;br/&gt;→ Qwen3
 
     User-&gt;&gt;SC: speaks
@@ -2314,22 +2314,22 @@
 <p>See <a href="../protocols/">protocols.md</a> for every wire format referenced above.</p>
 <h2 id="why-this-shape">Why this shape<a class="headerlink" href="#why-this-shape" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Audio lives with Unraid</strong> because the StackChan firmware already speaks the Xiaozhi WS protocol; xiaozhi-esp32-server is the matching server. Putting the brain next to the mic would require us to reimplement that protocol, and we'd still need a voice server.</li>
-<li><strong>The brain lives with the Pi</strong> because ZeroClaw already has memory, tools, persona, channels, LLM routing wired up. The StackChan is just another channel into the same agent.</li>
+<li><strong>Audio lives with the Docker host</strong> because the StackChan firmware already speaks the Xiaozhi WS protocol; xiaozhi-esp32-server is the matching server. Putting the brain next to the mic would require us to reimplement that protocol, and we'd still need a voice server.</li>
+<li><strong>The brain lives with ZeroClaw</strong> because ZeroClaw already has memory, tools, persona, channels, LLM routing wired up. The StackChan is just another channel into the same agent.</li>
 <li><strong>A bridge lives between them</strong> because ZeroClaw's HTTP API is observational; to <em>prompt</em> a running agent you have to use ACP (JSON-RPC 2.0 over stdio) against a <code>zeroclaw acp</code> child. The bridge is a tiny FastAPI adapter that does exactly that.</li>
-<li><strong>The seam is a custom xiaozhi LLM provider</strong> (<code>zeroclaw.py</code>, mounted into the container). xiaozhi-server thinks it's calling a local Python LLM class; the class just does an HTTP POST to <code>&lt;RPI_IP&gt;:8080/api/message</code>. That means we could swap ZeroClaw for anything HTTP-serviceable without touching xiaozhi.</li>
+<li><strong>The seam is a custom xiaozhi LLM provider</strong> (<code>zeroclaw.py</code>, mounted into the container). xiaozhi-server thinks it's calling a local Python LLM class; the class just does an HTTP POST to <code>&lt;ZEROCLAW_HOST&gt;:8080/api/message</code>. That means we could swap ZeroClaw for anything HTTP-serviceable without touching xiaozhi.</li>
 </ul>
 <h2 id="what-each-host-sees">What each host sees<a class="headerlink" href="#what-each-host-sees" title="Permanent link">&para;</a></h2>
 <p><strong>StackChan device</strong> knows only:
-- An OTA HTTP URL (<code>http://&lt;UNRAID_IP&gt;:8003/xiaozhi/ota/</code>)
-- A WS URL (provided by OTA response, typically <code>ws://&lt;UNRAID_IP&gt;:8000/xiaozhi/v1/</code>)</p>
-<p>It does <strong>not</strong> know about the RPi, ZeroClaw, or any LLM.</p>
-<p><strong>Unraid / xiaozhi-server</strong> knows:
+- An OTA HTTP URL (<code>http://&lt;XIAOZHI_HOST&gt;:8003/xiaozhi/ota/</code>)
+- A WS URL (provided by OTA response, typically <code>ws://&lt;XIAOZHI_HOST&gt;:8000/xiaozhi/v1/</code>)</p>
+<p>It does <strong>not</strong> know about the ZeroClaw host, ZeroClaw itself, or any LLM.</p>
+<p><strong>Docker host / xiaozhi-server</strong> knows:
 - Its own device-facing WS + OTA ports
 - A handful of pluggable providers selected via <code>data/.config.yaml</code> <code>selected_module:</code>
-- The LLM provider's <code>base_url: http://&lt;RPI_IP&gt;:8080</code> to reach the bridge</p>
+- The LLM provider's <code>base_url: http://&lt;ZEROCLAW_HOST&gt;:8080</code> to reach the bridge</p>
 <p>It does <strong>not</strong> know about ACP, ZeroClaw workspace files, or the OpenRouter key.</p>
-<p><strong>RPi / bridge</strong> knows:
+<p><strong>ZeroClaw host / bridge</strong> knows:
 - How to <code>subprocess.Popen("zeroclaw acp")</code> and speak JSON-RPC 2.0 on stdin/stdout
 - How to wrap turns that arrive with <code>channel="stackchan"</code> in the English+emoji sandwich
 - The OpenRouter API key lives in ZeroClaw's config, not in the bridge</p>
@@ -2367,20 +2367,20 @@
 </tr>
 </tbody>
 </table>
-<p>Paths and systemd unit names are env-configurable (<code>ZEROCLAW_VOICE_CFG</code>, <code>ZEROCLAW_VOICE_UNIT</code>, <code>ZEROCLAW_DISCORD_CFG</code>, <code>ZEROCLAW_DISCORD_UNIT</code>, <code>ZEROCLAW_WORKSPACE</code>); defaults match the documented RPi layout. The endpoints are off-the-shelf — if you don't reach <code>127.0.0.1:8080/admin/*</code>, they don't fire.</p>
+<p>Paths and systemd unit names are env-configurable (<code>ZEROCLAW_VOICE_CFG</code>, <code>ZEROCLAW_VOICE_UNIT</code>, <code>ZEROCLAW_DISCORD_CFG</code>, <code>ZEROCLAW_DISCORD_UNIT</code>, <code>ZEROCLAW_WORKSPACE</code>); defaults match the documented ZeroClaw-host layout. The endpoints are off-the-shelf — if you don't reach <code>127.0.0.1:8080/admin/*</code>, they don't fire.</p>
 <h2 id="threat-model-implications">Threat-model implications<a class="headerlink" href="#threat-model-implications" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Device compromise</strong> gives an attacker a WS session to xiaozhi-server and the ability to invoke any server-exposed MCP tool. It does <strong>not</strong> give them the LLM key, ZeroClaw's memory, or network access to OpenRouter beyond what proxied prompts can achieve.</li>
-<li><strong>Unraid compromise</strong> gives them access to the bridge over HTTP (no auth currently). Anything the bridge can ask ZeroClaw, the attacker can ask it. The <code>/admin/*</code> mutation endpoints are unreachable (they're <code>127.0.0.1</code>-only).</li>
-<li><strong>RPi compromise</strong> gives them everything — LLM keys, memory DB, workspace persona files.</li>
+<li><strong>Docker host compromise</strong> gives them access to the bridge over HTTP (no auth currently). Anything the bridge can ask ZeroClaw, the attacker can ask it. The <code>/admin/*</code> mutation endpoints are unreachable (they're <code>127.0.0.1</code>-only).</li>
+<li><strong>ZeroClaw host compromise</strong> gives them everything — LLM keys, memory DB, workspace persona files.</li>
 <li><strong>OpenRouter compromise</strong> gives them log access to every prompt sent. Treat prompts as non-confidential.</li>
 </ul>
 <p>See <a href="../ROADMAP.md"><code>../ROADMAP.md</code></a> for related backlog items (privacy-indicator LEDs, child-safety hardening).</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../hardware/">hardware.md</a> — what the device actually is.</li>
-<li><a href="../voice-pipeline/">voice-pipeline.md</a> — what Unraid runs.</li>
-<li><a href="../brain/">brain.md</a> — what the Pi runs.</li>
+<li><a href="../voice-pipeline/">voice-pipeline.md</a> — what the Docker host runs.</li>
+<li><a href="../brain/">brain.md</a> — what the ZeroClaw host runs.</li>
 <li><a href="../protocols/">protocols.md</a> — what's on the wire.</li>
 </ul>
 <p>Last verified: 2026-04-25.</p>
