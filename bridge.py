@@ -1599,6 +1599,25 @@ def _update_perception_state(device_id: str, name: str,
         if new_state:
             state["current_state"] = new_state
             state["last_state_change_t"] = ts
+            # Keep dance_active in sync with current_state as a fallback —
+            # dance_started/ended events are the primary signal, but if one
+            # is dropped we still won't get stuck with the flag inverted.
+            if new_state == "dance":
+                state["dance_active"] = True
+            elif state.get("dance_active"):
+                state["dance_active"] = False
+    elif name == "dance_started":
+        state["dance_active"] = True
+        state["last_dance_started_t"] = ts
+    elif name == "dance_ended":
+        state["dance_active"] = False
+        state["last_dance_ended_t"] = ts
+
+
+def _is_dance_active(device_id: str) -> bool:
+    """True iff the device is currently in DANCE state. Used to gate
+    autonomous photos and TTS so they don't interrupt a dance."""
+    return bool(_perception_state.get(device_id, {}).get("dance_active"))
 
 
 def _current_device_state(device_id: str) -> str:
@@ -1718,6 +1737,9 @@ async def _dispatch_face_greeting(device_id: str, text: str) -> None:
     if not _XIAOZHI_HOST:
         log.warning("face greeter: XIAOZHI_HOST not set; cannot reach xiaozhi-server")
         return
+    if _is_dance_active(device_id):
+        log.info("face greeter: suppressed (dance active): device=%s", device_id)
+        return
     url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/inject-text"
     payload = {"text": text, "device_id": device_id}
 
@@ -1744,6 +1766,9 @@ async def _dispatch_say(device_id: str, text: str) -> None:
     /admin/inject-text → startToChat does)."""
     if not _XIAOZHI_HOST:
         log.warning("greeter say: XIAOZHI_HOST not set; cannot reach xiaozhi-server")
+        return
+    if _is_dance_active(device_id):
+        log.info("greeter say: suppressed (dance active): device=%s", device_id)
         return
     url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/say"
     payload = {"text": text, "device_id": device_id}
@@ -1889,6 +1914,16 @@ async def _perception_sound_turner() -> None:
                 ),
                 name="dispatch_set_head_angles",
             )
+            head_turn_data = {
+                "yaw": yaw, "pitch": 0, "speed": SOUND_TURN_SPEED,
+                "reason": "sound_localizer", "direction": direction,
+                "energy": (event.get("data") or {}).get("energy"),
+            }
+            _update_perception_state(device_id, "head_turn", head_turn_data, now)
+            _perception_broadcast({
+                "device_id": device_id, "ts": now,
+                "name": "head_turn", "data": head_turn_data,
+            })
     except asyncio.CancelledError:
         log.info("perception sound turner cancelled")
         raise
@@ -1956,6 +1991,16 @@ async def _perception_wake_word_turner() -> None:
                 ),
                 name="dispatch_set_head_angles_wake",
             )
+            head_turn_data = {
+                "yaw": yaw, "pitch": 0, "speed": WAKE_TURN_SPEED,
+                "reason": "wake_word", "direction": direction,
+                "phrase": data.get("phrase", ""),
+            }
+            _update_perception_state(device_id, "head_turn", head_turn_data, now)
+            _perception_broadcast({
+                "device_id": device_id, "ts": now,
+                "name": "head_turn", "data": head_turn_data,
+            })
     except asyncio.CancelledError:
         log.info("perception wake-word turner cancelled")
         raise
@@ -2882,11 +2927,19 @@ async def vision_explain(
             state = _perception_state.setdefault(device_id, {})
             last_capture = state.get("last_room_view_capture_t", 0.0)
             cooldown_age = wall_now - last_capture
-            if cooldown_age < DOTTY_IDLE_VISION_COOLDOWN_SEC:
-                log.info(
-                    "room_view skipped: device=%s cooldown=%.1fs/%.0fs",
-                    device_id, cooldown_age, DOTTY_IDLE_VISION_COOLDOWN_SEC,
-                )
+            dance_active = _is_dance_active(device_id)
+            if dance_active or cooldown_age < DOTTY_IDLE_VISION_COOLDOWN_SEC:
+                if dance_active:
+                    log.info(
+                        "room_view skipped: device=%s reason=dance_active",
+                        device_id,
+                    )
+                else:
+                    log.info(
+                        "room_view skipped: device=%s cooldown=%.1fs/%.0fs",
+                        device_id, cooldown_age,
+                        DOTTY_IDLE_VISION_COOLDOWN_SEC,
+                    )
                 description = _ROOM_VIEW_NO_PERSON
                 _vision_cache[device_id] = {
                     "description": description,
