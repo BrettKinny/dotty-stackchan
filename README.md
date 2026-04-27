@@ -38,14 +38,14 @@ Dotty's behaviour is structured as a **six-state mutex** plus **two orthogonal t
 
 **States** (mutually exclusive, exactly one active):
 
-| State | LED pip (left ring 0) | What's happening |
+| State | LED arc (left ring 0-5) | What's happening |
 |---|---|---|
 | `idle` | off | Default. Ambient awareness, gentle idle motion. |
-| `talk` | dim cyan `(0,40,60)` | Conversation engaged. Chat sub-states (listen / think / talk) animate the rest of the left ring. |
+| `talk` | dim green `(0,60,0)` | Conversation engaged. The listening pixel on the right ring lights red while the user has the turn; thinking/speaking are face-animation only. |
 | `story_time` | warm `(100,40,0)` | Long-running interactive story. Bypasses ZeroClaw, calls OpenRouter directly with story persona + rolling context. |
-| `security` | white `(80,80,80)` flashing 1 Hz | Wide deliberate scan, periodic capture. Greeter suppressed. |
+| `security` | white `(80,80,80)` flashing 1 Hz across all 6 left pixels | Wide deliberate scan, periodic capture. Greeter suppressed. |
 | `sleep` | very dim blue `(0,0,16)` | Servos parked + torque off, sleepy emoji on screen. Wakes on face / voice / head-pet. |
-| `dance` | suppressed | Transient performance — choreography + audio. |
+| `dance` | rainbow sweep | Transient performance — choreography + audio. |
 
 **Toggles** (compose freely with state):
 
@@ -54,7 +54,9 @@ Dotty's behaviour is structured as a **six-state mutex** plus **two orthogonal t
 | `kid_mode` | warm pink `(168,80,100)` at index **8** | Safety-tuned model, content sandwich, camera tools denied, kid-safe persona |
 | `smart_mode` | orange `(168,80,0)` at index **9** | Bridge bypasses ZeroClaw → direct OpenRouter (capable model). No memory, no tools. |
 
-**12-pixel LED ring layout** — index 0 holds the state pip, indices 1–5 carry the chat-state animation, indices 8–9 hold the toggle pips, and indices **6 (mic) and 11 (camera)** are hardware-protected privacy LEDs (writes from anywhere except the privacy subsystem are rejected at compile time). Indices 7 and 10 are reserved for future toggles.
+**12-pixel LED ring layout** — left ring 0-5 paint the **state arc** (all six pixels show the current state colour), right-ring index **6** is the **listening pixel** (red while the user has the turn), and right-ring indices **8** and **9** are the **toggle pips** (kid_mode and smart_mode). Right-ring indices 7, 10, and 11 are reserved for future indicators (low-battery is a known candidate).
+
+The `idle → talk` transition fires on the firmware `face_detected` event (any face — family member or stranger). The bridge runs a VLM room-view match in parallel and feeds the resulting identity into the voice-channel persona; recognition does not gate the LED transition.
 
 Transitions are voice-driven (`go to sleep`, `tell me a story`, `keep watch`, `wake up`), camera-edge-driven (face_detected → `talk`), or dashboard-driven (`POST /admin/state`). The firmware emits a `state_changed` perception event on every transition; the bridge consumes those events and gates downstream behaviour (e.g. ambient awareness only in `idle`, greeter suppressed in `security`). See [`docs/modes.md`](./docs/modes.md) for the full state + LED contract, transition diagram, and per-state backing-architecture.
 

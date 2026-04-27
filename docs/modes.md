@@ -10,7 +10,7 @@ This document is the source of truth for Dotty's high-level modes. The model has
 - **STATE** — what Dotty is *doing right now*. Mutually exclusive — exactly one State is active. Six values: `idle`, `talk`, `story_time`, `security`, `sleep`, `dance`.
 - **TOGGLES** — orthogonal modifiers that can be on regardless of state. Two values today: `kid_mode`, `smart_mode`. Toggles compose freely with state.
 
-The firmware **StateManager** modifier (`firmware/main/stackchan/modes/state_manager.cpp`) owns both axes. It writes the state pip + toggle pips to the LED ring at 5 Hz, drives the idle-motion profile, and emits `state_changed` perception events on every transition.
+The firmware **StateManager** modifier (`firmware/main/stackchan/modes/state_manager.cpp`) owns both axes. It paints the state arc (left ring 0-5) + toggle pips at 5 Hz, drives the idle-motion profile, and emits `state_changed` perception events on every transition.
 
 Pair this with [hardware.md](./hardware.md) (the physical LED ring + servos) and [interaction-map.md](./interaction-map.md) (the underlying signals).
 
@@ -22,22 +22,26 @@ Pair this with [hardware.md](./hardware.md) (the physical LED ring + servos) and
 |---|---|---|---|
 | State | mutex (1 of 6) | `idle`, `talk`, `story_time` | firmware StateManager |
 | Toggle | compose freely | `kid_mode`, `smart_mode` | firmware StateManager |
-| Chat sub-state | nested under `talk` / `story_time` | listening / thinking / speaking | xiaozhi-server |
+| Chat sub-state | nested under `talk` / `story_time` | listening (LED) / thinking + speaking (face only) | xiaozhi-server |
 
 The firmware boots into `idle` with both toggles **off**. The bridge resyncs toggles from disk on the first turn after each reconnect. State transitions land via voice phrases, camera edges (face_detected → `talk`), or `/admin/state` from the dashboard.
+
+**Speech sub-states** are conveyed by face animations (eye gestures, talking mouth) and the dedicated **listening pixel** at right-ring index 6. `thinking` and `speaking` have no LED — they live on the face. `listening` lights pixel 6 red so the user knows when their voice is being captured as a turn.
 
 ---
 
 ## States (mutually exclusive)
 
-| State | State pip (left ring 0) | Idle profile | Behaviour | Backing path |
+| State | LED arc (left ring 0-5) | Idle profile | Behaviour | Backing path |
 |---|---|---|---|---|
 | `idle` | off `(0,0,0)` | NORMAL | Ambient awareness, gentle idle motion. Default. | n/a (no chat in flight) |
-| `talk` | dim cyan `(0,40,60)` | NORMAL (face_tracking overlay active) | Conversation engaged. Chat sub-states (listening / thinking / speaking) animate the rest of the left ring. | xiaozhi → bridge → ZeroClaw ACP |
+| `talk` | dim green `(0,60,0)` | NORMAL (face_tracking overlay active) | Conversation engaged. Listening pixel (right 6) lights red while the user has the turn; `thinking` and `speaking` are face-animation only. | xiaozhi → bridge → ZeroClaw ACP |
 | `story_time` | warm `(100,40,0)` | NORMAL | Long-running interactive story. Bridge bypasses ZeroClaw, calls OpenRouter directly with story persona + rolling context. | bridge → direct OpenRouter (Phase 7) |
-| `security` | white `(80,80,80)` **flashing 1 Hz** | SURVEILLANCE | Wide deliberate scan, serious face, periodic photo + audio capture. No proactive greet. | bridge ambient task (Phase 6) |
+| `security` | white `(80,80,80)` **flashing 1 Hz** across all 6 left pixels | SURVEILLANCE | Wide deliberate scan, serious face, periodic photo + audio capture. No proactive greet. | bridge ambient task (Phase 6) |
 | `sleep` | very dim blue `(0,0,16)` | SLEEPY | Head face-down + centred, servo torque off, sleeping emoji on screen, ambient awareness paused. Wakes on face / voice / head-pet. | firmware-only quiescence (Phase 5) |
-| `dance` | suppressed (rainbow takes over) | NORMAL | Transient performance — choreography + audio. Pre-existing dance handler. | `receiveAudioHandle.py::_handle_dance` |
+| `dance` | rainbow sweep (left ring) | NORMAL | Transient performance — choreography + audio. Pre-existing dance handler. | `receiveAudioHandle.py::_handle_dance` |
+
+The `idle → talk` trigger is the firmware `face_detected` event (any face, family or stranger). The bridge runs VLM recognition (`bridge.py::_capture_room_view`) in parallel and feeds the resulting identity into the speaker resolver / persona — recognition does **not** gate the state transition.
 
 ### Mutex rules
 
@@ -63,32 +67,29 @@ Toggles compose: `kid_mode = on` AND `smart_mode = on` is valid (bridge applies 
 ```
 LEFT RING (global 0–5)              RIGHT RING (global 6–11)
 ┌───────────────────┐               ┌───────────────────────┐
-│ 0  state pip      │               │ 6  privacy: mic    🔒 │
-│ 1  chat anim      │               │ 7  reserved (toggle)  │
-│ 2  chat anim      │               │ 8  kid_mode toggle    │
-│ 3  chat anim      │               │ 9  smart_mode toggle  │
-│ 4  chat anim      │               │ 10 reserved (toggle)  │
-│ 5  chat anim      │               │ 11 privacy: camera 🔒 │
+│ 0  state arc      │               │ 6  listening          │
+│ 1  state arc      │               │ 7  reserved           │
+│ 2  state arc      │               │ 8  kid_mode toggle    │
+│ 3  state arc      │               │ 9  smart_mode toggle  │
+│ 4  state arc      │               │ 10 reserved           │
+│ 5  state arc      │               │ 11 reserved           │
 └───────────────────┘               └───────────────────────┘
 ```
 
-| Index | Half | Owner | Hardware-protected |
+| Index | Half | Owner | Behaviour |
 |---|---|---|---|
-| 0 | left | StateManager (state pip) | no |
-| 1–5 | left | xiaozhi CircularStrip (chat-state animation) | no |
-| 6 | right | PrivacyLeds (mic) | **yes** — friend-class only |
-| 7 | right | reserved for future toggle | no |
-| 8 | right | StateManager (`kid_mode` pip) | no |
-| 9 | right | StateManager (`smart_mode` pip) | no |
-| 10 | right | reserved for future toggle | no |
-| 11 | right | PrivacyLeds (camera) | **yes** — friend-class only |
+| 0–5 | left | StateManager (state arc) | All six paint the current mutex-state colour. Dance suppresses and lets the rainbow animation own the ring. |
+| 6 | right | xiaozhi `stackchan_display.cc::set_listening_pixel` | Red `(120,0,0)` while xiaozhi is in `LISTENING` (mic open, ASR active, user's turn); off otherwise. |
+| 7, 10, 11 | right | unowned (off) | Reserved for future indicators (low-battery is a known candidate). |
+| 8 | right | StateManager (`kid_mode` pip) | Warm pink `(168,80,100)` when kid_mode = on; off otherwise. |
+| 9 | right | StateManager (`smart_mode` pip) | Orange `(168,80,0)` when smart_mode = on; off otherwise. |
 
 ### LED quirks
 
-- **Re-assertion at 5 Hz.** The chat-state animation (`set_left_leds` in `stackchan_display.cc`) repaints the entire left ring on every LISTENING / SPEAKING / STANDBY transition. The state pip is restored within ~200 ms.
+- **5 Hz tick.** StateManager re-paints the state arc + toggle pips every ~200 ms. The tick is what drives the SECURITY 1 Hz flash; defense-in-depth re-assertion is a free side-effect for anything that ever clobbers a pixel.
 - **PY32 IO expander quantises to RGB565.** Brightness deltas crush — `(40,40,40)` reads almost identical to `(200,200,200)`. Use distinct **hues**, not brightness levels, for any indicator that needs to read across a room.
-- **Privacy LEDs are friend-protected.** `Hal::setRgbColor` rejects writes to global indices 6 and 11 with a warning log; only `PrivacyLeds::setRgbColor_privacy_only` can drive them. Compile-time invariant.
-- **RightNeonLight uses local indices 0–5** internally, mapped to global 6–11 via `+6`. `setColorAt(local 0)` and `setColorAt(local 5)` are silently dropped (privacy guard). `setColorAt(local 2)` writes global 8 (kid_mode pip); `setColorAt(local 3)` writes global 9 (smart_mode pip).
+- **All 12 pixels are writable through `Hal::setRgbColor`.** The earlier privacy-LED friend-class guard was dropped along with the privacy semantics — listening pixel and toggle pips coexist by indexing rather than by hardware lock.
+- **RightNeonLight uses local indices 0–5** internally, mapped to global 6–11 via `+6`. `setColorAt(local 2)` writes global 8 (kid_mode pip); `setColorAt(local 3)` writes global 9 (smart_mode pip). Local 0 and local 5 now write global 6 and 11 directly (no silent drop).
 
 ---
 

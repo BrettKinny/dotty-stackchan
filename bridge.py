@@ -45,7 +45,6 @@ from textUtils import (
 # helper is a no-op-with-debug-log fallback so the call sites are ready
 # the moment a transport is plugged in. Firmware enforces a 2 s failsafe
 # timeout, so a missing `end` is self-healing.
-from bridge.privacy_signal import camera_upload_pulse
 
 try:
     from bridge.metrics import (
@@ -2958,11 +2957,10 @@ async def vision_explain(
                 _household_registry.roster_ids_with_appearance()
                 if _household_registry is not None else set()
             )
-            async with camera_upload_pulse():
-                raw = await asyncio.to_thread(
-                    _call_vision_api, b64_image, room_view_question,
-                    system_prompt=VISION_ROOM_VIEW_SYSTEM_PROMPT,
-                )
+            raw = await asyncio.to_thread(
+                _call_vision_api, b64_image, room_view_question,
+                system_prompt=VISION_ROOM_VIEW_SYSTEM_PROMPT,
+            )
             parsed_desc, room_match_person_id = _parse_room_view_response(
                 raw, roster_ids,
             )
@@ -2983,10 +2981,9 @@ async def vision_explain(
                     "person, reply with exactly: no one in view. "
                     "Do not guess names."
                 )
-            async with camera_upload_pulse():
-                description = await asyncio.to_thread(
-                    _call_vision_api, b64_image, question,
-                )
+            description = await asyncio.to_thread(
+                _call_vision_api, b64_image, question,
+            )
 
         _vision_cache[device_id] = {
             "description": description,

@@ -1,9 +1,8 @@
-{# LED state-pip colours (dashboard mirrors the firmware's state-pip).
-   Values brightened from the firmware's dim levels so they read on screen;
-   `dance` has no firmware pip (suppressed) — fuchsia is dashboard-only. #}
-{# Mirrors the firmware's chat-state animation: green=listening (the most
-   visible colour during a talk session), even though the state pip itself
-   is dim cyan. #}
+{# LED state-arc colours. Mirror the firmware's full-ring state colours,
+   brightened to read on screen. Source of truth for the contract is
+   ../../docs/modes.md — keep this dict and the firmware palette in
+   state_manager.cpp::writePips() in sync. `dance` has no fixed firmware
+   colour (rainbow takes over the left ring) — fuchsia is dashboard-only. #}
 {% set state_led_colors = {
   "idle":       "#6b7280",
   "talk":       "#22c55e",
