@@ -2321,8 +2321,8 @@ while this one targets <code>face_recognized</code> (Layer 4 output).</p>
 </tr>
 <tr>
 <td><code>GREETER_PER_DAY_MAX</code></td>
-<td><code>1</code></td>
-<td>Hard cap on greetings per identity per day.</td>
+<td><code>3</code></td>
+<td>Hard cap on greetings per identity per day. The 4h cooldown already prevents back-to-back firings, so this is a safety ceiling rather than a politeness lever — turn it down if 3 greetings/day feels noisy.</td>
 </tr>
 <tr>
 <td><code>GREETER_STATE_PATH</code></td>

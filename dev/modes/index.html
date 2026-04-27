@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Canonical taxonomy of Dotty's behavioural modes, what triggers each, what LED plays, and how they hand off to one another.">
+        <meta name="description" content="Authoritative taxonomy of Dotty's high-level modes — a six-state mutex with two orthogonal toggles, owned by the firmware StateManager and surfaced via a 12-pixel LED ring contract.">
       
       
       
@@ -23,7 +23,7 @@
     
     
       
-        <title>Modes & LED Contract - Dotty</title>
+        <title>States, Toggles & LED Contract - Dotty</title>
       
     
     
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#modes-led-contract" class="md-skip">
+        <a href="#states-toggles-led-contract" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Modes & LED Contract
+              States, Toggles & LED Contract
             
           </span>
         </div>
@@ -2132,77 +2132,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#mode-tiers" class="md-nav__link">
+  <a href="#states-mutually-exclusive" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Mode tiers
+        States (mutually exclusive)
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#per-mode-reference" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Per-mode reference
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Per-mode reference">
+    <nav class="md-nav" aria-label="States (mutually exclusive)">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#face_tracking" class="md-nav__link">
+  <a href="#mutex-rules" class="md-nav__link">
     <span class="md-ellipsis">
       
-        face_tracking
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#listening-thinking-talking" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        listening / thinking / talking
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#smart" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        smart
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#vision" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        vision
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#dance-sing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        dance / sing
+        Mutex rules
       
     </span>
   </a>
@@ -2215,10 +2160,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#state-transition-diagram" class="md-nav__link">
+  <a href="#toggles-compose-freely" class="md-nav__link">
     <span class="md-ellipsis">
       
-        State transition diagram
+        Toggles (compose freely)
       
     </span>
   </a>
@@ -2226,33 +2171,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#led-contract" class="md-nav__link">
+  <a href="#led-contract-12-pixel-ring" class="md-nav__link">
     <span class="md-ellipsis">
       
-        LED contract
+        LED contract (12-pixel ring)
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="LED contract">
+    <nav class="md-nav" aria-label="LED contract (12-pixel ring)">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#led-control-surfaces" class="md-nav__link">
+  <a href="#led-quirks" class="md-nav__link">
     <span class="md-ellipsis">
       
-        LED control surfaces
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#available-led-primitives" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Available LED primitives
+        LED quirks
       
     </span>
   </a>
@@ -2265,22 +2199,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#designed-but-not-yet-implemented" class="md-nav__link">
+  <a href="#state-transitions" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Designed but not yet implemented
+        State transitions
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Designed but not yet implemented">
+    <nav class="md-nav" aria-label="State transitions">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#face-detected-auto-listen-deferred" class="md-nav__link">
+  <a href="#voice-triggers-phase-4" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Face-detected auto-listen (deferred)
+        Voice triggers (Phase 4)
       
     </span>
   </a>
@@ -2288,10 +2222,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#hybrid-smart-mode-led-shipped" class="md-nav__link">
+  <a href="#admin-endpoints-localhost-only" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Hybrid smart-mode LED (shipped)
+        Admin endpoints (localhost-only)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mcp-tools-firmware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP tools (firmware)
       
     </span>
   </a>
@@ -2304,10 +2249,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#future-modes" class="md-nav__link">
+  <a href="#backing-architecture-per-state" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Future modes
+        Backing architecture per state
       
     </span>
   </a>
@@ -2315,10 +2260,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#see-also" class="md-nav__link">
+  <a href="#implementation-status" class="md-nav__link">
     <span class="md-ellipsis">
       
-        See also
+        Implementation status
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sources-of-truth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sources of truth
       
     </span>
   </a>
@@ -2345,395 +2301,439 @@
   
 
 
-<h1 id="modes-led-contract">Modes &amp; LED Contract<a class="headerlink" href="#modes-led-contract" title="Permanent link">&para;</a></h1>
-<p>One-page reference for every behavioural mode Dotty has, what colour the ring shows, and how a mode hands off to the next. Pair this with <a href="../interaction-map/">interaction-map.md</a> (which catalogs the underlying signals) and <a href="../hardware/">hardware.md</a> (which catalogs the physical LED ring + servos).</p>
+<h1 id="states-toggles-led-contract">States, Toggles &amp; LED Contract<a class="headerlink" href="#states-toggles-led-contract" title="Permanent link">&para;</a></h1>
+<p>This document is the source of truth for Dotty's high-level modes. The model has two axes:</p>
+<ul>
+<li><strong>STATE</strong> — what Dotty is <em>doing right now</em>. Mutually exclusive — exactly one State is active. Six values: <code>idle</code>, <code>talk</code>, <code>story_time</code>, <code>security</code>, <code>sleep</code>, <code>dance</code>.</li>
+<li><strong>TOGGLES</strong> — orthogonal modifiers that can be on regardless of state. Two values today: <code>kid_mode</code>, <code>smart_mode</code>. Toggles compose freely with state.</li>
+</ul>
+<p>The firmware <strong>StateManager</strong> modifier (<code>firmware/main/stackchan/modes/state_manager.cpp</code>) owns both axes. It writes the state pip + toggle pips to the LED ring at 5 Hz, drives the idle-motion profile, and emits <code>state_changed</code> perception events on every transition.</p>
+<p>Pair this with <a href="../hardware/">hardware.md</a> (the physical LED ring + servos) and <a href="../interaction-map/">interaction-map.md</a> (the underlying signals).</p>
+<hr />
 <h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
-<ul>
-<li>Dotty has four mode <strong>tiers</strong>: ambient (idle), conversation (talking), performance (one-shot action), maintenance (config / OTA).</li>
-<li>The 12-LED WS2812 ring on the front panel is the primary feedback channel. Two control paths drive it: <strong>firmware-automatic</strong> (reacts to device state) and <strong>server-overridable</strong> (MCP <code>set_led_color</code>).</li>
-<li>Most mode transitions are voice-phrase triggered today. Face-tracking is firmware-resident; dance / sing / smart / vision are dispatched server-side from <code>receiveAudioHandle.py</code>.</li>
-<li>One behaviour is <strong>designed but not yet implemented</strong>: face-detected auto-listen (face → 5 s manual-listen window → fall back to face-tracking). See <a href="#designed-but-not-yet-implemented">Designed but not yet implemented</a> below.</li>
-<li><strong>Hybrid smart-mode LED is live</strong> (bridge commit <code>b72b121</code>, firmware <code>32163bd</code>): LED index 0 holds purple throughout the smart-mode turn; remaining 11 LEDs continue showing listen / think / talk colours.</li>
-</ul>
-<h2 id="mode-tiers">Mode tiers<a class="headerlink" href="#mode-tiers" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Ambient        face_tracking          (default; no user intent yet)
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>               sleep                   (deferred — see Future modes)
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>Conversation   listening
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>               thinking                 sub-states of one conversation,
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>               talking                  owned by xiaozhi-server
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>               smart                   (capable-model variant)
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>Performance   dance / sing             (rainbow timeline + choreography)
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>               vision                  (camera capture + describe)
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>Maintenance   wifi_configuring
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>               connecting              firmware-driven during boot / OTA
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>               upgrading
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>               activating
-</code></pre></div>
-<h2 id="per-mode-reference">Per-mode reference<a class="headerlink" href="#per-mode-reference" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Mode</th>
-<th>Tier</th>
-<th>Triggered by</th>
-<th>LED today</th>
-<th>Lives in</th>
+<th>Axis</th>
+<th>Cardinality</th>
+<th>Examples</th>
+<th>Owner</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>face_tracking</code></td>
-<td>ambient</td>
-<td>firmware face-detect (Idle ↔ Tracking ↔ GracePeriod)</td>
-<td>left LED green when face seen, ring otherwise off (FadeOut)</td>
-<td><code>firmware/firmware/main/stackchan/modifiers/face_tracking.cpp</code></td>
+<td>State</td>
+<td>mutex (1 of 6)</td>
+<td><code>idle</code>, <code>talk</code>, <code>story_time</code></td>
+<td>firmware StateManager</td>
 </tr>
 <tr>
-<td><code>listening</code></td>
-<td>conversation</td>
-<td>xiaozhi VAD detects speech start</td>
-<td>ring solid red <code>(32,0,0)</code></td>
-<td><code>firmware/firmware/xiaozhi-esp32/main/led/circular_strip.cc</code></td>
+<td>Toggle</td>
+<td>compose freely</td>
+<td><code>kid_mode</code>, <code>smart_mode</code></td>
+<td>firmware StateManager</td>
 </tr>
 <tr>
-<td><code>thinking</code></td>
-<td>conversation</td>
-<td>STT frame received (ASR result emitted)</td>
-<td>ring solid orange (firmware-side)</td>
-<td>firmware (triggered server-side via <code>llm</code> emotion frame)</td>
-</tr>
-<tr>
-<td><code>talking</code></td>
-<td>conversation</td>
-<td>TTS <code>sentence_start</code> event</td>
-<td>ring solid green <code>(0,32,0)</code></td>
-<td><code>firmware/firmware/xiaozhi-esp32/main/led/circular_strip.cc</code></td>
-</tr>
-<tr>
-<td><code>smart</code></td>
-<td>conversation</td>
-<td>voice phrase: <code>"smart mode"</code>, <code>"think harder"</code>, <code>"big brain"</code></td>
-<td>one-shot purple <code>(168,0,168)</code> flash on entry, then normal listen / think / talk</td>
-<td><code>receiveAudioHandle.py</code> (smart-mode dispatch) + <code>bridge.py</code> (<code>SMART_MODEL</code> routing)</td>
-</tr>
-<tr>
-<td><code>vision</code></td>
-<td>performance</td>
-<td>voice phrase: <code>"what do you see"</code>, <code>"take a photo"</code>, <code>"describe what"</code></td>
-<td>none distinct (uses normal speech LEDs)</td>
-<td><code>receiveAudioHandle.py</code> (<code>_handle_vision</code>) + <code>bridge.py</code> (<code>/api/vision/*</code>)</td>
-</tr>
-<tr>
-<td><code>dance</code> / <code>sing</code></td>
-<td>performance</td>
-<td>voice phrase: <code>"dance"</code>, <code>"sing"</code>, song-name (<code>"macarena"</code>, <code>"tetris"</code>, <code>"star wars"</code>, …)</td>
-<td>timeline-driven multi-colour rainbow (see <a href="#dance--sing">Dance &amp; sing</a>)</td>
-<td><code>receiveAudioHandle.py</code> (<code>_handle_dance</code>) + <code>dances.py</code></td>
-</tr>
-<tr>
-<td><code>wifi_configuring</code></td>
-<td>maintenance</td>
-<td>first boot, no creds</td>
-<td>blue blink, 500 ms</td>
-<td><code>firmware/firmware/xiaozhi-esp32/main/led/circular_strip.cc</code></td>
-</tr>
-<tr>
-<td><code>connecting</code></td>
-<td>maintenance</td>
-<td>post-boot, joining WiFi/WS</td>
-<td>solid blue (low-brightness)</td>
-<td>same</td>
-</tr>
-<tr>
-<td><code>upgrading</code></td>
-<td>maintenance</td>
-<td>OTA in progress</td>
-<td>green blink, 100 ms</td>
-<td>same</td>
-</tr>
-<tr>
-<td><code>activating</code></td>
-<td>maintenance</td>
-<td>provisioning code entry</td>
-<td>green blink, 500 ms</td>
-<td>same</td>
+<td>Chat sub-state</td>
+<td>nested under <code>talk</code> / <code>story_time</code></td>
+<td>listening / thinking / speaking</td>
+<td>xiaozhi-server</td>
 </tr>
 </tbody>
 </table>
-<h3 id="face_tracking">face_tracking<a class="headerlink" href="#face_tracking" title="Permanent link">&para;</a></h3>
-<p>Three-state firmware modifier (<code>face_tracking.cpp</code>):</p>
-<ul>
-<li><strong>Idle</strong> — no face seen. Idle motion runs (random head looks every 4–8 s). Left LED off.</li>
-<li><strong>Tracking</strong> — face detected. Idle motion paused. Head smoothly follows normalised bbox via <code>motion().lookAtNormalized()</code>. Left LED green <code>(0,168,0)</code>.</li>
-<li><strong>GracePeriod</strong> — face just lost. 2 s window where re-acquisition snaps back to Tracking. After 2 s, returns to Idle.</li>
-</ul>
-<p>The Tracking ↔ GracePeriod ↔ Idle loop is <strong>entirely firmware-resident</strong>. The server-side Python pipeline does not know whether a face is currently visible. This is the gap the <a href="#face-detected-auto-listen-deferred">face-detected auto-listen</a> design closes.</p>
-<h3 id="listening-thinking-talking">listening / thinking / talking<a class="headerlink" href="#listening-thinking-talking" title="Permanent link">&para;</a></h3>
-<p>These are sub-states of a single conversation turn. Driven from xiaozhi-server, signalled to the firmware via the existing event protocol (<code>stt</code>, <code>llm</code>, <code>tts/start</code>, <code>tts/sentence_start</code>). The firmware drives LEDs from device-state changes via <code>CircularStrip::OnStateChanged()</code>. See <a href="../interaction-map/">interaction-map.md</a> for the per-event signal table.</p>
-<h3 id="smart">smart<a class="headerlink" href="#smart" title="Permanent link">&para;</a></h3>
-<p>Capable-model variant of conversation. Triggered by phrase match in <code>receiveAudioHandle.py</code> against <code>_SMART_MODE_PHRASES</code>. Two activation paths:</p>
-<ul>
-<li><strong>One-shot</strong>: <code>"smart mode, what is the speed of light?"</code> → trigger phrase + remaining query routed to the capable model in a single turn.</li>
-<li><strong>Two-turn</strong>: <code>"smart mode."</code> (no query) → robot acknowledges (<code>"Smart mode! What would you like to know?"</code>), <code>conn.smart_mode_next = True</code> flag set; the next turn is forced through smart routing.</li>
-</ul>
-<p>The capable model is configured via <code>SMART_MODEL</code> env on the bridge (e.g. Claude Sonnet via OpenRouter); falls through to the default brain if unset. LED: on smart-mode entry <code>set_led_color(168,0,168)</code> pulses the ring, then <code>conn.smart_mode_active = True</code> is set; subsequently <code>_send_led_color</code> re-asserts pixel <code>SMART_MODE_LED_INDEX</code> (default 0) purple via <code>set_led_multi</code> after every full-ring state change, so the indicator persists until the turn completes (firmware <code>32163bd</code>, shipped in <code>fw-v1.3.2</code>).</p>
-<h3 id="vision">vision<a class="headerlink" href="#vision" title="Permanent link">&para;</a></h3>
-<p>Camera-driven multimodal turn. Phrase match against <code>VISION_PHRASES</code> triggers an MCP <code>tools/call</code> for <code>self.camera.take_photo</code>, then long-polls the bridge's <code>/api/vision/latest/&lt;device_id&gt;</code> for the description. Description is injected as context into the next ZeroClaw prompt; LLM responds naturally as if looking at the photo.</p>
-<h3 id="dance-sing">dance / sing<a class="headerlink" href="#dance-sing" title="Permanent link">&para;</a></h3>
-<p>Unified handler — both phrases route through <code>_handle_dance()</code>. Behaviour:</p>
-<ol>
-<li>Phrase match → registry lookup in <code>DANCE_REGISTRY</code> (<code>dances.py</code>).</li>
-<li>If preset has a renderable <code>audio_file</code> (<code>.mid</code> / <code>.wav</code>): render to Opus and stream into the TTS queue while a parallel asyncio task walks the choreography timeline (servo <code>HEAD</code> events + <code>LED</code> events).</li>
-<li>If no audio: prompt the LLM for a spoken intro and run choreography only.</li>
-</ol>
-<p>Six choreographies ship today, all in <code>dances.py</code>:</p>
+<p>The firmware boots into <code>idle</code> with both toggles <strong>off</strong>. The bridge resyncs toggles from disk on the first turn after each reconnect. State transitions land via voice phrases, camera edges (face_detected → <code>talk</code>), or <code>/admin/state</code> from the dashboard.</p>
+<hr />
+<h2 id="states-mutually-exclusive">States (mutually exclusive)<a class="headerlink" href="#states-mutually-exclusive" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Choreography</th>
-<th>LED feel</th>
-<th>Used by</th>
+<th>State</th>
+<th>State pip (left ring 0)</th>
+<th>Idle profile</th>
+<th>Behaviour</th>
+<th>Backing path</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>macarena_moves</code></td>
-<td>hand-tuned 14-event timeline (purple / red / blue / green / yellow / cyan / orange / white)</td>
-<td><code>macarena</code></td>
+<td><code>idle</code></td>
+<td>off <code>(0,0,0)</code></td>
+<td>NORMAL</td>
+<td>Ambient awareness, gentle idle motion. Default.</td>
+<td>n/a (no chat in flight)</td>
 </tr>
 <tr>
-<td><code>head_bob</code></td>
-<td>steady cool blue <code>(0, 80, 168)</code></td>
-<td>(none currently)</td>
-</tr>
-<tr>
-<td><code>color_party</code></td>
-<td>rainbow palette, colour change every 2 beats</td>
-<td><code>mario</code></td>
-</tr>
-<tr>
-<td><code>bouncy_party</code></td>
-<td>rainbow palette, colour change every beat (faster)</td>
-<td><code>tetris</code>, <code>pirates</code></td>
-</tr>
-<tr>
-<td><code>sleepy_sway</code></td>
-<td>warm dim <code>(100, 40, 0)</code>, gentle sway</td>
-<td>(none currently)</td>
-</tr>
-<tr>
-<td><code>look_around</code></td>
-<td>deep blue / white pulses, dramatic poses</td>
-<td><code>mountain_king</code>, <code>star_wars</code></td>
-</tr>
-</tbody>
-</table>
-<p>The shared rainbow palette (<code>_RAINBOW</code> in <code>dances.py</code>) is 8 colours: red, orange, yellow, green, cyan, blue, violet, magenta. New songs slot in by adding an entry to <code>DANCE_REGISTRY</code> and (if needed) a new choreography factory in <code>CHOREOGRAPHIES</code>.</p>
-<h2 id="state-transition-diagram">State transition diagram<a class="headerlink" href="#state-transition-diagram" title="Permanent link">&para;</a></h2>
-<pre class="mermaid"><code>stateDiagram-v2
-    [*] --&gt; face_tracking_idle: boot complete
-
-    state face_tracking {
-        face_tracking_idle: Idle
-        face_tracking_active: Tracking
-        face_tracking_grace: GracePeriod
-
-        face_tracking_idle --&gt; face_tracking_active: face detected
-        face_tracking_active --&gt; face_tracking_grace: face lost
-        face_tracking_grace --&gt; face_tracking_active: face re-acquired
-        face_tracking_grace --&gt; face_tracking_idle: 2 s grace expires
-    }
-
-    face_tracking_idle --&gt; listening: VAD speech start
-    face_tracking_active --&gt; listening: VAD speech start
-
-    state conversation {
-        listening --&gt; thinking: STT result
-        thinking --&gt; talking: TTS sentence_start
-        talking --&gt; listening: TTS done + VAD speech start
-    }
-
-    listening --&gt; smart: phrase = "smart mode"
-    smart --&gt; conversation: turn complete
-    listening --&gt; vision: phrase = "what do you see"
-    vision --&gt; conversation: description injected
-    listening --&gt; performance: phrase = "dance" / "sing"
-
-    state performance {
-        dance
-        sing
-    }
-
-    conversation --&gt; face_tracking_idle: idle 30 s (proposed)
-    performance --&gt; face_tracking_idle: completion or barge-in</code></pre>
-<p>The <code>face_tracking → listening</code> edge currently fires only when the user speaks (VAD trips). With <a href="#face-detected-auto-listen-deferred">face-detected auto-listen</a>, that edge would also fire briefly when a face is acquired, opening a 5 s manual-listen window before falling back to face-tracking.</p>
-<h2 id="led-contract">LED contract<a class="headerlink" href="#led-contract" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Mode</th>
-<th>Resting LED</th>
-<th>Transition cue</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>face_tracking</code> idle</td>
-<td>ring off (FadeOut)</td>
-<td>—</td>
-</tr>
-<tr>
-<td><code>face_tracking</code> active</td>
-<td>left LED green; ring breathing low-green <em>(proposed)</em></td>
-<td>brief breathe-up on face acquire <em>(proposed)</em></td>
-</tr>
-<tr>
-<td><code>listening</code></td>
-<td>ring solid red <code>(32,0,0)</code></td>
-<td>—</td>
-</tr>
-<tr>
-<td><code>thinking</code></td>
-<td>ring solid orange</td>
-<td>—</td>
-</tr>
-<tr>
-<td><code>talking</code></td>
-<td>ring solid green <code>(0,32,0)</code></td>
-<td>—</td>
-</tr>
-<tr>
-<td><code>smart</code> (active turn)</td>
-<td>one ring LED held purple <code>(168,0,168)</code>; remaining 11 LEDs continue listen / think / talk</td>
-<td>purple pulse on entry; held LED clears on exit</td>
-</tr>
-<tr>
-<td><code>vision</code></td>
-<td>brief cyan flash on capture <em>(proposed)</em></td>
-<td>restores prior mode's LED after capture</td>
-</tr>
-<tr>
-<td><code>dance</code> / <code>sing</code></td>
-<td>timeline rainbow (choreography-driven)</td>
-<td>—</td>
-</tr>
-<tr>
-<td><code>sleep</code> <em>(deferred)</em></td>
-<td>all off</td>
-<td>brief fade-out on entry</td>
-</tr>
-<tr>
-<td><code>wifi_configuring</code></td>
-<td>blue blink, 500 ms</td>
-<td>—</td>
-</tr>
-<tr>
-<td><code>connecting</code></td>
-<td>solid blue, low-brightness</td>
-<td>—</td>
-</tr>
-<tr>
-<td><code>upgrading</code></td>
-<td>green blink, 100 ms</td>
-<td>—</td>
-</tr>
-<tr>
-<td><code>activating</code></td>
-<td>green blink, 500 ms</td>
-<td>—</td>
-</tr>
-</tbody>
-</table>
-<h3 id="led-control-surfaces">LED control surfaces<a class="headerlink" href="#led-control-surfaces" title="Permanent link">&para;</a></h3>
-<ul>
-<li><strong>Firmware-automatic</strong> — <code>CircularStrip::OnStateChanged()</code> (<code>firmware/firmware/xiaozhi-esp32/main/led/circular_strip.cc</code>) maps device state → solid / blink / scroll patterns. Triggered by the firmware's own <code>kDeviceState*</code> enum changes.</li>
-<li><strong>Server-overridable</strong> — two MCP tools invoked via helpers in <code>receiveAudioHandle.py</code>:</li>
-<li><code>self.robot.set_led_color(r, g, b)</code> → <code>_send_led_color()</code>: paints the full 12-LED ring one colour; used for smart-mode entry pulse and dance timeline events. Overrides firmware-automatic LED until the next firmware state change.</li>
-<li><code>self.robot.set_led_multi(index, r, g, b)</code> → <code>_send_led_multi()</code> (firmware ≥ <code>32163bd</code>): sets a <strong>single</strong> pixel without disturbing the rest. Bypasses the colour-animation tick, so it persists across firmware state changes that use <code>SetAllColor</code>. Used by the hybrid smart-mode indicator (re-asserted after each <code>_send_led_color</code> call when <code>conn.smart_mode_active</code> is True). Degrades gracefully on older firmware.</li>
-</ul>
-<h3 id="available-led-primitives">Available LED primitives<a class="headerlink" href="#available-led-primitives" title="Permanent link">&para;</a></h3>
-<p>Firmware <code>CircularStrip</code> (<code>circular_strip.h</code>) exposes: <code>SetAllColor</code>, <code>SetSingleColor</code>, <code>SetMultiColors</code>, <code>Blink(color, interval_ms)</code>, <code>Breathe(low, high, interval_ms)</code>, <code>Scroll(low, high, length, interval_ms)</code>, <code>Rainbow(low, high, interval_ms)</code>, <code>FadeOut(interval_ms)</code>. Brightness is <code>DEFAULT_BRIGHTNESS = 32</code>, <code>LOW_BRIGHTNESS = 4</code> (0–255 scale).</p>
-<p>The <code>set_led_multi</code> MCP tool (firmware <code>32163bd</code>) wraps <code>setColorAt()</code> on the <code>NeonLight</code> objects (index 0–5 → LeftNeonLight, 6–11 → RightNeonLight). Note: <code>setColorAt()</code> is a per-pixel write that bypasses <code>_color_anim</code>, which is why re-assertion is needed after full-ring colour changes.</p>
-<p>Anything we want to design fits inside this primitive set.</p>
-<h2 id="designed-but-not-yet-implemented">Designed but not yet implemented<a class="headerlink" href="#designed-but-not-yet-implemented" title="Permanent link">&para;</a></h2>
-<h3 id="face-detected-auto-listen-deferred">Face-detected auto-listen (deferred)<a class="headerlink" href="#face-detected-auto-listen-deferred" title="Permanent link">&para;</a></h3>
-<p><strong>Problem.</strong> Face tracking detects a face and turns the left LED green, but the event never reaches the Python side. The user has to speak first to engage a conversation. Walking up and waiting at the robot does nothing.</p>
-<p><strong>Design.</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>[face_tracking idle] ──face detected──▶ [face_tracking active, LED green]
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>                                          │
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>                                          ├─ speech heard within 5 s ─▶ [listening] (normal flow)
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>                                          │
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>                                          └─ 5 s of silence ─────────▶ stay in [face_tracking active]
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>[face_tracking active] ──face lost &gt; 2 s grace──▶ [face_tracking idle]
-</code></pre></div>
-<p><strong>Implementation sketch</strong> (deferred to a follow-up task):</p>
-<ol>
-<li><strong>Firmware</strong> (<code>face_tracking.cpp</code> Idle → Tracking edge): emit a server-bound event, e.g. <code>{"type":"event","name":"face_detected"}</code>, via the same outbound JSON channel used for <code>listen</code> / <code>abort</code> frames.</li>
-<li><strong>Server</strong> (<code>receiveAudioHandle.py</code>): on <code>face_detected</code>, send <code>{"type":"listen","state":"start","mode":"manual"}</code> to the device, start a 5 s timer. If VAD trips within the window → normal conversation flow takes over. If timer expires without VAD → send <code>{"type":"listen","state":"stop"}</code> and remain in face-tracking.</li>
-</ol>
-<p><strong>Why it's deferred.</strong> This requires firmware changes (new outbound event) which mean an OTA reflash. Captured here so the design is durable; implementation tracked in <a href="../ROADMAP.md"><code>ROADMAP.md</code></a>.</p>
-<h3 id="hybrid-smart-mode-led-shipped">Hybrid smart-mode LED (shipped)<a class="headerlink" href="#hybrid-smart-mode-led-shipped" title="Permanent link">&para;</a></h3>
-<p><strong>Shipped</strong> in bridge commit <code>b72b121</code> and firmware commit <code>32163bd</code> (rolled into <code>fw-v1.3.2</code>).</p>
-<p><strong>Behaviour.</strong> On smart-mode entry, <code>conn.smart_mode_active = True</code> is set on the <code>ConnectionHandler</code>. <code>_send_led_color()</code> then re-asserts pixel <code>SMART_MODE_LED_INDEX</code> (env var, default <code>0</code>) at purple <code>(168,0,168)</code> via <code>_send_led_multi()</code> after every full-ring colour change. The remaining 11 LEDs continue to show the firmware-automatic listen / think / talk colours. On turn completion <code>smart_mode_active</code> is cleared; the ring returns to firmware-automatic behaviour.</p>
-<p><strong>Firmware prerequisite.</strong> The <code>self.robot.set_led_multi(index, r, g, b)</code> MCP tool was added in StackChan/dotty <code>32163bd</code>. Without that firmware, the bridge degrades to the previous single-flash behaviour (warn-once per connection).</p>
-<h2 id="future-modes">Future modes<a class="headerlink" href="#future-modes" title="Permanent link">&para;</a></h2>
-<p>These are documented as design-space placeholders so contributors know where they would slot in. None are scheduled today.</p>
-<table>
-<thead>
-<tr>
-<th>Mode</th>
-<th>Tier</th>
-<th>Resting LED (proposed)</th>
-<th>Notes</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>sleep</code></td>
-<td>ambient</td>
-<td>all off; display dim</td>
-<td>Manual toggle now; later schedule-driven (quiet hours). Wake on wake-word or portal toggle.</td>
-</tr>
-<tr>
-<td><code>greeting</code></td>
-<td>conversation</td>
-<td>brief warm flash on entry</td>
-<td>Proactive on recognised face. Per-person, per-day cooldown; time-of-day-aware tone. Roadmap-only.</td>
-</tr>
-<tr>
-<td><code>privacy</code> / <code>mute</code></td>
-<td>ambient</td>
-<td>solid red (one LED, low-brightness)</td>
-<td>Mic + camera disabled; hardware-guaranteed indicator. Prerequisite for always-on face detection.</td>
+<td><code>talk</code></td>
+<td>dim cyan <code>(0,40,60)</code></td>
+<td>NORMAL (face_tracking overlay active)</td>
+<td>Conversation engaged. Chat sub-states (listening / thinking / speaking) animate the rest of the left ring.</td>
+<td>xiaozhi → bridge → ZeroClaw ACP</td>
 </tr>
 <tr>
 <td><code>story_time</code></td>
-<td>conversation</td>
-<td>dimmed warm <code>(100, 40, 0)</code></td>
-<td>Longer-form narration, no sentence truncation, lower TTS rate.</td>
+<td>warm <code>(100,40,0)</code></td>
+<td>NORMAL</td>
+<td>Long-running interactive story. Bridge bypasses ZeroClaw, calls OpenRouter directly with story persona + rolling context.</td>
+<td>bridge → direct OpenRouter (Phase 7)</td>
 </tr>
 <tr>
-<td><code>game</code></td>
-<td>performance</td>
-<td>mode-specific palette</td>
-<td>Turn-based interactions (rock-paper-scissors, Simon Says).</td>
+<td><code>security</code></td>
+<td>white <code>(80,80,80)</code> <strong>flashing 1 Hz</strong></td>
+<td>SURVEILLANCE</td>
+<td>Wide deliberate scan, serious face, periodic photo + audio capture. No proactive greet.</td>
+<td>bridge ambient task (Phase 6)</td>
+</tr>
+<tr>
+<td><code>sleep</code></td>
+<td>very dim blue <code>(0,0,16)</code></td>
+<td>SLEEPY</td>
+<td>Head face-down + centred, servo torque off, sleeping emoji on screen, ambient awareness paused. Wakes on face / voice / head-pet.</td>
+<td>firmware-only quiescence (Phase 5)</td>
+</tr>
+<tr>
+<td><code>dance</code></td>
+<td>suppressed (rainbow takes over)</td>
+<td>NORMAL</td>
+<td>Transient performance — choreography + audio. Pre-existing dance handler.</td>
+<td><code>receiveAudioHandle.py::_handle_dance</code></td>
 </tr>
 </tbody>
 </table>
-<p>See <a href="../ROADMAP.md"><code>ROADMAP.md</code></a> for current priority on each.</p>
-<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<h3 id="mutex-rules">Mutex rules<a class="headerlink" href="#mutex-rules" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Exactly <strong>one</strong> state is current. <code>setState(S)</code> to the same state is a no-op.</li>
+<li>State transitions are explicit — no implicit "fallback" to idle from other states; each non-idle state has its own exit triggers.</li>
+<li>Camera edges only auto-transition between <code>idle</code> ↔ <code>talk</code>. Sticky states (<code>story_time</code>, <code>security</code>, <code>sleep</code>, <code>dance</code>) ignore face_detected / face_lost.</li>
+</ol>
+<hr />
+<h2 id="toggles-compose-freely">Toggles (compose freely)<a class="headerlink" href="#toggles-compose-freely" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Toggle</th>
+<th>Toggle pip (right ring)</th>
+<th>When ON</th>
+<th>Persistence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kid_mode</code></td>
+<td>warm pink <code>(168,80,100)</code> at index <strong>8</strong></td>
+<td>Safety-tuned model, content sandwich, camera tools denied, kid-safe persona</td>
+<td><code>/root/zeroclaw-bridge/state/kid-mode</code></td>
+</tr>
+<tr>
+<td><code>smart_mode</code></td>
+<td>orange <code>(168,80,0)</code> at index <strong>9</strong></td>
+<td>Bridge bypasses ZeroClaw and routes the turn through direct OpenRouter (capable model). No memory, no tools.</td>
+<td><code>/root/zeroclaw-bridge/state/smart-mode</code></td>
+</tr>
+</tbody>
+</table>
+<p>Toggles compose: <code>kid_mode = on</code> AND <code>smart_mode = on</code> is valid (bridge applies the kid-safe sandwich on top of the direct OpenRouter call). Both toggles are sticky across turns, daemon restarts, and reboots.</p>
+<hr />
+<h2 id="led-contract-12-pixel-ring">LED contract (12-pixel ring)<a class="headerlink" href="#led-contract-12-pixel-ring" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>LEFT RING (global 0–5)              RIGHT RING (global 6–11)
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>┌───────────────────┐               ┌───────────────────────┐
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│ 0  state pip      │               │ 6  privacy: mic    🔒 │
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│ 1  chat anim      │               │ 7  reserved (toggle)  │
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│ 2  chat anim      │               │ 8  kid_mode toggle    │
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│ 3  chat anim      │               │ 9  smart_mode toggle  │
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│ 4  chat anim      │               │ 10 reserved (toggle)  │
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│ 5  chat anim      │               │ 11 privacy: camera 🔒 │
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>└───────────────────┘               └───────────────────────┘
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Index</th>
+<th>Half</th>
+<th>Owner</th>
+<th>Hardware-protected</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>left</td>
+<td>StateManager (state pip)</td>
+<td>no</td>
+</tr>
+<tr>
+<td>1–5</td>
+<td>left</td>
+<td>xiaozhi CircularStrip (chat-state animation)</td>
+<td>no</td>
+</tr>
+<tr>
+<td>6</td>
+<td>right</td>
+<td>PrivacyLeds (mic)</td>
+<td><strong>yes</strong> — friend-class only</td>
+</tr>
+<tr>
+<td>7</td>
+<td>right</td>
+<td>reserved for future toggle</td>
+<td>no</td>
+</tr>
+<tr>
+<td>8</td>
+<td>right</td>
+<td>StateManager (<code>kid_mode</code> pip)</td>
+<td>no</td>
+</tr>
+<tr>
+<td>9</td>
+<td>right</td>
+<td>StateManager (<code>smart_mode</code> pip)</td>
+<td>no</td>
+</tr>
+<tr>
+<td>10</td>
+<td>right</td>
+<td>reserved for future toggle</td>
+<td>no</td>
+</tr>
+<tr>
+<td>11</td>
+<td>right</td>
+<td>PrivacyLeds (camera)</td>
+<td><strong>yes</strong> — friend-class only</td>
+</tr>
+</tbody>
+</table>
+<h3 id="led-quirks">LED quirks<a class="headerlink" href="#led-quirks" title="Permanent link">&para;</a></h3>
 <ul>
-<li><a href="../interaction-map/">interaction-map.md</a> — every cross-layer signal (audio, LLM, MCP, session control); the wire-level companion to this doc.</li>
-<li><a href="../hardware/">hardware.md</a> — physical LED ring spec, servo capabilities, MCP tool catalog.</li>
-<li><a href="../voice-pipeline/">voice-pipeline.md</a> — how listening / thinking / talking sub-states map to xiaozhi-server internals.</li>
-<li><a href="../kid-mode/">kid-mode.md</a> — how Kid Mode wraps every conversation mode (default-on safety guardrails, prompt suffix injection).</li>
-<li><a href="../latent-capabilities/">latent-capabilities.md</a> — upstream features we aren't yet using; some of these would land as new modes.</li>
+<li><strong>Re-assertion at 5 Hz.</strong> The chat-state animation (<code>set_left_leds</code> in <code>stackchan_display.cc</code>) repaints the entire left ring on every LISTENING / SPEAKING / STANDBY transition. The state pip is restored within ~200 ms.</li>
+<li><strong>PY32 IO expander quantises to RGB565.</strong> Brightness deltas crush — <code>(40,40,40)</code> reads almost identical to <code>(200,200,200)</code>. Use distinct <strong>hues</strong>, not brightness levels, for any indicator that needs to read across a room.</li>
+<li><strong>Privacy LEDs are friend-protected.</strong> <code>Hal::setRgbColor</code> rejects writes to global indices 6 and 11 with a warning log; only <code>PrivacyLeds::setRgbColor_privacy_only</code> can drive them. Compile-time invariant.</li>
+<li><strong>RightNeonLight uses local indices 0–5</strong> internally, mapped to global 6–11 via <code>+6</code>. <code>setColorAt(local 0)</code> and <code>setColorAt(local 5)</code> are silently dropped (privacy guard). <code>setColorAt(local 2)</code> writes global 8 (kid_mode pip); <code>setColorAt(local 3)</code> writes global 9 (smart_mode pip).</li>
 </ul>
-<p>Last verified: 2026-04-25. Updated 2026-04-25 (hybrid smart-mode LED shipped, SetMultiColors→set_led_multi correction).</p>
+<hr />
+<h2 id="state-transitions">State transitions<a class="headerlink" href="#state-transitions" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>stateDiagram-v2
+    [*] --&gt; idle
+
+    idle --&gt; talk: face_detected (firmware)
+    talk --&gt; idle: face_lost grace expired (firmware)
+
+    idle --&gt; sleep: voice "go to sleep" / "goodnight Dotty"
+    sleep --&gt; idle: face_detected / voice "wake up" / head_pet
+
+    idle --&gt; security: voice "keep watch" / "security mode"
+    security --&gt; idle: voice "wake up" / face_detected (Phase 6)
+
+    idle --&gt; story_time: voice "tell me a story"
+    story_time --&gt; idle: voice "the end" / "stop story" / 90 s silence (Phase 7)
+
+    idle --&gt; dance: voice "dance" / song name
+    dance --&gt; idle: choreography ends
+
+    talk --&gt; sleep: voice "goodnight Dotty"
+    talk --&gt; story_time: voice "tell me a story"
+    talk --&gt; dance: voice "dance"</code></pre>
+<h3 id="voice-triggers-phase-4">Voice triggers (Phase 4)<a class="headerlink" href="#voice-triggers-phase-4" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Phrase (substring, case-insensitive)</th>
+<th>Target state</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>goodnight dotty</code> / <code>good night dotty</code> / <code>go to sleep</code></td>
+<td><code>sleep</code></td>
+</tr>
+<tr>
+<td><code>keep watch</code> / <code>security mode</code> / <code>watch the room</code></td>
+<td><code>security</code></td>
+</tr>
+<tr>
+<td><code>tell me a story</code> / <code>story time</code></td>
+<td><code>story_time</code></td>
+</tr>
+<tr>
+<td><code>wake up</code> / <code>come back</code> / <code>are you there</code> (only when state ∈ <code>{sleep, security, story_time}</code>)</td>
+<td><code>idle</code></td>
+</tr>
+</tbody>
+</table>
+<p>Toggle phrases:</p>
+<table>
+<thead>
+<tr>
+<th>Phrase</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>smart mode</code> / <code>think harder</code> / <code>big brain</code></td>
+<td><code>smart_mode = on</code> (sticky until cleared)</td>
+</tr>
+<tr>
+<td><code>normal mode</code> / <code>regular dotty</code> / <code>regular mode</code> / <code>stop smart mode</code></td>
+<td><code>smart_mode = off</code></td>
+</tr>
+</tbody>
+</table>
+<p>Kid mode is <em>not</em> voice-toggleable — it's a guardian-controlled axis driven from the <code>/admin/kid-mode</code> endpoint or the dashboard.</p>
+<h3 id="admin-endpoints-localhost-only">Admin endpoints (localhost-only)<a class="headerlink" href="#admin-endpoints-localhost-only" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Body</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /admin/state</code></td>
+<td><code>{"state": "&lt;idle\|talk\|story_time\|security\|sleep\|dance&gt;", "device_id": "&lt;optional&gt;"}</code></td>
+<td>Push <code>self.robot.set_state</code> MCP via xiaozhi-server relay. No daemon restart.</td>
+</tr>
+<tr>
+<td><code>POST /admin/smart-mode</code></td>
+<td><code>{"enabled": bool, "device_id": "&lt;optional&gt;"}</code></td>
+<td>Persist + push <code>self.robot.set_toggle("smart_mode", ...)</code>. No daemon restart.</td>
+</tr>
+<tr>
+<td><code>POST /admin/kid-mode</code></td>
+<td><code>{"enabled": bool}</code></td>
+<td>Persist + swap voice-daemon model + restart daemon. (Pip pushes via the post-restart toggle resync.)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="mcp-tools-firmware">MCP tools (firmware)<a class="headerlink" href="#mcp-tools-firmware" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Arguments</th>
+<th>Caller</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>self.robot.set_state</code></td>
+<td><code>{"state": "&lt;...&gt;"}</code></td>
+<td>xiaozhi-server <code>/admin/set-state</code> relay</td>
+</tr>
+<tr>
+<td><code>self.robot.set_toggle</code></td>
+<td><code>{"name": "kid_mode\|smart_mode", "enabled": bool}</code></td>
+<td>xiaozhi-server <code>/admin/set-toggle</code> relay; receiveAudioHandle.py voice phrases</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="backing-architecture-per-state">Backing architecture per state<a class="headerlink" href="#backing-architecture-per-state" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>Voice path</th>
+<th>Memory?</th>
+<th>Tools?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>idle</code></td>
+<td>n/a</td>
+<td>n/a</td>
+<td>n/a</td>
+</tr>
+<tr>
+<td><code>talk</code> (default)</td>
+<td>xiaozhi → bridge → ZeroClaw ACP (Mistral 3.2 by default)</td>
+<td>yes (FTS)</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>talk</code> (smart_mode = on)</td>
+<td>xiaozhi → bridge → direct OpenRouter (<code>SMART_API_URL</code>)</td>
+<td>no</td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>story_time</code></td>
+<td>xiaozhi → bridge → direct OpenRouter (story persona overlay + rolling context)</td>
+<td>per-session list (Phase 7)</td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>security</code></td>
+<td>bridge ambient task (no voice path active)</td>
+<td>logs to journal</td>
+<td>photo + audio capture</td>
+</tr>
+<tr>
+<td><code>sleep</code></td>
+<td>mic stays on for "wake up"; no LLM round-trip</td>
+<td>n/a</td>
+<td>n/a</td>
+</tr>
+<tr>
+<td><code>dance</code></td>
+<td>bridge handler dispatches choreography + audio file</td>
+<td>n/a</td>
+<td>dance MCP</td>
+</tr>
+</tbody>
+</table>
+<p><code>smart_mode</code> and <code>story_time</code> both bypass ZeroClaw — <code>smart_mode</code> is one-shot per turn, <code>story_time</code> is a sticky state with its own session memory (Phase 7).</p>
+<hr />
+<h2 id="implementation-status">Implementation status<a class="headerlink" href="#implementation-status" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Scope</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>4</td>
+<td>StateManager foundation: state pip + toggle pips + state_changed event + voice phrases + admin endpoints + dashboard</td>
+<td><strong>shipping</strong></td>
+</tr>
+<tr>
+<td>5</td>
+<td>Sleep state behaviour (servo park + torque off + sleepy emoji + wake triggers)</td>
+<td>pending</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Security state behaviour (periodic photo + audio capture, greeter gate)</td>
+<td>pending</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Story_time state (interactive setup, OpenRouter session, choose-your-own-adventure)</td>
+<td>pending</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Ambient awareness loop (idle-state photo + audio scene capture, journal)</td>
+<td>pending</td>
+</tr>
+</tbody>
+</table>
+<p>Phase 4 establishes the <em>rails</em> — pip, transition events, dispatch helpers, voice routing. Phases 5–8 each hang behaviour off those rails without changing the architecture.</p>
+<hr />
+<h2 id="sources-of-truth">Sources of truth<a class="headerlink" href="#sources-of-truth" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Firmware:</strong> <code>firmware/main/stackchan/modes/state_manager.{h,cpp}</code>, <code>firmware/main/stackchan/modifiers/face_tracking.cpp</code> (camera-edge hooks), <code>firmware/main/hal/hal_mcp.cpp</code> (set_state / set_toggle MCP)</li>
+<li><strong>Bridge:</strong> <code>bridge.py</code> (<code>_dispatch_set_state</code>, <code>_dispatch_set_toggle</code>, <code>_admin_state</code>, <code>_admin_smart_mode</code>, <code>_update_perception_state</code> for <code>state_changed</code>), <code>receiveAudioHandle.py</code> (voice phrases + per-conn toggle sync)</li>
+<li><strong>xiaozhi-server patches:</strong> <code>custom-providers/xiaozhi-patches/http_server.py</code> (<code>/xiaozhi/admin/set-state</code>, <code>/xiaozhi/admin/set-toggle</code>), <code>custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py</code> (<code>state_changed</code> → <code>conn.current_state</code>)</li>
+<li><strong>Dashboard:</strong> <code>bridge/dashboard.py</code> + <code>bridge/templates/state_card.html</code> + <code>bridge/templates/smart_mode.html</code></li>
+</ul>
 
 
 
