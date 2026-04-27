@@ -37,14 +37,14 @@ setup: ## Interactive first-run wizard (prompts for IPs, names, timezone)
 	@echo "This will substitute placeholders in config files and start the stack."
 	@echo ""
 	@read -rp "XIAOZHI_HOST  (LAN IP of Docker host, e.g. 192.168.1.10): " XIAOZHI_HOST && \
-	 read -rp "RPI_IP     (LAN IP of Raspberry Pi,  e.g. 192.168.1.20): " RPI_IP && \
-	 read -rp "RPI_USER   (SSH user on the Pi,       e.g. dietpi):       " RPI_USER && \
+	 read -rp "ZEROCLAW_HOST     (LAN IP of ZeroClaw host,  e.g. 192.168.1.20): " ZEROCLAW_HOST && \
+	 read -rp "ZEROCLAW_USER   (SSH user on the Pi,       e.g. dietpi):       " ZEROCLAW_USER && \
 	 read -rp "ROBOT_NAME (name the robot calls itself) [Dotty]:          " ROBOT_NAME && \
 	 ROBOT_NAME=$${ROBOT_NAME:-Dotty} && \
 	 read -rp "YOUR_NAME  (your name / org,           e.g. Brett):       " YOUR_NAME && \
 	 read -rp "Timezone   (TZ identifier,             e.g. Australia/Brisbane): " TZ_VALUE && \
 	 echo "" && \
-	 if [ -z "$$XIAOZHI_HOST" ] || [ -z "$$RPI_IP" ] || [ -z "$$RPI_USER" ] || \
+	 if [ -z "$$XIAOZHI_HOST" ] || [ -z "$$ZEROCLAW_HOST" ] || [ -z "$$ZEROCLAW_USER" ] || \
 	    [ -z "$$ROBOT_NAME" ] || [ -z "$$YOUR_NAME" ] || [ -z "$$TZ_VALUE" ]; then \
 	   echo -e "$(RED)Error: all fields are required.$(RESET)"; exit 1; \
 	 fi && \
@@ -52,8 +52,8 @@ setup: ## Interactive first-run wizard (prompts for IPs, names, timezone)
 	 for f in .config.yaml docker-compose.yml zeroclaw-bridge.service; do \
 	   if [ -f "$$f" ]; then \
 	     sed -i "s|<XIAOZHI_HOST>|$$XIAOZHI_HOST|g"   "$$f"; \
-	     sed -i "s|<RPI_IP>|$$RPI_IP|g"         "$$f"; \
-	     sed -i "s|<RPI_USER>|$$RPI_USER|g"     "$$f"; \
+	     sed -i "s|<ZEROCLAW_HOST>|$$ZEROCLAW_HOST|g"         "$$f"; \
+	     sed -i "s|<ZEROCLAW_USER>|$$ZEROCLAW_USER|g"     "$$f"; \
 	     sed -i "s|<ROBOT_NAME>|$$ROBOT_NAME|g; s|You are Dotty,|You are $$ROBOT_NAME,|g" "$$f"; \
 	     sed -i "s|<YOUR_NAME>|$$YOUR_NAME|g"   "$$f"; \
 	     echo "  $$f — done"; \
@@ -77,7 +77,7 @@ setup: ## Interactive first-run wizard (prompts for IPs, names, timezone)
 	 echo "  1. Flash the StackChan firmware (see SETUP.md or m5stack/StackChan repo)." && \
 	 echo "  2. In the device's Advanced Options, set the OTA URL to:" && \
 	 echo "       http://$$XIAOZHI_HOST:8003/xiaozhi/ota/" && \
-	 echo "  3. Deploy zeroclaw-bridge.service to the RPi and start it." && \
+	 echo "  3. Deploy zeroclaw-bridge.service to the ZeroClaw host and start it." && \
 	 echo "  4. Run 'make doctor' to verify everything is healthy." && \
 	 echo ""
 
@@ -177,7 +177,7 @@ doctor: ## Run health checks on config, models, and services
 	 check "models/piper/*.onnx exists" "ls $(PIPER_DIR)/*.onnx >/dev/null 2>&1"; \
 	 check "docker compose config validates" "docker compose config --quiet"; \
 	 XIAOZHI_HOST=$$(grep -oP 'ws://\K[0-9.]+' .config.yaml 2>/dev/null | head -1); \
-	 RPI_IP=$$(grep -oP 'url: http://\K[0-9.]+' .config.yaml 2>/dev/null | head -1); \
+	 ZEROCLAW_HOST=$$(grep -oP 'url: http://\K[0-9.]+' .config.yaml 2>/dev/null | head -1); \
 	 if [ -n "$$XIAOZHI_HOST" ]; then \
 	   if curl -sf --max-time 3 "http://$$XIAOZHI_HOST:8003/xiaozhi/ota/" >/dev/null 2>&1; then \
 	     echo -e "  $(GREEN)PASS$(RESET)  OTA endpoint reachable ($$XIAOZHI_HOST:8003)"; \
@@ -189,16 +189,16 @@ doctor: ## Run health checks on config, models, and services
 	 else \
 	   echo -e "  $(YELLOW)SKIP$(RESET)  OTA endpoint (could not extract XIAOZHI_HOST from config)"; \
 	 fi; \
-	 if [ -n "$$RPI_IP" ]; then \
-	   if curl -sf --max-time 3 "http://$$RPI_IP:8080/health" >/dev/null 2>&1; then \
-	     echo -e "  $(GREEN)PASS$(RESET)  Bridge /health reachable ($$RPI_IP:8080)"; \
+	 if [ -n "$$ZEROCLAW_HOST" ]; then \
+	   if curl -sf --max-time 3 "http://$$ZEROCLAW_HOST:8080/health" >/dev/null 2>&1; then \
+	     echo -e "  $(GREEN)PASS$(RESET)  Bridge /health reachable ($$ZEROCLAW_HOST:8080)"; \
 	     PASS=$$((PASS+1)); \
 	   else \
-	     echo -e "  $(RED)FAIL$(RESET)  Bridge /health reachable ($$RPI_IP:8080)"; \
+	     echo -e "  $(RED)FAIL$(RESET)  Bridge /health reachable ($$ZEROCLAW_HOST:8080)"; \
 	     FAIL=$$((FAIL+1)); \
 	   fi; \
 	 else \
-	   echo -e "  $(YELLOW)SKIP$(RESET)  Bridge /health (could not extract RPI_IP from config)"; \
+	   echo -e "  $(YELLOW)SKIP$(RESET)  Bridge /health (could not extract ZEROCLAW_HOST from config)"; \
 	 fi; \
 	 echo ""; \
 	 echo -e "$(BOLD)Results: $$PASS passed, $$FAIL failed.$(RESET)"; \
@@ -213,7 +213,7 @@ audit: ## Audit outbound network connections (verify local-except-LLM claim)
 	@echo -e "$(BOLD)Network audit — verifying 'local except LLM' claim$(RESET)"
 	@echo ""
 	@XIAOZHI_HOST=$$(grep -oP 'ws://\K[0-9.]+' .config.yaml 2>/dev/null | head -1); \
-	 RPI_IP=$$(grep -oP 'url: http://\K[0-9.]+' .config.yaml 2>/dev/null | head -1); \
+	 ZEROCLAW_HOST=$$(grep -oP 'url: http://\K[0-9.]+' .config.yaml 2>/dev/null | head -1); \
 	 PASS=0; FAIL=0; WARN=0; \
 	 echo -e "$(BOLD)Server host (Docker):$(RESET)"; \
 	 if [ -n "$$XIAOZHI_HOST" ]; then \
@@ -240,10 +240,10 @@ audit: ## Audit outbound network connections (verify local-except-LLM claim)
 	   WARN=$$((WARN+1)); \
 	 fi; \
 	 echo ""; \
-	 echo -e "$(BOLD)Bridge host (RPi):$(RESET)"; \
-	 if [ -n "$$RPI_IP" ]; then \
-	   echo "  Checking outbound connections on $$RPI_IP..."; \
-	   CONNS=$$(ssh -o ConnectTimeout=5 dietpi@$$RPI_IP \
+	 echo -e "$(BOLD)Bridge host (ZeroClaw host):$(RESET)"; \
+	 if [ -n "$$ZEROCLAW_HOST" ]; then \
+	   echo "  Checking outbound connections on $$ZEROCLAW_HOST..."; \
+	   CONNS=$$(ssh -o ConnectTimeout=5 dietpi@$$ZEROCLAW_HOST \
 	     'ss -tnp | grep -v "127.0.0.1\|::1" | grep "ESTAB"' 2>/dev/null); \
 	   if [ -z "$$CONNS" ]; then \
 	     echo -e "  $(GREEN)PASS$(RESET)  No outbound connections"; \
@@ -358,11 +358,11 @@ verify-firmware: ## Build firmware in IDF container and compute SHA256 checksums
 status: ## Show container status + bridge health
 	@docker compose ps
 	@echo ""
-	@RPI_IP=$$(grep -oP 'url: http://\K[0-9.]+' .config.yaml 2>/dev/null | head -1); \
-	 if [ -n "$$RPI_IP" ]; then \
-	   echo -n "Bridge health ($$RPI_IP:8080): "; \
-	   curl -sf --max-time 3 "http://$$RPI_IP:8080/health" && echo "" || \
+	@ZEROCLAW_HOST=$$(grep -oP 'url: http://\K[0-9.]+' .config.yaml 2>/dev/null | head -1); \
+	 if [ -n "$$ZEROCLAW_HOST" ]; then \
+	   echo -n "Bridge health ($$ZEROCLAW_HOST:8080): "; \
+	   curl -sf --max-time 3 "http://$$ZEROCLAW_HOST:8080/health" && echo "" || \
 	     echo -e "$(YELLOW)unreachable$(RESET)"; \
 	 else \
-	   echo -e "Bridge health: $(YELLOW)could not extract RPI_IP from config$(RESET)"; \
+	   echo -e "Bridge health: $(YELLOW)could not extract ZEROCLAW_HOST from config$(RESET)"; \
 	 fi

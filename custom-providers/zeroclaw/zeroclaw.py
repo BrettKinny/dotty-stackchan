@@ -77,7 +77,7 @@ class LLMProvider(LLMProviderBase):
         self.url = config.get("url") or config.get("base_url")
         if not self.url:
             raise ValueError(
-                "ZeroClawLLM requires 'url' (e.g. http://RPI:8080/api/message)"
+                "ZeroClawLLM requires 'url' (e.g. http://<zeroclaw-host>:8080/api/message)"
             )
         self.timeout = float(config.get("timeout", 90))
         self.channel = config.get("channel", "dotty")

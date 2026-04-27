@@ -35,7 +35,7 @@ So Dotty is the version that passes: every component runs on hardware I own, eve
 ## Reference deployment
 
 - **Hardware**: M5Stack StackChan (CoreS3 + servo kit), firmware built from `m5stack/StackChan`.
-- **Brain**: [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) on a Raspberry Pi, with Mistral Small 3.2 via OpenRouter as the default LLM (Qwen3-30B, Claude, and others are drop-in alternates).
+- **Brain**: [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) on any host that can run it (a small Linux box, your existing home server, or even the same Docker host), with Mistral Small 3.2 via OpenRouter as the default LLM (Qwen3-30B, Claude, and others are drop-in alternates).
 - **Voice I/O**: xiaozhi-esp32-server on Docker (any Linux Docker host; single-host works too).
 
 ---
@@ -61,8 +61,8 @@ This README covers deployment. For what the stack *is* underneath - hardware spe
 |---|---|---|
 | StackChan (device) | ESP32-S3 on the desk | Firmware built from `m5stack/StackChan` (see `SETUP.md`) |
 | xiaozhi-esp32-server | Docker host (`<XIAOZHI_HOST>`) | Docker, ports 8000 + 8003 |
-| zeroclaw-bridge | RPi (`<RPI_IP>`) | FastAPI on port 8080, systemd |
-| ZeroClaw daemon | RPi (`<RPI_IP>`) | `<RPI_ZEROCLAW_BIN>` |
+| zeroclaw-bridge | ZeroClaw host (`<ZEROCLAW_HOST>`) | FastAPI on port 8080, systemd |
+| ZeroClaw daemon | ZeroClaw host (`<ZEROCLAW_HOST>`) | `<ZEROCLAW_BIN>` |
 | Admin workstation | any LAN box | Development / `ssh` only |
 
 ---
@@ -77,12 +77,12 @@ This repo uses placeholders in place of real IPs, usernames, and filesystem path
 | `<XIAOZHI_USER>` | SSH user for the Docker host (whatever your distro defaults to: `root`, `ubuntu`, `dietpi`, etc.). |
 | `<XIAOZHI_HOSTNAME>` | Hostname or Tailscale name of the Docker host (optional, IP works for everything). |
 | `<XIAOZHI_PATH>` | Path on the Docker host where you clone/install xiaozhi-server (e.g. `/opt/xiaozhi-server/` or `/srv/xiaozhi-server/`). |
-| `<RPI_IP>` | LAN IP of the Raspberry Pi running ZeroClaw + the bridge. |
-| `<RPI_USER>` | SSH user on the Pi (DietPi default: `dietpi`; root is also common). |
-| `<RPI_HOME>` | Home directory on the Pi for the user that owns the bridge (e.g. `/root/` or `/home/pi/`). |
-| `<RPI_BRIDGE_PATH>` | Full path to the zeroclaw-bridge working directory on the Pi (e.g. `/root/zeroclaw-bridge/`). |
-| `<RPI_ZEROCLAW_BIN>` | Absolute path to the `zeroclaw` binary on the Pi (cargo default: `/root/.cargo/bin/zeroclaw`). |
-| `<RPI_ZEROCLAW_CFG>` | ZeroClaw config file path (default: `/root/.zeroclaw/config.toml`). |
+| `<ZEROCLAW_HOST>` | LAN IP of the host running ZeroClaw + the bridge. Anything that runs the `zeroclaw` binary works (a small Linux box, your existing home server, or the same Docker host as xiaozhi-server). |
+| `<ZEROCLAW_USER>` | SSH user on the ZeroClaw host (whatever your distro defaults to). |
+| `<ZEROCLAW_HOME>` | Home directory on the ZeroClaw host for the user that owns the bridge (e.g. `/root/` or `/home/<user>/`). |
+| `<BRIDGE_PATH>` | Full path to the zeroclaw-bridge working directory (e.g. `/root/zeroclaw-bridge/`). |
+| `<ZEROCLAW_BIN>` | Absolute path to the `zeroclaw` binary (cargo default: `~/.cargo/bin/zeroclaw`). |
+| `<ZEROCLAW_CFG>` | ZeroClaw config file path (default: `/root/.zeroclaw/config.toml`). |
 | `<YOUR_NAME>` | Your name / org, used in the persona prompt in `.config.yaml`. |
 | `<ROBOT_NAME>` | Name the robot introduces itself as, referenced in the persona prompt in `.config.yaml`. Any string - pick whatever you want. The default example uses the hardware name ("StackChan"). |
 
@@ -90,7 +90,7 @@ Port numbers (`8000`, `8003`, `8080`, `18789`, `42617`) are product-generic and 
 
 Files you will definitely need to edit before first run:
 
-- `.config.yaml` - replace `<XIAOZHI_HOST>`, `<RPI_IP>`, and customize the `prompt:` block.
+- `.config.yaml` - replace `<XIAOZHI_HOST>`, `<ZEROCLAW_HOST>`, and customize the `prompt:` block.
 - `docker-compose.yml` - set `TZ` to your timezone.
 - `zeroclaw-bridge.service` - adjust paths if the bridge doesn't live at `/root/zeroclaw-bridge/`.
 
@@ -114,7 +114,7 @@ flowchart LR
         end
     end
 
-    subgraph RPi["Raspberry Pi - &lt;RPI_IP&gt;"]
+    subgraph ZCHost["ZeroClaw host - &lt;ZEROCLAW_HOST&gt;"]
         Bridge["zeroclaw-bridge<br/>FastAPI :8080<br/>systemd unit"]
         ZC["ZeroClaw daemon<br/>(agent persona)"]
         Cloud["(OpenRouter / GLM / ...)"]
@@ -189,9 +189,9 @@ flowchart TB
         UA6["docker-compose.yml"]
     end
 
-    subgraph RPi_fs["RPi filesystem"]
+    subgraph ZCHost_fs["ZeroClaw host filesystem"]
         direction TB
-        RA["&lt;RPI_BRIDGE_PATH&gt;"]
+        RA["&lt;BRIDGE_PATH&gt;"]
         RA1["bridge.py"]
         RA2[".venv/<br/>(fastapi + uvicorn)"]
         RB["/etc/systemd/system/<br/>zeroclaw-bridge.service"]
@@ -221,9 +221,9 @@ Container volume mounts:
 |---|---|---|
 | OTA (enter into StackChan settings) | `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/` | StackChan device on boot |
 | WebSocket | `ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/` | StackChan device after OTA handshake |
-| Bridge (chat) | `http://<RPI_IP>:8080/api/message` | xiaozhi-server's ZeroClawLLM |
-| Bridge (health) | `http://<RPI_IP>:8080/health` | Humans, monitoring |
-| ZeroClaw gateway | `http://127.0.0.1:42617` (RPi-local) | ZeroClaw's web UI only |
+| Bridge (chat) | `http://<ZEROCLAW_HOST>:8080/api/message` | xiaozhi-server's ZeroClawLLM |
+| Bridge (health) | `http://<ZEROCLAW_HOST>:8080/health` | Humans, monitoring |
+| ZeroClaw gateway | `http://127.0.0.1:42617` (host-local) | ZeroClaw's web UI only |
 
 ---
 
@@ -234,7 +234,7 @@ Both services restart themselves without manual intervention:
 | Host | Mechanism |
 |---|---|
 | Docker host | Container `restart: unless-stopped` in `docker-compose.yml` + ensure dockerd starts at boot on your distro. |
-| RPi | `zeroclaw-bridge.service` is `enabled`, `Restart=on-failure`. |
+| ZeroClaw host | `zeroclaw-bridge.service` is `enabled`, `Restart=on-failure`. |
 
 Caveat: if you run `docker compose down`, the container is marked stopped
 and won't come back on reboot. Use `docker compose restart` or
@@ -249,34 +249,34 @@ and won't come back on reboot. Use `docker compose restart` or
 ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs -f xiaozhi-esp32-server'
 
 # Tail bridge logs
-ssh <RPI_USER>@<RPI_IP> 'sudo journalctl -u zeroclaw-bridge -f'
+ssh <ZEROCLAW_USER>@<ZEROCLAW_HOST> 'sudo journalctl -u zeroclaw-bridge -f'
 
 # Restart voice pipeline after config change
 ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'cd <XIAOZHI_PATH> && docker compose restart'
 
 # Restart the bridge
-ssh <RPI_USER>@<RPI_IP> 'sudo systemctl restart zeroclaw-bridge'
+ssh <ZEROCLAW_USER>@<ZEROCLAW_HOST> 'sudo systemctl restart zeroclaw-bridge'
 
 # Smoke test full round-trip
-curl -X POST http://<RPI_IP>:8080/api/message \
+curl -X POST http://<ZEROCLAW_HOST>:8080/api/message \
   -H 'content-type: application/json' \
   -d '{"content":"hello","channel":"dotty"}'
 
 # Bridge health
-curl http://<RPI_IP>:8080/health
+curl http://<ZEROCLAW_HOST>:8080/health
 ```
 
 ### Changing voice
 The default TTS is `LocalPiper` (offline, runs inside the container). To change the Piper voice, edit `TTS.LocalPiper.voice` and the corresponding `model_path` / `config_path` in `data/.config.yaml`. To switch to cloud EdgeTTS instead, set `selected_module.TTS: EdgeTTS` and edit `TTS.EdgeTTS.voice` (any Microsoft Edge Neural voice ID works, e.g. `en-US-AvaNeural`). Restart the container after changes.
 
 ### Changing persona (the robot's personality)
-Primary source: ZeroClaw's own system prompt in `<RPI_ZEROCLAW_CFG>` on the RPi. The `prompt:` key in `data/.config.yaml` is a secondary hint that the bridge passes to ZeroClaw as context, but ZeroClaw's own prompt wins.
+Primary source: ZeroClaw's own system prompt in `<ZEROCLAW_CFG>` on the ZeroClaw host. The `prompt:` key in `data/.config.yaml` is a secondary hint that the bridge passes to ZeroClaw as context, but ZeroClaw's own prompt wins.
 
 ### Changing VAD sensitivity
 `VAD.SileroVAD.min_silence_duration_ms` in `data/.config.yaml`. Default: 700ms. Lower = cuts off quicker. Higher = waits longer for slow speakers.
 
 ### Changing the LLM model
-`default_model` key near the top of `<RPI_ZEROCLAW_CFG>` on the RPi (provider and encrypted api_key live next to it). ACP mode caches config in the long-running child, so restart the bridge (`sudo systemctl restart zeroclaw-bridge`) after editing. Confirm with `sudo <RPI_ZEROCLAW_BIN> status | grep Model`.
+`default_model` key near the top of `<ZEROCLAW_CFG>` on the ZeroClaw host (provider and encrypted api_key live next to it). ACP mode caches config in the long-running child, so restart the bridge (`sudo systemctl restart zeroclaw-bridge`) after editing. Confirm with `sudo <ZEROCLAW_BIN> status | grep Model`.
 
 ---
 
@@ -284,9 +284,9 @@ Primary source: ZeroClaw's own system prompt in `<RPI_ZEROCLAW_CFG>` on the RPi.
 
 | File | Deployed to | Purpose |
 |---|---|---|
-| `bridge.py` | RPi `<RPI_BRIDGE_PATH>/bridge.py` | FastAPI HTTP→ZeroClaw translator (ACP over stdio) |
+| `bridge.py` | ZeroClaw host `<BRIDGE_PATH>/bridge.py` | FastAPI HTTP→ZeroClaw translator (ACP over stdio) |
 | `bridge/requirements.txt` | bare-metal venv | Pinned Python deps for the bridge (fastapi, uvicorn, pydantic) |
-| `zeroclaw-bridge.service` | RPi `/etc/systemd/system/` | systemd unit for bridge |
+| `zeroclaw-bridge.service` | ZeroClaw host `/etc/systemd/system/` | systemd unit for bridge |
 | `custom-providers/zeroclaw/zeroclaw.py` | Docker host `core/providers/llm/zeroclaw/zeroclaw.py` | xiaozhi LLM provider, proxies to the ZeroClaw bridge |
 | `custom-providers/zeroclaw/__init__.py` | Docker host `core/providers/llm/zeroclaw/__init__.py` | Python package marker |
 | `custom-providers/edge_stream/edge_stream.py` | Docker host `core/providers/tts/edge_stream.py` | Streaming EdgeTTS provider |
@@ -306,7 +306,7 @@ should match - if they drift, redeploy from here.
 ## Troubleshooting
 
 **"Bridge unreachable" or "(no response)" in the robot's voice.**
-The xiaozhi-server couldn't reach the bridge. Check `systemctl status zeroclaw-bridge` on the RPi and `curl http://<RPI_IP>:8080/health` from anywhere on the LAN.
+The xiaozhi-server couldn't reach the bridge. Check `systemctl status zeroclaw-bridge` on the ZeroClaw host and `curl http://<ZEROCLAW_HOST>:8080/health` from anywhere on the LAN.
 
 **xiaozhi-server won't start, log says `ModuleNotFoundError`.**
 Check the container logs for the actual missing module. The image ships with most deps but the streaming TTS provider uses `pydub` and `edge-tts` - if they're missing, add them via the compose file or bake a custom image.

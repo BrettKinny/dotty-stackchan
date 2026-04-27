@@ -2,7 +2,7 @@
 """dotty doctor — health-check CLI for the Dotty/StackChan stack.
 
 Runs the same checks as `make doctor` but as a portable Python script
-that can be invoked on any host (workstation, RPi, CI) without make.
+that can be invoked on any host (workstation, ZeroClaw host, CI) without make.
 
 Usage:
     python scripts/dotty_doctor.py [options]
@@ -88,7 +88,7 @@ def _extract_xiaozhi_host(config_text: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
-def _extract_rpi_ip(config_text: str) -> Optional[str]:
+def _extract_zeroclaw_host(config_text: str) -> Optional[str]:
     m = re.search(r"url:\s*http://([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)", config_text)
     return m.group(1) if m else None
 
@@ -168,15 +168,15 @@ def run_checks(
     config_text = config_path.read_text() if config_path else ""
 
     if bridge_url is None:
-        rpi_ip = _extract_rpi_ip(config_text)
-        if rpi_ip:
-            bridge_url = f"http://{rpi_ip}:8080/health"
+        zeroclaw_host = _extract_zeroclaw_host(config_text)
+        if zeroclaw_host:
+            bridge_url = f"http://{zeroclaw_host}:8080/health"
     if bridge_url:
         results.append(check_http("Bridge /health reachable", bridge_url, timeout))
     else:
         results.append(Result(
             "Bridge /health reachable", "skip",
-            "pass --bridge-url or ensure config has 'url: http://<RPI_IP>:8080'",
+            "pass --bridge-url or ensure config has 'url: http://<ZEROCLAW_HOST>:8080'",
         ))
 
     if server_url is None:

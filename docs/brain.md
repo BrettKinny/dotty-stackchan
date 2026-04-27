@@ -7,7 +7,7 @@ description: ZeroClaw agent runtime, Qwen3 LLM via OpenRouter, and the FastAPI b
 
 ## TL;DR
 
-- The brain is **[ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw)** — a Rust AI-agent runtime (MIT/Apache-2.0 dual-licensed) that runs on the RPi, installed via `cargo install`.
+- The brain is **[ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw)** — a Rust AI-agent runtime (MIT/Apache-2.0 dual-licensed) that runs on the ZeroClaw host, installed via `cargo install`.
 - A **FastAPI bridge** (`bridge.py`) accepts HTTP POSTs from xiaozhi-server's LLM provider and translates them into **ACP (Agent Client Protocol) JSON-RPC 2.0 over stdio** against a long-running `zeroclaw acp` child process.
 - The LLM is **[Qwen3-30B-A3B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-30B-A3B-Instruct-2507)** — a 30.5 B-param MoE with 3.3 B active per token — accessed via **OpenRouter**.
 - Persona lives in Markdown files under `~/.zeroclaw/workspace/` (`SOUL.md`, `IDENTITY.md`, `MEMORY.md`, `AGENTS.md`, and optionally `USER.md`). These are hot-read — no rebuild to change the persona.
@@ -55,7 +55,7 @@ See [protocols.md](./protocols.md#acp) for the ACP wire format.
 
 ## The bridge — `bridge.py`
 
-Lives at `<RPI_BRIDGE_PATH>/bridge.py`, runs under systemd (`zeroclaw-bridge.service`).
+Lives at `<BRIDGE_PATH>/bridge.py`, runs under systemd (`zeroclaw-bridge.service`).
 
 **Responsibilities:**
 

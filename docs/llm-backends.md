@@ -14,7 +14,7 @@ and the matching block under `LLM:` in `.config.yaml`.
 | | OpenAI-compatible API | Ollama (local) | ZeroClaw |
 |---|---|---|---|
 | **Provider key** | `OpenAICompat` | `OpenAICompat` | `ZeroClawLLM` |
-| **Runs where** | Cloud (OpenRouter, OpenAI, etc.) | Local GPU on Docker host | RPi or Docker host |
+| **Runs where** | Cloud (OpenRouter, OpenAI, etc.) | Local GPU on Docker host | ZeroClaw host or Docker host |
 | **Latency** | 300-800 ms (network-bound) | 200-600 ms (GPU-bound) | 500-1500 ms (agent overhead) |
 | **Cost** | Pay-per-token | Free (electricity + hardware) | Free (electricity + hardware) |
 | **Privacy** | Tokens sent to cloud provider | Fully local, nothing leaves LAN | Fully local (if Ollama backend) |
@@ -96,14 +96,14 @@ LLM:
 
 ## 3. ZeroClaw (advanced)
 
-The `ZeroClawLLM` provider routes through the FastAPI bridge on the RPi
+The `ZeroClawLLM` provider routes through the FastAPI bridge on the ZeroClaw host
 into a long-running ZeroClaw agent process. ZeroClaw handles its own LLM
 calls (to OpenRouter, Ollama, or any supported provider), persistent memory,
 tool execution, and MCP integration.
 
 ### Prerequisites
 
-- ZeroClaw installed on the RPi (or another host): `cargo install zeroclaw`.
+- ZeroClaw installed on the ZeroClaw host (or another host): `cargo install zeroclaw`.
 - `bridge.py` running as a systemd service (`zeroclaw-bridge.service`).
 - Persona configured in `~/.zeroclaw/workspace/` (`SOUL.md`, `IDENTITY.md`, etc.).
 
@@ -116,7 +116,7 @@ selected_module:
 LLM:
   ZeroClawLLM:
     type: zeroclaw
-    url: http://<RPI_IP>:8080/api/message/stream
+    url: http://<ZEROCLAW_HOST>:8080/api/message/stream
     channel: dotty
     timeout: 90
     system_prompt: |

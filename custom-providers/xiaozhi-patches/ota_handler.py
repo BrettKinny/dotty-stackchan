@@ -321,7 +321,7 @@ class OTAHandler(BaseHandler):
                         # vision_explain happens to live on the same server as OTA AND
                         # contains the literal substring "/mcp/vision/explain". In
                         # deployments where vision is offloaded (e.g. our setup —
-                        # vision_explain points at the RPi bridge at
+                        # vision_explain points at the ZeroClaw host bridge at
                         # `/api/vision/explain`), the replace is a no-op and the
                         # device gets handed back the vision endpoint as a download
                         # URL, returning 405.

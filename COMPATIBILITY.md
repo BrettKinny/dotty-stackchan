@@ -58,7 +58,7 @@ compatibility matrix"). When adopted, the plan is:
 2. **Back up before upgrading.** Run `scripts/backup.sh` (or the equivalent
    manual steps) to snapshot config, persona files, and bridge state.
 3. **Upgrade one component at a time.** Validate with a round-trip test
-   (`curl -X POST http://<RPI_IP>:8080/api/message ...`) before moving to the
+   (`curl -X POST http://<ZEROCLAW_HOST>:8080/api/message ...`) before moving to the
    next component.
 4. **Tail logs during validation.** Watch both the xiaozhi-server container
    logs and the bridge journal simultaneously to catch mismatches early.

@@ -20,14 +20,14 @@ I need you to set up infrastructure across two remote machines for an M5Stack St
 
 ## What you're building
 
-A self-hosted voice pipeline that routes StackChan's audio through a xiaozhi-esp32-server (ASR + TTS) running on a Linux Docker host, with all AI processing forwarded to a ZeroClaw instance running on a Raspberry Pi.
+A self-hosted voice pipeline that routes StackChan's audio through a xiaozhi-esp32-server (ASR + TTS) running on a Linux Docker host, with all AI processing forwarded to a ZeroClaw instance running on a separate host.
 
 ## Discovery steps (do these first)
 
-1. Run `tailscale status` (if you use Tailscale) to find the hostnames and IPs for both the Docker host and the RPi. Identify which is which from the OS/hostname.
+1. Run `tailscale status` (if you use Tailscale) to find the hostnames and IPs for both the Docker host and the ZeroClaw host. Identify which is which from the OS/hostname.
 2. SSH into the Docker host. Find its LAN IP (not Tailscale IP) — StackChan will need this because it's on WiFi, not Tailnet. Check `ip addr` or `hostname -I`. Also confirm Docker is available and pick a directory for the xiaozhi-server install (e.g. `/opt/xiaozhi-server/` or `/srv/xiaozhi-server/`).
-3. SSH into the RPi. Find its LAN IP similarly. Confirm ZeroClaw is running — check `zeroclaw status` or look for the gateway process on port 18789. Note the exact port and any API endpoints it exposes. Also check what Python version is available and whether pip/fastapi are already installed.
-4. Test basic connectivity: from the Docker host, can you reach the RPi's LAN IP? You may need to test this from inside a throwaway container (`docker run --rm alpine ping RPI_LAN_IP`).
+3. SSH into the ZeroClaw host. Find its LAN IP similarly. Confirm ZeroClaw is running — check `zeroclaw status` or look for the gateway process on port 18789. Note the exact port and any API endpoints it exposes. Also check what Python version is available and whether pip/fastapi are already installed.
+4. Test basic connectivity: from the Docker host, can you reach the ZeroClaw host's LAN IP? You may need to test this from inside a throwaway container (`docker run --rm alpine ping ZEROCLAW_LAN_IP`).
 
 ## Docker host setup (xiaozhi-esp32-server)
 
@@ -38,7 +38,7 @@ On the Docker host:
 3. Download the SenseVoiceSmall ASR model (`model.pt`, ~250MB) into `models/SenseVoiceSmall/`. Try ModelScope first: `https://www.modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt`. If that's slow, use HuggingFace: `https://huggingface.co/FunAudioLLM/SenseVoiceSmall/resolve/main/model.pt`. Verify the file is >200MB after download.
 4. Create the custom ZeroClaw LLM provider at `repo/main/xiaozhi-server/core/providers/llm/zeroclaw/zeroclaw.py` plus `__init__.py`. The provider:
    - Extends `LLMProviderBase` from `core.providers.llm.base`
-   - Sends HTTP POST to the ZeroClaw bridge on the RPi
+   - Sends HTTP POST to the ZeroClaw bridge on the ZeroClaw host
    - Passes the user's transcribed text plus a system prompt that enforces emoji-first responses for StackChan face animations
    - Handles connection errors gracefully with emoji-prefixed fallback messages
    - Implements both `response()` and `response_stream()` (stream can just yield the non-stream result for now)
@@ -49,7 +49,7 @@ On the Docker host:
    - `selected_module.TTS: EdgeTTS`
    - `selected_module.VAD: SileroVAD`
    - EdgeTTS voice: `en-AU-WilliamNeural`
-   - ZeroClaw URL pointing to RPi LAN IP port 8080
+   - ZeroClaw URL pointing to the ZeroClaw host's LAN IP, port 8080
    - A system prompt that identifies as a desktop robot assistant. Enforce emoji-first responses. Keep TTS-friendly (short sentences).
    - VAD silence duration 700ms (so it doesn't cut off slow speakers)
    - Use the actual LAN IPs you discovered, not placeholders.
@@ -62,9 +62,9 @@ On the Docker host:
    - **Important**: Check the actual container's internal directory structure first before writing the volume mounts. Run `docker run --rm ghcr.io/xinnan-tech/xiaozhi-esp32-server:server_latest ls /opt/xiaozhi-server/` (or wherever the app lives) to find the correct internal paths. The mount targets must match where the app actually loads providers from.
 7. Start the container, tail the logs, and confirm you see the WebSocket and OTA addresses in the output.
 
-## RPi setup (ZeroClaw HTTP bridge)
+## ZeroClaw host setup (ZeroClaw HTTP bridge)
 
-On the Raspberry Pi:
+On the ZeroClaw host:
 
 1. First, understand how ZeroClaw actually accepts messages. Check the running config, look at the gateway's API, examine any webchat or REST endpoints. The bridge needs to translate a simple HTTP POST into whatever ZeroClaw actually expects. Don't assume the API shape — discover it.
 2. Create `~/zeroclaw-bridge/bridge.py` — a FastAPI app that:

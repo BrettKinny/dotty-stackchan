@@ -4,7 +4,7 @@
 # on one Docker host. The two services talk over a shared Docker network;
 # no real IPs needed between them.
 #
-# For the multi-host (Docker host + RPi) deployment, see docs/advanced/multi-host.md.
+# For the multi-host (Docker host + ZeroClaw host) deployment, see docs/advanced/multi-host.md.
 #
 # ─── Prerequisites ──────────────────────────────────────────────────────
 #

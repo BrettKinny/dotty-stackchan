@@ -27,8 +27,8 @@ modifications — please open an issue first to discuss the approach.
   deployment.
 
 - **Check for leaked placeholders or real values:**
-  - Files in this repo must use placeholders (`<XIAOZHI_HOST>`, `<RPI_IP>`,
-    `<RPI_USER>`, `<ROBOT_NAME>`, etc.) everywhere a real IP, hostname,
+  - Files in this repo must use placeholders (`<XIAOZHI_HOST>`, `<ZEROCLAW_HOST>`,
+    `<ZEROCLAW_USER>`, `<ROBOT_NAME>`, etc.) everywhere a real IP, hostname,
     username, or filesystem path would appear. See the "Configuring for your
     environment" table in `README.md` for the full list.
   - **Never commit real IPs, hostnames, usernames, API keys, or filesystem
@@ -47,7 +47,7 @@ Changes tend to fall into one of these areas:
 | Area | Files | Notes |
 |---|---|---|
 | **Voice pipeline (xiaozhi-server)** | `docker-compose.yml`, `.config.yaml`, custom providers (`zeroclaw.py`, `edge_stream.py`, `fun_local.py`, `piper_local.py`) | These run inside the xiaozhi-server Docker container on whatever Linux Docker host you've chosen. |
-| **Bridge** | `bridge.py`, `zeroclaw-bridge.service`, `bridge/` | Runs on the RPi. The `bridge/` directory contains the Dockerfile, compose file, and deployment docs. |
+| **Bridge** | `bridge.py`, `zeroclaw-bridge.service`, `bridge/` | Runs on the ZeroClaw host. The `bridge/` directory contains the Dockerfile, compose file, and deployment docs. |
 | **Documentation** | `README.md`, `SETUP.md`, `docs/`, `session-prompt.md` | Docs under `docs/` follow conventions listed in `docs/README.md` (TL;DR at top, tables over prose, freshness footer). |
 | **CI** | `.github/workflows/` | Currently just the bridge Docker image build. |
 
@@ -67,8 +67,8 @@ forked and configured per-deployment. Every value that varies between
 deployments must use a placeholder:
 
 - `<XIAOZHI_HOST>`, `<XIAOZHI_USER>`, `<XIAOZHI_HOSTNAME>`, `<XIAOZHI_PATH>`
-- `<RPI_IP>`, `<RPI_USER>`, `<RPI_HOME>`, `<RPI_BRIDGE_PATH>`
-- `<RPI_ZEROCLAW_BIN>`, `<RPI_ZEROCLAW_CFG>`
+- `<ZEROCLAW_HOST>`, `<ZEROCLAW_USER>`, `<ZEROCLAW_HOME>`, `<BRIDGE_PATH>`
+- `<ZEROCLAW_BIN>`, `<ZEROCLAW_CFG>`
 - `<YOUR_NAME>`, `<ROBOT_NAME>`
 
 Port numbers (`8000`, `8003`, `8080`, `18789`, `42617`) are product-generic

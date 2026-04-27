@@ -11,7 +11,7 @@ One-page reference for every cross-layer signal in the Dotty stack.
 
 1. **StackChan firmware** -- ESP32-S3 (m5stack/StackChan). The physical robot.
 2. **xiaozhi-esp32-server** -- Docker on a Linux host. Voice I/O pipeline (ASR, TTS, VAD, emotion parsing).
-3. **zeroclaw-bridge** -- FastAPI on RPi. LLM brain interface (HTTP to ZeroClaw ACP-over-stdio).
+3. **zeroclaw-bridge** -- FastAPI on ZeroClaw host. LLM brain interface (HTTP to ZeroClaw ACP-over-stdio).
 
 ---
 

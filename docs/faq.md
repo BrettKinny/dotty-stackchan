@@ -9,7 +9,7 @@ description: Frequently asked questions about hardware, setup, and configuration
 
 ### What hardware do I need?
 
-The verified setup is an **M5Stack CoreS3** mounted in the **M5Stack StackChan servo kit** (2x SG90 servos for pan/tilt, 12 RGB LEDs, 3D-printed chassis). You also need a Docker-capable host on your LAN (a spare PC or any Linux box with Docker) and a Raspberry Pi for the agent brain.
+The verified setup is an **M5Stack CoreS3** mounted in the **M5Stack StackChan servo kit** (2x SG90 servos for pan/tilt, 12 RGB LEDs, 3D-printed chassis). You also need a Docker-capable host on your LAN (a spare PC or any Linux box with Docker) and a ZeroClaw host for the agent brain.
 
 See [hardware-support.md](./hardware-support.md) for the full spec table and support tiers.
 
@@ -19,7 +19,7 @@ See [hardware-support.md](./hardware-support.md) for the full spec table and sup
 
 Yes. The LLM is pluggable at two levels:
 
-1. **At the ZeroClaw level** (the brain): change the `default_model` and provider in ZeroClaw's `config.toml` on the RPi. ZeroClaw supports OpenAI-compatible APIs, Anthropic, Gemini, Ollama, and 17+ other backends. Restart the bridge after changing.
+1. **At the ZeroClaw level** (the brain): change the `default_model` and provider in ZeroClaw's `config.toml` on the ZeroClaw host. ZeroClaw supports OpenAI-compatible APIs, Anthropic, Gemini, Ollama, and 17+ other backends. Restart the bridge after changing.
 2. **At the xiaozhi-server level**: if you want to bypass ZeroClaw entirely, swap the `selected_module` for LLM in `data/.config.yaml` to any of the built-in providers (OpenAI-compatible, Ollama, Dify, FastGPT, etc.). You lose ZeroClaw's agent features (memory, tools, persona files) but gain a simpler stack.
 
 The reference config uses Qwen3-30B-A3B via OpenRouter. Any model that handles English well and can follow emoji-prefix instructions will work. Larger models give better persona adherence; smaller models respond faster.
@@ -43,7 +43,7 @@ With Piper TTS and a local Ollama model, nothing leaves your LAN. The trade-off 
 **Hardware (one-time):**
 - M5Stack StackChan kit: check current pricing on the [M5Stack store](https://shop.m5stack.com/). Expect roughly $60-80 USD for the CoreS3 + servo kit.
 - Docker host: whatever you already have. Any machine that can run Docker and has a few GB of RAM.
-- Raspberry Pi: any Pi 3 or later. The ZeroClaw binary is ~9 MB and uses <5 MB RAM.
+- ZeroClaw host: any Pi 3 or later. The ZeroClaw binary is ~9 MB and uses <5 MB RAM.
 
 **Recurring:**
 - Electricity for the hosts (negligible for most home setups).
@@ -72,7 +72,7 @@ This is a self-hosted system — you control the prompt, the model, and every lo
 
 ### Can I change the robot's personality?
 
-Yes. The persona is defined in Markdown files on the RPi:
+Yes. The persona is defined in Markdown files on the ZeroClaw host:
 
 - `~/.zeroclaw/workspace/SOUL.md` — core identity and values.
 - `~/.zeroclaw/workspace/IDENTITY.md` — name, backstory, role.

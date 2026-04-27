@@ -8,7 +8,7 @@ description: xiaozhi-esp32-server pipeline stages -- VAD, ASR, LLM proxy, and TT
 ## TL;DR
 
 - **Server** is `xinnan-tech/xiaozhi-esp32-server` running in Docker on a Linux host. Plugin-based: each of VAD, ASR, LLM, TTS, Memory, Intent is a swappable provider picked via `data/.config.yaml`'s `selected_module:` block.
-- Our live pipeline: **SileroVAD** (speech-end detection) → **FunASR SenseVoiceSmall** (ASR, pinned to English via `fun_local.py` patch) → **ZeroClawLLM** custom provider (HTTP POST to RPi bridge) → **LocalPiper** en_GB-cori-medium (TTS, rolled out 2026-04-24; EdgeTTS rollback path intact).
+- Our live pipeline: **SileroVAD** (speech-end detection) → **FunASR SenseVoiceSmall** (ASR, pinned to English via `fun_local.py` patch) → **ZeroClawLLM** custom provider (HTTP POST to ZeroClaw host bridge) → **LocalPiper** en_GB-cori-medium (TTS, rolled out 2026-04-24; EdgeTTS rollback path intact).
 - **Emotion** is not a pipeline stage — it's extracted post-hoc from the LLM's emoji prefix and emitted as a separate WS frame. See [protocols.md](./protocols.md#emotion-protocol).
 - Custom providers are mounted into the container via Docker volumes at `/opt/xiaozhi-esp32-server/core/providers/{asr,tts,llm}/…`. They override the baked-in files at module-import time.
 - **Lots of upstream features are unused** — voiceprint speaker-ID, VLLM vision, knowledge-base RAG, PowerMem, multi-user routing. See [latent-capabilities.md](./latent-capabilities.md#voice-pipeline-unused).
@@ -64,7 +64,7 @@ Deployment: mounted as a file-level override at `/opt/xiaozhi-esp32-server/core/
 
 ### LLM — custom ZeroClawLLM provider
 
-Not really an LLM — it's a proxy. `zeroclaw.py` (mounted at `/opt/xiaozhi-esp32-server/core/providers/llm/zeroclaw/`) implements xiaozhi's LLM provider contract but the `response()` method is a thin HTTP POST to `http://<RPI_IP>:8080/api/message`.
+Not really an LLM — it's a proxy. `zeroclaw.py` (mounted at `/opt/xiaozhi-esp32-server/core/providers/llm/zeroclaw/`) implements xiaozhi's LLM provider contract but the `response()` method is a thin HTTP POST to `http://<ZEROCLAW_HOST>:8080/api/message`.
 
 The actual inference happens on the Pi, in ZeroClaw, calling OpenRouter. See [brain.md](./brain.md).
 

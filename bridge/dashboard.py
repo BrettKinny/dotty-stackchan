@@ -317,7 +317,7 @@ async def dashboard(request: Request) -> Any:
 
 @router.get("/cards", response_class=HTMLResponse, include_in_schema=False)
 async def cards(request: Request) -> Any:
-    rpi_uptime = time.time() - _START_TIME
+    bridge_uptime = time.time() - _START_TIME
 
     xiaozhi_ota_ok, xiaozhi_ws_ok = await asyncio.gather(
         _tcp_reachable(XIAOZHI_HOST, XIAOZHI_OTA_PORT),
@@ -355,8 +355,8 @@ async def cards(request: Request) -> Any:
     cards_data = [
         {"name": "StackChan", "kind": "robot", "status": sc_status,
          "detail": sc_detail, "last_seen": sc_last},
-        {"name": "RPi (bridge)", "kind": "host", "status": "ok",
-         "detail": f"bridge up {_humanize_age(rpi_uptime)}", "last_seen": ""},
+        {"name": "ZeroClaw bridge", "kind": "host", "status": "ok",
+         "detail": f"bridge up {_humanize_age(bridge_uptime)}", "last_seen": ""},
         {"name": "xiaozhi-server", "kind": "host", "status": xiaozhi_status,
          "detail": xiaozhi_detail, "last_seen": ""},
     ]
@@ -1206,7 +1206,7 @@ async def metrics(request: Request) -> Any:
         {"label": "Disk /",
          "value": (f"{disk[0]} / {disk[1]} GiB" if disk else "n/a"),
          "warn": disk is not None and disk[1] and (disk[0] / disk[1]) > 0.85},
-        {"label": "RPi uptime",
+        {"label": "Host uptime",
          "value": _humanize_age(upt) if upt else "n/a",
          "warn": False},
         {"label": "Bridge uptime",

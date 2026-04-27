@@ -42,7 +42,7 @@ Privacy
 Resolver output is *only* a registry id + the data the registry
 already exposes. No raw voice fingerprints, no photos, no biometric-
 adjacent material. All decisions persist to a small audit table for
-tuning; that table never leaves the RPi.
+tuning; that table never leaves the ZeroClaw host.
 """
 from __future__ import annotations
 

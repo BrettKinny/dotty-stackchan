@@ -16,7 +16,7 @@ LLM verbatim. Structured fields (`birthdate`, `calendar_prefix`,
 
 Reload semantics: the registry stat-checks the YAML file on every
 public access. If mtime has moved, it re-parses. Cheap; lets you edit
-household.yaml on the running RPi without a bridge restart.
+household.yaml on the running ZeroClaw host without a bridge restart.
 
 If PyYAML is missing or the file is unreadable/malformed, the registry
 starts empty rather than crashing the bridge. An empty registry is a

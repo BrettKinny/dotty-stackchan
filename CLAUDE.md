@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Your self-hosted StackChan robot assistant. A fully self-hosted voice stack for the M5Stack **StackChan** desktop robot. The default persona is "Dotty" (customizable via `make setup`). Voice I/O routes through a self-hosted xiaozhi-esp32-server; brain is ZeroClaw on the RPi. No cloud AI services — fully self-hosted except for the LLM call (replaceable with local Ollama).
+Your self-hosted StackChan robot assistant. A fully self-hosted voice stack for the M5Stack **StackChan** desktop robot. The default persona is "Dotty" (customizable via `make setup`). Voice I/O routes through a self-hosted xiaozhi-esp32-server; brain is ZeroClaw on whatever Linux host you've chosen for it. No cloud AI services — fully self-hosted except for the LLM call (replaceable with local Ollama).
 
 ## Architecture
 
@@ -15,14 +15,14 @@ StackChan hardware → configured persona
 xiaozhi-esp32-server (Docker on a Linux host)
   ├─ ASR: FunASR SenseVoiceSmall (local, no cloud)
   ├─ TTS: LocalPiper (en_US-kristin-medium); EdgeTTS / StreamingEdgeTTS available as alternates
-  ├─ LLM: Custom ZeroClawLLM provider (proxies to RPi)
+  ├─ LLM: Custom ZeroClawLLM provider (proxies to ZeroClaw host)
   └─ Emotion: Parsed from emoji in LLM response text
        │  HTTP POST /api/message
        ▼
-zeroclaw-bridge (FastAPI on RPi, runs as root)
+zeroclaw-bridge (FastAPI on the ZeroClaw host)
   │  JSON-RPC 2.0 over stdio to a long-running `zeroclaw acp` child
   ▼
-ZeroClaw (the brain, on RPi)
+ZeroClaw (the brain, same host)
 ```
 
 See `README.md` for the full visual architecture and message-flow diagrams.
@@ -31,18 +31,18 @@ See `README.md` for the full visual architecture and message-flow diagrams.
 
 - **Admin workstation** (this machine): Development/admin workstation. Runs Claude Code sessions.
 - **Docker host**: runs xiaozhi-esp32-server. Any Linux box with Docker works. Reachable on the LAN (and optionally Tailscale).
-- **RPi (DietPi)**: Runs ZeroClaw + the HTTP bridge. Reachable via Tailscale and LAN.
+- **ZeroClaw host**: Runs ZeroClaw + the HTTP bridge (any Linux host with a working `zeroclaw` install). Reachable on the LAN (and optionally Tailscale).
 - **StackChan**: On LAN WiFi only (not on Tailnet). Needs LAN IPs for OTA and WebSocket.
 
 SSH access is via Tailscale hostnames. Discover actual Tailscale hostnames at runtime with `tailscale status`.
 
-This repo uses placeholders (`<XIAOZHI_HOST>`, `<RPI_IP>`, `<RPI_USER>`, `<XIAOZHI_PATH>`, etc.) everywhere real values would normally appear — see the "Configuring for your environment" section of `README.md` for the full list.
+This repo uses placeholders (`<XIAOZHI_HOST>`, `<ZEROCLAW_HOST>`, `<ZEROCLAW_USER>`, `<XIAOZHI_PATH>`, etc.) everywhere real values would normally appear — see the "Configuring for your environment" section of `README.md` for the full list.
 
 ## Key Paths
 
 - **xiaozhi-server install dir** (on the Docker host): `<XIAOZHI_PATH>` (e.g. `/opt/xiaozhi-server/`)
 - **Custom LLM provider** (on the Docker host): mounted into container at `/opt/xiaozhi-server/core/providers/llm/zeroclaw/`
-- **RPi ZeroClaw bridge**: `<RPI_BRIDGE_PATH>` (e.g. `~/zeroclaw-bridge/`)
+- **ZeroClaw bridge install dir**: `<BRIDGE_PATH>` (e.g. `~/zeroclaw-bridge/`)
 - **This project dir**: wherever you cloned `dotty-stackchan`
 
 ## Ports
@@ -51,9 +51,9 @@ This repo uses placeholders (`<XIAOZHI_HOST>`, `<RPI_IP>`, `<RPI_USER>`, `<XIAOZ
 |---------|------|------|----------|
 | xiaozhi WebSocket | Docker host LAN IP | 8000 | ws:// |
 | xiaozhi OTA/HTTP | Docker host LAN IP | 8003 | http:// |
-| ZeroClaw bridge | RPi LAN IP | 8080 | http:// |
-| ZeroClaw gateway (ws) | RPi localhost | 18789 | ws:// |
-| ZeroClaw gateway (web UI) | RPi localhost | 42617 | http:// |
+| ZeroClaw bridge | ZeroClaw host LAN IP | 8080 | http:// |
+| ZeroClaw gateway (ws) | ZeroClaw host localhost | 18789 | ws:// |
+| ZeroClaw gateway (web UI) | ZeroClaw host localhost | 42617 | http:// |
 
 ## Config Files to Know
 
@@ -63,7 +63,7 @@ This repo uses placeholders (`<XIAOZHI_HOST>`, `<RPI_IP>`, `<RPI_USER>`, `<XIAOZ
 - `custom-providers/openai_compat/openai_compat.py` — OpenAI-compatible LLM provider (alternative to ZeroClaw).
 - `custom-providers/piper_local/piper_local.py` — local Piper TTS provider (offline alternative to EdgeTTS).
 - `custom-providers/asr/fun_local.py` — patched FunASR provider. Adds a `language` config key (upstream hardcodes `"auto"`, which mis-detects Korean/Japanese on unclear English). Mounted as a file-level override over the upstream provider.
-- `bridge.py` on RPi — the HTTP↔ZeroClaw translator (ACP-over-stdio client).
+- `bridge.py` on the ZeroClaw host — the HTTP↔ZeroClaw translator (ACP-over-stdio client).
 - `personas/default.md` — default robot persona prompt (swappable).
 - `session-prompt.md` — Claude Code session prompt for infrastructure setup.
 
@@ -100,8 +100,8 @@ Run `make help` for the full list. Key targets:
 - **Change system prompt**: Edit `data/.config.yaml` on the Docker host, top-level `prompt:` block. Restart container.
 - **Check logs**: `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs -f xiaozhi-esp32-server'`
 - **Restart pipeline**: `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'cd <XIAOZHI_PATH> && docker compose restart'`
-- **Test bridge**: `curl http://<RPI_IP>:8080/health`
-- **Test full round-trip**: `curl -X POST http://<RPI_IP>:8080/api/message -H 'Content-Type: application/json' -d '{"content":"hello"}'`
+- **Test bridge**: `curl http://<ZEROCLAW_HOST>:8080/health`
+- **Test full round-trip**: `curl -X POST http://<ZEROCLAW_HOST>:8080/api/message -H 'Content-Type: application/json' -d '{"content":"hello"}'`
 
 ## Firmware iteration
 

@@ -55,7 +55,7 @@ Symptom-first lookup table. The [README.md Troubleshooting section](../README.md
 **Symptom:** The StackChan boots and connects to WiFi, but never responds to voice. May show a face but no indication of listening.
 
 **Fix:**
-1. Check the bridge health endpoint: `curl http://<RPI_IP>:8080/health`. If the bridge is down, restart it.
+1. Check the bridge health endpoint: `curl http://<ZEROCLAW_HOST>:8080/health`. If the bridge is down, restart it.
 2. Check xiaozhi-server logs: `docker logs -f xiaozhi-esp32-server` on the Docker host. Look for connection attempts from the device.
 3. Verify the device's OTA URL hasn't changed. After a firmware update, re-enter the OTA URL (`http://<XIAOZHI_HOST>:8003/xiaozhi/ota/`) in the device's Advanced Options if needed.
 4. Open the browser test page (`repo/main/xiaozhi-server/test/test_page.html`) and point it at `ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/`. If the browser page works but the device doesn't, it's a device-side configuration issue.
@@ -121,11 +121,11 @@ Symptom-first lookup table. The [README.md Troubleshooting section](../README.md
 **Symptom:** The robot says something like "no response" or goes silent after you speak. xiaozhi-server logs show a failed HTTP POST to the bridge.
 
 **Fix:**
-1. Check bridge status on the RPi:
+1. Check bridge status on the ZeroClaw host:
    - Bare metal: `systemctl status zeroclaw-bridge`
    - Docker: `docker ps | grep zeroclaw-bridge`
-2. Test the health endpoint: `curl http://<RPI_IP>:8080/health`
-3. If the bridge is running but unreachable, check firewall rules on the RPi. Port 8080 must be open for LAN traffic.
+2. Test the health endpoint: `curl http://<ZEROCLAW_HOST>:8080/health`
+3. If the bridge is running but unreachable, check firewall rules on the ZeroClaw host. Port 8080 must be open for LAN traffic.
 4. If the bridge crashes on startup, check logs for a ZeroClaw binary issue: the bridge spawns `zeroclaw acp` as a child process. If the binary is missing or the config is invalid, the bridge won't start.
 
 ---

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploy the bridge code (top-level bridge.py + bridge/ package) from this repo
-# to the RPi running zeroclaw-bridge. Designed for both manual ad-hoc use and
-# the cloud post-commit auto-sync routine.
+# to the host running zeroclaw-bridge. Designed for both manual ad-hoc use and
+# post-commit auto-sync routines.
 #
 # Why a script instead of inline routine logic: the prior cloud routine pushed
 # only bridge.py and missed new bridge/*.py modules — bit us with
@@ -10,17 +10,17 @@
 # tracked-file list, so any newly tracked module is auto-included.
 #
 # Usage:
-#   bash scripts/deploy-bridge-to-rpi.sh
+#   BRIDGE_HOST=user@host bash scripts/deploy-bridge.sh
 #
 # Environment overrides:
-#   RPI_HOST    SSH user@host of the RPi   (default: dietpi@192.168.1.54)
-#   REMOTE_DIR  Bridge install dir on RPi  (default: /root/zeroclaw-bridge)
+#   BRIDGE_HOST  SSH user@host running zeroclaw-bridge (required)
+#   REMOTE_DIR   Bridge install dir on the host  (default: /root/zeroclaw-bridge)
 #
-# Requirements on the RPi: passwordless sudo for the SSH user (DietPi default).
+# Requirements on the host: passwordless sudo for the SSH user.
 
 set -euo pipefail
 
-RPI_HOST="${RPI_HOST:-dietpi@192.168.1.54}"
+BRIDGE_HOST="${BRIDGE_HOST:?set BRIDGE_HOST=user@host}"
 REMOTE_DIR="${REMOTE_DIR:-/root/zeroclaw-bridge}"
 TS="$(date +%Y%m%d-%H%M%S)"
 LOCAL_TGZ="$(mktemp -t dotty-bridge.XXXXXX.tgz)"
@@ -38,28 +38,28 @@ fi
 echo "Deploy set: ${#FILES[@]} files (HEAD $(git rev-parse --short HEAD))"
 
 # 2. SSH preflight — fail fast if creds / sudo broken.
-ssh -o BatchMode=yes -o ConnectTimeout=5 "$RPI_HOST" sudo -n true \
-    || { echo "ERROR: ssh+sudo preflight failed for $RPI_HOST" >&2; exit 1; }
+ssh -o BatchMode=yes -o ConnectTimeout=5 "$BRIDGE_HOST" sudo -n true \
+    || { echo "ERROR: ssh+sudo preflight failed for $BRIDGE_HOST" >&2; exit 1; }
 
-# 3. Pre-deploy snapshot on the RPi. Keep the last 3 deploy snapshots.
+# 3. Pre-deploy snapshot on the bridge host. Keep the last 3 deploy snapshots.
 #    Prune pipeline runs under `sudo sh -c` because /root/ isn't readable
-#    by the SSH user (dietpi) without sudo — bare `ls /root/...` would
+#    by a non-root SSH user without sudo — bare `ls /root/...` would
 #    "Permission denied" and kill the script under set -e + pipefail.
-ssh "$RPI_HOST" "
+ssh "$BRIDGE_HOST" "
     set -euo pipefail
     sudo cp -a $REMOTE_DIR ${REMOTE_DIR}.bak-deploy-$TS
     sudo sh -c \"ls -1dt ${REMOTE_DIR}.bak-deploy-* 2>/dev/null | tail -n +4 | xargs -r rm -rf\" || true
 "
 
-# 4. Pack + ship via cat (DietPi has no sftp-server / rsync server).
+# 4. Pack + ship via cat (avoids needing sftp-server / rsync on the host).
 tar -czf "$LOCAL_TGZ" "${FILES[@]}"
-cat "$LOCAL_TGZ" | ssh "$RPI_HOST" "cat > /tmp/dotty-bridge.tgz"
+cat "$LOCAL_TGZ" | ssh "$BRIDGE_HOST" "cat > /tmp/dotty-bridge.tgz"
 
 # 5. Extract under root, chmod the deployed paths only, restart, poll until
 #    the new uvicorn prints "Application startup complete" or until 30 s
 #    elapses. Bridge cold-start runs face_db / face_recognizer / perception
 #    consumers / piper warm-up, typically 8–15 s — a fixed sleep races it.
-ssh "$RPI_HOST" "
+ssh "$BRIDGE_HOST" "
     set -euo pipefail
     sudo tar -xzf /tmp/dotty-bridge.tgz -C $REMOTE_DIR \
         --owner=root --group=root --no-same-owner
@@ -89,10 +89,10 @@ ssh "$RPI_HOST" "
 "
 
 # 6. md5 round-trip on the deploy set — belt-and-suspenders against silent
-#    transport corruption. /root/ isn't readable by dietpi without sudo,
+#    transport corruption. /root/ isn't readable by a non-root SSH user without sudo,
 #    so the cd + md5sum runs under `sudo bash -c`.
 LOCAL_MD5="$(md5sum "${FILES[@]}" | sort -k2)"
-REMOTE_MD5="$(ssh "$RPI_HOST" "sudo bash -c 'cd $REMOTE_DIR && md5sum $(printf '%q ' "${FILES[@]}")'" | sort -k2)"
+REMOTE_MD5="$(ssh "$BRIDGE_HOST" "sudo bash -c 'cd $REMOTE_DIR && md5sum $(printf '%q ' "${FILES[@]}")'" | sort -k2)"
 if [[ "$LOCAL_MD5" != "$REMOTE_MD5" ]]; then
     echo "ERROR: md5 mismatch after deploy" >&2
     diff <(echo "$LOCAL_MD5") <(echo "$REMOTE_MD5") >&2 || true

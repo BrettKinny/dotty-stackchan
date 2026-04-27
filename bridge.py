@@ -2869,7 +2869,7 @@ if _configure_dashboard is not None:
 # persona file, or amend the MCP tool allowlist without an SSH session.
 #
 # Paths and systemd unit names are env-configurable (defaults match the
-# documented RPi layout):
+# documented ZeroClaw host layout):
 #   ZEROCLAW_VOICE_CFG       - voice daemon config.toml
 #   ZEROCLAW_VOICE_UNIT      - voice daemon's systemd unit (the bridge)
 #   ZEROCLAW_DISCORD_CFG     - optional secondary daemon config.toml

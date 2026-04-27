@@ -11,7 +11,7 @@ typical hobby project; when Kid Mode is active the threat model escalates
 further because children become the audience:
 
 - **Voice pipeline exposure:** ASR transcripts, LLM prompts, and TTS audio
-  traverse the LAN between the device, the Docker host, and the RPi. An
+  traverse the LAN between the device, the Docker host, and the ZeroClaw host. An
   attacker on the LAN could intercept or inject traffic.
 - **Kid Mode safety:** When Kid Mode is active, children are the intended
   audience. Prompt injection or jailbreaks that bypass the content-safety

@@ -3,7 +3,7 @@ server:
   port: 8000
   http_port: 8003
   websocket: ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/
-  vision_explain: http://<RPI_IP>:8080/api/vision/explain
+  vision_explain: http://<ZEROCLAW_HOST>:8080/api/vision/explain
   timezone_offset: +10
 
 log:
@@ -38,7 +38,7 @@ prompt: |
 
   Voice and persona:
   - Warm, competent, a little bit playful.
-  - Your brain runs on ZeroClaw on the Raspberry Pi; voice I/O runs on xiaozhi-server on a Docker host.
+  - Your brain runs on ZeroClaw on the ZeroClaw host; voice I/O runs on xiaozhi-server on a Docker host.
 
 VAD:
   SileroVAD:
@@ -96,7 +96,7 @@ TTS:
 LLM:
   ZeroClawLLM:
     type: zeroclaw
-    url: http://<RPI_IP>:8080/api/message/stream
+    url: http://<ZEROCLAW_HOST>:8080/api/message/stream
     channel: dotty
     timeout: 90
     system_prompt: |

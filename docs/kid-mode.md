@@ -40,7 +40,7 @@ Every voice turn passes through three independent layers before reaching the
 speaker. Each layer reinforces the same rules so that a failure in one layer
 is caught by the next.
 
-### Layer 1 -- ZeroClaw Agent Prompt (RPi)
+### Layer 1 -- ZeroClaw Agent Prompt (ZeroClaw host)
 
 The ZeroClaw agent's own persona prompt sets the baseline: stay cheerful,
 age-appropriate, begin every reply with an emoji. This is the "inner" system
@@ -63,7 +63,7 @@ prompt: |
     markdown, no code blocks.
 ```
 
-### Layer 3 -- Bridge Prefix + Suffix Sandwich (RPi, `bridge.py`)
+### Layer 3 -- Bridge Prefix + Suffix Sandwich (ZeroClaw host, `bridge.py`)
 
 This is the strongest enforcement layer. Every turn on the `stackchan`
 channel is wrapped in a prefix and a suffix before being sent to the LLM:

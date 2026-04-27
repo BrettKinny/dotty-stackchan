@@ -106,7 +106,7 @@ Now you can copy the encrypted `api_key` line directly from the voice `config.to
 
 ## systemd units
 
-Two units, one per daemon. Both run as the same user as your single-daemon setup (typically `<RPI_USER>` or root, depending on how you set up the bridge originally).
+Two units, one per daemon. Both run as the same user as your single-daemon setup (typically `<ZEROCLAW_USER>` or root, depending on how you set up the bridge originally).
 
 `/etc/systemd/system/zeroclaw-bridge.service` (voice — unchanged from single-daemon setup):
 
@@ -117,11 +117,11 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-WorkingDirectory=<RPI_BRIDGE_PATH>
-ExecStart=<RPI_BRIDGE_PATH>.venv/bin/python bridge.py
+WorkingDirectory=<BRIDGE_PATH>
+ExecStart=<BRIDGE_PATH>.venv/bin/python bridge.py
 Restart=on-failure
 RestartSec=2
-Environment=ZEROCLAW_CONFIG_DIR=<RPI_HOME>.zeroclaw
+Environment=ZEROCLAW_CONFIG_DIR=<ZEROCLAW_HOME>.zeroclaw
 
 [Install]
 WantedBy=multi-user.target
@@ -136,7 +136,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=<RPI_HOME>.cargo/bin/zeroclaw daemon --config-dir <RPI_HOME>.zeroclaw-discord
+ExecStart=<ZEROCLAW_HOME>.cargo/bin/zeroclaw daemon --config-dir <ZEROCLAW_HOME>.zeroclaw-discord
 Restart=on-failure
 RestartSec=2
 

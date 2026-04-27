@@ -182,7 +182,7 @@ Once the device connects, run through:
 2. **Voice round-trip** — speak a simple phrase and confirm ASR → LLM → TTS returns audio to the device.
 3. **MCP tool call** — send a test instruction through the bridge:
    ```bash
-   curl -X POST http://<RPI_IP>:8080/api/message \
+   curl -X POST http://<ZEROCLAW_HOST>:8080/api/message \
      -H 'Content-Type: application/json' \
      -d '{"content":"Turn your head to the right"}'
    ```

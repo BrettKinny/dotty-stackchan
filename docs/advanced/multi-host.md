@@ -1,6 +1,6 @@
-# Multi-host deployment (Docker host + Raspberry Pi)
+# Multi-host deployment (Docker host + ZeroClaw host)
 
-The default setup in `compose.all-in-one.yml` runs everything on one Docker host. This document describes the **multi-host** split: xiaozhi-server on a Linux Docker host and ZeroClaw + the bridge on a separate Raspberry Pi.
+The default setup in `compose.all-in-one.yml` runs everything on one Docker host. This document describes the **multi-host** split: xiaozhi-server on a Linux Docker host and ZeroClaw + the bridge on a separate ZeroClaw host.
 
 ## When you'd want this
 
@@ -14,7 +14,7 @@ The default setup in `compose.all-in-one.yml` runs everything on one Docker host
 |---|---|---|
 | Compose file | `compose.all-in-one.yml` | `docker-compose.yml` (xiaozhi only) |
 | Bridge runs as | Docker container | systemd service on the Pi |
-| LLM URL in `.config.yaml` | `http://bridge:8080/api/message/stream` (Docker network) | `http://<RPI_IP>:8080/api/message/stream` (real LAN IP) |
+| LLM URL in `.config.yaml` | `http://bridge:8080/api/message/stream` (Docker network) | `http://<ZEROCLAW_HOST>:8080/api/message/stream` (real LAN IP) |
 | ZeroClaw install | On the Docker host, bind-mounted into the bridge container | Native on the Pi (`cargo install zeroclaw`) |
 | Network | Docker bridge network between services | LAN — xiaozhi-server reaches the Pi over WiFi/Ethernet |
 
@@ -24,13 +24,13 @@ The main [README](../../README.md) already documents this layout in detail. The 
 
 1. **Docker host:**
    - Clone this repo to `<XIAOZHI_PATH>`.
-   - Edit `data/.config.yaml`: set `LLM.ZeroClawLLM.url` to `http://<RPI_IP>:8080/api/message/stream`.
+   - Edit `data/.config.yaml`: set `LLM.ZeroClawLLM.url` to `http://<ZEROCLAW_HOST>:8080/api/message/stream`.
    - Run `docker compose up -d` (uses the standard `docker-compose.yml`).
 
-2. **Raspberry Pi:**
+2. **ZeroClaw host:**
    - Install ZeroClaw: `cargo install zeroclaw` (see [zeroclaw-labs/zeroclaw](https://github.com/zeroclaw-labs/zeroclaw)).
    - Configure the agent: edit `~/.zeroclaw/config.toml` with your LLM provider, API keys, and persona.
-   - Copy `bridge.py` and `bridge/requirements.txt` to `<RPI_BRIDGE_PATH>`.
+   - Copy `bridge.py` and `bridge/requirements.txt` to `<BRIDGE_PATH>`.
    - Create a venv and install deps: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`.
    - Install the systemd unit: copy `zeroclaw-bridge.service` to `/etc/systemd/system/`, edit paths, then `systemctl enable --now zeroclaw-bridge`.
 
@@ -40,7 +40,7 @@ The main [README](../../README.md) already documents this layout in detail. The 
 ## Migrating from all-in-one to multi-host
 
 1. Stop the all-in-one stack: `docker compose -f compose.all-in-one.yml down`.
-2. Edit `data/.config.yaml`: change the LLM URL from `http://bridge:8080/...` to `http://<RPI_IP>:8080/...`.
+2. Edit `data/.config.yaml`: change the LLM URL from `http://bridge:8080/...` to `http://<ZEROCLAW_HOST>:8080/...`.
 3. Set up the Pi as described above.
 4. Start xiaozhi-server alone: `docker compose up -d` (standard `docker-compose.yml`).
 

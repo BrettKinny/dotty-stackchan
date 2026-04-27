@@ -1,7 +1,7 @@
 # Household registry for Dotty.
 #
 # Copy this file to `~/.zeroclaw/household.yaml` (or wherever
-# HOUSEHOLD_YAML_PATH points) on the bridge host (the RPi) and edit the
+# HOUSEHOLD_YAML_PATH points) on the bridge host (the ZeroClaw host) and edit the
 # entries to match your household. The bridge hot-reloads on save — no
 # restart needed.
 #
@@ -29,7 +29,7 @@
 #                            ("[Sam]") so events get bucketed per person.
 #   voice_print_id           null until speaker-ID lands; reserved.
 #
-# Privacy: this file lives on the RPi, never egresses. The bridge sends
+# Privacy: this file lives on the ZeroClaw host, never egresses. The bridge sends
 # only the *compact_description* of the active person to the LLM (~200
 # chars). Birthdate is used locally for "birthday in N days" — never
 # sent to the LLM in raw ISO form.

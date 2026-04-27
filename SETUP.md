@@ -2,7 +2,7 @@
 
 Step-by-step for taking a fresh M5Stack StackChan from the box to a working,
 fully-self-hosted voice robot. The backend (xiaozhi-server on a Docker host,
-ZeroClaw bridge on the RPi) is assumed to already be deployed — if you're
+ZeroClaw bridge on a separate host) is assumed to already be deployed — if you're
 starting fresh, skim `README.md` first.
 
 > This guide assumes you've already substituted the placeholders from
@@ -20,10 +20,10 @@ second or two:
 curl -s http://<XIAOZHI_HOST>:8003/xiaozhi/ota/
 # Expect:  OTA接口运行正常，向设备发送的websocket地址是：ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/
 
-curl -s http://<RPI_IP>:8080/health
+curl -s http://<ZEROCLAW_HOST>:8080/health
 # Expect:  {"status":"ok","service":"zeroclaw-bridge","acp_running":true}
 
-curl -s -X POST http://<RPI_IP>:8080/api/message \
+curl -s -X POST http://<ZEROCLAW_HOST>:8080/api/message \
   -H 'content-type: application/json' \
   -d '{"content":"hi"}' | jq .
 # Expect:  {"response":"<emoji> <short reply>","session_id":"..."}
@@ -32,7 +32,7 @@ curl -s -X POST http://<RPI_IP>:8080/api/message \
 If any fails, fix the backend before dealing with the robot:
 
 - OTA down → `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs --tail 40 xiaozhi-esp32-server'`
-- Bridge down → `ssh <RPI_USER>@<RPI_IP> 'sudo journalctl -u zeroclaw-bridge -n 40 --no-pager'`
+- Bridge down → `ssh <ZEROCLAW_USER>@<ZEROCLAW_HOST> 'sudo journalctl -u zeroclaw-bridge -n 40 --no-pager'`
 
 ---
 
@@ -183,7 +183,7 @@ If the device isn't on the list after 60s:
    response starts with one of: 😊 😆 😢 😮 🤔 😠 😐 😍 😴.
 
 Expected first-audio latency: **~2–4s** after you stop speaking. If it's
-way slower, check `http://<RPI_IP>:8080/health` for `acp_running:true`
+way slower, check `http://<ZEROCLAW_HOST>:8080/health` for `acp_running:true`
 (a dead ACP child means the bridge is re-spawning on every request).
 
 ---
@@ -191,7 +191,7 @@ way slower, check `http://<RPI_IP>:8080/health` for `acp_running:true`
 ## 6. Tune if needed
 
 All of these are edits to `data/.config.yaml` on the Docker host followed by
-`docker compose restart`, except the LLM model (lives on the RPi).
+`docker compose restart`, except the LLM model (lives on the ZeroClaw host).
 
 | Complaint | Edit | File |
 |---|---|---|
@@ -199,7 +199,7 @@ All of these are edits to `data/.config.yaml` on the Docker host followed by
 | "It waits forever after I stop talking" | lower `min_silence_duration_ms` to 400 | same |
 | "I don't like the voice" | change `voice:` to any Edge Neural voice | `data/.config.yaml` → TTS.EdgeTTS / StreamingEdgeTTS |
 | "Responses are too long" | add "Keep replies under 20 words." to the persona | `data/.config.yaml` → `prompt:` block |
-| "Too slow to reply" | switch LLM model | `<RPI_ZEROCLAW_CFG>` on RPi → `default_model` |
+| "Too slow to reply" | switch LLM model | `<ZEROCLAW_CFG>` on ZeroClaw host → `default_model` |
 | "No facial expression change" | check response actually starts with a supported emoji (tail logs) | — |
 
 ---
@@ -240,9 +240,9 @@ It just isn't what M5Stack ships today.
 ## 9. When it's working: bookmark these
 
 - **Tail voice pipeline**: `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs -f xiaozhi-esp32-server'`
-- **Tail bridge**: `ssh <RPI_USER>@<RPI_IP> 'sudo journalctl -u zeroclaw-bridge -f'`
-- **Smoke test end-to-end**: `curl -X POST http://<RPI_IP>:8080/api/message -H 'content-type: application/json' -d '{"content":"test"}'`
+- **Tail bridge**: `ssh <ZEROCLAW_USER>@<ZEROCLAW_HOST> 'sudo journalctl -u zeroclaw-bridge -f'`
+- **Smoke test end-to-end**: `curl -X POST http://<ZEROCLAW_HOST>:8080/api/message -H 'content-type: application/json' -d '{"content":"test"}'`
 - **ZeroClaw's web UI** (for tweaking the agent persona directly):
-  `ssh -L 42617:127.0.0.1:42617 <RPI_USER>@<RPI_IP>` then open
+  `ssh -L 42617:127.0.0.1:42617 <ZEROCLAW_USER>@<ZEROCLAW_HOST>` then open
   http://localhost:42617 in a browser — pair with the code printed by
-  `sudo <RPI_ZEROCLAW_BIN> gateway get-paircode`.
+  `sudo <ZEROCLAW_BIN> gateway get-paircode`.

@@ -19,7 +19,7 @@ v0.1 is the first tagged release — early-feedback alpha. Everything in this li
 - **ASR noise filtering** -- rejects punctuation-only / sub-threshold utterances
 - **ACP session caching** -- long-lived sessions with idle/turn-count/wall-clock rotation
 - **Single-host deployment** -- `compose.all-in-one.yml` runs everything on one machine
-- **Multi-host deployment** -- documented split across Docker host + RPi
+- **Multi-host deployment** -- documented split across Docker host + ZeroClaw host
 - **`make setup` wizard** -- interactive first-run: name your robot, fetch models, validate config
 - **MkDocs Material docs site** -- architecture, protocols, quickstart, troubleshooting, FAQ
 - **Kid Mode channel routing** -- voice channels are kid-safe by default; the bridge's kid-mode sandwich (English-pin, emoji prefix, topic blocklist, jailbreak resistance) only applies when the inbound `channel` is in `VOICE_CHANNELS`, so messaging-platform channels (Discord, Telegram, etc.) skip it automatically. Pair with a separate ZeroClaw daemon on a more capable model for an adult-mode chat surface
@@ -58,7 +58,7 @@ Actively being worked on or partially complete. **Big push 2026-04-25 evening:**
 - **Dancing mode** -- shipped at v0.1; karaoke + LLM-initiated dance + Phase 2 vocal singing remain.
 - **Voice catalog + install helper** -- `docs/voice-catalog.md` (12 Piper + 6 EdgeTTS) + `make voice-install`.
 - **Versioned docs via mike** -- `/latest/`, `/v0.1/`, `/dev/` URL structure scaffolded; first deploy run pending.
-- **Observability hooks** -- Prometheus `/metrics` + Grafana dashboard scaffold shipped. Deploy on RPi pending.
+- **Observability hooks** -- Prometheus `/metrics` + Grafana dashboard scaffold shipped. Deploy on ZeroClaw host pending.
 - **Reproducible + signed firmware builds** -- SBOM + signed-releases scaffolds shipped. Maintainer GPG key + IDF Dockerfile SHA256 pin pending.
 
 ## Planned
