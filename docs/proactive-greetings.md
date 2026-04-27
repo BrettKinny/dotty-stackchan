@@ -1,6 +1,6 @@
 ---
 title: Proactive Greetings (Layer 6)
-description: Server-initiated greetings — Dotty speaks first when it recognises a familiar face, with calendar-aware context and time-of-day windowing.
+description: Server-initiated greetings — Dotty speaks first when it recognises a familiar face, with calendar-aware context.
 ---
 
 # Proactive Greetings (Layer 6)
@@ -9,8 +9,13 @@ description: Server-initiated greetings — Dotty speaks first when it recognise
 
 Layer 6 lets Dotty start a conversation. Instead of only responding to
 voice input, the robot recognises a face, looks up that person in the
-calendar, decides whether the time of day is appropriate, and pushes a
-short spoken greeting through the existing TTS path.
+calendar, and pushes a short spoken greeting through the existing TTS
+path.
+
+A greeting fires for every recognised face subject to **cooldown** and
+**per-day cap** only — there is no time-of-day gate. The current hour
+is still used to phrase the greeting ("Good morning, Brett!" vs "Good
+evening, …") but never to decide whether to speak.
 
 This is the first server-initiated speech path in the project. Earlier
 layers were strictly reactive (face detected → "Hi!"). Layer 6 turns
@@ -33,7 +38,7 @@ sequenceDiagram
     FW->>XZ: face_recognized {identity: "Hudson"}
     XZ->>BR: POST /api/perception/event
     BR-->>PG: perception bus event
-    PG->>PG: cooldown + time-of-day check
+    PG->>PG: cooldown + per-day cap check
     PG->>CAL: summarize_for_prompt(events, person="Hudson")
     CAL-->>PG: ["09:00 [Hudson] Library day"]
     PG->>LLM: short greeting prompt
@@ -57,14 +62,14 @@ while this one targets `face_recognized` (Layer 4 output).
 3. **Layer 6 — proactive greeter.** Subscribes to `face_recognized`
    (and optionally `face_detected` while Layer 4 is being wired —
    see `GREETER_USE_FACE_DETECTED`).
-4. **Cooldown gate.** Per-person, per-day limits.
-5. **Time-of-day gate.** Morning / afternoon / evening windows.
-6. **Layer 5 — calendar context.** Person-filtered events for today
+4. **Cooldown + per-day cap gate.** Per-person cooldown (default 4h)
+   and per-day cap (default 1) — no time-of-day gating.
+5. **Layer 5 — calendar context.** Person-filtered events for today
    via `summarize_for_prompt(events, person=name, include_household=True)`.
-7. **LLM.** ≤15-word warm spoken greeting.
-8. **Kid-safety sandwich.** Same surface as voice turns; the
+6. **LLM.** ≤15-word warm spoken greeting.
+7. **Kid-safety sandwich.** Same surface as voice turns; the
    greeting is also constrained directly in the prompt.
-9. **TTS push.** `push_greeting_audio()` → existing `inject-text`
+8. **TTS push.** `push_greeting_audio()` → existing `inject-text`
    admin route → xiaozhi-server TTS → device speaker.
 
 ## Configuration
@@ -76,9 +81,6 @@ while this one targets `face_recognized` (Layer 4 output).
 | `GREETER_GREET_UNKNOWN` | `false` | When true, greet unrecognised faces with a generic "Hello! I don't think we've met." |
 | `GREETER_COOLDOWN_HOURS` | `4` | Minimum hours between greetings for the same identity. |
 | `GREETER_PER_DAY_MAX` | `1` | Hard cap on greetings per identity per day. |
-| `GREETER_MORNING_WINDOW` | `06:00-09:00` | Morning greeting window (`HH:MM-HH:MM`). |
-| `GREETER_AFTERNOON_WINDOW` | `15:00-17:00` | Afternoon window. |
-| `GREETER_EVENING_WINDOW` | `19:00-21:00` | Evening / wind-down window. |
 | `GREETER_STATE_PATH` | `~/.zeroclaw/greeter_state.json` | Persistent greet log so a restart doesn't re-greet everyone. |
 | `GREETER_GREETING_MAX_WORDS` | `15` | Word cap fed to the LLM prompt; the model is also told "one sentence". |
 
@@ -151,5 +153,5 @@ keep that change scoped to a single function.
 
 - `bridge/proactive_greeter.py` — `ProactiveGreeter` class.
 - `bridge/server_push.py` — `push_greeting_audio()` wrapper.
-- `tests/test_proactive_greeter.py` — cooldown / window / unknown /
+- `tests/test_proactive_greeter.py` — cooldown / per-day cap / unknown /
   template-fallback unit tests.

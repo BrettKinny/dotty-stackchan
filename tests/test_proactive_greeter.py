@@ -22,7 +22,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from bridge.proactive_greeter import (  # noqa: E402
     ProactiveGreeter,
-    _parse_window,
 )
 
 
@@ -92,20 +91,9 @@ def _greeter(
     # Override the state path to the temp file.
     g._state_path = state_path  # type: ignore[attr-defined]
     g._state = {}  # type: ignore[attr-defined]
-    if fixed_now is not None:
-        # Monkey-patch _current_window to use fixed_now.
-        original = g._current_window
-        tz = fixed_now.tzinfo
-
-        def _patched():
-            minutes = fixed_now.hour * 60 + fixed_now.minute
-            for name, (start, end) in g.windows.items():
-                if start <= minutes < end:
-                    return name
-            return None
-
-        g._current_window = _patched  # type: ignore[assignment]
-        g._today_key = lambda: fixed_now.strftime("%Y-%m-%d")  # type: ignore[assignment]
+    # _current_window and _today_key both derive from self._clock(), so
+    # injecting clock=lambda: fixed_now.timestamp() above is sufficient.
+    # No monkey-patching needed.
     return g, bus, llm, calendar, tts
 
 
@@ -118,15 +106,6 @@ def _evt(name="face_recognized", identity="Hudson", device_id="dev-1", ts=1000.0
     }
 
 
-class ParseWindowTests(unittest.TestCase):
-    def test_basic(self):
-        self.assertEqual(_parse_window("06:00-09:00"), (360, 540))
-
-    def test_invalid(self):
-        self.assertIsNone(_parse_window("nope"))
-        self.assertIsNone(_parse_window("25:00-26:00"))
-
-
 class GreeterTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         # Ensure env doesn't bleed in from the host.
@@ -136,9 +115,6 @@ class GreeterTests(unittest.IsolatedAsyncioTestCase):
             "GREETER_GREET_UNKNOWN",
             "GREETER_COOLDOWN_HOURS",
             "GREETER_PER_DAY_MAX",
-            "GREETER_MORNING_WINDOW",
-            "GREETER_AFTERNOON_WINDOW",
-            "GREETER_EVENING_WINDOW",
             "GREETER_STATE_PATH",
             "GREETER_GREETING_MAX_WORDS",
         ]:
@@ -173,13 +149,15 @@ class GreeterTests(unittest.IsolatedAsyncioTestCase):
         await g._handle(_evt(identity="Hudson", ts=now.timestamp() + 1800))
         self.assertEqual(tts.await_count, 1)
 
-    async def test_outside_window_skipped(self):
-        # 02:00 — between evening (19-21) and morning (06-09).
+    async def test_greeting_fires_outside_legacy_windows(self):
+        # 02:00 — used to be skipped under the morning/afternoon/evening
+        # gate; now greets regardless of hour, subject only to cooldown
+        # and per-day cap. Time-of-day label degrades to "night".
         now = datetime(2026, 4, 21, 2, 0, tzinfo=ZoneInfo("Australia/Brisbane"))
         g, bus, llm, cal, tts = _greeter(fixed_now=now)
         await g._handle(_evt(identity="Hudson"))
-        self.assertEqual(tts.await_count, 0)
-        llm.assert_not_awaited()
+        self.assertEqual(tts.await_count, 1)
+        llm.assert_awaited_once()
 
     async def test_unknown_face_default_skipped(self):
         now = datetime(2026, 4, 21, 7, 30, tzinfo=ZoneInfo("Australia/Brisbane"))
