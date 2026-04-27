@@ -2479,7 +2479,7 @@
 <li><strong>One-shot</strong>: <code>"smart mode, what is the speed of light?"</code> → trigger phrase + remaining query routed to the capable model in a single turn.</li>
 <li><strong>Two-turn</strong>: <code>"smart mode."</code> (no query) → robot acknowledges (<code>"Smart mode! What would you like to know?"</code>), <code>conn.smart_mode_next = True</code> flag set; the next turn is forced through smart routing.</li>
 </ul>
-<p>The capable model is configured via <code>SMART_MODEL</code> env on the bridge (e.g. Claude Sonnet via OpenRouter); falls through to the default brain if unset. LED: on smart-mode entry <code>set_led_color(168,0,168)</code> pulses the ring, then <code>conn.smart_mode_active = True</code> is set; subsequently <code>_send_led_color</code> re-asserts pixel <code>SMART_MODE_LED_INDEX</code> (default 0) purple via <code>set_led_multi</code> after every full-ring state change, so the indicator persists until the turn completes (flash-pending: firmware <code>32163bd</code>).</p>
+<p>The capable model is configured via <code>SMART_MODEL</code> env on the bridge (e.g. Claude Sonnet via OpenRouter); falls through to the default brain if unset. LED: on smart-mode entry <code>set_led_color(168,0,168)</code> pulses the ring, then <code>conn.smart_mode_active = True</code> is set; subsequently <code>_send_led_color</code> re-asserts pixel <code>SMART_MODE_LED_INDEX</code> (default 0) purple via <code>set_led_multi</code> after every full-ring state change, so the indicator persists until the turn completes (firmware <code>32163bd</code>, shipped in <code>fw-v1.3.2</code>).</p>
 <h3 id="vision">vision<a class="headerlink" href="#vision" title="Permanent link">&para;</a></h3>
 <p>Camera-driven multimodal turn. Phrase match against <code>VISION_PHRASES</code> triggers an MCP <code>tools/call</code> for <code>self.camera.take_photo</code>, then long-polls the bridge's <code>/api/vision/latest/&lt;device_id&gt;</code> for the description. Description is injected as context into the next ZeroClaw prompt; LLM responds naturally as if looking at the photo.</p>
 <h3 id="dance-sing">dance / sing<a class="headerlink" href="#dance-sing" title="Permanent link">&para;</a></h3>
@@ -2607,7 +2607,7 @@
 </tr>
 <tr>
 <td><code>smart</code> (active turn)</td>
-<td>one ring LED held purple <code>(168,0,168)</code>; remaining 11 LEDs continue listen / think / talk <em>(proposed)</em></td>
+<td>one ring LED held purple <code>(168,0,168)</code>; remaining 11 LEDs continue listen / think / talk</td>
 <td>purple pulse on entry; held LED clears on exit</td>
 </tr>
 <tr>
@@ -2677,7 +2677,7 @@
 </ol>
 <p><strong>Why it's deferred.</strong> This requires firmware changes (new outbound event) which mean an OTA reflash. Captured here so the design is durable; implementation tracked in <a href="../ROADMAP.md"><code>ROADMAP.md</code></a>.</p>
 <h3 id="hybrid-smart-mode-led-shipped">Hybrid smart-mode LED (shipped)<a class="headerlink" href="#hybrid-smart-mode-led-shipped" title="Permanent link">&para;</a></h3>
-<p><strong>Shipped</strong> in bridge commit <code>b72b121</code> (firmware half: StackChan/dotty <code>32163bd</code>, <strong>flash pending</strong>).</p>
+<p><strong>Shipped</strong> in bridge commit <code>b72b121</code> and firmware commit <code>32163bd</code> (rolled into <code>fw-v1.3.2</code>).</p>
 <p><strong>Behaviour.</strong> On smart-mode entry, <code>conn.smart_mode_active = True</code> is set on the <code>ConnectionHandler</code>. <code>_send_led_color()</code> then re-asserts pixel <code>SMART_MODE_LED_INDEX</code> (env var, default <code>0</code>) at purple <code>(168,0,168)</code> via <code>_send_led_multi()</code> after every full-ring colour change. The remaining 11 LEDs continue to show the firmware-automatic listen / think / talk colours. On turn completion <code>smart_mode_active</code> is cleared; the ring returns to firmware-automatic behaviour.</p>
 <p><strong>Firmware prerequisite.</strong> The <code>self.robot.set_led_multi(index, r, g, b)</code> MCP tool was added in StackChan/dotty <code>32163bd</code>. Without that firmware, the bridge degrades to the previous single-flash behaviour (warn-once per connection).</p>
 <h2 id="future-modes">Future modes<a class="headerlink" href="#future-modes" title="Permanent link">&para;</a></h2>
