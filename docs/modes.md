@@ -1,233 +1,191 @@
 ---
-title: Modes & LED Contract
-description: Canonical taxonomy of Dotty's behavioural modes, what triggers each, what LED plays, and how they hand off to one another.
+title: States, Toggles & LED Contract
+description: Authoritative taxonomy of Dotty's high-level modes — a six-state mutex with two orthogonal toggles, owned by the firmware StateManager and surfaced via a 12-pixel LED ring contract.
 ---
 
-# Modes & LED Contract
+# States, Toggles & LED Contract
 
-One-page reference for every behavioural mode Dotty has, what colour the ring shows, and how a mode hands off to the next. Pair this with [interaction-map.md](./interaction-map.md) (which catalogs the underlying signals) and [hardware.md](./hardware.md) (which catalogs the physical LED ring + servos).
+This document is the source of truth for Dotty's high-level modes. The model has two axes:
+
+- **STATE** — what Dotty is *doing right now*. Mutually exclusive — exactly one State is active. Six values: `idle`, `talk`, `story_time`, `security`, `sleep`, `dance`.
+- **TOGGLES** — orthogonal modifiers that can be on regardless of state. Two values today: `kid_mode`, `smart_mode`. Toggles compose freely with state.
+
+The firmware **StateManager** modifier (`firmware/main/stackchan/modes/state_manager.cpp`) owns both axes. It writes the state pip + toggle pips to the LED ring at 5 Hz, drives the idle-motion profile, and emits `state_changed` perception events on every transition.
+
+Pair this with [hardware.md](./hardware.md) (the physical LED ring + servos) and [interaction-map.md](./interaction-map.md) (the underlying signals).
+
+---
 
 ## TL;DR
 
-- Dotty has four mode **tiers**: ambient (idle), conversation (talking), performance (one-shot action), maintenance (config / OTA).
-- The 12-LED WS2812 ring on the front panel is the primary feedback channel. Two control paths drive it: **firmware-automatic** (reacts to device state) and **server-overridable** (MCP `set_led_color`).
-- Most mode transitions are voice-phrase triggered today. Face-tracking is firmware-resident; dance / sing / smart / vision are dispatched server-side from `receiveAudioHandle.py`.
-- One behaviour is **designed but not yet implemented**: face-detected auto-listen (face → 5 s manual-listen window → fall back to face-tracking). See [Designed but not yet implemented](#designed-but-not-yet-implemented) below.
-- **Hybrid smart-mode LED is live** (bridge commit `b72b121`, firmware `32163bd`): LED index 0 holds purple throughout the smart-mode turn; remaining 11 LEDs continue showing listen / think / talk colours.
+| Axis | Cardinality | Examples | Owner |
+|---|---|---|---|
+| State | mutex (1 of 6) | `idle`, `talk`, `story_time` | firmware StateManager |
+| Toggle | compose freely | `kid_mode`, `smart_mode` | firmware StateManager |
+| Chat sub-state | nested under `talk` / `story_time` | listening / thinking / speaking | xiaozhi-server |
 
-## Mode tiers
+The firmware boots into `idle` with both toggles **off**. The bridge resyncs toggles from disk on the first turn after each reconnect. State transitions land via voice phrases, camera edges (face_detected → `talk`), or `/admin/state` from the dashboard.
 
-```
-Ambient        face_tracking          (default; no user intent yet)
-               sleep                   (deferred — see Future modes)
+---
 
-Conversation   listening
-               thinking                 sub-states of one conversation,
-               talking                  owned by xiaozhi-server
-               smart                   (capable-model variant)
+## States (mutually exclusive)
 
-Performance   dance / sing             (rainbow timeline + choreography)
-               vision                  (camera capture + describe)
-
-Maintenance   wifi_configuring
-               connecting              firmware-driven during boot / OTA
-               upgrading
-               activating
-```
-
-## Per-mode reference
-
-| Mode | Tier | Triggered by | LED today | Lives in |
+| State | State pip (left ring 0) | Idle profile | Behaviour | Backing path |
 |---|---|---|---|---|
-| `face_tracking` | ambient | firmware face-detect (Idle ↔ Tracking ↔ GracePeriod) | left LED green when face seen, ring otherwise off (FadeOut) | `firmware/firmware/main/stackchan/modifiers/face_tracking.cpp` |
-| `listening` | conversation | xiaozhi VAD detects speech start | ring solid red `(32,0,0)` | `firmware/firmware/xiaozhi-esp32/main/led/circular_strip.cc` |
-| `thinking` | conversation | STT frame received (ASR result emitted) | ring solid orange (firmware-side) | firmware (triggered server-side via `llm` emotion frame) |
-| `talking` | conversation | TTS `sentence_start` event | ring solid green `(0,32,0)` | `firmware/firmware/xiaozhi-esp32/main/led/circular_strip.cc` |
-| `smart` | conversation | voice phrase: `"smart mode"`, `"think harder"`, `"big brain"` | one-shot purple `(168,0,168)` flash on entry, then normal listen / think / talk | `receiveAudioHandle.py` (smart-mode dispatch) + `bridge.py` (`SMART_MODEL` routing) |
-| `vision` | performance | voice phrase: `"what do you see"`, `"take a photo"`, `"describe what"` | none distinct (uses normal speech LEDs) | `receiveAudioHandle.py` (`_handle_vision`) + `bridge.py` (`/api/vision/*`) |
-| `dance` / `sing` | performance | voice phrase: `"dance"`, `"sing"`, song-name (`"macarena"`, `"tetris"`, `"star wars"`, …) | timeline-driven multi-colour rainbow (see [Dance & sing](#dance--sing)) | `receiveAudioHandle.py` (`_handle_dance`) + `dances.py` |
-| `wifi_configuring` | maintenance | first boot, no creds | blue blink, 500 ms | `firmware/firmware/xiaozhi-esp32/main/led/circular_strip.cc` |
-| `connecting` | maintenance | post-boot, joining WiFi/WS | solid blue (low-brightness) | same |
-| `upgrading` | maintenance | OTA in progress | green blink, 100 ms | same |
-| `activating` | maintenance | provisioning code entry | green blink, 500 ms | same |
+| `idle` | off `(0,0,0)` | NORMAL | Ambient awareness, gentle idle motion. Default. | n/a (no chat in flight) |
+| `talk` | dim cyan `(0,40,60)` | NORMAL (face_tracking overlay active) | Conversation engaged. Chat sub-states (listening / thinking / speaking) animate the rest of the left ring. | xiaozhi → bridge → ZeroClaw ACP |
+| `story_time` | warm `(100,40,0)` | NORMAL | Long-running interactive story. Bridge bypasses ZeroClaw, calls OpenRouter directly with story persona + rolling context. | bridge → direct OpenRouter (Phase 7) |
+| `security` | white `(80,80,80)` **flashing 1 Hz** | SURVEILLANCE | Wide deliberate scan, serious face, periodic photo + audio capture. No proactive greet. | bridge ambient task (Phase 6) |
+| `sleep` | very dim blue `(0,0,16)` | SLEEPY | Head face-down + centred, servo torque off, sleeping emoji on screen, ambient awareness paused. Wakes on face / voice / head-pet. | firmware-only quiescence (Phase 5) |
+| `dance` | suppressed (rainbow takes over) | NORMAL | Transient performance — choreography + audio. Pre-existing dance handler. | `receiveAudioHandle.py::_handle_dance` |
 
-### face_tracking
+### Mutex rules
 
-Three-state firmware modifier (`face_tracking.cpp`):
+1. Exactly **one** state is current. `setState(S)` to the same state is a no-op.
+2. State transitions are explicit — no implicit "fallback" to idle from other states; each non-idle state has its own exit triggers.
+3. Camera edges only auto-transition between `idle` ↔ `talk`. Sticky states (`story_time`, `security`, `sleep`, `dance`) ignore face_detected / face_lost.
 
-- **Idle** — no face seen. Idle motion runs (random head looks every 4–8 s). Left LED off.
-- **Tracking** — face detected. Idle motion paused. Head smoothly follows normalised bbox via `motion().lookAtNormalized()`. Left LED green `(0,168,0)`.
-- **GracePeriod** — face just lost. 2 s window where re-acquisition snaps back to Tracking. After 2 s, returns to Idle.
+---
 
-The Tracking ↔ GracePeriod ↔ Idle loop is **entirely firmware-resident**. The server-side Python pipeline does not know whether a face is currently visible. This is the gap the [face-detected auto-listen](#face-detected-auto-listen-deferred) design closes.
+## Toggles (compose freely)
 
-### listening / thinking / talking
+| Toggle | Toggle pip (right ring) | When ON | Persistence |
+|---|---|---|---|
+| `kid_mode` | warm pink `(168,80,100)` at index **8** | Safety-tuned model, content sandwich, camera tools denied, kid-safe persona | `/root/zeroclaw-bridge/state/kid-mode` |
+| `smart_mode` | orange `(168,80,0)` at index **9** | Bridge bypasses ZeroClaw and routes the turn through direct OpenRouter (capable model). No memory, no tools. | `/root/zeroclaw-bridge/state/smart-mode` |
 
-These are sub-states of a single conversation turn. Driven from xiaozhi-server, signalled to the firmware via the existing event protocol (`stt`, `llm`, `tts/start`, `tts/sentence_start`). The firmware drives LEDs from device-state changes via `CircularStrip::OnStateChanged()`. See [interaction-map.md](./interaction-map.md) for the per-event signal table.
+Toggles compose: `kid_mode = on` AND `smart_mode = on` is valid (bridge applies the kid-safe sandwich on top of the direct OpenRouter call). Both toggles are sticky across turns, daemon restarts, and reboots.
 
-### smart
+---
 
-Capable-model variant of conversation. Triggered by phrase match in `receiveAudioHandle.py` against `_SMART_MODE_PHRASES`. Two activation paths:
+## LED contract (12-pixel ring)
 
-- **One-shot**: `"smart mode, what is the speed of light?"` → trigger phrase + remaining query routed to the capable model in a single turn.
-- **Two-turn**: `"smart mode."` (no query) → robot acknowledges (`"Smart mode! What would you like to know?"`), `conn.smart_mode_next = True` flag set; the next turn is forced through smart routing.
+```
+LEFT RING (global 0–5)              RIGHT RING (global 6–11)
+┌───────────────────┐               ┌───────────────────────┐
+│ 0  state pip      │               │ 6  privacy: mic    🔒 │
+│ 1  chat anim      │               │ 7  reserved (toggle)  │
+│ 2  chat anim      │               │ 8  kid_mode toggle    │
+│ 3  chat anim      │               │ 9  smart_mode toggle  │
+│ 4  chat anim      │               │ 10 reserved (toggle)  │
+│ 5  chat anim      │               │ 11 privacy: camera 🔒 │
+└───────────────────┘               └───────────────────────┘
+```
 
-The capable model is configured via `SMART_MODEL` env on the bridge (e.g. Claude Sonnet via OpenRouter); falls through to the default brain if unset. LED: on smart-mode entry `set_led_color(168,0,168)` pulses the ring, then `conn.smart_mode_active = True` is set; subsequently `_send_led_color` re-asserts pixel `SMART_MODE_LED_INDEX` (default 0) purple via `set_led_multi` after every full-ring state change, so the indicator persists until the turn completes (firmware `32163bd`, shipped in `fw-v1.3.2`).
+| Index | Half | Owner | Hardware-protected |
+|---|---|---|---|
+| 0 | left | StateManager (state pip) | no |
+| 1–5 | left | xiaozhi CircularStrip (chat-state animation) | no |
+| 6 | right | PrivacyLeds (mic) | **yes** — friend-class only |
+| 7 | right | reserved for future toggle | no |
+| 8 | right | StateManager (`kid_mode` pip) | no |
+| 9 | right | StateManager (`smart_mode` pip) | no |
+| 10 | right | reserved for future toggle | no |
+| 11 | right | PrivacyLeds (camera) | **yes** — friend-class only |
 
-### vision
+### LED quirks
 
-Camera-driven multimodal turn. Phrase match against `VISION_PHRASES` triggers an MCP `tools/call` for `self.camera.take_photo`, then long-polls the bridge's `/api/vision/latest/<device_id>` for the description. Description is injected as context into the next ZeroClaw prompt; LLM responds naturally as if looking at the photo.
+- **Re-assertion at 5 Hz.** The chat-state animation (`set_left_leds` in `stackchan_display.cc`) repaints the entire left ring on every LISTENING / SPEAKING / STANDBY transition. The state pip is restored within ~200 ms.
+- **PY32 IO expander quantises to RGB565.** Brightness deltas crush — `(40,40,40)` reads almost identical to `(200,200,200)`. Use distinct **hues**, not brightness levels, for any indicator that needs to read across a room.
+- **Privacy LEDs are friend-protected.** `Hal::setRgbColor` rejects writes to global indices 6 and 11 with a warning log; only `PrivacyLeds::setRgbColor_privacy_only` can drive them. Compile-time invariant.
+- **RightNeonLight uses local indices 0–5** internally, mapped to global 6–11 via `+6`. `setColorAt(local 0)` and `setColorAt(local 5)` are silently dropped (privacy guard). `setColorAt(local 2)` writes global 8 (kid_mode pip); `setColorAt(local 3)` writes global 9 (smart_mode pip).
 
-### dance / sing
+---
 
-Unified handler — both phrases route through `_handle_dance()`. Behaviour:
-
-1. Phrase match → registry lookup in `DANCE_REGISTRY` (`dances.py`).
-2. If preset has a renderable `audio_file` (`.mid` / `.wav`): render to Opus and stream into the TTS queue while a parallel asyncio task walks the choreography timeline (servo `HEAD` events + `LED` events).
-3. If no audio: prompt the LLM for a spoken intro and run choreography only.
-
-Six choreographies ship today, all in `dances.py`:
-
-| Choreography | LED feel | Used by |
-|---|---|---|
-| `macarena_moves` | hand-tuned 14-event timeline (purple / red / blue / green / yellow / cyan / orange / white) | `macarena` |
-| `head_bob` | steady cool blue `(0, 80, 168)` | (none currently) |
-| `color_party` | rainbow palette, colour change every 2 beats | `mario` |
-| `bouncy_party` | rainbow palette, colour change every beat (faster) | `tetris`, `pirates` |
-| `sleepy_sway` | warm dim `(100, 40, 0)`, gentle sway | (none currently) |
-| `look_around` | deep blue / white pulses, dramatic poses | `mountain_king`, `star_wars` |
-
-The shared rainbow palette (`_RAINBOW` in `dances.py`) is 8 colours: red, orange, yellow, green, cyan, blue, violet, magenta. New songs slot in by adding an entry to `DANCE_REGISTRY` and (if needed) a new choreography factory in `CHOREOGRAPHIES`.
-
-## State transition diagram
+## State transitions
 
 ```mermaid
 stateDiagram-v2
-    [*] --> face_tracking_idle: boot complete
+    [*] --> idle
 
-    state face_tracking {
-        face_tracking_idle: Idle
-        face_tracking_active: Tracking
-        face_tracking_grace: GracePeriod
+    idle --> talk: face_detected (firmware)
+    talk --> idle: face_lost grace expired (firmware)
 
-        face_tracking_idle --> face_tracking_active: face detected
-        face_tracking_active --> face_tracking_grace: face lost
-        face_tracking_grace --> face_tracking_active: face re-acquired
-        face_tracking_grace --> face_tracking_idle: 2 s grace expires
-    }
+    idle --> sleep: voice "go to sleep" / "goodnight Dotty"
+    sleep --> idle: face_detected / voice "wake up" / head_pet
 
-    face_tracking_idle --> listening: VAD speech start
-    face_tracking_active --> listening: VAD speech start
+    idle --> security: voice "keep watch" / "security mode"
+    security --> idle: voice "wake up" / face_detected (Phase 6)
 
-    state conversation {
-        listening --> thinking: STT result
-        thinking --> talking: TTS sentence_start
-        talking --> listening: TTS done + VAD speech start
-    }
+    idle --> story_time: voice "tell me a story"
+    story_time --> idle: voice "the end" / "stop story" / 90 s silence (Phase 7)
 
-    listening --> smart: phrase = "smart mode"
-    smart --> conversation: turn complete
-    listening --> vision: phrase = "what do you see"
-    vision --> conversation: description injected
-    listening --> performance: phrase = "dance" / "sing"
+    idle --> dance: voice "dance" / song name
+    dance --> idle: choreography ends
 
-    state performance {
-        dance
-        sing
-    }
-
-    conversation --> face_tracking_idle: idle 30 s (proposed)
-    performance --> face_tracking_idle: completion or barge-in
+    talk --> sleep: voice "goodnight Dotty"
+    talk --> story_time: voice "tell me a story"
+    talk --> dance: voice "dance"
 ```
 
-The `face_tracking → listening` edge currently fires only when the user speaks (VAD trips). With [face-detected auto-listen](#face-detected-auto-listen-deferred), that edge would also fire briefly when a face is acquired, opening a 5 s manual-listen window before falling back to face-tracking.
+### Voice triggers (Phase 4)
 
-## LED contract
+| Phrase (substring, case-insensitive) | Target state |
+|---|---|
+| `goodnight dotty` / `good night dotty` / `go to sleep` | `sleep` |
+| `keep watch` / `security mode` / `watch the room` | `security` |
+| `tell me a story` / `story time` | `story_time` |
+| `wake up` / `come back` / `are you there` (only when state ∈ `{sleep, security, story_time}`) | `idle` |
 
-| Mode | Resting LED | Transition cue |
+Toggle phrases:
+
+| Phrase | Effect |
+|---|---|
+| `smart mode` / `think harder` / `big brain` | `smart_mode = on` (sticky until cleared) |
+| `normal mode` / `regular dotty` / `regular mode` / `stop smart mode` | `smart_mode = off` |
+
+Kid mode is *not* voice-toggleable — it's a guardian-controlled axis driven from the `/admin/kid-mode` endpoint or the dashboard.
+
+### Admin endpoints (localhost-only)
+
+| Endpoint | Body | Effect |
 |---|---|---|
-| `face_tracking` idle | ring off (FadeOut) | — |
-| `face_tracking` active | left LED green; ring breathing low-green *(proposed)* | brief breathe-up on face acquire *(proposed)* |
-| `listening` | ring solid red `(32,0,0)` | — |
-| `thinking` | ring solid orange | — |
-| `talking` | ring solid green `(0,32,0)` | — |
-| `smart` (active turn) | one ring LED held purple `(168,0,168)`; remaining 11 LEDs continue listen / think / talk | purple pulse on entry; held LED clears on exit |
-| `vision` | brief cyan flash on capture *(proposed)* | restores prior mode's LED after capture |
-| `dance` / `sing` | timeline rainbow (choreography-driven) | — |
-| `sleep` *(deferred)* | all off | brief fade-out on entry |
-| `wifi_configuring` | blue blink, 500 ms | — |
-| `connecting` | solid blue, low-brightness | — |
-| `upgrading` | green blink, 100 ms | — |
-| `activating` | green blink, 500 ms | — |
+| `POST /admin/state` | `{"state": "<idle\|talk\|story_time\|security\|sleep\|dance>", "device_id": "<optional>"}` | Push `self.robot.set_state` MCP via xiaozhi-server relay. No daemon restart. |
+| `POST /admin/smart-mode` | `{"enabled": bool, "device_id": "<optional>"}` | Persist + push `self.robot.set_toggle("smart_mode", ...)`. No daemon restart. |
+| `POST /admin/kid-mode` | `{"enabled": bool}` | Persist + swap voice-daemon model + restart daemon. (Pip pushes via the post-restart toggle resync.) |
 
-### LED control surfaces
+### MCP tools (firmware)
 
-- **Firmware-automatic** — `CircularStrip::OnStateChanged()` (`firmware/firmware/xiaozhi-esp32/main/led/circular_strip.cc`) maps device state → solid / blink / scroll patterns. Triggered by the firmware's own `kDeviceState*` enum changes.
-- **Server-overridable** — two MCP tools invoked via helpers in `receiveAudioHandle.py`:
-  - `self.robot.set_led_color(r, g, b)` → `_send_led_color()`: paints the full 12-LED ring one colour; used for smart-mode entry pulse and dance timeline events. Overrides firmware-automatic LED until the next firmware state change.
-  - `self.robot.set_led_multi(index, r, g, b)` → `_send_led_multi()` (firmware ≥ `32163bd`): sets a **single** pixel without disturbing the rest. Bypasses the colour-animation tick, so it persists across firmware state changes that use `SetAllColor`. Used by the hybrid smart-mode indicator (re-asserted after each `_send_led_color` call when `conn.smart_mode_active` is True). Degrades gracefully on older firmware.
+| Tool | Arguments | Caller |
+|---|---|---|
+| `self.robot.set_state` | `{"state": "<...>"}` | xiaozhi-server `/admin/set-state` relay |
+| `self.robot.set_toggle` | `{"name": "kid_mode\|smart_mode", "enabled": bool}` | xiaozhi-server `/admin/set-toggle` relay; receiveAudioHandle.py voice phrases |
 
-### Available LED primitives
+---
 
-Firmware `CircularStrip` (`circular_strip.h`) exposes: `SetAllColor`, `SetSingleColor`, `SetMultiColors`, `Blink(color, interval_ms)`, `Breathe(low, high, interval_ms)`, `Scroll(low, high, length, interval_ms)`, `Rainbow(low, high, interval_ms)`, `FadeOut(interval_ms)`. Brightness is `DEFAULT_BRIGHTNESS = 32`, `LOW_BRIGHTNESS = 4` (0–255 scale).
+## Backing architecture per state
 
-The `set_led_multi` MCP tool (firmware `32163bd`) wraps `setColorAt()` on the `NeonLight` objects (index 0–5 → LeftNeonLight, 6–11 → RightNeonLight). Note: `setColorAt()` is a per-pixel write that bypasses `_color_anim`, which is why re-assertion is needed after full-ring colour changes.
-
-Anything we want to design fits inside this primitive set.
-
-## Designed but not yet implemented
-
-### Face-detected auto-listen (deferred)
-
-**Problem.** Face tracking detects a face and turns the left LED green, but the event never reaches the Python side. The user has to speak first to engage a conversation. Walking up and waiting at the robot does nothing.
-
-**Design.**
-
-```
-[face_tracking idle] ──face detected──▶ [face_tracking active, LED green]
-                                          │
-                                          ├─ speech heard within 5 s ─▶ [listening] (normal flow)
-                                          │
-                                          └─ 5 s of silence ─────────▶ stay in [face_tracking active]
-
-[face_tracking active] ──face lost > 2 s grace──▶ [face_tracking idle]
-```
-
-**Implementation sketch** (deferred to a follow-up task):
-
-1. **Firmware** (`face_tracking.cpp` Idle → Tracking edge): emit a server-bound event, e.g. `{"type":"event","name":"face_detected"}`, via the same outbound JSON channel used for `listen` / `abort` frames.
-2. **Server** (`receiveAudioHandle.py`): on `face_detected`, send `{"type":"listen","state":"start","mode":"manual"}` to the device, start a 5 s timer. If VAD trips within the window → normal conversation flow takes over. If timer expires without VAD → send `{"type":"listen","state":"stop"}` and remain in face-tracking.
-
-**Why it's deferred.** This requires firmware changes (new outbound event) which mean an OTA reflash. Captured here so the design is durable; implementation tracked in [`ROADMAP.md`](../ROADMAP.md).
-
-### Hybrid smart-mode LED (shipped)
-
-**Shipped** in bridge commit `b72b121` and firmware commit `32163bd` (rolled into `fw-v1.3.2`).
-
-**Behaviour.** On smart-mode entry, `conn.smart_mode_active = True` is set on the `ConnectionHandler`. `_send_led_color()` then re-asserts pixel `SMART_MODE_LED_INDEX` (env var, default `0`) at purple `(168,0,168)` via `_send_led_multi()` after every full-ring colour change. The remaining 11 LEDs continue to show the firmware-automatic listen / think / talk colours. On turn completion `smart_mode_active` is cleared; the ring returns to firmware-automatic behaviour.
-
-**Firmware prerequisite.** The `self.robot.set_led_multi(index, r, g, b)` MCP tool was added in StackChan/dotty `32163bd`. Without that firmware, the bridge degrades to the previous single-flash behaviour (warn-once per connection).
-
-## Future modes
-
-These are documented as design-space placeholders so contributors know where they would slot in. None are scheduled today.
-
-| Mode | Tier | Resting LED (proposed) | Notes |
+| State | Voice path | Memory? | Tools? |
 |---|---|---|---|
-| `sleep` | ambient | all off; display dim | Manual toggle now; later schedule-driven (quiet hours). Wake on wake-word or portal toggle. |
-| `greeting` | conversation | brief warm flash on entry | Proactive on recognised face. Per-person, per-day cooldown; time-of-day-aware tone. Roadmap-only. |
-| `privacy` / `mute` | ambient | solid red (one LED, low-brightness) | Mic + camera disabled; hardware-guaranteed indicator. Prerequisite for always-on face detection. |
-| `story_time` | conversation | dimmed warm `(100, 40, 0)` | Longer-form narration, no sentence truncation, lower TTS rate. |
-| `game` | performance | mode-specific palette | Turn-based interactions (rock-paper-scissors, Simon Says). |
+| `idle` | n/a | n/a | n/a |
+| `talk` (default) | xiaozhi → bridge → ZeroClaw ACP (Mistral 3.2 by default) | yes (FTS) | yes |
+| `talk` (smart_mode = on) | xiaozhi → bridge → direct OpenRouter (`SMART_API_URL`) | no | no |
+| `story_time` | xiaozhi → bridge → direct OpenRouter (story persona overlay + rolling context) | per-session list (Phase 7) | no |
+| `security` | bridge ambient task (no voice path active) | logs to journal | photo + audio capture |
+| `sleep` | mic stays on for "wake up"; no LLM round-trip | n/a | n/a |
+| `dance` | bridge handler dispatches choreography + audio file | n/a | dance MCP |
 
-See [`ROADMAP.md`](../ROADMAP.md) for current priority on each.
+`smart_mode` and `story_time` both bypass ZeroClaw — `smart_mode` is one-shot per turn, `story_time` is a sticky state with its own session memory (Phase 7).
 
-## See also
+---
 
-- [interaction-map.md](./interaction-map.md) — every cross-layer signal (audio, LLM, MCP, session control); the wire-level companion to this doc.
-- [hardware.md](./hardware.md) — physical LED ring spec, servo capabilities, MCP tool catalog.
-- [voice-pipeline.md](./voice-pipeline.md) — how listening / thinking / talking sub-states map to xiaozhi-server internals.
-- [kid-mode.md](./kid-mode.md) — how Kid Mode wraps every conversation mode (default-on safety guardrails, prompt suffix injection).
-- [latent-capabilities.md](./latent-capabilities.md) — upstream features we aren't yet using; some of these would land as new modes.
+## Implementation status
 
-Last verified: 2026-04-25. Updated 2026-04-25 (hybrid smart-mode LED shipped, SetMultiColors→set_led_multi correction).
+| Phase | Scope | Status |
+|---|---|---|
+| 4 | StateManager foundation: state pip + toggle pips + state_changed event + voice phrases + admin endpoints + dashboard | **shipping** |
+| 5 | Sleep state behaviour (servo park + torque off + sleepy emoji + wake triggers) | pending |
+| 6 | Security state behaviour (periodic photo + audio capture, greeter gate) | pending |
+| 7 | Story_time state (interactive setup, OpenRouter session, choose-your-own-adventure) | pending |
+| 8 | Ambient awareness loop (idle-state photo + audio scene capture, journal) | pending |
+
+Phase 4 establishes the *rails* — pip, transition events, dispatch helpers, voice routing. Phases 5–8 each hang behaviour off those rails without changing the architecture.
+
+---
+
+## Sources of truth
+
+- **Firmware:** `firmware/main/stackchan/modes/state_manager.{h,cpp}`, `firmware/main/stackchan/modifiers/face_tracking.cpp` (camera-edge hooks), `firmware/main/hal/hal_mcp.cpp` (set_state / set_toggle MCP)
+- **Bridge:** `bridge.py` (`_dispatch_set_state`, `_dispatch_set_toggle`, `_admin_state`, `_admin_smart_mode`, `_update_perception_state` for `state_changed`), `receiveAudioHandle.py` (voice phrases + per-conn toggle sync)
+- **xiaozhi-server patches:** `custom-providers/xiaozhi-patches/http_server.py` (`/xiaozhi/admin/set-state`, `/xiaozhi/admin/set-toggle`), `custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py` (`state_changed` → `conn.current_state`)
+- **Dashboard:** `bridge/dashboard.py` + `bridge/templates/state_card.html` + `bridge/templates/smart_mode.html`

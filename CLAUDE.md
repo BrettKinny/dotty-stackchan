@@ -148,7 +148,11 @@ Plumbing:
 
 WS lifecycle is the structural fact most easily forgotten: **xiaozhi only opens the WS during a conversation**, not persistently. Anything that needs to fire a server-bound event from idle has to either (a) trigger `OpenAudioChannel()` first or (b) accept that events are session-only. Producer A and B both assume (a) — done in `SendEvent`.
 
-For the design spec see [`docs/modes.md`](./docs/modes.md) "Designed but not yet implemented".
+The Phase 4 firmware **StateManager** (`firmware/main/stackchan/modes/state_manager.{h,cpp}`) is a producer too — it emits `state_changed` on every mutex-state transition (`idle / talk / story_time / security / sleep / dance`) so bridge consumers can gate behaviour on state. The bridge tracks `_perception_state[device_id]["current_state"]` from those events.
+
+## States, toggles & LEDs
+
+`docs/modes.md` is the **authoritative source** for the six-state mutex (`idle / talk / story_time / security / sleep / dance`), the orthogonal toggles (`kid_mode`, `smart_mode`), the LED contract (state pip on left ring 0, toggle pips on right ring 8/9, privacy LEDs hardware-protected at 6/11), the voice-phrase triggers, and the per-state backing-architecture (which states use ZeroClaw vs direct OpenRouter). When adding behaviour that responds to or changes Dotty's mode, read modes.md first — don't reinvent.
 
 ## Deeper reference
 

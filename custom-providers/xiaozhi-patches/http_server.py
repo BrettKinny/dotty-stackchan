@@ -159,6 +159,102 @@ class SimpleHttpServer:
             "yaw": yaw, "pitch": pitch, "speed": speed,
         })
 
+    async def _dotty_set_state(self, request: "web.Request") -> "web.Response":
+        """POST /xiaozhi/admin/set-state
+        Body: {"device_id": "<optional>", "state": "<idle|talk|story_time|security|sleep|dance>"}
+
+        Direct MCP self.robot.set_state call. Phase 4 — voice phrases and the
+        dashboard route through here (and through the bridge) so the state pip
+        and idle profile flip without a daemon restart.
+        """
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        device_id = (data.get("device_id") or "").strip()
+        state = (data.get("state") or "").strip()
+        if state not in ("idle", "talk", "story_time", "security", "sleep", "dance"):
+            return web.json_response({"error": f"unknown state: {state!r}"}, status=400)
+        if device_id:
+            conn = _dotty_active_connections.get(device_id)
+        else:
+            conn = next(iter(_dotty_active_connections.values()), None)
+        if conn is None:
+            return web.json_response(
+                {"error": "no device connected",
+                 "known": list(_dotty_active_connections)},
+                status=503,
+            )
+        import json
+        import time
+        msg = json.dumps({
+            "session_id": getattr(conn, "session_id", ""),
+            "type": "mcp",
+            "payload": {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "self.robot.set_state",
+                    "arguments": {"state": state},
+                },
+                "id": int(time.time() * 1000) % 0x7FFFFFFF,
+            },
+        })
+        _spawn(conn.websocket.send(msg), name="set_state_send")
+        return web.json_response({
+            "ok": True,
+            "device_id": (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id,
+            "state": state,
+        })
+
+    async def _dotty_set_toggle(self, request: "web.Request") -> "web.Response":
+        """POST /xiaozhi/admin/set-toggle
+        Body: {"device_id": "<optional>", "name": "<kid_mode|smart_mode>", "enabled": bool}
+
+        Direct MCP self.robot.set_toggle call. Phase 4 — toggles compose with
+        State; this endpoint flips them without disturbing the active state.
+        """
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        device_id = (data.get("device_id") or "").strip()
+        name = (data.get("name") or "").strip()
+        if name not in ("kid_mode", "smart_mode"):
+            return web.json_response({"error": f"unknown toggle: {name!r}"}, status=400)
+        enabled = bool(data.get("enabled"))
+        if device_id:
+            conn = _dotty_active_connections.get(device_id)
+        else:
+            conn = next(iter(_dotty_active_connections.values()), None)
+        if conn is None:
+            return web.json_response(
+                {"error": "no device connected",
+                 "known": list(_dotty_active_connections)},
+                status=503,
+            )
+        import json
+        import time
+        msg = json.dumps({
+            "session_id": getattr(conn, "session_id", ""),
+            "type": "mcp",
+            "payload": {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "self.robot.set_toggle",
+                    "arguments": {"name": name, "enabled": enabled},
+                },
+                "id": int(time.time() * 1000) % 0x7FFFFFFF,
+            },
+        })
+        _spawn(conn.websocket.send(msg), name="set_toggle_send")
+        return web.json_response({
+            "ok": True,
+            "device_id": (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id,
+            "name": name, "enabled": enabled,
+        })
+
     async def _dotty_list_songs(self, request: "web.Request") -> "web.Response":
         """GET /xiaozhi/admin/songs — list audio files mounted at
         /opt/xiaozhi-esp32-server/config/assets/songs/.
@@ -456,6 +552,14 @@ class SimpleHttpServer:
                         web.post(
                             "/xiaozhi/admin/set-head-angles",
                             self._dotty_set_head_angles,
+                        ),
+                        web.post(
+                            "/xiaozhi/admin/set-state",
+                            self._dotty_set_state,
+                        ),
+                        web.post(
+                            "/xiaozhi/admin/set-toggle",
+                            self._dotty_set_toggle,
                         ),
                         web.post(
                             "/xiaozhi/admin/play-asset",

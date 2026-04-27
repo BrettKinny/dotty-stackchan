@@ -18,27 +18,25 @@ TAG = __name__
 
 VISION_BRIDGE_URL = os.environ.get("VISION_BRIDGE_URL", "")
 MIN_UTTERANCE_CHARS = int(os.environ.get("MIN_UTTERANCE_CHARS", "2"))
-# Smart-mode persistent LED pixel: which ring index holds the purple
-# while listen/think/talk colours animate the rest of the ring. The
-# firmware MCP `self.robot.set_led_multi` tool (firmware ≥ 32163bd)
-# bypasses the colour-animation tick, so we re-assert this pixel after
-# every full-ring colour change.
-SMART_MODE_LED_INDEX = int(os.environ.get("SMART_MODE_LED_INDEX", "0"))
-# Right-ring pixel held in soft pink whenever kid mode is OFF, as a sustained
-# "guards are down" indicator visible to anyone glancing at the robot. Mirrors
-# the Smart Mode persistent-pixel pattern but on the opposite ring (0-5 left,
-# 6-11 right) so the two indicators never collide.
-KID_MODE_OFF_LED_INDEX = int(os.environ.get("KID_MODE_OFF_LED_INDEX", "6"))
-KID_MODE_OFF_RGB = (168, 80, 100)
+
+# Phase 4 — kid_mode + smart_mode are now firmware-owned toggle pips on the
+# right ring (StateManager writes index 8 = warm pink for kid_mode, index 9 =
+# orange for smart_mode). The bridge dispatches `self.robot.set_toggle` MCP
+# calls on phrase triggers, dashboard flips, and once-per-connection sync.
+# State files persist the toggles across daemon restarts and reboots.
 _KID_MODE_STATE_FILE = os.environ.get(
     "DOTTY_KID_MODE_STATE", "/root/zeroclaw-bridge/state/kid-mode",
+)
+_SMART_MODE_STATE_FILE = os.environ.get(
+    "DOTTY_SMART_MODE_STATE", "/root/zeroclaw-bridge/state/smart-mode",
 )
 
 
 def _read_kid_mode_state() -> bool:
     """Mirror of bridge.py's _read_kid_mode but importable from this module
     without circular-import gymnastics. Single source of truth = the same
-    state file the portal writes."""
+    state file the portal writes. Re-read every turn so dashboard flips land
+    without a daemon restart."""
     try:
         with open(_KID_MODE_STATE_FILE, "r") as f:
             v = f.read().strip().lower()
@@ -49,6 +47,31 @@ def _read_kid_mode_state() -> bool:
     except OSError:
         pass
     return os.environ.get("DOTTY_KID_MODE", "true").lower() in ("1", "true", "yes")
+
+
+def _read_smart_mode_state() -> bool:
+    """Smart_mode is sticky across turns and persists across reboot via the
+    state file. Default off — smart_mode opts INTO direct OpenRouter and
+    bypasses ZeroClaw's persona/memory; the safe default is the regular path."""
+    try:
+        with open(_SMART_MODE_STATE_FILE, "r") as f:
+            v = f.read().strip().lower()
+        if v in ("true", "1", "yes"):
+            return True
+        if v in ("false", "0", "no"):
+            return False
+    except OSError:
+        pass
+    return False
+
+
+def _write_smart_mode_state(enabled: bool) -> None:
+    try:
+        os.makedirs(os.path.dirname(_SMART_MODE_STATE_FILE), exist_ok=True)
+        with open(_SMART_MODE_STATE_FILE, "w") as f:
+            f.write("true" if enabled else "false")
+    except OSError:
+        pass
 
 
 _LETTERS_RE = re.compile(r'[a-zA-Z一-鿿぀-ゟ゠-ヿ]')
@@ -189,11 +212,19 @@ VISION_PHRASES = (
 _SMART_MODE_PHRASES = (
     "smart mode", "think harder", "big brain",
 )
+_SMART_MODE_OFF_PHRASES = (
+    "normal mode", "regular dotty", "regular mode", "stop smart mode",
+)
 
 
 def _is_smart_mode_request(text: str) -> bool:
     lower = text.lower().strip()
     return any(phrase in lower for phrase in _SMART_MODE_PHRASES)
+
+
+def _is_smart_mode_off_request(text: str) -> bool:
+    lower = text.lower().strip()
+    return any(phrase in lower for phrase in _SMART_MODE_OFF_PHRASES)
 
 
 def _strip_smart_trigger(text: str) -> str:
@@ -204,6 +235,42 @@ def _strip_smart_trigger(text: str) -> str:
             remaining = text[:idx] + text[idx + len(phrase):]
             return re.sub(r'^[\s,.\-!?]+|[\s,.\-!?]+$', '', remaining)
     return ""
+
+
+# Phase 4 — state-trigger phrases. Each entry: (substring, target_state, ack).
+# Order matters: longer/more-specific phrases first so "good night dotty" beats
+# "good night". Match is case-insensitive substring on the full ASR text.
+#
+# Phase 5/6/7 wire the actual behaviour (sleep posing, security scanning, story
+# narration). Phase 4 just dispatches set_state and emits a brief LLM ack.
+_STATE_TRIGGER_PHRASES: tuple[tuple[str, str, str], ...] = (
+    ("goodnight dotty",   "sleep",      "Goodnight! \U0001f634"),
+    ("good night dotty",  "sleep",      "Goodnight! \U0001f634"),
+    ("go to sleep",       "sleep",      "Going to sleep \U0001f634"),
+    ("keep watch",        "security",   "Watching the room \U0001f47e"),
+    ("security mode",     "security",   "Watching the room \U0001f47e"),
+    ("watch the room",    "security",   "Watching the room \U0001f47e"),
+    ("tell me a story",   "story_time", "Story time! \U0001f4d6"),
+    ("story time",        "story_time", "Story time! \U0001f4d6"),
+)
+# "wake up" / "come back" / "are you there" only switch state if Dotty is in a
+# non-conversational state (sleep / security / story_time). Otherwise they're
+# regular conversation continuations.
+_WAKE_PHRASES = ("wake up", "come back", "are you there")
+_NON_CONVERSATIONAL_STATES = ("sleep", "security", "story_time")
+
+
+def _detect_state_phrase(text: str) -> tuple[str, str] | None:
+    lower = text.lower().strip()
+    for phrase, state, ack in _STATE_TRIGGER_PHRASES:
+        if phrase in lower:
+            return (state, ack)
+    return None
+
+
+def _is_wake_phrase(text: str) -> bool:
+    lower = text.lower().strip()
+    return any(phrase in lower for phrase in _WAKE_PHRASES)
 
 
 async def _send_led_color(conn: "ConnectionHandler", r: int, g: int, b: int) -> None:
@@ -224,21 +291,10 @@ async def _send_led_color(conn: "ConnectionHandler", r: int, g: int, b: int) -> 
         await conn.websocket.send(msg)
     except Exception:
         pass
-    # Smart-mode persistent pixel: the firmware's set_led_color repaints
-    # every pixel in the ring (including the smart-mode marker), so we
-    # re-paint our marker pixel afterward. Only fires when the smart-mode
-    # flag is active — a no-op the rest of the time.
-    if getattr(conn, "smart_mode_active", False):
-        await _send_led_multi(conn, SMART_MODE_LED_INDEX, 168, 0, 168)
-    # Kid-mode-OFF persistent pixel: same reassert pattern, opposite ring.
-    # Cache the flag on the connection so the state file is hit at most once
-    # per connection — subsequent paints just check the boolean.
-    if not hasattr(conn, "kid_mode_off"):
-        conn.kid_mode_off = not _read_kid_mode_state()
-    if conn.kid_mode_off:
-        await _send_led_multi(
-            conn, KID_MODE_OFF_LED_INDEX, *KID_MODE_OFF_RGB,
-        )
+    # Phase 4 — Smart-mode and kid-mode pips are now firmware-owned (StateManager
+    # 5 Hz re-assert at right ring 8/9). The legacy per-paint re-assertion
+    # (set_led_multi at indices 0 and 6) was removed; the firmware restores
+    # the pips after every chat-state full-ring write within ~200 ms.
 
 
 async def _send_led_multi(
@@ -303,6 +359,84 @@ async def _send_head_angles(conn: "ConnectionHandler", yaw: int, pitch: int, spe
             },
         })
         await conn.websocket.send(msg)
+    except Exception:
+        pass
+
+
+async def _send_set_state(conn: "ConnectionHandler", state: str) -> None:
+    """Phase 4 — fire `self.robot.set_state` MCP at the firmware. Valid states:
+    idle / talk / story_time / security / sleep / dance. The firmware
+    StateManager handles the transition (pip update + idle profile + state_changed
+    event back to the bridge)."""
+    try:
+        msg = json.dumps({
+            "session_id": conn.session_id,
+            "type": "mcp",
+            "payload": {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "self.robot.set_state",
+                    "arguments": {"state": state},
+                },
+                "id": int(time.time() * 1000) % 0x7FFFFFFF,
+            },
+        })
+        await conn.websocket.send(msg)
+    except Exception as exc:
+        try:
+            conn.logger.bind(tag=TAG).warning(f"set_state {state} failed: {exc}")
+        except Exception:
+            pass
+
+
+async def _send_set_toggle(conn: "ConnectionHandler", name: str, enabled: bool) -> None:
+    """Phase 4 — fire `self.robot.set_toggle` MCP at the firmware. Valid names:
+    kid_mode (warm pink pip on right ring index 8) and smart_mode (orange pip
+    on right ring index 9). Toggles compose freely with state."""
+    try:
+        msg = json.dumps({
+            "session_id": conn.session_id,
+            "type": "mcp",
+            "payload": {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "self.robot.set_toggle",
+                    "arguments": {"name": name, "enabled": enabled},
+                },
+                "id": int(time.time() * 1000) % 0x7FFFFFFF,
+            },
+        })
+        await conn.websocket.send(msg)
+    except Exception as exc:
+        try:
+            conn.logger.bind(tag=TAG).warning(f"set_toggle {name}={enabled} failed: {exc}")
+        except Exception:
+            pass
+
+
+async def _sync_toggles_once(conn: "ConnectionHandler") -> None:
+    """Push current kid_mode + smart_mode state to the firmware once per
+    WebSocket connection. The firmware StateManager boots with both toggles
+    OFF; this resync runs on the first turn after a reconnect (or daemon
+    restart) so the toggle pips reflect the bridge's persisted state.
+
+    Idempotent — repeat calls are no-ops via the `_dotty_toggles_synced`
+    sentinel. Voice-phrase flips (later in startToChat) and dashboard
+    flips (via the bridge) push their own set_toggle MCP calls."""
+    if getattr(conn, "_dotty_toggles_synced", False):
+        return
+    conn._dotty_toggles_synced = True
+    kid_on = _read_kid_mode_state()
+    smart_on = _read_smart_mode_state()
+    conn.smart_mode_active = smart_on
+    await _send_set_toggle(conn, "kid_mode", kid_on)
+    await _send_set_toggle(conn, "smart_mode", smart_on)
+    try:
+        conn.logger.bind(tag=TAG).info(
+            f"toggles synced on reconnect: kid_mode={kid_on} smart_mode={smart_on}"
+        )
     except Exception:
         pass
 
@@ -942,6 +1076,10 @@ async def startToChat(conn: "ConnectionHandler", text):
         conn.logger.bind(tag=TAG).info(f"ASR noise rejected: {actual_text!r}")
         return
 
+    # Phase 4 — push current toggle state to firmware on first turn after a
+    # reconnect / daemon restart. Idempotent on subsequent turns.
+    await _sync_toggles_once(conn)
+
     actual_text = _apply_asr_corrections(actual_text)
     actual_text = _apply_phrase_corrections(actual_text)
 
@@ -1003,14 +1141,64 @@ async def startToChat(conn: "ConnectionHandler", text):
     except (json.JSONDecodeError, KeyError):
         pass
 
+    # Phase 4 — meta-state commands (sleep / security / story_time / wake-up).
+    # Run BEFORE smart-mode / vision / dance because they're top-level state
+    # transitions that supersede any per-turn behaviour.
+    current_state = (getattr(conn, "current_state", "idle") or "idle").lower()
+
+    if _is_wake_phrase(user_text) and current_state in _NON_CONVERSATIONAL_STATES:
+        conn.logger.bind(tag=TAG).info(
+            f"Wake phrase: {current_state} -> idle"
+        )
+        await _send_set_state(conn, "idle")
+        conn.executor.submit(
+            conn.chat,
+            "[STATE_WAKE] You just woke up. Say only a SHORT greeting "
+            "(under 10 words). Examples: 'I'm here!' / 'Hello again.'",
+        )
+        return
+
+    state_match = _detect_state_phrase(user_text)
+    if state_match:
+        target_state, ack_hint = state_match
+        conn.logger.bind(tag=TAG).info(
+            f"State phrase: {current_state} -> {target_state}"
+        )
+        await _send_set_state(conn, target_state)
+        conn.executor.submit(
+            conn.chat,
+            f"[STATE_CHANGE:{target_state}] You just entered {target_state} "
+            f"state. Say only a SHORT one-liner (under 12 words). "
+            f"Suggested: {ack_hint!r}",
+        )
+        return
+
+    # Smart-mode OFF — explicit "back to normal" toggle. Sticky-clear via
+    # state file + firmware toggle pip.
+    if _is_smart_mode_off_request(user_text) and getattr(conn, "smart_mode_active", False):
+        conn.logger.bind(tag=TAG).info("Smart mode OFF")
+        conn.smart_mode_active = False
+        _write_smart_mode_state(False)
+        await _send_set_toggle(conn, "smart_mode", False)
+        conn.executor.submit(
+            conn.chat,
+            "[SMART_MODE_OFF] You just turned smart mode off. "
+            "Say only a SHORT one-liner (under 8 words). Example: "
+            "'Back to normal!' / 'Okay, regular Dotty.'",
+        )
+        return
+
+    # Smart-mode ON
     if _is_smart_mode_request(user_text):
         remaining_q = _strip_smart_trigger(user_text)
-        conn.logger.bind(tag=TAG).info(f"Smart mode: q={remaining_q!r}")
-        # Mark BEFORE the colour change so _send_led_color's re-assert
-        # paints the smart-mode pixel on top of the full-ring purple.
+        conn.logger.bind(tag=TAG).info(f"Smart mode ON: q={remaining_q!r}")
         conn.smart_mode_active = True
-        await _send_led_color(conn, 168, 0, 168)
-        await _send_led_multi(conn, SMART_MODE_LED_INDEX, 168, 0, 168)
+        _write_smart_mode_state(True)
+        # Visual feedback is the orange toggle pip on right ring index 9 —
+        # StateManager re-asserts at 5 Hz. The legacy full-ring purple flash
+        # was removed because it clobbers the state pip on left ring 0 and
+        # conflicts with the chat-state animation on left ring 1-5.
+        await _send_set_toggle(conn, "smart_mode", True)
         if remaining_q:
             _submit_chat(conn, f"[SMART_MODE]\n{remaining_q}")
         else:
@@ -1025,8 +1213,8 @@ async def startToChat(conn: "ConnectionHandler", text):
     if getattr(conn, 'smart_mode_next', False):
         conn.smart_mode_next = False
         conn.smart_mode_active = True
-        await _send_led_color(conn, 168, 0, 168)
-        await _send_led_multi(conn, SMART_MODE_LED_INDEX, 168, 0, 168)
+        _write_smart_mode_state(True)
+        await _send_set_toggle(conn, "smart_mode", True)
         _submit_chat(conn, f"[SMART_MODE]\n{actual_text}")
         return
 

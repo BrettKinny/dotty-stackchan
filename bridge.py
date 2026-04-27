@@ -133,6 +133,33 @@ KID_MODE = _read_kid_mode()
 if _METRICS_AVAILABLE:
     _safe_metric(dotty_kid_mode_active.set, 1 if KID_MODE else 0)
 
+
+# Phase 4 — smart_mode toggle persistence. Mirrors kid-mode but does NOT swap
+# the LLM model — smart_mode is a per-turn dispatch flag in receiveAudioHandle
+# that re-routes the turn through direct OpenRouter (bypassing ZeroClaw). The
+# state file persists the bit across reconnects.
+_SMART_STATE_FILE = Path(
+    os.environ.get("DOTTY_SMART_MODE_STATE", "/root/zeroclaw-bridge/state/smart-mode")
+)
+
+
+def _read_smart_mode() -> bool:
+    if _SMART_STATE_FILE.exists():
+        try:
+            v = _SMART_STATE_FILE.read_text().strip().lower()
+            if v in ("true", "1", "yes"):
+                return True
+            if v in ("false", "0", "no"):
+                return False
+        except OSError:
+            pass
+    return False
+
+
+def _write_smart_mode(enabled: bool) -> None:
+    _SMART_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _SMART_STATE_FILE.write_text("true" if enabled else "false")
+
 LOCAL_TZ = ZoneInfo(os.environ.get("TZ", "Australia/Brisbane"))
 WEATHER_LOCATION = os.environ.get("WEATHER_LOCATION", "Brisbane")
 
@@ -1462,7 +1489,7 @@ def _perception_broadcast(event: dict) -> None:
     # buggy or malicious payload can't blow up the time-series count.
     name = event.get("name") or ""
     if _METRICS_AVAILABLE and name in (
-        "face_detected", "face_lost", "sound_event",
+        "face_detected", "face_lost", "sound_event", "state_changed",
     ):
         _safe_metric(
             dotty_perception_events_total.labels(type=name).inc,
@@ -1496,6 +1523,23 @@ def _update_perception_state(device_id: str, name: str,
         state["last_sound_dir"] = data.get("direction")
         state["last_sound_t"] = ts
         state["last_sound_energy"] = data.get("energy")
+    elif name == "state_changed":
+        # Phase 4 — track the firmware's high-level State so consumers can gate
+        # behaviour on it (e.g. greeter skips during security; ambient awareness
+        # only runs in idle). Set by StateManager::emitStateChanged on every
+        # transition.
+        new_state = (data.get("state") or "").strip().lower()
+        if new_state:
+            state["current_state"] = new_state
+            state["last_state_change_t"] = ts
+
+
+def _current_device_state(device_id: str) -> str:
+    """Convenience accessor — returns the last known firmware State for a
+    device, or 'idle' if no state_changed event has been seen yet (default
+    on boot before StateManager fires its first transition). Consumers that
+    need to gate on state should call this."""
+    return _perception_state.get(device_id, {}).get("current_state", "idle")
 
 
 async def _dispatch_abort(device_id: str) -> None:
@@ -1676,6 +1720,55 @@ async def _dispatch_set_head_angles(device_id: str, yaw: int,
             log.warning("sound turn set-head-angles failed: %s", exc)
 
     await asyncio.to_thread(_post)
+
+
+async def _dispatch_set_state(device_id: str, state: str) -> bool:
+    """Phase 4 helper: fire MCP self.robot.set_state at the firmware via the
+    /xiaozhi/admin/set-state route. State must be one of:
+    idle / talk / story_time / security / sleep / dance.
+    Returns True on 2xx, False otherwise (and logs)."""
+    if not _XIAOZHI_HOST:
+        log.warning("set_state: XIAOZHI_HOST not set; cannot reach xiaozhi-server")
+        return False
+    url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/set-state"
+    payload = {"device_id": device_id, "state": state}
+
+    def _post() -> bool:
+        try:
+            r = requests.post(url, json=payload, timeout=3)
+            if r.status_code >= 400:
+                log.warning("set_state %s: %s", r.status_code, r.text[:200])
+                return False
+            return True
+        except Exception as exc:
+            log.warning("set_state failed: %s", exc)
+            return False
+
+    return await asyncio.to_thread(_post)
+
+
+async def _dispatch_set_toggle(device_id: str, name: str, enabled: bool) -> bool:
+    """Phase 4 helper: fire MCP self.robot.set_toggle at the firmware via the
+    /xiaozhi/admin/set-toggle route. Toggle name must be one of:
+    kid_mode / smart_mode. Returns True on 2xx, False otherwise (and logs)."""
+    if not _XIAOZHI_HOST:
+        log.warning("set_toggle: XIAOZHI_HOST not set; cannot reach xiaozhi-server")
+        return False
+    url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/set-toggle"
+    payload = {"device_id": device_id, "name": name, "enabled": enabled}
+
+    def _post() -> bool:
+        try:
+            r = requests.post(url, json=payload, timeout=3)
+            if r.status_code >= 400:
+                log.warning("set_toggle %s: %s", r.status_code, r.text[:200])
+                return False
+            return True
+        except Exception as exc:
+            log.warning("set_toggle failed: %s", exc)
+            return False
+
+    return await asyncio.to_thread(_post)
 
 
 async def _perception_sound_turner() -> None:
@@ -2966,11 +3059,33 @@ if _configure_dashboard is not None:
                 return {"ok": False, "error": str(exc)}
         return await asyncio.to_thread(_post)
 
+    def _dashboard_state_getter() -> str:
+        """Return the current State of the (first connected) device, or 'idle'.
+        Falls back to 'idle' before any state_changed event has been seen."""
+        for st in _perception_state.values():
+            s = st.get("current_state")
+            if s:
+                return s
+        return "idle"
+
+    async def _dashboard_set_state(state: str) -> dict:
+        ok = await _dispatch_set_state("", state)
+        return {"ok": ok}
+
+    async def _dashboard_set_smart_mode(enabled: bool) -> dict:
+        _write_smart_mode(enabled)
+        ok = await _dispatch_set_toggle("", "smart_mode", enabled)
+        return {"ok": ok}
+
     _configure_dashboard(
         send_message=_dashboard_send_message,
         vision_cache=_vision_cache,
         kid_mode_getter=lambda: KID_MODE,
         kid_mode_setter=_dashboard_set_kid_mode,
+        smart_mode_getter=_read_smart_mode,
+        smart_mode_setter=_dashboard_set_smart_mode,
+        state_getter=_dashboard_state_getter,
+        state_setter=_dashboard_set_state,
         inject_to_device=_dashboard_inject_to_device,
         abort_device=_dashboard_abort_device,
         subscribe_events=_dashboard_subscribe_events,
@@ -3038,6 +3153,16 @@ class _AdminKidModeIn(BaseModel):
     enabled: bool
 
 
+class _AdminSmartModeIn(BaseModel):
+    enabled: bool
+    device_id: str = ""
+
+
+class _AdminStateIn(BaseModel):
+    state: str
+    device_id: str = ""
+
+
 class _AdminPersonaIn(BaseModel):
     file: str
     content: str
@@ -3066,6 +3191,37 @@ async def _admin_kid_mode(payload: _AdminKidModeIn) -> dict:
         "ok": True, "enabled": payload.enabled,
         "restart": _ADMIN_DAEMON_CFG["voice"][1],
     }
+
+
+@_admin_router.post("/smart-mode")
+async def _admin_smart_mode(payload: _AdminSmartModeIn) -> dict:
+    """Phase 4 — flip smart_mode toggle. Unlike kid-mode this does NOT restart
+    the daemon — smart_mode is a per-turn dispatch flag in receiveAudioHandle
+    plus a firmware toggle pip. The pip update is pushed via the
+    /xiaozhi/admin/set-toggle MCP relay so it lands live."""
+    _write_smart_mode(payload.enabled)
+    pushed = await _dispatch_set_toggle(
+        payload.device_id, "smart_mode", payload.enabled,
+    )
+    return {
+        "ok": True, "enabled": payload.enabled, "device_pushed": pushed,
+    }
+
+
+@_admin_router.post("/state")
+async def _admin_state(payload: _AdminStateIn) -> dict:
+    """Phase 4 — dashboard / external trigger to set Dotty's high-level state.
+    Valid: idle / talk / story_time / security / sleep / dance. Pushes
+    self.robot.set_state MCP via the xiaozhi-server relay; the firmware
+    StateManager handles the transition. No daemon restart."""
+    valid = ("idle", "talk", "story_time", "security", "sleep", "dance")
+    if payload.state not in valid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"state must be one of {valid}",
+        )
+    pushed = await _dispatch_set_state(payload.device_id, payload.state)
+    return {"ok": True, "state": payload.state, "device_pushed": pushed}
 
 
 @_admin_router.post("/persona")

@@ -26,11 +26,39 @@ So Dotty is the version that passes: every component runs on hardware I own, eve
 - **Streaming responses** -- the bridge streams LLM output to the voice pipeline for lower perceived latency.
 - **Emoji expressions** -- every response starts with an emoji that the firmware maps to a face animation (smile, laugh, sad, surprise, thinking, angry, love, sleepy, neutral).
 - **MCP tools** -- ZeroClaw exposes tools (web search, memory, etc.) to the LLM via the Model Context Protocol.
-- **Behavioural modes** -- face-tracking idle, conversation (listen / think / talk), smart mode, dance, sing, vision -- each with its own LED contract on the 12-LED ring. See [`docs/modes.md`](./docs/modes.md) for the taxonomy + transition diagram.
+- **States, toggles & LEDs** -- a six-state mutex (`idle / talk / story_time / security / sleep / dance`) plus orthogonal toggles (`kid_mode`, `smart_mode`) drive both behaviour and the 12-pixel LED ring. State pip on left ring index 0, toggle pips on right ring 8/9, privacy LEDs hardware-protected at 6/11. Voice phrases, camera edges, and dashboard controls all flow through the same firmware StateManager. See [`docs/modes.md`](./docs/modes.md) for the full contract + transition diagram.
 - **Vision (camera)** -- the StackChan's built-in camera can capture images for multimodal LLM queries.
 - **Persona system** -- swappable persona prompts in `personas/`. Change the robot's personality without touching code.
 - **Calendar context** -- optional calendar integration feeds upcoming events into the conversation context.
 - **Hackable** -- every seam is swappable: LLM, TTS, ASR, agent framework, persona. Fork it, rip out what you don't want, wire in your own.
+
+## States, Toggles & LEDs
+
+Dotty's behaviour is structured as a **six-state mutex** plus **two orthogonal toggles**, all owned by the firmware StateManager (`firmware/main/stackchan/modes/state_manager.cpp`). It's the architectural backbone — voice phrases, camera edges, dashboard controls, and every behavioural side-effect plug into the same model.
+
+**States** (mutually exclusive, exactly one active):
+
+| State | LED pip (left ring 0) | What's happening |
+|---|---|---|
+| `idle` | off | Default. Ambient awareness, gentle idle motion. |
+| `talk` | dim cyan `(0,40,60)` | Conversation engaged. Chat sub-states (listen / think / talk) animate the rest of the left ring. |
+| `story_time` | warm `(100,40,0)` | Long-running interactive story. Bypasses ZeroClaw, calls OpenRouter directly with story persona + rolling context. |
+| `security` | white `(80,80,80)` flashing 1 Hz | Wide deliberate scan, periodic capture. Greeter suppressed. |
+| `sleep` | very dim blue `(0,0,16)` | Servos parked + torque off, sleepy emoji on screen. Wakes on face / voice / head-pet. |
+| `dance` | suppressed | Transient performance — choreography + audio. |
+
+**Toggles** (compose freely with state):
+
+| Toggle | LED pip (right ring) | When ON |
+|---|---|---|
+| `kid_mode` | warm pink `(168,80,100)` at index **8** | Safety-tuned model, content sandwich, camera tools denied, kid-safe persona |
+| `smart_mode` | orange `(168,80,0)` at index **9** | Bridge bypasses ZeroClaw → direct OpenRouter (capable model). No memory, no tools. |
+
+**12-pixel LED ring layout** — index 0 holds the state pip, indices 1–5 carry the chat-state animation, indices 8–9 hold the toggle pips, and indices **6 (mic) and 11 (camera)** are hardware-protected privacy LEDs (writes from anywhere except the privacy subsystem are rejected at compile time). Indices 7 and 10 are reserved for future toggles.
+
+Transitions are voice-driven (`go to sleep`, `tell me a story`, `keep watch`, `wake up`), camera-edge-driven (face_detected → `talk`), or dashboard-driven (`POST /admin/state`). The firmware emits a `state_changed` perception event on every transition; the bridge consumes those events and gates downstream behaviour (e.g. ambient awareness only in `idle`, greeter suppressed in `security`). See [`docs/modes.md`](./docs/modes.md) for the full state + LED contract, transition diagram, and per-state backing-architecture.
+
+---
 
 ## Reference deployment
 

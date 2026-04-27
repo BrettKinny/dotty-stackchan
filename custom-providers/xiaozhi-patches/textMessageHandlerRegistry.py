@@ -99,6 +99,19 @@ class EventTextMessageHandler(TextMessageHandler):
                 conn._room_match_person_id = None
             except Exception:
                 pass
+        # Phase 4: track the firmware's high-level State on the WS conn so
+        # receiveAudioHandle (and any other in-process consumer) can gate
+        # behaviour on it without the bridge round-trip. The bridge gets
+        # the same event via the relay below and updates _perception_state
+        # in parallel — both paths are kept in sync by StateManager being
+        # the only producer.
+        elif event_name == "state_changed":
+            try:
+                new_state = ((msg_json.get("data") or {}).get("state") or "").strip().lower()
+                if new_state:
+                    conn.current_state = new_state
+            except Exception:
+                pass
         # Listen on `face_detected`. Prior firmware also emitted
         # `face_recognized(identity="unknown")` from the dormant dlib
         # FaceRecognizer scaffold; that scaffold + emission were removed
