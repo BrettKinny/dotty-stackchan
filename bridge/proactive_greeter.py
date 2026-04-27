@@ -117,6 +117,7 @@ class ProactiveGreeter:
         kid_mode_provider: Callable[[], bool],
         *,
         household_registry: Any = None,
+        turn_logger: Optional[Callable[..., None]] = None,
         clock: Callable[[], float] = time.time,
         tz: Optional[ZoneInfo] = None,
     ) -> None:
@@ -125,6 +126,11 @@ class ProactiveGreeter:
         self._calendar = calendar_cache
         self._tts = tts_pusher
         self._kid_mode = kid_mode_provider
+        # Optional. When supplied, every greeting (success or push-error)
+        # is mirrored as a synthetic conversation turn with channel="greeter"
+        # so the dashboard's unified Activity feed surfaces it alongside
+        # voice turns. Inject `_convo_log.log_turn` from bridge.py.
+        self._turn_logger = turn_logger
         # Optional. When supplied, we enrich greetings with display name,
         # personality and birthday awareness. None == legacy behaviour
         # (raw identity string). See bridge/household.py.
@@ -241,6 +247,8 @@ class ProactiveGreeter:
         # greeting); it never gates whether a greeting fires.
         time_of_day = self._current_window()
 
+        t0 = self._clock()
+
         # Unknown branch.
         if identity == "unknown":
             if not self.greet_unknown:
@@ -253,7 +261,10 @@ class ProactiveGreeter:
             text = self._sandwich(
                 "Hello! I don't think we've met.", window=time_of_day,
             )
-            await self._safe_push(device_id, text)
+            await self._safe_push(
+                device_id, text, t0=t0,
+                request_text=f"face:{identity}",
+            )
             return
 
         # Known identity.
@@ -264,7 +275,10 @@ class ProactiveGreeter:
             identity=identity, window=time_of_day,
         )
         text = self._sandwich(greeting, window=time_of_day)
-        await self._safe_push(device_id, text)
+        await self._safe_push(
+            device_id, text, t0=t0,
+            request_text=f"face:{identity}",
+        )
 
     # ------------------------------------------------------------------
     # Time-of-day label
@@ -467,18 +481,44 @@ class ProactiveGreeter:
     # ------------------------------------------------------------------
     # TTS push
     # ------------------------------------------------------------------
-    async def _safe_push(self, device_id: str, text: str) -> None:
+    async def _safe_push(
+        self,
+        device_id: str,
+        text: str,
+        *,
+        t0: Optional[float] = None,
+        request_text: str = "",
+    ) -> None:
         if not text:
             return
+        err: Optional[str] = None
         try:
             await self._tts(device_id, text)
             log.info(
                 "greeter: pushed greeting device=%s text=%r", device_id, text,
             )
-        except Exception:
+        except Exception as exc:
             log.exception(
                 "greeter: tts_pusher raised (device=%s)", device_id,
             )
+            err = repr(exc)[:200]
+        if self._turn_logger is not None:
+            latency_ms = (
+                (self._clock() - t0) * 1000.0 if t0 is not None else 0.0
+            )
+            try:
+                self._turn_logger(
+                    channel="greeter",
+                    session_id="",
+                    request_text=request_text,
+                    response_text=text,
+                    latency_ms=latency_ms,
+                    error=err,
+                )
+            except Exception:
+                log.debug(
+                    "greeter: turn_logger raised", exc_info=True,
+                )
 
     # ------------------------------------------------------------------
     # State persistence

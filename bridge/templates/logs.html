@@ -23,6 +23,13 @@
       <details class="mt-1" {% if loop.first %}open{% endif %}>
         <summary class="text-xs text-base-content/60 cursor-pointer select-none flex items-center gap-2">
           <span>response &middot; {{ entry.latency_ms }}ms</span>
+          {% if entry.latency_phases %}
+          <span class="text-xs text-base-content/40 font-mono">
+            (new {{ entry.latency_phases.new_ms|default(0)|int }} &middot;
+            prompt {{ entry.latency_phases.prompt_ms|default(0)|int }} &middot;
+            stop {{ entry.latency_phases.stop_ms|default(0)|int }}ms)
+          </span>
+          {% endif %}
           <button class="btn btn-ghost btn-sm ml-auto"
                   type="button"
                   aria-label="Copy response text"

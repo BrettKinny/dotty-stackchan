@@ -865,6 +865,11 @@ class ACPClient:
         self._sid_created: float = 0.0
         self._sid_turns: int = 0
         self._in_flight_rid: int | None = None
+        # Per-call latency phases from the most recent prompt(). Keys:
+        # total_ms, new_ms, prompt_ms, stop_ms, reused (1/0). Read by
+        # log_turn callers so the convo NDJSON carries a phase breakdown
+        # for dashboard surfacing. Overwritten on every prompt() entry.
+        self._last_phases: dict[str, float] = {}
 
     async def _spawn(self) -> None:
         # Any respawn path invalidates the cached session — ZeroClaw has no memory of it.
@@ -1099,6 +1104,7 @@ class ACPClient:
             prompt_ms = 0.0
             stop_ms = 0.0  # always 0 in the reuse path; kept in log for continuity
             phase = "new"
+            self._last_phases = {}
             try:
                 if self._sid is None:
                     t_new = perf_counter()
@@ -1126,6 +1132,13 @@ class ACPClient:
                 self._sid_turns += 1
 
                 total_ms = (perf_counter() - t_total) * 1000.0
+                self._last_phases = {
+                    "total_ms": round(total_ms),
+                    "new_ms": round(new_ms),
+                    "prompt_ms": round(prompt_ms),
+                    "stop_ms": round(stop_ms),
+                    "reused": float(reused),
+                }
                 log.info(
                     "latency_ms total=%.0f new=%.0f prompt=%.0f stop=%.0f "
                     "sid=%s reused=%d turn=%d xiaozhi_sid=%s",
@@ -1379,6 +1392,7 @@ class _ConvoLogger:
         response_text: str,
         latency_ms: float,
         error: str | None = None,
+        latency_phases: dict[str, float] | None = None,
     ) -> None:
         now = datetime.now(LOCAL_TZ)
         emoji_used = ""
@@ -1398,6 +1412,8 @@ class _ConvoLogger:
             "latency_ms": round(latency_ms),
             "error": error,
         }
+        if latency_phases:
+            record["latency_phases"] = latency_phases
         path = self._dir / f"convo-{now.strftime('%Y-%m-%d')}.ndjson"
         try:
             with open(path, "a") as f:
@@ -1413,6 +1429,7 @@ class _ConvoLogger:
             error=error,
             emoji_used=emoji_used,
             ts_iso=now.isoformat(),
+            latency_phases=latency_phases,
         )
 
 
@@ -1441,7 +1458,8 @@ def _dashboard_unsubscribe_events(q: asyncio.Queue) -> None:
 def _dashboard_broadcast_turn(*, channel: str, request_text: str,
                            response_text: str, latency_ms: float,
                            error: str | None, emoji_used: str,
-                           ts_iso: str) -> None:
+                           ts_iso: str,
+                           latency_phases: dict[str, float] | None = None) -> None:
     if not _dashboard_event_listeners:
         return
     event = {
@@ -1453,6 +1471,8 @@ def _dashboard_broadcast_turn(*, channel: str, request_text: str,
         "error": error,
         "emoji_used": emoji_used,
     }
+    if latency_phases:
+        event["latency_phases"] = latency_phases
     for q in list(_dashboard_event_listeners):
         try:
             q.put_nowait(event)
@@ -2339,6 +2359,7 @@ async def lifespan(app: FastAPI):
             tts_pusher=_greeter_tts_pusher,
             kid_mode_provider=lambda: KID_MODE,
             household_registry=_household_registry,
+            turn_logger=_convo_log.log_turn,
         )
         _proactive_greeter.start()
     except Exception:
@@ -2991,6 +3012,7 @@ async def message(payload: MessageIn) -> MessageOut:
         response_text=answer,
         latency_ms=elapsed_s * 1000.0,
         error=error_msg,
+        latency_phases=dict(acp._last_phases) if acp._last_phases else None,
     )
     return MessageOut(response=answer, session_id=session_id)
 
@@ -3068,6 +3090,25 @@ if _configure_dashboard is not None:
                 return s
         return "idle"
 
+    def _dashboard_perception_state_getter() -> dict:
+        """Snapshot of per-device perception state with sensor_stale +
+        sensor_age_s annotations — same shape as /api/perception/state but
+        called in-process so the dashboard avoids an HTTP round-trip on
+        every status-strip refresh. Stale threshold is the bridge's
+        _PERCEPTION_STALE_THRESHOLD_S; sensors going quiet past that
+        window flips the Dotty header dot to amber even when voice is
+        otherwise live."""
+        now = time.time()
+        out: dict[str, dict] = {}
+        for did, raw in _perception_state.items():
+            entry = dict(raw)
+            last_t = entry.get("last_event_t")
+            age = float("inf") if last_t is None else max(0.0, now - last_t)
+            entry["sensor_age_s"] = age
+            entry["sensor_stale"] = age > _PERCEPTION_STALE_THRESHOLD_S
+            out[did] = entry
+        return out
+
     async def _dashboard_set_state(state: str) -> dict:
         ok = await _dispatch_set_state("", state)
         return {"ok": ok}
@@ -3090,6 +3131,7 @@ if _configure_dashboard is not None:
         abort_device=_dashboard_abort_device,
         subscribe_events=_dashboard_subscribe_events,
         unsubscribe_events=_dashboard_unsubscribe_events,
+        perception_state_getter=_dashboard_perception_state_getter,
     )
 
 
@@ -3502,6 +3544,7 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
             response_text=full,
             latency_ms=elapsed_s * 1000.0,
             error=error_msg,
+            latency_phases=dict(acp._last_phases) if acp._last_phases else None,
         )
 
     async def gen():

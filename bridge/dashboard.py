@@ -45,6 +45,7 @@ _state: dict[str, Any] = {
     "abort_device": None,
     "subscribe_events": None,
     "unsubscribe_events": None,
+    "perception_state_getter": None,
 }
 
 
@@ -54,7 +55,8 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
               state_getter: Any = None, state_setter: Any = None,
               inject_to_device: Any = None, abort_device: Any = None,
               subscribe_events: Any = None,
-              unsubscribe_events: Any = None) -> None:
+              unsubscribe_events: Any = None,
+              perception_state_getter: Any = None) -> None:
     """Register bridge state with the dashboard. Idempotent."""
     if send_message is not None:
         _state["send_message"] = send_message
@@ -80,6 +82,8 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
         _state["subscribe_events"] = subscribe_events
     if unsubscribe_events is not None:
         _state["unsubscribe_events"] = unsubscribe_events
+    if perception_state_getter is not None:
+        _state["perception_state_getter"] = perception_state_getter
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -308,12 +312,16 @@ def _read_recent_log_entries(date_str: str, limit: int = 20) -> list[dict[str, A
         cleaned_request = _clean_request_text(rec.get("request_text") or "")
         if _looks_like_xiaozhi_system_msg(cleaned_request):
             continue
+        phases = rec.get("latency_phases")
+        if not isinstance(phases, dict):
+            phases = None
         out.append({
             "time": time_str,
             "channel": rec.get("channel") or "?",
             "request": cleaned_request[:400],
             "response": (rec.get("response_text") or "")[:1000],
             "latency_ms": rec.get("latency_ms", "?"),
+            "latency_phases": phases,
             "error": rec.get("error"),
         })
         if len(out) >= limit:
@@ -1374,6 +1382,35 @@ async def status_strip(request: Request, placement: str = "header") -> Any:
             else:
                 sc_status, sc_tip = "bad", f"Dotty: stale {_humanize_age(age)} ago"
 
+        # Downgrade the dot when the perception sensors have gone quiet
+        # past the bridge staleness threshold (face/sound bus, not voice).
+        # Voice activity may be 0 in the morning while perception should
+        # still be ticking over from face_detected etc — a stale bus
+        # means the firmware-side perception path is hung even if voice
+        # is technically reachable.
+        psg = _state.get("perception_state_getter")
+        if psg is not None:
+            try:
+                pstate = psg() or {}
+            except Exception:
+                pstate = {}
+            stale_devs = [
+                did for did, s in pstate.items()
+                if s and s.get("sensor_stale")
+            ]
+            any_dev = bool(pstate)
+            if stale_devs and sc_status in ("ok", "unknown"):
+                sc_status = "warn"
+                sc_tip = (
+                    f"Dotty: perception sensors stale "
+                    f"({len(stale_devs)}/{len(pstate)} dev) — "
+                    f"firmware bus may be hung"
+                )
+            elif not any_dev and sc_status == "unknown":
+                # Same fall-through: no events ever — don't override the
+                # "no voice activity today" tip; just leave it.
+                pass
+
         if not XIAOZHI_HOST:
             xz_status, xz_tip = "unknown", "unraid: XIAOZHI_HOST env not set"
         elif xz_ota_ok and xz_ws_ok:
@@ -1479,6 +1516,52 @@ async def host_detail(request: Request, slug: str) -> Any:
         getter = _state.get("state_getter")
         current = (getter() if getter else None) or "idle"
         n = await _xiaozhi_device_count()
+        # Perception bus liveness — separate from voice activity. Stale
+        # means firmware-side face/sound events have stopped flowing
+        # (face_detected, sound_event, state_changed) past the bridge's
+        # PERCEPTION_STALE_THRESHOLD_S window. A live device with stale
+        # perception is a useful early-warning that a perception modifier
+        # has hung even though the voice path still works.
+        perception_label = "no events yet"
+        psg = _state.get("perception_state_getter")
+        if psg is not None:
+            try:
+                pstate = psg() or {}
+            except Exception:
+                pstate = {}
+            if pstate:
+                stale = [
+                    did for did, s in pstate.items()
+                    if s and s.get("sensor_stale")
+                ]
+                if stale:
+                    ages = [
+                        s.get("sensor_age_s") for _, s in pstate.items()
+                        if s and s.get("sensor_stale")
+                    ]
+                    finite_ages = [a for a in ages if a not in (None, float("inf"))]
+                    if finite_ages:
+                        oldest = max(finite_ages)
+                        perception_label = (
+                            f"stale ({len(stale)}/{len(pstate)} dev, "
+                            f"oldest {_humanize_age(oldest)})"
+                        )
+                    else:
+                        perception_label = (
+                            f"stale ({len(stale)}/{len(pstate)} dev, never)"
+                        )
+                else:
+                    youngest = min(
+                        (s.get("sensor_age_s", float("inf"))
+                         for s in pstate.values() if s),
+                        default=float("inf"),
+                    )
+                    if youngest != float("inf"):
+                        perception_label = (
+                            f"live ({_humanize_age(youngest)} since last)"
+                        )
+                    else:
+                        perception_label = "live"
         facts = [
             ("device class", "M5Stack StackChan (ESP32-S3)"),
             ("connection",
@@ -1486,6 +1569,7 @@ async def host_detail(request: Request, slug: str) -> Any:
              else ("offline" if n == 0 else "unknown")),
             ("last seen",   seen),
             ("current state", current),
+            ("perception",  perception_label),
         ]
 
     return templates.TemplateResponse(
