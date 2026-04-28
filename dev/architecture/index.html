@@ -2132,6 +2132,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#topology" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Topology
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#actors" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2198,6 +2209,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#deployment-files-this-repo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment files (this repo)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2237,6 +2259,37 @@
 <li>The "xiaozhi ↔ brain" seam is HTTP + ACP-over-stdio, not a library call — so either side can be swapped independently.</li>
 <li>The robot speaks the <strong>Xiaozhi WebSocket protocol</strong> (see <a href="../protocols/">protocols.md</a>). It has no hardcoded knowledge of ZeroClaw.</li>
 </ul>
+<h2 id="topology">Topology<a class="headerlink" href="#topology" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>flowchart LR
+    subgraph Desk["Desk (LAN WiFi)"]
+        SC["M5Stack StackChan&lt;br/&gt;ESP32-S3"]
+    end
+
+    subgraph DockerHost["Docker host - &amp;lt;XIAOZHI_HOST&amp;gt;"]
+        XZ["xiaozhi-esp32-server&lt;br/&gt;(Docker)&lt;br/&gt;:8000 WS + :8003 HTTP"]
+        subgraph XZMods["voice pipeline"]
+            VAD["SileroVAD"]
+            ASR["FunASR&lt;br/&gt;SenseVoiceSmall"]
+            LLM["ZeroClawLLM&lt;br/&gt;(custom provider)"]
+            TTS["TTS&lt;br/&gt;(LocalPiper default,&lt;br/&gt;EdgeTTS available)"]
+        end
+    end
+
+    subgraph ZCHost["ZeroClaw host - &amp;lt;ZEROCLAW_HOST&amp;gt;"]
+        Bridge["zeroclaw-bridge&lt;br/&gt;FastAPI :8080&lt;br/&gt;systemd unit"]
+        ZC["ZeroClaw daemon&lt;br/&gt;(agent persona)"]
+        Cloud["(OpenRouter / GLM / ...)"]
+    end
+
+    SC --&gt;|"WebSocket&lt;br/&gt;Xiaozhi protocol"| XZ
+    XZ --- VAD &amp; ASR &amp; LLM &amp; TTS
+    LLM --&gt;|"HTTP POST&lt;br/&gt;/api/message/stream"| Bridge
+    Bridge --&gt;|"JSON-RPC 2.0&lt;br/&gt;over stdio (ACP)"| ZC
+    ZC -.-&gt;|"LLM API call"| Cloud
+    ZC --&gt;|"stdout JSON-RPC"| Bridge
+    Bridge --&gt;|"JSON response"| LLM
+    TTS --&gt;|"audio stream"| XZ
+    XZ --&gt;|"WebSocket"| SC</code></pre>
 <h2 id="actors">Actors<a class="headerlink" href="#actors" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2376,12 +2429,82 @@
 <li><strong>OpenRouter compromise</strong> gives them log access to every prompt sent. Treat prompts as non-confidential.</li>
 </ul>
 <p>See <a href="../ROADMAP.md"><code>../ROADMAP.md</code></a> for related backlog items (privacy-indicator LEDs, child-safety hardening).</p>
+<h2 id="deployment-files-this-repo">Deployment files (this repo)<a class="headerlink" href="#deployment-files-this-repo" title="Permanent link">&para;</a></h2>
+<p>The canonical working copies live in this repo. The deployed copies on each host should match — if they drift, redeploy from here.</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Deployed to</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bridge.py</code></td>
+<td>ZeroClaw host <code>&lt;BRIDGE_PATH&gt;/bridge.py</code></td>
+<td>FastAPI HTTP→ZeroClaw translator (ACP over stdio)</td>
+</tr>
+<tr>
+<td><code>bridge/requirements.txt</code></td>
+<td>bare-metal venv</td>
+<td>Pinned Python deps for the bridge (fastapi, uvicorn, pydantic)</td>
+</tr>
+<tr>
+<td><code>zeroclaw-bridge.service</code></td>
+<td>ZeroClaw host <code>/etc/systemd/system/</code></td>
+<td>systemd unit for bridge</td>
+</tr>
+<tr>
+<td><code>custom-providers/zeroclaw/zeroclaw.py</code></td>
+<td>Docker host <code>core/providers/llm/zeroclaw/zeroclaw.py</code></td>
+<td>xiaozhi LLM provider, proxies to the ZeroClaw bridge</td>
+</tr>
+<tr>
+<td><code>custom-providers/zeroclaw/__init__.py</code></td>
+<td>Docker host <code>core/providers/llm/zeroclaw/__init__.py</code></td>
+<td>Python package marker</td>
+</tr>
+<tr>
+<td><code>custom-providers/edge_stream/edge_stream.py</code></td>
+<td>Docker host <code>core/providers/tts/edge_stream.py</code></td>
+<td>Streaming EdgeTTS provider</td>
+</tr>
+<tr>
+<td><code>custom-providers/piper_local/piper_local.py</code></td>
+<td>Docker host <code>core/providers/tts/piper_local.py</code></td>
+<td>Local Piper TTS provider (offline alternative to EdgeTTS)</td>
+</tr>
+<tr>
+<td><code>custom-providers/asr/fun_local.py</code></td>
+<td>Docker host <code>core/providers/asr/fun_local.py</code></td>
+<td>Patched FunASR provider (adds <code>language</code> config key)</td>
+</tr>
+<tr>
+<td><code>.config.yaml</code></td>
+<td>Docker host <code>data/.config.yaml</code></td>
+<td>xiaozhi-server config override</td>
+</tr>
+<tr>
+<td><code>.env.example</code></td>
+<td>reference only</td>
+<td>Documented environment variables with defaults</td>
+</tr>
+<tr>
+<td><code>docker-compose.yml</code></td>
+<td>Docker host <code>&lt;XIAOZHI_PATH&gt;</code></td>
+<td>Container definition</td>
+</tr>
+</tbody>
+</table>
+<p>Volume mounts (Docker host) are listed in <a href="../quickstart/#deployment-layout">quickstart.md</a>.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../hardware/">hardware.md</a> — what the device actually is.</li>
 <li><a href="../voice-pipeline/">voice-pipeline.md</a> — what the Docker host runs.</li>
 <li><a href="../brain/">brain.md</a> — what the ZeroClaw host runs.</li>
 <li><a href="../protocols/">protocols.md</a> — what's on the wire.</li>
+<li><a href="../quickstart/">quickstart.md</a> — deployment placeholders, volume mounts, common ops.</li>
 </ul>
 <p>Last verified: 2026-04-25.</p>
 

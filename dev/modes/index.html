@@ -2307,7 +2307,7 @@
 <li><strong>STATE</strong> — what Dotty is <em>doing right now</em>. Mutually exclusive — exactly one State is active. Six values: <code>idle</code>, <code>talk</code>, <code>story_time</code>, <code>security</code>, <code>sleep</code>, <code>dance</code>.</li>
 <li><strong>TOGGLES</strong> — orthogonal modifiers that can be on regardless of state. Two values today: <code>kid_mode</code>, <code>smart_mode</code>. Toggles compose freely with state.</li>
 </ul>
-<p>The firmware <strong>StateManager</strong> modifier (<code>firmware/main/stackchan/modes/state_manager.cpp</code>) owns both axes. It writes the state pip + toggle pips to the LED ring at 5 Hz, drives the idle-motion profile, and emits <code>state_changed</code> perception events on every transition.</p>
+<p>The firmware <strong>StateManager</strong> modifier (<code>firmware/main/stackchan/modes/state_manager.cpp</code>) owns both axes. It paints the state arc (left ring 0-5) + toggle pips at 5 Hz, drives the idle-motion profile, and emits <code>state_changed</code> perception events on every transition.</p>
 <p>Pair this with <a href="../hardware/">hardware.md</a> (the physical LED ring + servos) and <a href="../interaction-map/">interaction-map.md</a> (the underlying signals).</p>
 <hr />
 <h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
@@ -2336,19 +2336,20 @@
 <tr>
 <td>Chat sub-state</td>
 <td>nested under <code>talk</code> / <code>story_time</code></td>
-<td>listening / thinking / speaking</td>
+<td>listening (LED) / thinking + speaking (face only)</td>
 <td>xiaozhi-server</td>
 </tr>
 </tbody>
 </table>
 <p>The firmware boots into <code>idle</code> with both toggles <strong>off</strong>. The bridge resyncs toggles from disk on the first turn after each reconnect. State transitions land via voice phrases, camera edges (face_detected → <code>talk</code>), or <code>/admin/state</code> from the dashboard.</p>
+<p><strong>Speech sub-states</strong> are conveyed by face animations (eye gestures, talking mouth) and the dedicated <strong>listening pixel</strong> at right-ring index 11. <code>thinking</code> and <code>speaking</code> have no LED — they live on the face. <code>listening</code> lights pixel 11 red so the user knows when their voice is being captured as a turn.</p>
 <hr />
 <h2 id="states-mutually-exclusive">States (mutually exclusive)<a class="headerlink" href="#states-mutually-exclusive" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
 <th>State</th>
-<th>State pip (left ring 0)</th>
+<th>LED arc (left ring 0-5)</th>
 <th>Idle profile</th>
 <th>Behaviour</th>
 <th>Backing path</th>
@@ -2364,9 +2365,9 @@
 </tr>
 <tr>
 <td><code>talk</code></td>
-<td>dim cyan <code>(0,40,60)</code></td>
+<td>dim green <code>(0,60,0)</code></td>
 <td>NORMAL (face_tracking overlay active)</td>
-<td>Conversation engaged. Chat sub-states (listening / thinking / speaking) animate the rest of the left ring.</td>
+<td>Conversation engaged. Listening pixel (right 6) lights red while the user has the turn; <code>thinking</code> and <code>speaking</code> are face-animation only.</td>
 <td>xiaozhi → bridge → ZeroClaw ACP</td>
 </tr>
 <tr>
@@ -2378,7 +2379,7 @@
 </tr>
 <tr>
 <td><code>security</code></td>
-<td>white <code>(80,80,80)</code> <strong>flashing 1 Hz</strong></td>
+<td>white <code>(80,80,80)</code> <strong>flashing 1 Hz</strong> across all 6 left pixels</td>
 <td>SURVEILLANCE</td>
 <td>Wide deliberate scan, serious face, periodic photo + audio capture. No proactive greet.</td>
 <td>bridge ambient task (Phase 6)</td>
@@ -2392,13 +2393,14 @@
 </tr>
 <tr>
 <td><code>dance</code></td>
-<td>suppressed (rainbow takes over)</td>
+<td>rainbow sweep (left ring)</td>
 <td>NORMAL</td>
 <td>Transient performance — choreography + audio. Pre-existing dance handler.</td>
 <td><code>receiveAudioHandle.py::_handle_dance</code></td>
 </tr>
 </tbody>
 </table>
+<p>The <code>idle → talk</code> trigger is the firmware <code>face_detected</code> event (any face, family or stranger). The bridge runs VLM recognition (<code>bridge.py::_capture_room_view</code>) in parallel and feeds the resulting identity into the speaker resolver / persona — recognition does <strong>not</strong> gate the state transition.</p>
 <h3 id="mutex-rules">Mutex rules<a class="headerlink" href="#mutex-rules" title="Permanent link">&para;</a></h3>
 <ol>
 <li>Exactly <strong>one</strong> state is current. <code>setState(S)</code> to the same state is a no-op.</li>
@@ -2436,12 +2438,12 @@
 <h2 id="led-contract-12-pixel-ring">LED contract (12-pixel ring)<a class="headerlink" href="#led-contract-12-pixel-ring" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>LEFT RING (global 0–5)              RIGHT RING (global 6–11)
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>┌───────────────────┐               ┌───────────────────────┐
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│ 0  state pip      │               │ 6  privacy: mic    🔒 │
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│ 1  chat anim      │               │ 7  reserved (toggle)  │
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│ 2  chat anim      │               │ 8  kid_mode toggle    │
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│ 3  chat anim      │               │ 9  smart_mode toggle  │
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│ 4  chat anim      │               │ 10 reserved (toggle)  │
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│ 5  chat anim      │               │ 11 privacy: camera 🔒 │
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│ 0  state arc      │               │ 6  reserved           │
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│ 1  state arc      │               │ 7  reserved           │
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│ 2  state arc      │               │ 8  kid_mode toggle    │
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│ 3  state arc      │               │ 9  smart_mode toggle  │
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│ 4  state arc      │               │ 10 reserved           │
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│ 5  state arc      │               │ 11 listening          │
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>└───────────────────┘               └───────────────────────┘
 </code></pre></div>
 <table>
@@ -2450,66 +2452,48 @@
 <th>Index</th>
 <th>Half</th>
 <th>Owner</th>
-<th>Hardware-protected</th>
+<th>Behaviour</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>0</td>
+<td>0–5</td>
 <td>left</td>
-<td>StateManager (state pip)</td>
-<td>no</td>
+<td>StateManager (state arc)</td>
+<td>All six paint the current mutex-state colour. Dance suppresses and lets the rainbow animation own the ring.</td>
 </tr>
 <tr>
-<td>1–5</td>
-<td>left</td>
-<td>xiaozhi CircularStrip (chat-state animation)</td>
-<td>no</td>
-</tr>
-<tr>
-<td>6</td>
+<td>6, 7, 10</td>
 <td>right</td>
-<td>PrivacyLeds (mic)</td>
-<td><strong>yes</strong> — friend-class only</td>
-</tr>
-<tr>
-<td>7</td>
-<td>right</td>
-<td>reserved for future toggle</td>
-<td>no</td>
+<td>unowned (off)</td>
+<td>Reserved for future indicators (low-battery is a known candidate).</td>
 </tr>
 <tr>
 <td>8</td>
 <td>right</td>
 <td>StateManager (<code>kid_mode</code> pip)</td>
-<td>no</td>
+<td>Warm pink <code>(168,80,100)</code> when kid_mode = on; off otherwise.</td>
 </tr>
 <tr>
 <td>9</td>
 <td>right</td>
 <td>StateManager (<code>smart_mode</code> pip)</td>
-<td>no</td>
-</tr>
-<tr>
-<td>10</td>
-<td>right</td>
-<td>reserved for future toggle</td>
-<td>no</td>
+<td>Orange <code>(168,80,0)</code> when smart_mode = on; off otherwise.</td>
 </tr>
 <tr>
 <td>11</td>
 <td>right</td>
-<td>PrivacyLeds (camera)</td>
-<td><strong>yes</strong> — friend-class only</td>
+<td>xiaozhi <code>stackchan_display.cc::set_listening_pixel</code></td>
+<td>Red <code>(120,0,0)</code> while xiaozhi is in <code>LISTENING</code> (mic open, ASR active, user's turn); off otherwise. Bottom of the right ring; spatially separated from the toggle pips.</td>
 </tr>
 </tbody>
 </table>
 <h3 id="led-quirks">LED quirks<a class="headerlink" href="#led-quirks" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>Re-assertion at 5 Hz.</strong> The chat-state animation (<code>set_left_leds</code> in <code>stackchan_display.cc</code>) repaints the entire left ring on every LISTENING / SPEAKING / STANDBY transition. The state pip is restored within ~200 ms.</li>
+<li><strong>5 Hz tick.</strong> StateManager re-paints the state arc + toggle pips every ~200 ms. The tick is what drives the SECURITY 1 Hz flash; defense-in-depth re-assertion is a free side-effect for anything that ever clobbers a pixel.</li>
 <li><strong>PY32 IO expander quantises to RGB565.</strong> Brightness deltas crush — <code>(40,40,40)</code> reads almost identical to <code>(200,200,200)</code>. Use distinct <strong>hues</strong>, not brightness levels, for any indicator that needs to read across a room.</li>
-<li><strong>Privacy LEDs are friend-protected.</strong> <code>Hal::setRgbColor</code> rejects writes to global indices 6 and 11 with a warning log; only <code>PrivacyLeds::setRgbColor_privacy_only</code> can drive them. Compile-time invariant.</li>
-<li><strong>RightNeonLight uses local indices 0–5</strong> internally, mapped to global 6–11 via <code>+6</code>. <code>setColorAt(local 0)</code> and <code>setColorAt(local 5)</code> are silently dropped (privacy guard). <code>setColorAt(local 2)</code> writes global 8 (kid_mode pip); <code>setColorAt(local 3)</code> writes global 9 (smart_mode pip).</li>
+<li><strong>All 12 pixels are writable through <code>Hal::setRgbColor</code>.</strong> The earlier privacy-LED friend-class guard was dropped along with the privacy semantics — listening pixel and toggle pips coexist by indexing rather than by hardware lock.</li>
+<li><strong>RightNeonLight uses local indices 0–5</strong> internally, mapped to global 6–11 via <code>+6</code>. <code>setColorAt(local 2)</code> writes global 8 (kid_mode pip); <code>setColorAt(local 3)</code> writes global 9 (smart_mode pip). Local 0 and local 5 now write global 6 and 11 directly (no silent drop).</li>
 </ul>
 <hr />
 <h2 id="state-transitions">State transitions<a class="headerlink" href="#state-transitions" title="Permanent link">&para;</a></h2>

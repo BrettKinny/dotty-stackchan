@@ -2209,6 +2209,111 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#placeholders" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Placeholders
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Endpoints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reboot-survival" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reboot survival
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common operations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Common operations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changing-voice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changing voice
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changing-persona-the-robots-personality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changing persona (the robot's personality)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changing-vad-sensitivity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changing VAD sensitivity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changing-the-llm-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changing the LLM model
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#troubleshooting" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2346,10 +2451,252 @@ latency is roughly 5 seconds, dominated by the LLM round-trip.</p>
 <li><a href="../architecture/">Architecture overview</a> -- full data flow.</li>
 <li><a href="../kid-mode/">Kid Mode</a> -- on by default, what it enforces.</li>
 </ul>
+<hr />
+<h2 id="placeholders">Placeholders<a class="headerlink" href="#placeholders" title="Permanent link">&para;</a></h2>
+<p>This repo uses placeholders in place of real IPs, usernames, and filesystem paths. Substitute these everywhere before deploying:</p>
+<table>
+<thead>
+<tr>
+<th>Placeholder</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;XIAOZHI_HOST&gt;</code></td>
+<td>LAN IP of the Docker host running xiaozhi-server. StackChan reaches this on WiFi, so it must be a LAN IP, not a Tailscale/VPN IP.</td>
+</tr>
+<tr>
+<td><code>&lt;XIAOZHI_USER&gt;</code></td>
+<td>SSH user for the Docker host (whatever your distro defaults to: <code>root</code>, <code>ubuntu</code>, <code>dietpi</code>, etc.).</td>
+</tr>
+<tr>
+<td><code>&lt;XIAOZHI_HOSTNAME&gt;</code></td>
+<td>Hostname or Tailscale name of the Docker host (optional, IP works for everything).</td>
+</tr>
+<tr>
+<td><code>&lt;XIAOZHI_PATH&gt;</code></td>
+<td>Path on the Docker host where you clone/install xiaozhi-server (e.g. <code>/opt/xiaozhi-server/</code> or <code>/srv/xiaozhi-server/</code>).</td>
+</tr>
+<tr>
+<td><code>&lt;ZEROCLAW_HOST&gt;</code></td>
+<td>LAN IP of the host running ZeroClaw + the bridge. Anything that runs the <code>zeroclaw</code> binary works (a small Linux box, your existing home server, or the same Docker host as xiaozhi-server).</td>
+</tr>
+<tr>
+<td><code>&lt;ZEROCLAW_USER&gt;</code></td>
+<td>SSH user on the ZeroClaw host (whatever your distro defaults to).</td>
+</tr>
+<tr>
+<td><code>&lt;ZEROCLAW_HOME&gt;</code></td>
+<td>Home directory on the ZeroClaw host for the user that owns the bridge (e.g. <code>/root/</code> or <code>/home/&lt;user&gt;/</code>).</td>
+</tr>
+<tr>
+<td><code>&lt;BRIDGE_PATH&gt;</code></td>
+<td>Full path to the zeroclaw-bridge working directory (e.g. <code>/root/zeroclaw-bridge/</code>).</td>
+</tr>
+<tr>
+<td><code>&lt;ZEROCLAW_BIN&gt;</code></td>
+<td>Absolute path to the <code>zeroclaw</code> binary (cargo default: <code>~/.cargo/bin/zeroclaw</code>).</td>
+</tr>
+<tr>
+<td><code>&lt;ZEROCLAW_CFG&gt;</code></td>
+<td>ZeroClaw config file path (default: <code>/root/.zeroclaw/config.toml</code>).</td>
+</tr>
+<tr>
+<td><code>&lt;YOUR_NAME&gt;</code></td>
+<td>Your name / org, used in the persona prompt in <code>.config.yaml</code>.</td>
+</tr>
+<tr>
+<td><code>&lt;ROBOT_NAME&gt;</code></td>
+<td>Name the robot introduces itself as, referenced in the persona prompt in <code>.config.yaml</code>. Any string — pick whatever you want. The default example uses the hardware name ("StackChan").</td>
+</tr>
+</tbody>
+</table>
+<p>Port numbers (<code>8000</code>, <code>8003</code>, <code>8080</code>, <code>18789</code>, <code>42617</code>) are product-generic and should not be changed unless you also reconfigure the respective services.</p>
+<p>Files you will definitely need to edit before first run:</p>
+<ul>
+<li><code>.config.yaml</code> — replace <code>&lt;XIAOZHI_HOST&gt;</code>, <code>&lt;ZEROCLAW_HOST&gt;</code>, and customise the <code>prompt:</code> block.</li>
+<li><code>docker-compose.yml</code> — set <code>TZ</code> to your timezone.</li>
+<li><code>zeroclaw-bridge.service</code> — adjust paths if the bridge doesn't live at <code>/root/zeroclaw-bridge/</code>.</li>
+</ul>
+<hr />
+<h2 id="deployment-layout">Deployment layout<a class="headerlink" href="#deployment-layout" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>flowchart TB
+    subgraph DockerHost_fs["Docker host filesystem - &amp;lt;XIAOZHI_PATH&amp;gt;"]
+        direction TB
+        UA1["data/.config.yaml&lt;br/&gt;(override - voice, persona, endpoints)"]
+        UA2["models/SenseVoiceSmall/&lt;br/&gt;(model.pt + configs)"]
+        UA3["custom-providers/zeroclaw/&lt;br/&gt;(zeroclaw.py + __init__.py)"]
+        UA3b["custom-providers/edge_stream/&lt;br/&gt;(edge_stream.py + __init__.py)"]
+        UA3d["custom-providers/piper_local/&lt;br/&gt;(piper_local.py + __init__.py)"]
+        UA3c["custom-providers/asr/fun_local.py&lt;br/&gt;(patched ASR - language key)"]
+        UA4["tmp/&lt;br/&gt;(TTS audio scratch)"]
+        UA5["repo/&lt;br/&gt;(git clone, reference only)"]
+        UA6["docker-compose.yml"]
+    end
+
+    subgraph ZCHost_fs["ZeroClaw host filesystem"]
+        direction TB
+        RA["&amp;lt;BRIDGE_PATH&amp;gt;"]
+        RA1["bridge.py"]
+        RA2[".venv/&lt;br/&gt;(fastapi + uvicorn)"]
+        RB["/etc/systemd/system/&lt;br/&gt;zeroclaw-bridge.service"]
+        RC["~/.zeroclaw/&lt;br/&gt;(agent persona config)"]
+        RA --&gt; RA1 &amp; RA2
+    end</code></pre>
+<p>Container volume mounts:</p>
+<table>
+<thead>
+<tr>
+<th>Host path</th>
+<th>Container path</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>data/.config.yaml</code></td>
+<td><code>/opt/xiaozhi-esp32-server/data/.config.yaml</code></td>
+<td>Config override (read-only mount)</td>
+</tr>
+<tr>
+<td><code>models/SenseVoiceSmall/</code></td>
+<td><code>/opt/xiaozhi-esp32-server/models/SenseVoiceSmall/</code></td>
+<td>ASR weights</td>
+</tr>
+<tr>
+<td><code>models/piper/</code></td>
+<td><code>/opt/xiaozhi-esp32-server/models/piper/</code></td>
+<td>Piper TTS voice models (<code>.onnx</code> + <code>.json</code>)</td>
+</tr>
+<tr>
+<td><code>tmp/</code></td>
+<td><code>/opt/xiaozhi-esp32-server/tmp/</code></td>
+<td>Scratch</td>
+</tr>
+<tr>
+<td><code>custom-providers/zeroclaw/</code></td>
+<td><code>/opt/xiaozhi-esp32-server/core/providers/llm/zeroclaw/</code></td>
+<td>Custom LLM provider (directory mount)</td>
+</tr>
+<tr>
+<td><code>custom-providers/edge_stream/edge_stream.py</code></td>
+<td><code>/opt/xiaozhi-esp32-server/core/providers/tts/edge_stream.py</code></td>
+<td>Streaming EdgeTTS provider (file mount)</td>
+</tr>
+<tr>
+<td><code>custom-providers/piper_local/piper_local.py</code></td>
+<td><code>/opt/xiaozhi-esp32-server/core/providers/tts/piper_local.py</code></td>
+<td>Local Piper TTS provider (file mount)</td>
+</tr>
+<tr>
+<td><code>custom-providers/asr/fun_local.py</code></td>
+<td><code>/opt/xiaozhi-esp32-server/core/providers/asr/fun_local.py</code></td>
+<td>Patched FunASR — adds <code>language</code> config key so SenseVoiceSmall can be pinned to English</td>
+</tr>
+</tbody>
+</table>
+<p>The full file inventory (with <code>/etc/systemd/system/</code> paths and the bare-metal venv) lives in <a href="../architecture/#deployment-files-this-repo">architecture.md</a>.</p>
+<hr />
+<h2 id="endpoints">Endpoints<a class="headerlink" href="#endpoints" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>URL</th>
+<th>Who calls it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OTA (enter into StackChan settings)</td>
+<td><code>http://&lt;XIAOZHI_HOST&gt;:8003/xiaozhi/ota/</code></td>
+<td>StackChan device on boot</td>
+</tr>
+<tr>
+<td>WebSocket</td>
+<td><code>ws://&lt;XIAOZHI_HOST&gt;:8000/xiaozhi/v1/</code></td>
+<td>StackChan device after OTA handshake</td>
+</tr>
+<tr>
+<td>Bridge (chat)</td>
+<td><code>http://&lt;ZEROCLAW_HOST&gt;:8080/api/message</code></td>
+<td>xiaozhi-server's ZeroClawLLM</td>
+</tr>
+<tr>
+<td>Bridge (health)</td>
+<td><code>http://&lt;ZEROCLAW_HOST&gt;:8080/health</code></td>
+<td>Humans, monitoring</td>
+</tr>
+<tr>
+<td>Bridge (dashboard)</td>
+<td><code>http://&lt;ZEROCLAW_HOST&gt;:8080/ui</code></td>
+<td>Humans (LAN-only HTMX UI)</td>
+</tr>
+<tr>
+<td>ZeroClaw gateway</td>
+<td><code>http://127.0.0.1:42617</code> (host-local)</td>
+<td>ZeroClaw's web UI only</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="reboot-survival">Reboot survival<a class="headerlink" href="#reboot-survival" title="Permanent link">&para;</a></h2>
+<p>Both services restart themselves without manual intervention:</p>
+<table>
+<thead>
+<tr>
+<th>Host</th>
+<th>Mechanism</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Docker host</td>
+<td>Container <code>restart: unless-stopped</code> in <code>docker-compose.yml</code> + ensure dockerd starts at boot on your distro.</td>
+</tr>
+<tr>
+<td>ZeroClaw host</td>
+<td><code>zeroclaw-bridge.service</code> is <code>enabled</code>, <code>Restart=on-failure</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Caveat: if you run <code>docker compose down</code>, the container is marked stopped and won't come back on reboot. Use <code>docker compose restart</code> or <code>docker restart xiaozhi-esp32-server</code> for transient restarts instead.</p>
+<hr />
+<h2 id="common-operations">Common operations<a class="headerlink" href="#common-operations" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Tail xiaozhi-server logs (voice pipeline)</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>ssh<span class="w"> </span>&lt;XIAOZHI_USER&gt;@&lt;XIAOZHI_HOST&gt;<span class="w"> </span><span class="s1">&#39;docker logs -f xiaozhi-esp32-server&#39;</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># Tail bridge logs</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>ssh<span class="w"> </span>&lt;ZEROCLAW_USER&gt;@&lt;ZEROCLAW_HOST&gt;<span class="w"> </span><span class="s1">&#39;sudo journalctl -u zeroclaw-bridge -f&#39;</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="c1"># Restart voice pipeline after config change</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>ssh<span class="w"> </span>&lt;XIAOZHI_USER&gt;@&lt;XIAOZHI_HOST&gt;<span class="w"> </span><span class="s1">&#39;cd &lt;XIAOZHI_PATH&gt; &amp;&amp; docker compose restart&#39;</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="c1"># Restart the bridge</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>ssh<span class="w"> </span>&lt;ZEROCLAW_USER&gt;@&lt;ZEROCLAW_HOST&gt;<span class="w"> </span><span class="s1">&#39;sudo systemctl restart zeroclaw-bridge&#39;</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="c1"># Smoke test full round-trip</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://&lt;ZEROCLAW_HOST&gt;:8080/api/message<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;content&quot;:&quot;hello&quot;,&quot;channel&quot;:&quot;dotty&quot;}&#39;</span>
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>
+<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="c1"># Bridge health</span>
+<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>curl<span class="w"> </span>http://&lt;ZEROCLAW_HOST&gt;:8080/health
+</code></pre></div>
+<h3 id="changing-voice">Changing voice<a class="headerlink" href="#changing-voice" title="Permanent link">&para;</a></h3>
+<p>The default TTS is <code>LocalPiper</code> (offline, runs inside the container). To change the Piper voice, edit <code>TTS.LocalPiper.voice</code> and the corresponding <code>model_path</code> / <code>config_path</code> in <code>data/.config.yaml</code>. To switch to cloud EdgeTTS instead, set <code>selected_module.TTS: EdgeTTS</code> and edit <code>TTS.EdgeTTS.voice</code> (any Microsoft Edge Neural voice ID works, e.g. <code>en-US-AvaNeural</code>). Restart the container after changes.</p>
+<h3 id="changing-persona-the-robots-personality">Changing persona (the robot's personality)<a class="headerlink" href="#changing-persona-the-robots-personality" title="Permanent link">&para;</a></h3>
+<p>Primary source: ZeroClaw's own system prompt in <code>&lt;ZEROCLAW_CFG&gt;</code> on the ZeroClaw host. The <code>prompt:</code> key in <code>data/.config.yaml</code> is a secondary hint that the bridge passes to ZeroClaw as context, but ZeroClaw's own prompt wins.</p>
+<h3 id="changing-vad-sensitivity">Changing VAD sensitivity<a class="headerlink" href="#changing-vad-sensitivity" title="Permanent link">&para;</a></h3>
+<p><code>VAD.SileroVAD.min_silence_duration_ms</code> in <code>data/.config.yaml</code>. Default: 700 ms. Lower = cuts off quicker. Higher = waits longer for slow speakers.</p>
+<h3 id="changing-the-llm-model">Changing the LLM model<a class="headerlink" href="#changing-the-llm-model" title="Permanent link">&para;</a></h3>
+<p><code>default_model</code> key near the top of <code>&lt;ZEROCLAW_CFG&gt;</code> on the ZeroClaw host (provider and encrypted api_key live next to it). ACP mode caches config in the long-running child, so restart the bridge (<code>sudo systemctl restart zeroclaw-bridge</code>) after editing. Confirm with <code>sudo &lt;ZEROCLAW_BIN&gt; status | grep Model</code>.</p>
+<hr />
 <h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>make<span class="w"> </span>doctor<span class="w">          </span><span class="c1"># health checks</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>make<span class="w"> </span>logs<span class="w">            </span><span class="c1"># tail server logs</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>curl<span class="w"> </span>http://&lt;YOUR_SERVER_IP&gt;:8080/health<span class="w">   </span><span class="c1"># test the bridge</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>make<span class="w"> </span>doctor<span class="w">          </span><span class="c1"># health checks</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>make<span class="w"> </span>logs<span class="w">            </span><span class="c1"># tail server logs</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>curl<span class="w"> </span>http://&lt;YOUR_SERVER_IP&gt;:8080/health<span class="w">   </span><span class="c1"># test the bridge</span>
 </code></pre></div>
 <p>See <a href="../troubleshooting/">troubleshooting.md</a> for common issues.</p>
 
