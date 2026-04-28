@@ -3895,6 +3895,7 @@ def _admin_schedule_restart(unit: str, delay: float = 2.0) -> None:
 
 class _AdminKidModeIn(BaseModel):
     enabled: bool
+    device_id: str = ""
 
 
 class _AdminSmartModeIn(BaseModel):
@@ -3930,9 +3931,20 @@ _admin_router = APIRouter(
 @_admin_router.post("/kid-mode")
 async def _admin_kid_mode(payload: _AdminKidModeIn) -> dict:
     _write_kid_mode(payload.enabled)
+    # Push the firmware pip update before scheduling the daemon restart so
+    # the on-device toggle pip flips live, matching the dashboard path
+    # (`_dashboard_set_kid_mode`) and `/admin/smart-mode`. Without this the
+    # pip stayed stale until the next voice turn re-ran `_sync_toggles_once`.
+    # The restart is still required because several bridge constants
+    # (KID_MODE global, DENIED_TOOLS, VOICE_TURN_SUFFIX) are baked at
+    # module import — that's tracked separately as "Hot-loadable kid_mode".
+    pushed = await _dispatch_set_toggle(
+        payload.device_id, "kid_mode", payload.enabled,
+    )
     _admin_schedule_restart(_ADMIN_DAEMON_CFG["voice"][1])
     return {
         "ok": True, "enabled": payload.enabled,
+        "device_pushed": pushed,
         "restart": _ADMIN_DAEMON_CFG["voice"][1],
     }
 
