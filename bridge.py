@@ -3568,6 +3568,11 @@ async def _scene_synthesis_loop() -> None:
     races queue.get() against an interval timeout — whichever fires
     first decides the next emit attempt. Failures never propagate."""
     queue = _perception_subscribe()
+    log.info(
+        "perception scene-synthesis loop started "
+        "(interval=%.0fs min_gap=%.0fs)",
+        SCENE_SYNTHESIS_INTERVAL_SEC, SCENE_SYNTHESIS_MIN_GAP_SEC,
+    )
     try:
         while True:
             reason = "tick"
