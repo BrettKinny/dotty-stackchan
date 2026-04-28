@@ -757,18 +757,61 @@ def _build_context() -> str:
     return f"[Context: {' | '.join(parts)}]\n"
 
 
-def _wrap_voice(text: str, turn: int) -> str:
+def _build_perception_block(device_id: str | None) -> str:
+    """Render the latest perception snapshot for `device_id` as a
+    `[Current perception]` line for the talk-turn system prompt.
+
+    Re-evaluated on every turn so multi-turn conversations see fresh
+    perception. Returns "" when nothing meaningful is cached so cold
+    idle turns don't waste tokens on an empty marker.
+    """
+    if not device_id:
+        return ""
+    try:
+        from bridge.perception import snapshot as _perception_snapshot
+        snap = _perception_snapshot(
+            device_id,
+            perception_state=_perception_state,
+            vision_cache=_vision_cache,
+            audio_cache=_audio_cache,
+            scene_synthesis_cache=_scene_synthesis_cache,
+        )
+        return snap.to_prompt_block()
+    except Exception:
+        # A perception read failure must never break the voice path.
+        log.exception("perception block build failed; voice turn proceeding without it")
+        return ""
+
+
+def _wrap_voice(text: str, turn: int, device_id: str | None = None) -> str:
     suffix = VOICE_TURN_SUFFIX if turn == 0 else VOICE_TURN_SUFFIX_SHORT
-    return VOICE_TURN_PREFIX + _build_context() + text + suffix
+    return (
+        VOICE_TURN_PREFIX
+        + _build_perception_block(device_id)
+        + _build_context()
+        + text
+        + suffix
+    )
 
 
-def _wrap_voice_with_block(text: str, turn: int, speaker_block: str) -> str:
+def _wrap_voice_with_block(
+    text: str, turn: int, speaker_block: str, device_id: str | None = None,
+) -> str:
     """Variant of `_wrap_voice` that injects a pre-built multi-line
     speaker block (e.g. `[Speaking with] Hudson — 7yo, loves Lego.`)
     instead of the single-line `[Speaker: name]` marker. Used by the
-    SpeakerResolver path."""
+    SpeakerResolver path. Block order: `[channel] [speaker] [perception]
+    [context] {user}` — speaker first (who) then perception (what's
+    happening) then time/weather context."""
     suffix = VOICE_TURN_SUFFIX if turn == 0 else VOICE_TURN_SUFFIX_SHORT
-    return VOICE_TURN_PREFIX + speaker_block + _build_context() + text + suffix
+    return (
+        VOICE_TURN_PREFIX
+        + speaker_block
+        + _build_perception_block(device_id)
+        + _build_context()
+        + text
+        + suffix
+    )
 
 
 def _build_speaker_block(resolution) -> str:
@@ -831,7 +874,8 @@ def _resolve_speaker_for_request(payload):
 
 
 def _voice_preparer(channel: str | None, resolution=None,
-                    room_description: str | None = None):
+                    room_description: str | None = None,
+                    device_id: str | None = None):
     """Build a `prepare` callback for `acp.prompt`.
 
     Three layers of speaker context, additive (any combination may be
@@ -853,6 +897,10 @@ def _voice_preparer(channel: str | None, resolution=None,
       * **Legacy face-rec path** — when neither of the above produces
         anything, consume any pending face-recognized identity marker
         for this channel and emit the historic `[Speaker: name]` line.
+
+    `device_id` is curried into the wrapper so `_build_perception_block`
+    can read the latest perception caches at every turn (multi-turn
+    sessions see fresh perception, not the snapshot at preparer build).
     """
     if channel not in VOICE_CHANNELS:
         return None
@@ -871,9 +919,11 @@ def _voice_preparer(channel: str | None, resolution=None,
         block_parts.append(f"[Room view] {cleaned}\n")
     if block_parts:
         return functools.partial(
-            _wrap_voice_with_block, speaker_block="".join(block_parts),
+            _wrap_voice_with_block,
+            speaker_block="".join(block_parts),
+            device_id=device_id,
         )
-    return _wrap_voice
+    return functools.partial(_wrap_voice, device_id=device_id)
 
 
 class MessageIn(BaseModel):
@@ -3646,6 +3696,7 @@ async def message(payload: MessageIn) -> MessageOut:
                         payload.channel, speaker,
                         room_description=(payload.metadata or {}).get(
                             "room_description"),
+                        device_id=(payload.metadata or {}).get("device_id"),
                     ),
                 ),
                 timeout=REQUEST_TIMEOUT_SEC,
@@ -4206,6 +4257,7 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
                         payload.channel, speaker,
                         room_description=(payload.metadata or {}).get(
                             "room_description"),
+                        device_id=(payload.metadata or {}).get("device_id"),
                     ),
                     ),
                     timeout=REQUEST_TIMEOUT_SEC,
