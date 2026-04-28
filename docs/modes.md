@@ -26,7 +26,7 @@ Pair this with [hardware.md](./hardware.md) (the physical LED ring + servos) and
 
 The firmware boots into `idle` with both toggles **off**. The bridge resyncs toggles from disk on the first turn after each reconnect. State transitions land via voice phrases, camera edges (face_detected → `talk`), or `/admin/state` from the dashboard.
 
-**Speech sub-states** are conveyed by face animations (eye gestures, talking mouth) and the dedicated **listening pixel** at right-ring index 6. `thinking` and `speaking` have no LED — they live on the face. `listening` lights pixel 6 red so the user knows when their voice is being captured as a turn.
+**Speech sub-states** are conveyed by face animations (eye gestures, talking mouth) and the dedicated **listening pixel** at right-ring index 11. `thinking` and `speaking` have no LED — they live on the face. `listening` lights pixel 11 red so the user knows when their voice is being captured as a turn.
 
 ---
 
@@ -67,22 +67,22 @@ Toggles compose: `kid_mode = on` AND `smart_mode = on` is valid (bridge applies 
 ```
 LEFT RING (global 0–5)              RIGHT RING (global 6–11)
 ┌───────────────────┐               ┌───────────────────────┐
-│ 0  state arc      │               │ 6  listening          │
+│ 0  state arc      │               │ 6  reserved           │
 │ 1  state arc      │               │ 7  reserved           │
 │ 2  state arc      │               │ 8  kid_mode toggle    │
 │ 3  state arc      │               │ 9  smart_mode toggle  │
 │ 4  state arc      │               │ 10 reserved           │
-│ 5  state arc      │               │ 11 reserved           │
+│ 5  state arc      │               │ 11 listening          │
 └───────────────────┘               └───────────────────────┘
 ```
 
 | Index | Half | Owner | Behaviour |
 |---|---|---|---|
 | 0–5 | left | StateManager (state arc) | All six paint the current mutex-state colour. Dance suppresses and lets the rainbow animation own the ring. |
-| 6 | right | xiaozhi `stackchan_display.cc::set_listening_pixel` | Red `(120,0,0)` while xiaozhi is in `LISTENING` (mic open, ASR active, user's turn); off otherwise. |
-| 7, 10, 11 | right | unowned (off) | Reserved for future indicators (low-battery is a known candidate). |
+| 6, 7, 10 | right | unowned (off) | Reserved for future indicators (low-battery is a known candidate). |
 | 8 | right | StateManager (`kid_mode` pip) | Warm pink `(168,80,100)` when kid_mode = on; off otherwise. |
 | 9 | right | StateManager (`smart_mode` pip) | Orange `(168,80,0)` when smart_mode = on; off otherwise. |
+| 11 | right | xiaozhi `stackchan_display.cc::set_listening_pixel` | Red `(120,0,0)` while xiaozhi is in `LISTENING` (mic open, ASR active, user's turn); off otherwise. Bottom of the right ring; spatially separated from the toggle pips. |
 
 ### LED quirks
 
