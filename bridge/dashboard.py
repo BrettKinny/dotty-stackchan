@@ -548,6 +548,11 @@ async def mood(request: Request, emoji: str = Form(...)) -> Any:
             {"ok": False, "error": "Unknown emoji."},
         )
     name = _EMOJI_FACE_NAMES.get(emoji, "")
+    if emoji == "😠" and name == "angry":
+        kid_getter = _state.get("kid_mode_getter")
+        kid_on = bool(kid_getter()) if kid_getter else True
+        if not kid_on:
+            name = "war"
     if name:
         prompt = (
             f"Make the {emoji} face. Reply with exactly: "
