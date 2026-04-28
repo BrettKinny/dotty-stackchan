@@ -2437,14 +2437,14 @@
 <hr />
 <h2 id="led-contract-12-pixel-ring">LED contract (12-pixel ring)<a class="headerlink" href="#led-contract-12-pixel-ring" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>LEFT RING (global 0–5)              RIGHT RING (global 6–11)
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>┌───────────────────┐               ┌───────────────────────┐
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│ 0  state arc      │               │ 6  reserved           │
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│ 1  state arc      │               │ 7  reserved           │
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│ 2  state arc      │               │ 8  kid_mode toggle    │
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│ 3  state arc      │               │ 9  smart_mode toggle  │
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│ 4  state arc      │               │ 10 reserved           │
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│ 5  state arc      │               │ 11 listening          │
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>└───────────────────┘               └───────────────────────┘
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>┌───────────────────┐               ┌────────────────────────────┐
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│ 0  state arc      │               │ 6  face state (TOP)        │
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│ 1  state arc      │               │ 7  reserved (locked off)   │
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│ 2  state arc      │               │ 8  kid_mode toggle         │
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│ 3  state arc      │               │ 9  smart_mode toggle       │
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│ 4  state arc      │               │ 10 reserved (locked off)   │
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│ 5  state arc      │               │ 11 listening (BOTTOM)      │
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>└───────────────────┘               └────────────────────────────┘
 </code></pre></div>
 <table>
 <thead>
@@ -2463,10 +2463,16 @@
 <td>All six paint the current mutex-state colour. Dance suppresses and lets the rainbow animation own the ring.</td>
 </tr>
 <tr>
-<td>6, 7, 10</td>
+<td>6</td>
 <td>right</td>
-<td>unowned (off)</td>
-<td>Reserved for future indicators (low-battery is a known candidate).</td>
+<td>StateManager (face state pip)</td>
+<td>Yellow <code>(168,140,0)</code> when a face is detected; green <code>(0,140,30)</code> when the bridge has identified the face via room-view VLM + roster match (mutex on the same pixel). Identified state has a 4 s firmware-side timeout — bridge refreshes by calling <code>self.robot.set_face_identified</code> again on each successful match.</td>
+</tr>
+<tr>
+<td>7, 10</td>
+<td>right</td>
+<td>StateManager (locked off)</td>
+<td>Reserved for future indicators (low-battery is a known candidate). Re-asserted to <code>(0,0,0)</code> every 200 ms as defense-in-depth.</td>
 </tr>
 <tr>
 <td>8</td>
@@ -2483,17 +2489,19 @@
 <tr>
 <td>11</td>
 <td>right</td>
-<td>xiaozhi <code>stackchan_display.cc::set_listening_pixel</code></td>
-<td>Red <code>(120,0,0)</code> while xiaozhi is in <code>LISTENING</code> (mic open, ASR active, user's turn); off otherwise. Bottom of the right ring; spatially separated from the toggle pips.</td>
+<td>StateManager (listening pip)</td>
+<td>Red <code>(120,0,0)</code> while xiaozhi is in <code>LISTENING</code> (mic open, ASR active, user's turn); off otherwise. Driven by <code>stackchan_display.cc::set_listening_pixel</code> which now routes through <code>StateManager::setListening(bool)</code> and emits a <code>chat_status</code> perception event for the dashboard mirror. Bottom of the right ring; spatially separated from the toggle pips.</td>
 </tr>
 </tbody>
 </table>
 <h3 id="led-quirks">LED quirks<a class="headerlink" href="#led-quirks" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>5 Hz tick.</strong> StateManager re-paints the state arc + toggle pips every ~200 ms. The tick is what drives the SECURITY 1 Hz flash; defense-in-depth re-assertion is a free side-effect for anything that ever clobbers a pixel.</li>
+<li><strong>5 Hz tick.</strong> StateManager re-paints the state arc AND the entire right ring (face / kid / smart / listening / reserved 7 / reserved 10) every ~200 ms. The tick drives the SECURITY 1 Hz flash and the face-identified 4 s timeout, and acts as defense-in-depth re-assert across all status indicators — MCP writes / dance keyframes / future writers cannot persistently clobber any pixel (worst case: 200 ms flicker).</li>
 <li><strong>PY32 IO expander quantises to RGB565.</strong> Brightness deltas crush — <code>(40,40,40)</code> reads almost identical to <code>(200,200,200)</code>. Use distinct <strong>hues</strong>, not brightness levels, for any indicator that needs to read across a room.</li>
-<li><strong>All 12 pixels are writable through <code>Hal::setRgbColor</code>.</strong> The earlier privacy-LED friend-class guard was dropped along with the privacy semantics — listening pixel and toggle pips coexist by indexing rather than by hardware lock.</li>
-<li><strong>RightNeonLight uses local indices 0–5</strong> internally, mapped to global 6–11 via <code>+6</code>. <code>setColorAt(local 2)</code> writes global 8 (kid_mode pip); <code>setColorAt(local 3)</code> writes global 9 (smart_mode pip). Local 0 and local 5 now write global 6 and 11 directly (no silent drop).</li>
+<li><strong>MCP tools are contract-aware.</strong> <code>self.robot.set_led_color</code> and <code>self.robot.set_led_multi</code> are restricted to the LEFT ring only (indices 0-5). Attempts to write right-ring indices via these tools are rejected with a warn log. Use <code>self.robot.set_face_identified</code> (no args) to light the face pixel green for ~4 seconds.</li>
+<li><strong>Dance choreography only animates the left ring.</strong> <code>Keyframe::apply</code> no longer writes the right ring. Custom JSON dances that set <code>rightRgbColor</code> will see that field preserved on the <code>Keyframe</code> struct but not applied to hardware.</li>
+<li><strong>RightNeonLight uses local indices 0–5</strong> internally, mapped to global 6–11 via <code>+6</code>. StateManager constants: <code>kFacePipRightLocal=0</code>, <code>kReservedPipRightLocal_7=1</code>, <code>kKidModePipRightLocal=2</code>, <code>kSmartModePipRightLocal=3</code>, <code>kReservedPipRightLocal_10=4</code>, <code>kListeningPipRightLocal=5</code>.</li>
+<li><strong>Dashboard mirror.</strong> The bridge dashboard at <code>/ui/led-ring-mirror</code> shows all four indicators in the same colours as the physical ring, updated via 2 s HTMX polling + <code>dotty-refresh</code> event nudges fired by SSE perception events (<code>face_detected</code>, <code>face_lost</code>, <code>face_recognized</code>, <code>chat_status</code>).</li>
 </ul>
 <hr />
 <h2 id="state-transitions">State transitions<a class="headerlink" href="#state-transitions" title="Permanent link">&para;</a></h2>
