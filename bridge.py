@@ -915,19 +915,72 @@ class ACPClient:
         # log_turn callers so the convo NDJSON carries a phase breakdown
         # for dashboard surfacing. Overwritten on every prompt() entry.
         self._last_phases: dict[str, float] = {}
+        # Lifetime is bound to _proc — cleaned up in _cancel_stderr_task()
+        # from every spawn-replacement path so respawns can't leak readers.
+        self._stderr_task: asyncio.Task[None] | None = None
+
+    async def _drain_stderr(self, proc: asyncio.subprocess.Process) -> None:
+        # Without this, the daemon's exit reason is invisible — that was
+        # the diagnostic blind spot behind the 2026-04-28 session/new
+        # crash. Rate-cap protects us if the child ever loops on stderr.
+        if proc.stderr is None:
+            return
+        pid = proc.pid
+        loop = asyncio.get_event_loop()
+        bucket_start = loop.time()
+        bucket_count = 0
+        DROP_THRESHOLD = 200
+        try:
+            while True:
+                raw = await proc.stderr.readline()
+                if not raw:
+                    return
+                now = loop.time()
+                if now - bucket_start >= 1.0:
+                    dropped = bucket_count - DROP_THRESHOLD
+                    if dropped > 0:
+                        log.warning(
+                            "zeroclaw-stderr pid=%s: dropped %d lines (rate cap)",
+                            pid, dropped,
+                        )
+                    bucket_start = now
+                    bucket_count = 0
+                bucket_count += 1
+                if bucket_count > DROP_THRESHOLD:
+                    continue
+                line = raw.decode("utf-8", errors="replace").rstrip()
+                if line:
+                    log.warning("zeroclaw-stderr pid=%s: %s", pid, line)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.debug("stderr drain raised", exc_info=True)
+
+    async def _cancel_stderr_task(self) -> None:
+        task = self._stderr_task
+        self._stderr_task = None
+        if task is None or task.done():
+            return
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
 
     async def _spawn(self) -> None:
         # Any respawn path invalidates the cached session — ZeroClaw has no memory of it.
         self._sid = None
         self._sid_turns = 0
+        await self._cancel_stderr_task()
         env = {**os.environ, "RUST_LOG": "error"}
         self._proc = await asyncio.create_subprocess_exec(
             ZEROCLAW_BIN, "acp",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
             env=env,
         )
+        self._stderr_task = asyncio.create_task(self._drain_stderr(self._proc))
         rid = next(self._id_gen)
         await self._send({"jsonrpc": "2.0", "id": rid, "method": "initialize", "params": {}})
         resp = await self._recv_matching(rid, INIT_TIMEOUT_SEC)
@@ -1054,26 +1107,38 @@ class ACPClient:
                 _safe_metric(dotty_active_acp_sessions.set, 0)
 
     async def _cancel_prompt(self) -> None:
-        """Kill the ACP child to guarantee no stale events after barge-in.
+        """Cancel the in-flight ACP turn after barge-in.
 
-        Cheaper than draining: respawn takes ~200ms and the next prompt()
-        call will re-create the session via ensure_alive().
+        Never SIGTERMs the daemon — that path raced the freshly-spawned
+        successor's session/new (probably sqlite WAL contention with the
+        just-killed predecessor) and produced the 2026-04-28
+        'ACP child closed stdout' crash, reproducible at <12ms by parallel
+        cancelled streams on one xiaozhi session. Stale session/event
+        messages for the cancelled session are filtered by request-id
+        mismatch in _recv_matching.
         """
+        sid = self._sid
         self._in_flight_rid = None
         self._sid = None
         self._sid_turns = 0
         if _METRICS_AVAILABLE:
             _safe_metric(dotty_active_acp_sessions.set, 0)
-        if self._proc is not None and self._proc.returncode is None:
-            try:
-                self._proc.terminate()
-                await asyncio.wait_for(self._proc.wait(), timeout=1.0)
-            except (ProcessLookupError, asyncio.TimeoutError):
-                try:
-                    self._proc.kill()
-                except ProcessLookupError:
-                    pass
-        self._proc = None
+
+        # Already-dead daemon: clean up handles, next prompt will respawn.
+        if self._proc is not None and self._proc.returncode is not None:
+            await self._cancel_stderr_task()
+            self._proc = None
+            return
+
+        # Active session: ask the daemon to drop it cleanly. Daemon stays alive.
+        if sid is not None and self._proc is not None:
+            await self._close_session(sid)
+            return
+
+        # Cancelled before a session was created — leave the daemon alone.
+        # An in-flight session/new (if any) will land in the pipe and be
+        # filtered by id mismatch on the next _recv_matching.
+        return
 
     def _should_rotate(self, now: float) -> tuple[bool, str | None]:
         if self._sid is None:
@@ -1215,6 +1280,7 @@ class ACPClient:
                     except ProcessLookupError:
                         pass
                     self._proc = None
+                await self._cancel_stderr_task()
                 self._sid = None
                 raise
 
@@ -1231,6 +1297,7 @@ class ACPClient:
                     self._proc.kill()
                 except ProcessLookupError:
                     pass
+        await self._cancel_stderr_task()
         if _METRICS_AVAILABLE:
             _safe_metric(dotty_active_acp_sessions.set, 0)
 
