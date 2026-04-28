@@ -3215,8 +3215,13 @@ if _configure_dashboard is not None:
         out = await message(MessageIn(content=text, channel=channel))
         return {"response": out.response, "session_id": out.session_id}
 
-    def _dashboard_set_kid_mode(enabled: bool) -> None:
+    async def _dashboard_set_kid_mode(enabled: bool) -> dict:
         _write_kid_mode(enabled)
+        # Push the toggle to the firmware so StateManager paints the kid_mode
+        # pip immediately. Without this, the bridge restart that follows
+        # would leave the firmware unaware until the next voice turn rearmed
+        # _sync_toggles_once.
+        ok = await _dispatch_set_toggle("", "kid_mode", enabled)
         # Tied model swap: kid mode ON → small safety-tuned model;
         # kid mode OFF → capable adult model. Failure is logged but does
         # NOT block the kid-mode flip — a flipped flag with a stale model
@@ -3229,6 +3234,7 @@ if _configure_dashboard is not None:
                 "kid_mode flip succeeded but model swap to %r failed",
                 target_model,
             )
+        return {"ok": ok}
 
     async def _dashboard_abort_device(*, device_id: str = "") -> dict:
         """Fire-and-forget POST to xiaozhi-server's admin abort route."""

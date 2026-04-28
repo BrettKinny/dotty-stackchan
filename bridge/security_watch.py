@@ -97,7 +97,7 @@ LOCAL_TZ = ZoneInfo(os.environ.get("DOTTY_LOCAL_TZ", "Australia/Brisbane"))
 _XIAOZHI_HOST: str = os.environ.get("XIAOZHI_HOST", "")
 _XIAOZHI_HTTP_PORT: int = int(os.environ.get("XIAOZHI_OTA_PORT", "8003"))
 _BRIDGE_INTERNAL_URL: str = os.environ.get(
-    "BRIDGE_INTERNAL_URL", "http://127.0.0.1:8000"
+    "BRIDGE_INTERNAL_URL", "http://127.0.0.1:8080"
 )
 
 

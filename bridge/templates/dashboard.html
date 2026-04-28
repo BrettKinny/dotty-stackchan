@@ -16,7 +16,7 @@
         integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"
         crossorigin="anonymous" defer></script>
 <link href="/ui/static/tailwind.min.css" rel="stylesheet"
-      integrity="sha384-8XNMbtVzGCmDvgyHxA00gw2TvN2Uv+CFlfgv7ottHeJNaxHVAexDpb2o3R70Odcz"
+      integrity="sha384-yk2TJ8R/9V08Y2LQeb55sLXFG/XC5nNWWh7BuhlsChfm8yVX7YIolzfVKUc94DpP"
       crossorigin="anonymous">
 <style>
   html, body { -webkit-tap-highlight-color: transparent; }
@@ -137,14 +137,14 @@
   <section>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div id="kid-card-body" class="card bg-base-100 shadow-sm overflow-hidden"
-           hx-get="/ui/kid-mode" hx-trigger="load" hx-swap="outerHTML"
+           hx-get="/ui/kid-mode" hx-trigger="load, dotty-refresh from:window" hx-swap="outerHTML"
            hx-target="this">
         <div class="card-body p-3 animate-pulse">
           <div class="h-4 bg-base-300 rounded w-1/4"></div>
         </div>
       </div>
       <div id="smart-card-body" class="card bg-base-100 shadow-sm overflow-hidden"
-           hx-get="/ui/smart-mode" hx-trigger="load" hx-swap="outerHTML"
+           hx-get="/ui/smart-mode" hx-trigger="load, dotty-refresh from:window" hx-swap="outerHTML"
            hx-target="this">
         <div class="card-body p-3 animate-pulse">
           <div class="h-4 bg-base-300 rounded w-1/4"></div>
