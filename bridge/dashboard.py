@@ -339,9 +339,10 @@ def _read_recent_log_entries(date_str: str, limit: int = 20) -> list[dict[str, A
 
 @router.get("", response_class=HTMLResponse, include_in_schema=False)
 async def dashboard(request: Request) -> Any:
+    chip_ctx = await asyncio.to_thread(_build_chip_context)
     return templates.TemplateResponse(
         request, "dashboard.html",
-        {"version": BRIDGE_VERSION},
+        {"version": BRIDGE_VERSION, **chip_ctx},
     )
 
 
@@ -1132,7 +1133,11 @@ async def preview_update(request: Request) -> Any:
 
 
 _LATEST_SHA_CACHE: dict[str, Any] = {"sha": None, "ts": 0.0}
-_LATEST_SHA_TTL = 600.0  # 10 min — `git ls-remote` is cheap but no need to spam.
+_LATEST_TAGS_CACHE: dict[str, Any] = {"tags": None, "ts": 0.0}
+_LATEST_REMOTE_TTL = 600.0  # 10 min — `git ls-remote` is cheap but no need to spam.
+
+_BRIDGE_TAG_PREFIX = "bridge-v"
+_TAG_VERSION_RE = re.compile(r"^bridge-v(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
 
 
 def _fetch_latest_remote_sha() -> str | None:
@@ -1141,7 +1146,7 @@ def _fetch_latest_remote_sha() -> str | None:
     import subprocess
     now = time.time()
     cached = _LATEST_SHA_CACHE.get("sha")
-    if cached and now - _LATEST_SHA_CACHE["ts"] < _LATEST_SHA_TTL:
+    if cached and now - _LATEST_SHA_CACHE["ts"] < _LATEST_REMOTE_TTL:
         return cached  # type: ignore[return-value]
     try:
         proc = subprocess.run(
@@ -1159,20 +1164,127 @@ def _fetch_latest_remote_sha() -> str | None:
     return None
 
 
-def _check_for_bridge_update() -> tuple[str | None, bool]:
-    """Return (latest_short_sha_or_none, update_available)."""
-    full = _fetch_latest_remote_sha()
-    if not full:
-        return None, False
-    short = full[:7]
+def _fetch_remote_tags() -> dict[str, str]:
+    """Return {tag_name: commit_sha} for refs/tags/bridge-v* on origin.
+    Annotated tags are dereferenced to their target commit. Cached 10 min."""
+    import subprocess
+    now = time.time()
+    cached = _LATEST_TAGS_CACHE.get("tags")
+    if cached is not None and now - _LATEST_TAGS_CACHE["ts"] < _LATEST_REMOTE_TTL:
+        return cached  # type: ignore[return-value]
+    out: dict[str, str] = {}
+    try:
+        proc = subprocess.run(
+            ["git", "ls-remote", "--tags", GITHUB_REPO,
+             f"refs/tags/{_BRIDGE_TAG_PREFIX}*"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if proc.returncode != 0:
+            return out
+    except Exception as exc:
+        log.debug("ls-remote --tags failed: %s", exc)
+        return out
+    deref: dict[str, str] = {}
+    raw: dict[str, str] = {}
+    for line in proc.stdout.strip().splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        sha, ref = parts
+        if not ref.startswith("refs/tags/"):
+            continue
+        name = ref[len("refs/tags/"):]
+        if name.endswith("^{}"):
+            deref[name[:-3]] = sha
+        else:
+            raw[name] = sha
+    # Annotated tags appear in both forms; the dereferenced ^{} line points
+    # at the commit (what we actually want). Lightweight tags only appear in
+    # `raw` and that line *is* the commit.
+    for name, sha in raw.items():
+        out[name] = deref.get(name, sha)
+    _LATEST_TAGS_CACHE["tags"] = out
+    _LATEST_TAGS_CACHE["ts"] = now
+    return out
+
+
+def _parse_tag_version(name: str) -> tuple[int, int, int] | None:
+    m = _TAG_VERSION_RE.match(name)
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2)), int(m.group(3))
+
+
+def _build_chip_context() -> dict[str, Any]:
+    """Compute the version-chip rendering context. If the deployed SHA is
+    parked at a `bridge-v*` tag, compare against the highest tag (release
+    mode). Otherwise fall back to comparing against `main` HEAD (bleeding
+    edge). Returns keys consumed by version_chip.html."""
     deployed = BRIDGE_VERSION
-    if not deployed or deployed == "unknown":
-        # Can't compare — don't claim an update is available.
-        return short, False
-    # BRIDGE_VERSION is a short SHA prefix; full starts with it when in sync.
-    if full.startswith(deployed) or deployed.startswith(short):
-        return short, False
-    return short, True
+    repo_url = GITHUB_REPO.removesuffix(".git")
+
+    # ---- Tag mode probe -------------------------------------------------
+    tags = _fetch_remote_tags()
+    versioned: list[tuple[tuple[int, int, int], str, str]] = []
+    for name, sha in tags.items():
+        v = _parse_tag_version(name)
+        if v is not None:
+            versioned.append((v, name, sha))
+    versioned.sort()
+    latest_tag = versioned[-1] if versioned else None
+
+    installed_tag: str | None = None
+    if deployed and deployed != "unknown":
+        for _, name, sha in versioned:
+            if sha.startswith(deployed) or deployed.startswith(sha[:len(deployed)]):
+                installed_tag = name
+                break
+
+    if installed_tag and latest_tag:
+        latest_v, latest_name, _ = latest_tag
+        installed_v = _parse_tag_version(installed_tag) or (0, 0, 0)
+        update_available = latest_v > installed_v
+        installed_pretty = installed_tag[len(_BRIDGE_TAG_PREFIX):]
+        return {
+            "installed_display": f"v{installed_pretty}",
+            "installed_href": f"{repo_url}/releases/tag/{installed_tag}",
+            "installed_title": f"Bridge release v{installed_pretty}",
+            "update_available": update_available,
+            "update_display": (
+                f"v{latest_name[len(_BRIDGE_TAG_PREFIX):]}" if update_available else None
+            ),
+            "update_title": (
+                f"New release {latest_name[len(_BRIDGE_TAG_PREFIX):]} available — click to preview"
+                if update_available else None
+            ),
+        }
+
+    # ---- Bleeding-edge fallback ----------------------------------------
+    full = _fetch_latest_remote_sha()
+    short = full[:7] if full else None
+    update_available = False
+    if full and deployed and deployed != "unknown":
+        same = full.startswith(deployed) or deployed.startswith(full[:len(deployed)])
+        update_available = not same
+    installed_label = deployed if deployed and deployed != "unknown" else "unknown"
+    return {
+        "installed_display": f"v{installed_label}",
+        "installed_href": (
+            f"{repo_url}/commit/{installed_label}"
+            if installed_label != "unknown" else repo_url
+        ),
+        "installed_title": (
+            f"Bridge build {installed_label} — opens this commit on GitHub"
+            if installed_label != "unknown"
+            else "Bridge build (unknown) — opens repo on GitHub"
+        ),
+        "update_available": update_available,
+        "update_display": f"v{short}" if update_available and short else None,
+        "update_title": (
+            f"Newer commit {short} on main — click to preview"
+            if update_available and short else None
+        ),
+    }
 
 
 @router.get("/version-chip",
@@ -1180,16 +1292,9 @@ def _check_for_bridge_update() -> tuple[str | None, bool]:
 async def version_chip(request: Request) -> Any:
     """Render the GitHub/version/update chip. Polled by the dashboard
     header so the update prompt appears without a page reload."""
-    latest_short, update_available = await asyncio.to_thread(
-        _check_for_bridge_update,
-    )
+    ctx = await asyncio.to_thread(_build_chip_context)
     return templates.TemplateResponse(
-        request, "version_chip.html",
-        {
-            "version": BRIDGE_VERSION,
-            "latest_short": latest_short,
-            "update_available": update_available,
-        },
+        request, "version_chip.html", ctx,
     )
 
 
