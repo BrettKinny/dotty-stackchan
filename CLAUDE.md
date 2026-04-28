@@ -152,7 +152,7 @@ The Phase 4 firmware **StateManager** (`firmware/main/stackchan/modes/state_mana
 
 ## States, toggles & LEDs
 
-`docs/modes.md` is the **authoritative source** for the six-state mutex (`idle / talk / story_time / security / sleep / dance`), the orthogonal toggles (`kid_mode`, `smart_mode`), the LED contract (state pip on left ring 0, toggle pips on right ring 8/9, privacy LEDs hardware-protected at 6/11), the voice-phrase triggers, and the per-state backing-architecture (which states use ZeroClaw vs direct OpenRouter). When adding behaviour that responds to or changes Dotty's mode, read modes.md first — don't reinvent.
+`docs/modes.md` is the **authoritative source** for the six-state mutex (`idle / talk / story_time / security / sleep / dance`), the orthogonal toggles (`kid_mode`, `smart_mode`), the LED contract (state arc on left ring 0-5; face-state / kid / smart / listening indicators on right ring 6 / 8 / 9 / 11 with reserved pixels at 7 / 10 — all six right-ring pixels owned by StateManager and re-asserted at 5 Hz), the voice-phrase triggers, and the per-state backing-architecture (which states use ZeroClaw vs direct OpenRouter). When adding behaviour that responds to or changes Dotty's mode, read modes.md first — don't reinvent.
 
 ## Deeper reference
 

@@ -255,6 +255,51 @@ class SimpleHttpServer:
             "name": name, "enabled": enabled,
         })
 
+    async def _dotty_set_face_identified(self, request: "web.Request") -> "web.Response":
+        """POST /xiaozhi/admin/set-face-identified
+        Body: {"device_id": "<optional>"}
+
+        Direct MCP self.robot.set_face_identified call. The bridge fires this
+        after a successful room-view VLM identification so the firmware lights
+        the right-ring face pixel green for ~4 seconds. No-op on the firmware
+        side if no face is currently detected.
+        """
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        device_id = (data.get("device_id") or "").strip()
+        if device_id:
+            conn = _dotty_active_connections.get(device_id)
+        else:
+            conn = next(iter(_dotty_active_connections.values()), None)
+        if conn is None:
+            return web.json_response(
+                {"error": "no device connected",
+                 "known": list(_dotty_active_connections)},
+                status=503,
+            )
+        import json
+        import time
+        msg = json.dumps({
+            "session_id": getattr(conn, "session_id", ""),
+            "type": "mcp",
+            "payload": {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "self.robot.set_face_identified",
+                    "arguments": {},
+                },
+                "id": int(time.time() * 1000) % 0x7FFFFFFF,
+            },
+        })
+        _spawn(conn.websocket.send(msg), name="set_face_identified_send")
+        return web.json_response({
+            "ok": True,
+            "device_id": (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id,
+        })
+
     async def _dotty_take_photo(self, request: "web.Request") -> "web.Response":
         """POST /xiaozhi/admin/take-photo
         Body: {"device_id": "<optional>", "question": str}
@@ -611,6 +656,10 @@ class SimpleHttpServer:
                         web.post(
                             "/xiaozhi/admin/set-toggle",
                             self._dotty_set_toggle,
+                        ),
+                        web.post(
+                            "/xiaozhi/admin/set-face-identified",
+                            self._dotty_set_face_identified,
                         ),
                         web.post(
                             "/xiaozhi/admin/take-photo",

@@ -1,0 +1,66 @@
+{# Right LED ring debug mirror.
+
+   Layout matches the physical strip: pixel 6 at top, pixel 11 at bottom,
+   pixels 7/10 are reserved off-pixels rendered as faint visual gaps.
+   Colours mirror the firmware palette in state_manager.cpp::writePips —
+   keep this in sync when tuning hardware values.
+
+   Live updates: HTMX 2 s polling + dotty-refresh event nudges (fired by
+   toggle results and the inline SSE listener below). Cheap re-render —
+   the endpoint just reads in-process getters. #}
+{% set off_color = "#374151" %}
+{% set face_color = "#008c1e" if face_identified else ("#a88c00" if face_detected else off_color) %}
+{% set face_label = "identified" if face_identified else ("detected" if face_detected else "off") %}
+{% set kid_color = "#a85064" if kid_mode else off_color %}
+{% set smart_color = "#a85000" if smart_mode else off_color %}
+{% set listen_color = "#cc0000" if listening else off_color %}
+<div id="led-ring-mirror-card-body" class="card bg-base-100 shadow-sm overflow-hidden">
+  <div class="card-body p-3">
+    <div class="text-xs text-base-content/60 mb-2 px-1 flex items-center justify-between">
+      <span>Right LED ring (debug mirror)</span>
+      <span class="text-base-content/40 font-mono">px 6–11</span>
+    </div>
+    <ul class="space-y-1.5 text-sm">
+      {# Pixel 6 — face state #}
+      <li class="flex items-center gap-3">
+        <span aria-hidden="true"
+              style="display:inline-block;width:12px;height:12px;border-radius:9999px;flex-shrink:0;background:{{ face_color }};box-shadow:0 0 8px {{ face_color }}80;"></span>
+        <span class="flex-1">Face</span>
+        <span class="text-xs text-base-content/50 font-mono">{{ face_label }}</span>
+      </li>
+      {# Pixel 7 — reserved #}
+      <li class="flex items-center gap-3 opacity-40">
+        <span aria-hidden="true"
+              style="display:inline-block;width:6px;height:6px;border-radius:9999px;flex-shrink:0;background:{{ off_color }};margin-left:3px;margin-right:3px;"></span>
+        <span class="flex-1 text-xs italic">reserved (px 7)</span>
+      </li>
+      {# Pixel 8 — kid mode #}
+      <li class="flex items-center gap-3">
+        <span aria-hidden="true"
+              style="display:inline-block;width:12px;height:12px;border-radius:9999px;flex-shrink:0;background:{{ kid_color }};box-shadow:0 0 8px {{ kid_color }}80;"></span>
+        <span class="flex-1">Kid mode</span>
+        <span class="text-xs text-base-content/50 font-mono">{{ "on" if kid_mode else "off" }}</span>
+      </li>
+      {# Pixel 9 — smart mode #}
+      <li class="flex items-center gap-3">
+        <span aria-hidden="true"
+              style="display:inline-block;width:12px;height:12px;border-radius:9999px;flex-shrink:0;background:{{ smart_color }};box-shadow:0 0 8px {{ smart_color }}80;"></span>
+        <span class="flex-1">Smart mode</span>
+        <span class="text-xs text-base-content/50 font-mono">{{ "on" if smart_mode else "off" }}</span>
+      </li>
+      {# Pixel 10 — reserved #}
+      <li class="flex items-center gap-3 opacity-40">
+        <span aria-hidden="true"
+              style="display:inline-block;width:6px;height:6px;border-radius:9999px;flex-shrink:0;background:{{ off_color }};margin-left:3px;margin-right:3px;"></span>
+        <span class="flex-1 text-xs italic">reserved (px 10)</span>
+      </li>
+      {# Pixel 11 — listening #}
+      <li class="flex items-center gap-3">
+        <span aria-hidden="true"
+              style="display:inline-block;width:12px;height:12px;border-radius:9999px;flex-shrink:0;background:{{ listen_color }};box-shadow:0 0 8px {{ listen_color }}80;"></span>
+        <span class="flex-1">Listening</span>
+        <span class="text-xs text-base-content/50 font-mono">{{ "on" if listening else "off" }}</span>
+      </li>
+    </ul>
+  </div>
+</div>

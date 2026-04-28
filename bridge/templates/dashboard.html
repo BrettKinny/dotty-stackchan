@@ -152,6 +152,15 @@
       </div>
     </div>
 
+    <div id="led-ring-mirror-card-body" class="card bg-base-100 shadow-sm overflow-hidden"
+         hx-get="/ui/led-ring-mirror"
+         hx-trigger="load, every 2s, dotty-refresh from:window"
+         hx-swap="outerHTML" hx-target="this">
+      <div class="card-body p-3 animate-pulse">
+        <div class="h-4 bg-base-300 rounded w-1/4"></div>
+      </div>
+    </div>
+
     <div id="emojis-section" class="card bg-base-100 shadow-sm">
       <div class="card-body p-3">
         <div class="text-xs text-base-content/60 mb-2 px-1">Emojis</div>
@@ -514,6 +523,14 @@
       var data;
       try { data = JSON.parse(ev.data); } catch (e) { return; }
       prependFeedEvent(data);
+      // Nudge polling tiles (LED ring mirror) on indicator-relevant events
+      // so they update with sub-second latency instead of waiting on the
+      // next 2 s tick.
+      var name = data && data.name;
+      if (name === 'face_detected' || name === 'face_lost'
+          || name === 'face_recognized' || name === 'chat_status') {
+        window.dispatchEvent(new CustomEvent('dotty-refresh'));
+      }
     };
   })();
 

@@ -1585,6 +1585,10 @@ def _update_perception_state(device_id: str, name: str,
     elif name == "face_lost":
         state["face_present"] = False
         state["last_face_lost_t"] = ts
+        # Drop the cached identity — the dashboard derives "identified vs just
+        # detected" from this, so leaving stale `last_face_id` would keep the
+        # face pixel green after the person walked away.
+        state.pop("last_face_id", None)
     elif name == "sound_event":
         state["last_sound_dir"] = data.get("direction")
         state["last_sound_t"] = ts
@@ -1611,6 +1615,21 @@ def _update_perception_state(device_id: str, name: str,
     elif name == "dance_ended":
         state["dance_active"] = False
         state["last_dance_ended_t"] = ts
+    elif name == "chat_status":
+        # Edge-only emission from firmware (stackchan_display.cc) on
+        # LISTENING <-> not-LISTENING transitions. Drives the dashboard's
+        # listening LED mirror.
+        listening = bool(data.get("listening"))
+        state["listening"] = listening
+        state["last_chat_status_t"] = ts
+    elif name == "face_recognized":
+        # Synthetic event broadcast by /api/vision/explain when the room-view
+        # VLM matches a household roster member. Track the identity so the
+        # dashboard can paint the face pixel green vs yellow.
+        identity = (data.get("identity") or "").strip()
+        if identity:
+            state["last_face_id"] = identity
+            state["last_face_recognized_t"] = ts
 
 
 def _is_dance_active(device_id: str) -> bool:
@@ -1838,6 +1857,32 @@ async def _dispatch_set_state(device_id: str, state: str) -> bool:
     return await asyncio.to_thread(_post)
 
 
+async def _dispatch_set_face_identified(device_id: str) -> bool:
+    """Fire MCP self.robot.set_face_identified at the firmware via the
+    /xiaozhi/admin/set-face-identified route. Lights the right-ring face
+    pixel green for ~4 seconds (firmware-side timeout). Failures are
+    non-fatal — name-greeting still played, the missing LED is cosmetic.
+    """
+    if not _XIAOZHI_HOST:
+        log.warning("set_face_identified: XIAOZHI_HOST not set; cannot reach xiaozhi-server")
+        return False
+    url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/set-face-identified"
+    payload = {"device_id": device_id}
+
+    def _post() -> bool:
+        try:
+            r = requests.post(url, json=payload, timeout=3)
+            if r.status_code >= 400:
+                log.warning("set_face_identified %s: %s", r.status_code, r.text[:200])
+                return False
+            return True
+        except Exception as exc:
+            log.warning("set_face_identified failed: %s", exc)
+            return False
+
+    return await asyncio.to_thread(_post)
+
+
 async def _dispatch_set_toggle(device_id: str, name: str, enabled: bool) -> bool:
     """Phase 4 helper: fire MCP self.robot.set_toggle at the firmware via the
     /xiaozhi/admin/set-toggle route. Toggle name must be one of:
@@ -2054,6 +2099,13 @@ async def _handle_face_recognized(event: dict) -> None:
     _spawn(
         _dispatch_say(device_id, text),
         name="dispatch_name_greet",
+    )
+    # Light the right-ring face pixel green to mirror the named greeting.
+    # Firmware auto-times-out after ~4 s; bridge can refresh by calling again
+    # if the same face stays in frame across multiple recognitions.
+    _spawn(
+        _dispatch_set_face_identified(device_id),
+        name="dispatch_set_face_identified",
     )
 
 

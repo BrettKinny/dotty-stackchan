@@ -897,6 +897,53 @@ async def smart_mode_partial(request: Request) -> Any:
     )
 
 
+@router.get("/led-ring-mirror", response_class=HTMLResponse, include_in_schema=False)
+async def led_ring_mirror(request: Request) -> Any:
+    """Debug mirror of the right-ring status indicators.
+
+    Reflects the firmware's right LED half (face / kid / smart / listening)
+    so an operator can see at a glance which signals are active without
+    looking at the physical device. Colours mirror the firmware palette in
+    state_manager.cpp::writePips — keep in sync if those change.
+    """
+    kid_getter = _state.get("kid_mode_getter")
+    smart_getter = _state.get("smart_mode_getter")
+    psg = _state.get("perception_state_getter")
+
+    kid_mode = bool(kid_getter()) if kid_getter else False
+    smart_mode = bool(smart_getter()) if smart_getter else False
+
+    listening = False
+    face_detected = False
+    face_identified = False
+    if psg:
+        try:
+            states = psg() or {}
+            # Single-device deployment: pick the only entry, regardless of
+            # device_id. Multi-device support would iterate; out of scope.
+            for dev in states.values():
+                if not isinstance(dev, dict):
+                    continue
+                listening = bool(dev.get("listening"))
+                face_detected = bool(dev.get("face_present"))
+                identity = (dev.get("last_face_id") or "").strip()
+                face_identified = bool(face_detected and identity and identity != "unknown")
+                break
+        except Exception:
+            log.exception("led_ring_mirror: perception_state_getter failed")
+
+    return templates.TemplateResponse(
+        request, "led_ring_mirror.html",
+        {
+            "listening": listening,
+            "kid_mode": kid_mode,
+            "smart_mode": smart_mode,
+            "face_detected": face_detected,
+            "face_identified": face_identified,
+        },
+    )
+
+
 @router.post("/actions/smart-mode", response_class=HTMLResponse, include_in_schema=False)
 async def smart_mode_set(request: Request, enabled: str = Form("")) -> Any:
     setter = _state.get("smart_mode_setter")

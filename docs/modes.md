@@ -66,30 +66,33 @@ Toggles compose: `kid_mode = on` AND `smart_mode = on` is valid (bridge applies 
 
 ```
 LEFT RING (global 0–5)              RIGHT RING (global 6–11)
-┌───────────────────┐               ┌───────────────────────┐
-│ 0  state arc      │               │ 6  reserved           │
-│ 1  state arc      │               │ 7  reserved           │
-│ 2  state arc      │               │ 8  kid_mode toggle    │
-│ 3  state arc      │               │ 9  smart_mode toggle  │
-│ 4  state arc      │               │ 10 reserved           │
-│ 5  state arc      │               │ 11 listening          │
-└───────────────────┘               └───────────────────────┘
+┌───────────────────┐               ┌────────────────────────────┐
+│ 0  state arc      │               │ 6  face state (TOP)        │
+│ 1  state arc      │               │ 7  reserved (locked off)   │
+│ 2  state arc      │               │ 8  kid_mode toggle         │
+│ 3  state arc      │               │ 9  smart_mode toggle       │
+│ 4  state arc      │               │ 10 reserved (locked off)   │
+│ 5  state arc      │               │ 11 listening (BOTTOM)      │
+└───────────────────┘               └────────────────────────────┘
 ```
 
 | Index | Half | Owner | Behaviour |
 |---|---|---|---|
 | 0–5 | left | StateManager (state arc) | All six paint the current mutex-state colour. Dance suppresses and lets the rainbow animation own the ring. |
-| 6, 7, 10 | right | unowned (off) | Reserved for future indicators (low-battery is a known candidate). |
+| 6 | right | StateManager (face state pip) | Yellow `(168,140,0)` when a face is detected; green `(0,140,30)` when the bridge has identified the face via room-view VLM + roster match (mutex on the same pixel). Identified state has a 4 s firmware-side timeout — bridge refreshes by calling `self.robot.set_face_identified` again on each successful match. |
+| 7, 10 | right | StateManager (locked off) | Reserved for future indicators (low-battery is a known candidate). Re-asserted to `(0,0,0)` every 200 ms as defense-in-depth. |
 | 8 | right | StateManager (`kid_mode` pip) | Warm pink `(168,80,100)` when kid_mode = on; off otherwise. |
 | 9 | right | StateManager (`smart_mode` pip) | Orange `(168,80,0)` when smart_mode = on; off otherwise. |
-| 11 | right | xiaozhi `stackchan_display.cc::set_listening_pixel` | Red `(120,0,0)` while xiaozhi is in `LISTENING` (mic open, ASR active, user's turn); off otherwise. Bottom of the right ring; spatially separated from the toggle pips. |
+| 11 | right | StateManager (listening pip) | Red `(120,0,0)` while xiaozhi is in `LISTENING` (mic open, ASR active, user's turn); off otherwise. Driven by `stackchan_display.cc::set_listening_pixel` which now routes through `StateManager::setListening(bool)` and emits a `chat_status` perception event for the dashboard mirror. Bottom of the right ring; spatially separated from the toggle pips. |
 
 ### LED quirks
 
-- **5 Hz tick.** StateManager re-paints the state arc + toggle pips every ~200 ms. The tick is what drives the SECURITY 1 Hz flash; defense-in-depth re-assertion is a free side-effect for anything that ever clobbers a pixel.
+- **5 Hz tick.** StateManager re-paints the state arc AND the entire right ring (face / kid / smart / listening / reserved 7 / reserved 10) every ~200 ms. The tick drives the SECURITY 1 Hz flash and the face-identified 4 s timeout, and acts as defense-in-depth re-assert across all status indicators — MCP writes / dance keyframes / future writers cannot persistently clobber any pixel (worst case: 200 ms flicker).
 - **PY32 IO expander quantises to RGB565.** Brightness deltas crush — `(40,40,40)` reads almost identical to `(200,200,200)`. Use distinct **hues**, not brightness levels, for any indicator that needs to read across a room.
-- **All 12 pixels are writable through `Hal::setRgbColor`.** The earlier privacy-LED friend-class guard was dropped along with the privacy semantics — listening pixel and toggle pips coexist by indexing rather than by hardware lock.
-- **RightNeonLight uses local indices 0–5** internally, mapped to global 6–11 via `+6`. `setColorAt(local 2)` writes global 8 (kid_mode pip); `setColorAt(local 3)` writes global 9 (smart_mode pip). Local 0 and local 5 now write global 6 and 11 directly (no silent drop).
+- **MCP tools are contract-aware.** `self.robot.set_led_color` and `self.robot.set_led_multi` are restricted to the LEFT ring only (indices 0-5). Attempts to write right-ring indices via these tools are rejected with a warn log. Use `self.robot.set_face_identified` (no args) to light the face pixel green for ~4 seconds.
+- **Dance choreography only animates the left ring.** `Keyframe::apply` no longer writes the right ring. Custom JSON dances that set `rightRgbColor` will see that field preserved on the `Keyframe` struct but not applied to hardware.
+- **RightNeonLight uses local indices 0–5** internally, mapped to global 6–11 via `+6`. StateManager constants: `kFacePipRightLocal=0`, `kReservedPipRightLocal_7=1`, `kKidModePipRightLocal=2`, `kSmartModePipRightLocal=3`, `kReservedPipRightLocal_10=4`, `kListeningPipRightLocal=5`.
+- **Dashboard mirror.** The bridge dashboard at `/ui/led-ring-mirror` shows all four indicators in the same colours as the physical ring, updated via 2 s HTMX polling + `dotty-refresh` event nudges fired by SSE perception events (`face_detected`, `face_lost`, `face_recognized`, `chat_status`).
 
 ---
 
