@@ -6,6 +6,7 @@ import itertools
 import json
 import logging
 import os
+import random
 import re
 import requests
 import sys
@@ -299,6 +300,34 @@ FACE_NAME_GREET_QUIET_AFTER_CHAT_SEC = float(
 DOTTY_IDLE_VISION_COOLDOWN_SEC = float(
     os.environ.get("DOTTY_IDLE_VISION_COOLDOWN_SEC", "120"),
 )
+# Idle photographer — fires a silent take_photo every IDLE_PHOTOGRAPHER_*
+# seconds (uniform jitter) while the device is genuinely idle. No servo
+# motion, no LED change, no audio cue. The capture itself is identical
+# to a face-driven room view; the difference is the trigger and the
+# wandering prompt. Disable by setting IDLE_PHOTOGRAPHER_ENABLED=0.
+IDLE_PHOTOGRAPHER_ENABLED = (
+    os.environ.get("IDLE_PHOTOGRAPHER_ENABLED", "1") == "1"
+)
+IDLE_PHOTOGRAPHER_SLEEP_MIN_SEC = float(
+    os.environ.get("IDLE_PHOTOGRAPHER_SLEEP_MIN_SEC", "180"),
+)
+IDLE_PHOTOGRAPHER_SLEEP_MAX_SEC = float(
+    os.environ.get("IDLE_PHOTOGRAPHER_SLEEP_MAX_SEC", "300"),
+)
+# Wait window after dispatching `take_photo` before reading the cache.
+# Firmware capture + upload + VLM round-trip is typically ~5–10 s; pad
+# generously since this loop is fully async and a missed cycle just
+# means we try again in 3–5 min.
+IDLE_PHOTOGRAPHER_RESULT_WAIT_SEC = float(
+    os.environ.get("IDLE_PHOTOGRAPHER_RESULT_WAIT_SEC", "20"),
+)
+# Token-set Jaccard similarity threshold above which a new perception
+# is considered "the same" as the previous saved one and skipped. 0.7
+# tolerates a couple of changed words; tune up to suppress more, down
+# to save more.
+IDLE_PHOTOGRAPHER_NOTABLE_JACCARD = float(
+    os.environ.get("IDLE_PHOTOGRAPHER_NOTABLE_JACCARD", "0.7"),
+)
 # How recently must a greeting have fired for face_lost to abort it.
 # Firmware emits face_lost ~2 s after the face actually leaves frame
 # (FaceTrackingModifier grace period); past this window we assume the
@@ -400,6 +429,18 @@ AUDIO_CAPTION_SYSTEM_PROMPT = (
 # intent. Versioning is in the sentinel itself for future format
 # revs (`__ROOM_VIEW_V2__` etc.).
 _ROOM_VIEW_SENTINEL = "__ROOM_VIEW_V1__"
+
+# Idle photographer wandering prompt — sent as the `question` to
+# `take_photo`, which the firmware passes back to /api/vision/explain
+# as the VLM user-prompt. No people identification (the room-view
+# roster path handles that on face_detected). Curious framing,
+# concrete language; the bridge-side notability filter handles
+# repetition suppression.
+IDLE_WANDER_PROMPT = (
+    "Describe what you see in 1–3 sentences as a curious robot would "
+    "notice it — light, objects, the room's mood. No people identification "
+    "needed. Stay short and concrete."
+)
 
 # ---------------------------------------------------------------------------
 # MCP tool permission policy
@@ -2653,6 +2694,15 @@ async def lifespan(app: FastAPI):
     # safe to run; emits only when there's at least vision-or-audio
     # signal to summarise.
     perception_tasks.append(asyncio.create_task(_scene_synthesis_loop()))
+    # Idle photographer — silent take_photo every 3–5 min while idle.
+    # Notable descriptions land in perception-YYYY-MM-DD.ndjson for
+    # later FTS ingestion. Toggle with IDLE_PHOTOGRAPHER_ENABLED.
+    if IDLE_PHOTOGRAPHER_ENABLED:
+        perception_tasks.append(
+            asyncio.create_task(_perception_idle_photographer())
+        )
+    else:
+        log.info("perception idle photographer disabled (IDLE_PHOTOGRAPHER_ENABLED!=1)")
     # Layer 5: background calendar refresher (no-op when CALENDAR_IDS empty).
     calendar_task = asyncio.create_task(_calendar_poll_loop())
 
@@ -3481,6 +3531,175 @@ _SCENE_SYNTHESIS_TRIGGER_EVENTS = {
 def _scene_synthesis_log_path() -> Path:
     today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
     return CONVO_LOG_DIR / f"scene-synthesis-{today}.ndjson"
+
+
+def _idle_perception_log_path() -> Path:
+    today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
+    return CONVO_LOG_DIR / f"perception-{today}.ndjson"
+
+
+def _write_idle_perception_record(device_id: str, description: str) -> None:
+    """Append one idle-perception record to the daily NDJSON ring file.
+    Same shape and mode (0600, no media) as scene-synthesis records,
+    with `type=perception` and `mode=idle` so future ingestion can
+    discriminate. ZeroClaw FTS ingestion of these files is a separate
+    routine (see Phase C scene-synthesis tracker)."""
+    record = {
+        "ts": datetime.now(LOCAL_TZ).isoformat(),
+        "device": device_id,
+        "type": "perception",
+        "mode": "idle",
+        "text": description,
+    }
+    path = _idle_perception_log_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(record, ensure_ascii=False) + "\n"
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(line)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except Exception:
+        log.warning("idle perception ndjson write failed", exc_info=True)
+
+
+_IDLE_TOKEN_RE = re.compile(r"\w+")
+
+
+def _is_notable_perception(
+    description: str, last_description: str | None,
+    *,
+    jaccard_threshold: float = IDLE_PHOTOGRAPHER_NOTABLE_JACCARD,
+) -> bool:
+    """True when `description` is worth saving to memory.
+
+    Cheap, FTS-friendly notability check (memory is FTS-only — no
+    embeddings). Skips trivially short or "nothing changed" responses,
+    then computes token-set Jaccard similarity against the last saved
+    perception. Above the threshold = same scene = skip.
+    """
+    if not description or len(description) < 20:
+        return False
+    if "same as before" in description.lower():
+        return False
+    if not last_description:
+        return True
+    cur = set(t.lower() for t in _IDLE_TOKEN_RE.findall(description))
+    prev = set(t.lower() for t in _IDLE_TOKEN_RE.findall(last_description))
+    if not cur or not prev:
+        return True
+    union = cur | prev
+    if not union:
+        return True
+    jaccard = len(cur & prev) / len(union)
+    return jaccard < jaccard_threshold
+
+
+def _idle_photographer_pick_device() -> str | None:
+    """Single-device deployment helper — pick the device the
+    photographer should target. Mirrors `_pick_perception_device_id`
+    in dashboard.py; replicated here so the photographer doesn't
+    pull a dashboard import. Priority: most recent _vision_cache
+    entry, else first device in _perception_state."""
+    if _vision_cache:
+        try:
+            return max(
+                _vision_cache.items(),
+                key=lambda kv: kv[1].get("wall_ts", 0.0),
+            )[0]
+        except Exception:
+            pass
+    for did in _perception_state.keys():
+        if did and did != "unknown":
+            return did
+    return None
+
+
+async def _perception_idle_photographer() -> None:
+    """Background task: while idle, fire `take_photo` every 3–5 min
+    (jittered) and write notable descriptions to the idle-perception
+    NDJSON. No servo motion, no LED change, no audio cue — silent
+    capture. Skips when state != idle, when listening, when a face
+    is present (room-view path handles those), and when the dispatch
+    relay returns False (xiaozhi-server admin route missing).
+
+    Skips on no-device-known and on dispatch failures rather than
+    crashing — a missed cycle just means the next 3–5 min retries.
+    """
+    log.info(
+        "perception idle photographer started "
+        "(sleep=%.0f–%.0fs jaccard=%.2f wait=%.0fs)",
+        IDLE_PHOTOGRAPHER_SLEEP_MIN_SEC,
+        IDLE_PHOTOGRAPHER_SLEEP_MAX_SEC,
+        IDLE_PHOTOGRAPHER_NOTABLE_JACCARD,
+        IDLE_PHOTOGRAPHER_RESULT_WAIT_SEC,
+    )
+    try:
+        from bridge.security_watch import dispatch_take_photo
+    except Exception:
+        log.exception("idle photographer: dispatch_take_photo import failed; aborting")
+        return
+    try:
+        while True:
+            sleep_s = random.uniform(
+                IDLE_PHOTOGRAPHER_SLEEP_MIN_SEC,
+                IDLE_PHOTOGRAPHER_SLEEP_MAX_SEC,
+            )
+            await asyncio.sleep(sleep_s)
+            device_id = _idle_photographer_pick_device()
+            if not device_id:
+                continue
+            pstate = _perception_state.get(device_id, {}) or {}
+            current_state = (pstate.get("current_state") or "idle").lower()
+            if current_state != "idle":
+                continue
+            if pstate.get("listening"):
+                continue
+            if pstate.get("face_present"):
+                continue
+            pre_ts = (
+                _vision_cache.get(device_id, {}).get("wall_ts") or 0.0
+            )
+            ok = await dispatch_take_photo(
+                device_id, question=IDLE_WANDER_PROMPT,
+            )
+            if not ok:
+                # Already logged once by dispatch_take_photo; don't
+                # spam the journal on repeated 404s.
+                continue
+            await asyncio.sleep(IDLE_PHOTOGRAPHER_RESULT_WAIT_SEC)
+            entry = _vision_cache.get(device_id) or {}
+            new_ts = entry.get("wall_ts") or 0.0
+            description = (entry.get("description") or "").strip()
+            if not description or new_ts <= pre_ts:
+                log.info(
+                    "idle photographer: device=%s no fresh description "
+                    "(new_ts=%.0f pre_ts=%.0f)",
+                    device_id, new_ts, pre_ts,
+                )
+                continue
+            last_text = pstate.get("last_idle_perception_text")
+            if not _is_notable_perception(description, last_text):
+                log.info(
+                    "idle photographer: device=%s skipped (not notable, "
+                    "len=%d)", device_id, len(description),
+                )
+                continue
+            pstate["last_idle_perception_text"] = description
+            pstate["last_idle_perception_t"] = time.time()
+            _perception_state[device_id] = pstate
+            _write_idle_perception_record(device_id, description)
+            log.info(
+                "idle photographer: device=%s saved perception (%d chars)",
+                device_id, len(description),
+            )
+    except asyncio.CancelledError:
+        log.info("perception idle photographer cancelled")
+        raise
+    except Exception:
+        log.exception("perception idle photographer crashed")
 
 
 def _compose_scene_synthesis(device_id: str) -> dict | None:
