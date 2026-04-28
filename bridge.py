@@ -403,7 +403,9 @@ VISION_ROOM_VIEW_SYSTEM_PROMPT = (
     "Identify the person ONLY by names from the list the user provides. "
     "Never invent names; never name anyone outside the list. "
     "If you are not confident or no match is clear, use the name 'unknown'. "
-    "Keep the description to one short sentence."
+    "Keep the description to one short sentence. "
+    "Read the person's apparent mood from face + posture only, choosing "
+    "from a fixed vocabulary."
 )
 # Security-framed audio captioning prompt. Used by /api/audio/explain
 # whenever no caller-supplied prompt overrides it. The framing biases the
@@ -1792,6 +1794,10 @@ def _update_perception_state(device_id: str, name: str,
         # detected" from this, so leaving stale `last_face_id` would keep the
         # face pixel green after the person walked away.
         state.pop("last_face_id", None)
+        # Mood is bound to the person; clear when they leave so the
+        # next talk turn doesn't ship stale "engaged" into the prompt.
+        state.pop("face_mood", None)
+        state.pop("face_mood_t", None)
     elif name == "sound_event":
         state["last_sound_dir"] = data.get("direction")
         state["last_sound_t"] = ts
@@ -3081,18 +3087,20 @@ def _call_vision_api(
 # line so a streaming or partial completion still parses; `DESC: ` and
 # `NAME: ` are explicit markers the parser anchors on.
 _ROOM_VIEW_PROMPT_TEMPLATE = (
-    "Look at this photo and do TWO things in one reply.\n"
+    "Look at this photo and do THREE things in one reply.\n"
     "\n"
     "1. Describe the person in ONE short sentence — approximate age "
     "range, hair, clothing, distinguishing features.\n"
     "2. If the person clearly matches one of these family members, "
     "give that exact name. Otherwise reply with the name 'unknown'.\n"
+    "3. Read the person's apparent mood — pick exactly one of: "
+    "engaged, tired, excited, distressed, neutral.\n"
     "\n"
     "Family:\n"
     "{roster}\n"
     "\n"
     "Reply on a SINGLE line in this exact format:\n"
-    "DESC: <one sentence> | NAME: <{name_choices}|unknown>\n"
+    "DESC: <one sentence> | NAME: <{name_choices}|unknown> | MOOD: <engaged|tired|excited|distressed|neutral>\n"
     "\n"
     "If you cannot see a person at all, reply with exactly: no one in view\n"
     "Do not invent names. Do not add commentary."
@@ -3103,8 +3111,17 @@ _ROOM_VIEW_NO_PERSON = "no one in view"
 # Parser regex. Anchored at start, allows whitespace flexibility, and
 # tolerates trailing punctuation around the name (e.g. `NAME: Hudson.`).
 _ROOM_VIEW_RESP_RE = re.compile(
-    r"^\s*DESC:\s*(?P<desc>.+?)\s*\|\s*NAME:\s*(?P<name>[A-Za-z_][A-Za-z0-9_-]*)\s*[.!?]?\s*$",
+    r"^\s*DESC:\s*(?P<desc>.+?)\s*"
+    r"\|\s*NAME:\s*(?P<name>[A-Za-z_][A-Za-z0-9_-]*)\s*"
+    # Accept ANY single-word MOOD value here so an out-of-vocab reply
+    # ("chaotic") still parses the desc + name cleanly — the parser
+    # validates the vocab and drops invalid moods to None.
+    r"(?:\|\s*MOOD:\s*(?P<mood>[A-Za-z]+)\s*)?"
+    r"[.!?]?\s*$",
     re.IGNORECASE | re.DOTALL,
+)
+_ROOM_VIEW_MOODS = frozenset(
+    {"engaged", "tired", "excited", "distressed", "neutral"}
 )
 
 
@@ -3137,37 +3154,44 @@ def _build_room_view_question() -> Optional[str]:
 
 def _parse_room_view_response(
     raw: str, roster_ids: set[str],
-) -> tuple[Optional[str], Optional[str]]:
-    """Parse the VLM's room_view reply into `(description, person_id)`.
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Parse the VLM's room_view reply into `(description, person_id, mood)`.
 
     Behaviour:
-      * Empty input  → (None, None)
-      * "no one in view" sentinel → (None, None)
-      * Format match + name in roster → (desc, person_id)
-      * Format match + name == "unknown" or off-roster → (desc, None)
-      * Format mismatch → (raw_stripped, None) — graceful degrade to
-        v1 behaviour so we never lose the description signal even when
-        the model deviates from the requested format.
+      * Empty input  → (None, None, None)
+      * "no one in view" sentinel → (None, None, None)
+      * Format match + name in roster → (desc, person_id, mood_or_None)
+      * Format match + name == "unknown" or off-roster → (desc, None, mood_or_None)
+      * Format mismatch → (raw_stripped, None, None) — graceful degrade
+        to v1 behaviour so we never lose the description signal even
+        when the model deviates from the requested format.
+
+    `mood` is None when the model omits the MOOD: field (older replies)
+    or returns a value outside the fixed vocabulary. The MOOD field is
+    optional in the regex precisely so older / non-conforming replies
+    still parse cleanly.
     """
     if not raw:
-        return None, None
+        return None, None, None
     cleaned = raw.strip()
     if not cleaned:
-        return None, None
+        return None, None, None
     if _ROOM_VIEW_NO_PERSON in cleaned.lower():
-        return None, None
+        return None, None, None
     m = _ROOM_VIEW_RESP_RE.match(cleaned)
     if not m:
         # Fall back: treat the whole reply as a description. Mirrors the
         # v1 path so a botched format never costs us the description.
-        return cleaned, None
+        return cleaned, None, None
     desc = m.group("desc").strip()
     name = m.group("name").strip().lower()
+    raw_mood = (m.group("mood") or "").strip().lower()
+    mood = raw_mood if raw_mood in _ROOM_VIEW_MOODS else None
     if not desc:
         desc = None  # paranoid — regex requires non-empty
     if name == "unknown" or name not in roster_ids:
-        return desc, None
-    return desc, name
+        return desc, None, mood
+    return desc, name, mood
 
 
 @app.post("/api/vision/explain")
@@ -3242,13 +3266,21 @@ async def vision_explain(
                 _call_vision_api, b64_image, room_view_question,
                 system_prompt=VISION_ROOM_VIEW_SYSTEM_PROMPT,
             )
-            parsed_desc, room_match_person_id = _parse_room_view_response(
-                raw, roster_ids,
+            parsed_desc, room_match_person_id, parsed_mood = (
+                _parse_room_view_response(raw, roster_ids)
             )
             description = parsed_desc or _ROOM_VIEW_NO_PERSON
+            if parsed_mood:
+                # Plumb mood into perception state so the talk-turn
+                # PerceptionSnapshot picks it up. Cleared on face_lost
+                # by the existing event handler (last_face_id pop).
+                pstate = _perception_state.setdefault(device_id, {})
+                pstate["face_mood"] = parsed_mood
+                pstate["face_mood_t"] = time.time()
             log.info(
-                "room_view device=%s match=%s desc=%s",
-                device_id, room_match_person_id or "-", description[:120],
+                "room_view device=%s match=%s mood=%s desc=%s",
+                device_id, room_match_person_id or "-",
+                parsed_mood or "-", description[:120],
             )
         else:
             # v1 path — either a normal "what do you see" call, OR a

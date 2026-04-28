@@ -37,11 +37,19 @@ SCENE_SYNTH_AGE_GATE_SEC = 600.0
 FaceState = Literal["off", "detected", "identified"]
 
 
+STORY_FRAMING_LINE = (
+    "You are inside the story you're telling — not narrating from outside. "
+    "Describe what you see, hear, and feel as a character in the story. "
+    "Use rich sensory language. Save vivid moments to memory when they happen."
+)
+
+
 @dataclass(frozen=True)
 class PerceptionSnapshot:
     state: str
     face: FaceState
     face_id: str | None
+    face_mood: str | None
     listening: bool
     last_vision_desc: str | None
     last_vision_age_s: float | None
@@ -53,17 +61,32 @@ class PerceptionSnapshot:
     def to_prompt_block(self) -> str:
         """Format as a `[Current perception]` system-prompt addendum.
 
-        Returns "" when nothing meaningful is cached, so a cold idle
-        conversation doesn't get a `[Current perception: nothing]` line
-        eating tokens. Trailing newline included so callers can
-        concatenate without padding.
+        Returns "" when nothing meaningful is cached *and* the current
+        state has no special framing to add (idle/talk with empty
+        caches). Story mode always emits at least the framing line so
+        the LLM gets the "you're inside the story" instruction even
+        when no other perception is cached.
+
+        Trailing newline included so callers can concatenate without
+        padding.
         """
         lines: list[str] = []
 
+        # Story-mode framing — appears first so the rest of the
+        # perception ("you see X") reads as in-story sensation.
+        if (self.state or "").lower() == "story_time":
+            lines.append(STORY_FRAMING_LINE)
+
         if self.face == "identified" and self.face_id:
-            lines.append(f"You see {self.face_id} in front of you.")
+            who_line = f"You see {self.face_id} in front of you."
+            if self.face_mood:
+                who_line += f" They look {self.face_mood}."
+            lines.append(who_line)
         elif self.face == "detected":
-            lines.append("You see an unrecognised face in front of you.")
+            who_line = "You see an unrecognised face in front of you."
+            if self.face_mood:
+                who_line += f" They look {self.face_mood}."
+            lines.append(who_line)
 
         # Prefer the synth sentence (composed, sentence-shaped) over raw
         # vision/audio. The synth loop already merges those signals.
@@ -112,6 +135,14 @@ def snapshot(
         else:
             face = "detected"
 
+    # Mood is set by _parse_room_view_response when the VLM returns a
+    # value from _ROOM_VIEW_MOODS. Cleared on face_lost so it doesn't
+    # outlast the person it describes.
+    raw_mood = (pstate.get("face_mood") or "").strip().lower()
+    face_mood = raw_mood if raw_mood else None
+    if face == "off":
+        face_mood = None
+
     listening = bool(pstate.get("listening"))
     state = pstate.get("current_state") or "idle"
 
@@ -152,6 +183,7 @@ def snapshot(
         state=state,
         face=face,
         face_id=face_id,
+        face_mood=face_mood,
         listening=listening,
         last_vision_desc=last_vision_desc,
         last_vision_age_s=last_vision_age_s,

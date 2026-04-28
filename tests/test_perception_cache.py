@@ -229,5 +229,73 @@ class SnapshotIsFrozen(unittest.TestCase):
             snap.face = "identified"  # type: ignore[misc]
 
 
+class FaceMoodTests(unittest.TestCase):
+
+    def test_mood_plumbed_through_when_face_present(self):
+        caches = _empty_caches()
+        caches["perception_state"][DEVICE] = {
+            "face_present": True,
+            "last_face_id": "hudson",
+            "face_mood": "engaged",
+        }
+        snap = snapshot(DEVICE, **caches)
+        self.assertEqual(snap.face_mood, "engaged")
+
+    def test_mood_cleared_when_face_absent(self):
+        # If face_lost handling missed the mood pop somehow, the
+        # snapshot still scrubs it so a stale mood can't ride into
+        # the prompt after the person leaves.
+        caches = _empty_caches()
+        caches["perception_state"][DEVICE] = {
+            "face_present": False,
+            "face_mood": "engaged",  # stale
+        }
+        snap = snapshot(DEVICE, **caches)
+        self.assertIsNone(snap.face_mood)
+
+    def test_mood_renders_in_prompt_block(self):
+        caches = _empty_caches()
+        caches["perception_state"][DEVICE] = {
+            "face_present": True,
+            "last_face_id": "hudson",
+            "face_mood": "tired",
+        }
+        block = snapshot(DEVICE, **caches).to_prompt_block()
+        self.assertIn("hudson", block)
+        self.assertIn("tired", block)
+
+
+class StoryFramingTests(unittest.TestCase):
+
+    def test_story_framing_appears_in_story_time(self):
+        caches = _empty_caches()
+        caches["perception_state"][DEVICE] = {
+            "current_state": "story_time",
+        }
+        block = snapshot(DEVICE, **caches).to_prompt_block()
+        self.assertIn("inside the story", block)
+        self.assertTrue(block.startswith("[Current perception]"))
+
+    def test_no_story_framing_in_idle(self):
+        caches = _empty_caches()
+        caches["perception_state"][DEVICE] = {
+            "current_state": "idle",
+        }
+        # Empty perception in idle still returns "" — story framing is
+        # the only thing that promotes a no-signal snapshot to a
+        # non-empty block.
+        self.assertEqual(snapshot(DEVICE, **caches).to_prompt_block(), "")
+
+    def test_no_story_framing_in_talk(self):
+        caches = _empty_caches()
+        caches["perception_state"][DEVICE] = {
+            "current_state": "talk",
+            "face_present": True,
+            "last_face_id": "hudson",
+        }
+        block = snapshot(DEVICE, **caches).to_prompt_block()
+        self.assertNotIn("inside the story", block)
+
+
 if __name__ == "__main__":
     unittest.main()
