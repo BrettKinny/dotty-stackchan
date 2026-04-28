@@ -156,7 +156,7 @@
   <section>
     <div id="perception-card-body" class="card bg-base-100 shadow-sm overflow-hidden"
          hx-get="/ui/perception"
-         hx-trigger="load, every 2s, dotty-refresh from:window"
+         hx-trigger="load, dotty-refresh from:window"
          hx-swap="outerHTML" hx-target="this">
       <div class="card-body p-3 animate-pulse">
         <div class="h-4 bg-base-300 rounded w-1/4"></div>
@@ -166,7 +166,7 @@
 
   <section class="flex flex-col" style="gap: 1.5rem;">
     <div id="state-card-body" class="card bg-base-100 shadow-sm overflow-hidden"
-         hx-get="/ui/state" hx-trigger="load, every 5s" hx-swap="outerHTML"
+         hx-get="/ui/state" hx-trigger="load, dotty-refresh from:window" hx-swap="outerHTML"
          hx-target="this">
       <div class="card-body p-3 animate-pulse">
         <div class="h-4 bg-base-300 rounded w-1/4"></div>
@@ -519,12 +519,14 @@
       var data;
       try { data = JSON.parse(ev.data); } catch (e) { return; }
       prependFeedEvent(data);
-      // Nudge polling tiles (LED ring mirror) on indicator-relevant events
-      // so they update with sub-second latency instead of waiting on the
-      // next 2 s tick.
+      // Nudge event-driven cards (Perception, State, status-strip) on
+      // indicator-relevant events. This replaces dashboard-wide polling for
+      // these cards — they only re-fetch when something actually changed.
       var name = data && data.name;
       if (name === 'face_detected' || name === 'face_lost'
-          || name === 'face_recognized' || name === 'chat_status') {
+          || name === 'face_recognized' || name === 'chat_status'
+          || name === 'state_changed' || name === 'dance_started'
+          || name === 'dance_ended') {
         window.dispatchEvent(new CustomEvent('dotty-refresh'));
       }
     };
