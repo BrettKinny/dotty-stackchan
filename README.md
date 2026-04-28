@@ -40,6 +40,16 @@ The 12-pixel LED ring shows the current state at a glance: **left ring 0-5 is th
 
 Full state taxonomy, colour palette, transition diagram, and per-state backing architecture: [`docs/modes.md`](./docs/modes.md).
 
+## Web dashboard (locally hosted)
+
+The bridge serves a web dashboard at `http://<ZEROCLAW_HOST>:8080/ui` — host status, mode toggles (Kid Mode / Smart Mode), state switcher, perception card (face / identity), emoji presets, and a live event log (turns, perception events, errors). Light and dark themes follow the system preference. It's served from the same FastAPI process as the bridge, so there's nothing extra to deploy and no external service ever sees your data.
+
+<p align="center">
+  <img src="docs/assets/dashboard-light.png" alt="Dotty dashboard — light theme" width="48%">
+  &nbsp;
+  <img src="docs/assets/dashboard-dark.png" alt="Dotty dashboard — dark theme" width="48%">
+</p>
+
 ## Reference deployment
 
 - **Hardware**: M5Stack StackChan (CoreS3 + servo kit), firmware built from `m5stack/StackChan`.
