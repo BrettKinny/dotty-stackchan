@@ -3749,7 +3749,7 @@ if _configure_dashboard is not None:
         vision_cache=_vision_cache,
         audio_cache=_audio_cache,
         scene_synthesis_cache=_scene_synthesis_cache,
-        kid_mode_getter=lambda: KID_MODE,
+        kid_mode_getter=_read_kid_mode,
         kid_mode_setter=_dashboard_set_kid_mode,
         smart_mode_getter=_read_smart_mode,
         smart_mode_setter=_dashboard_set_smart_mode,
