@@ -997,6 +997,19 @@ def _build_perception_card_ctx(device_id: str | None) -> dict:
             face_color = "#a88c00"
             face_tip = "face: detected, awaiting identification"
 
+    # --- listening state (mirrors the bottom red pixel on the right ring) ---
+    # Driven by the firmware's edge-only `chat_status` event — see
+    # bridge.py::_dispatch_perception_event. Hue (#780000) matches the
+    # physical LED's (120,0,0) so the dashboard reads as a true mirror.
+    listening = bool(dev_state.get("listening")) if dev_state else False
+    listening_color = "#780000" if listening else "#374151"
+    listening_label = "listening" if listening else "off"
+    listening_tip = (
+        "xiaozhi is in LISTENING — Dotty's mic is open"
+        if listening
+        else "not listening"
+    )
+
     # --- vision preview + description ---
     latest_vision: dict | None = None
     if device_id:
@@ -1065,6 +1078,10 @@ def _build_perception_card_ctx(device_id: str | None) -> dict:
         "face_label": face_label,
         "face_color": face_color,
         "face_tip": face_tip,
+        "listening": listening,
+        "listening_color": listening_color,
+        "listening_label": listening_label,
+        "listening_tip": listening_tip,
         "latest_vision": latest_vision,
         "audio_text": audio_text,
         "audio_age_label": audio_age_label,

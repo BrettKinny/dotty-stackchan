@@ -28,6 +28,16 @@
       <span class="text-xs {% if face_state == 'off' %}text-base-content/40{% else %}text-base-content/80{% endif %} font-mono truncate max-w-[16rem]">{{ face_label }}</span>
     </div>
 
+    {# 1b. Listening status row — mirrors the red LED at the bottom of the
+         right ring. Driven by `chat_status` SSE events; refresh nudges are
+         already wired in dashboard.html. #}
+    <div class="flex items-center gap-3 text-sm" title="{{ listening_tip }}">
+      <span aria-hidden="true"
+            style="display:inline-block;width:12px;height:12px;border-radius:9999px;flex-shrink:0;background:{{ listening_color }};{% if listening %}box-shadow:0 0 8px {{ listening_color }}80;{% endif %}"></span>
+      <span class="flex-1">Listening</span>
+      <span class="text-xs {% if not listening %}text-base-content/40{% else %}text-base-content/80{% endif %} font-mono truncate max-w-[16rem]">{{ listening_label }}</span>
+    </div>
+
     {# 2. Scene view #}
     <div class="rounded-lg bg-base-200 p-2 text-sm">
       {% if latest_vision %}
