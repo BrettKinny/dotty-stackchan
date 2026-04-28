@@ -65,6 +65,11 @@ Actively being worked on or partially complete. **Big push 2026-04-25 evening:**
 
 Designed but not yet started. Roughly in priority order.
 
+- **Improve Security Mode** -- expand beyond the current LED-flash + alert posture: configurable triggers, escalation rules, and richer notification surfaces
+- **Improve Story Mode** -- longer-form narrative pacing, character voices, save/resume, and child-led branching
+- **Easily configurable model profiles** -- first-class config surface for swapping the local / kid / smart models (and adding new ones) without hand-editing daemon `config.toml` files
+- **Improve Kid Mode -- configurable age band** -- per-child age setting that tunes vocabulary, topic blocklist strictness, and response length; today Kid Mode is one-size-fits-all
+- **Improve Dance Mode -- user song library** -- let users drop their own audio files into a song folder and have Dotty discover, list, and dance to them (current dance set is built-in only)
 - **Speech bubble sync** -- tie on-screen text bubble visibility to actual audio playback state (deferred at v0.1 — Brett says timing looks fine in practice)
 - **Singing mode** -- vocal synthesis or pitch-shifted TTS over backing tracks (Phase 2 of dance work)
 - **Runtime OTA provisioning** -- captive-portal WiFi + OTA URL setup on first boot (no rebuild to retarget)
