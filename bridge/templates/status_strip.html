@@ -3,7 +3,7 @@
    version) now live in the Bridge host-detail modal. The endpoint still
    accepts ?placement=header for callers that want to be explicit; only the
    header layout exists. #}
-<div class="flex items-center gap-3 flex-wrap" role="group" aria-label="Host status">
+<div class="flex items-center gap-3" role="group" aria-label="Host status">
   {% for d in dots %}
   {% if d.clickable is not defined or d.clickable %}
   <button type="button"
@@ -26,21 +26,4 @@
   </span>
   {% endif %}
   {% endfor %}
-
-  {# Mode chips — pink for kid, orange for smart. Mirror the LED colours so
-     the dashboard's at-a-glance signal matches what's on Dotty's right ring. #}
-  {% if kid_on is defined %}
-    {% if kid_on %}
-    <span class="badge badge-sm badge-secondary" title="kid_mode is on — voice path uses the safety-tuned model and restricted prompt">kid mode on</span>
-    {% else %}
-    <span class="badge badge-sm badge-ghost" title="kid_mode is off — voice path uses the full-autonomy model">kid mode off</span>
-    {% endif %}
-  {% endif %}
-  {% if smart_on is defined %}
-    {% if smart_on %}
-    <span class="badge badge-sm badge-warning" title="smart_mode is on — turn dispatched directly to OpenRouter, bypassing ZeroClaw">smart mode on</span>
-    {% else %}
-    <span class="badge badge-sm badge-ghost" title="smart_mode is off — normal ZeroClaw turn dispatch">smart mode off</span>
-    {% endif %}
-  {% endif %}
 </div>

@@ -1701,20 +1701,6 @@ async def status_strip(request: Request, placement: str = "header") -> Any:
             {"slug": "robot",  "label": "robot",
              "status": sc_status, "title": sc_tip.replace("Dotty:", "robot:")},
         ]
-
-        # Mode chips — kid_mode (pink) and smart_mode (orange) badges that
-        # mirror the LED colours on Dotty's right ring so the dashboard's
-        # at-a-glance signal matches the device.
-        kg = _state.get("kid_mode_getter")
-        sg = _state.get("smart_mode_getter")
-        try:
-            ctx["kid_on"] = bool(kg()) if kg else False
-        except Exception:
-            ctx["kid_on"] = False
-        try:
-            ctx["smart_on"] = bool(sg()) if sg else False
-        except Exception:
-            ctx["smart_on"] = False
     else:
         cpu_c = _cpu_temp_c()
         mem = _read_memory_mb()
