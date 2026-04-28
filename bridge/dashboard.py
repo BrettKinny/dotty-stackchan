@@ -35,6 +35,8 @@ log = logging.getLogger("dashboard")
 _state: dict[str, Any] = {
     "send_message": None,
     "vision_cache": None,
+    "audio_cache": None,
+    "scene_synthesis_cache": None,
     "kid_mode_getter": None,
     "kid_mode_setter": None,
     "smart_mode_getter": None,
@@ -52,6 +54,8 @@ _state: dict[str, Any] = {
 
 
 def configure(*, send_message: Any = None, vision_cache: dict | None = None,
+              audio_cache: dict | None = None,
+              scene_synthesis_cache: dict | None = None,
               kid_mode_getter: Any = None, kid_mode_setter: Any = None,
               smart_mode_getter: Any = None, smart_mode_setter: Any = None,
               state_getter: Any = None, state_setter: Any = None,
@@ -66,6 +70,10 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
         _state["send_message"] = send_message
     if vision_cache is not None:
         _state["vision_cache"] = vision_cache
+    if audio_cache is not None:
+        _state["audio_cache"] = audio_cache
+    if scene_synthesis_cache is not None:
+        _state["scene_synthesis_cache"] = scene_synthesis_cache
     if kid_mode_getter is not None:
         _state["kid_mode_getter"] = kid_mode_getter
     if kid_mode_setter is not None:
@@ -907,59 +915,180 @@ async def smart_mode_partial(request: Request) -> Any:
     )
 
 
-@router.get("/perception", response_class=HTMLResponse, include_in_schema=False)
-async def perception_partial(request: Request) -> Any:
-    """Software-side perception indicators (face today, listening + sound
-    direction next). Lives between the actor controls (Kid/Smart) and the
-    State row so the reading order is: who Dotty is → what Dotty senses →
-    what mode Dotty is in. Updated by 2 s HTMX polling + dotty-refresh
-    nudges fired by the SSE perception feed."""
+def _pick_perception_device_id() -> str | None:
+    """Single-device deployment helper — picks the most relevant device id
+    to feed into the Perception card builder. Priority:
+      1. The device with a fresh _vision_cache entry (most likely the one
+         actively perceiving).
+      2. Any device in _perception_state (single robot ➜ single key).
+    Returns None when the bridge has not yet seen any device — the card
+    then renders empty states across the board.
+    """
+    vc = _state.get("vision_cache") or {}
+    if vc:
+        try:
+            return max(vc.items(), key=lambda kv: kv[1].get("wall_ts", 0.0))[0]
+        except Exception:  # malformed cache — fall through
+            pass
     psg = _state.get("perception_state_getter")
-    name_lookup = _state.get("identity_display_name")
-
-    face_state = "off"  # off | detected | identified
-    face_label = "off"
-    face_color = "#374151"
-    face_tip = "no face in frame"
-
     if psg:
         try:
             states = psg() or {}
         except Exception:
-            log.exception("perception card: perception_state_getter failed")
             states = {}
-        for dev in states.values():
-            if not isinstance(dev, dict):
-                continue
-            if dev.get("face_present"):
-                identity = (dev.get("last_face_id") or "").strip()
-                if identity and identity != "unknown":
-                    name = None
-                    if name_lookup:
-                        try:
-                            name = name_lookup(identity)
-                        except Exception:
-                            name = None
-                    face_state = "identified"
-                    face_label = name or identity
-                    face_color = "#008c1e"
-                    face_tip = f"face: identified ({identity})"
-                else:
-                    face_state = "detected"
-                    face_label = "detected"
-                    face_color = "#a88c00"
-                    face_tip = "face: detected, awaiting identification"
-            break
+        for did in states.keys():
+            return did
+    return None
 
-    return templates.TemplateResponse(
-        request, "perception.html",
-        {
-            "face_state": face_state,
-            "face_label": face_label,
-            "face_color": face_color,
-            "face_tip": face_tip,
-        },
-    )
+
+def _build_perception_card_ctx(device_id: str | None) -> dict:
+    """Assemble the template context for perception.html.
+
+    Composes face state (existing 3-state dot), latest VLM image preview
+    + description, latest audio caption (with the existing
+    sound-direction heuristic as fallback), and the most recent scene
+    synthesis sentence. Reads only in-memory caches — no I/O.
+    """
+    psg = _state.get("perception_state_getter")
+    name_lookup = _state.get("identity_display_name")
+    vision_cache = _state.get("vision_cache") or {}
+    audio_cache = _state.get("audio_cache") or {}
+    synth_cache = _state.get("scene_synthesis_cache") or {}
+    perception_recent = _state.get("perception_recent_getter")
+    state_getter = _state.get("state_getter")
+
+    # --- face state (preserved from the prior 3-state implementation) ---
+    face_state = "off"
+    face_label = "off"
+    face_color = "#374151"
+    face_tip = "no face in frame"
+    pstates: dict = {}
+    if psg:
+        try:
+            pstates = psg() or {}
+        except Exception:
+            log.exception("perception card: perception_state_getter failed")
+            pstates = {}
+    dev_state: dict | None = None
+    if device_id and isinstance(pstates.get(device_id), dict):
+        dev_state = pstates.get(device_id)
+    elif pstates:
+        # Fall back to the first device — single-robot deployment.
+        for v in pstates.values():
+            if isinstance(v, dict):
+                dev_state = v
+                break
+    if dev_state and dev_state.get("face_present"):
+        identity = (dev_state.get("last_face_id") or "").strip()
+        if identity and identity != "unknown":
+            name = None
+            if name_lookup:
+                try:
+                    name = name_lookup(identity)
+                except Exception:
+                    name = None
+            face_state = "identified"
+            face_label = name or identity
+            face_color = "#008c1e"
+            face_tip = f"face: identified ({identity})"
+        else:
+            face_state = "detected"
+            face_label = "detected"
+            face_color = "#a88c00"
+            face_tip = "face: detected, awaiting identification"
+
+    # --- vision preview + description ---
+    latest_vision: dict | None = None
+    if device_id:
+        vc_entry = vision_cache.get(device_id) or {}
+        if vc_entry:
+            wall_ts = vc_entry.get("wall_ts")
+            age_label = "—"
+            age_s = float("inf")
+            if isinstance(wall_ts, (int, float)):
+                age_s = max(0.0, time.time() - float(wall_ts))
+                age_label = _humanize_age(age_s)
+            latest_vision = {
+                "description": (vc_entry.get("description") or "").strip(),
+                "source": vc_entry.get("source") or "room_view",
+                "age_label": age_label,
+                "stale": age_s > 55.0,
+                "has_photo": bool(vc_entry.get("jpeg_bytes")),
+            }
+
+    # --- audio caption (real description ➜ heuristic fallback) ---
+    audio_text = ""
+    audio_age_label = "—"
+    audio_is_caption = False
+    audio_stale = False
+    if device_id:
+        ac_entry = audio_cache.get(device_id) or {}
+        if ac_entry:
+            wall_ts = ac_entry.get("wall_ts")
+            age_s = float("inf")
+            if isinstance(wall_ts, (int, float)):
+                age_s = max(0.0, time.time() - float(wall_ts))
+                audio_age_label = _humanize_age(age_s)
+            # Audio cache TTL on the bridge side is 120 s; flip to stale a
+            # bit before that so the badge dims rather than vanishing
+            # mid-glance.
+            if age_s <= 120.0:
+                audio_text = (ac_entry.get("description") or "").strip()
+                audio_is_caption = bool(audio_text)
+                audio_stale = age_s > 100.0
+    if not audio_is_caption:
+        # Fall back to the sound-direction/energy heuristic the robot
+        # modal already uses. Same window, same wording.
+        events: list[dict] = []
+        if perception_recent and device_id:
+            try:
+                events = perception_recent(device_id, 12) or []
+            except Exception:
+                log.warning("perception_recent_getter raised", exc_info=True)
+                events = []
+        audio_text = _summarise_audio_from_perception(events)
+
+    # --- scene synthesis ---
+    synth_entry = (synth_cache.get(device_id) or {}) if device_id else {}
+    synthesis_text = (synth_entry.get("text") or "").strip()
+    synthesis_age_label = "—"
+    if isinstance(synth_entry.get("ts_wall"), (int, float)):
+        synthesis_age_label = _humanize_age(
+            max(0.0, time.time() - float(synth_entry["ts_wall"]))
+        )
+
+    current_state = (state_getter() if state_getter else None) or "idle"
+
+    return {
+        "device_id": device_id or "",
+        "face_state": face_state,
+        "face_label": face_label,
+        "face_color": face_color,
+        "face_tip": face_tip,
+        "latest_vision": latest_vision,
+        "audio_text": audio_text,
+        "audio_age_label": audio_age_label,
+        "audio_is_caption": audio_is_caption,
+        "audio_stale": audio_stale,
+        "synthesis_text": synthesis_text,
+        "synthesis_age_label": synthesis_age_label,
+        "current_state": current_state,
+    }
+
+
+@router.get("/perception", response_class=HTMLResponse, include_in_schema=False)
+async def perception_partial(request: Request) -> Any:
+    """Top-level Perception card — what Dotty is sensing right now.
+
+    Layout: face status row, scene view (cached image + VLM "Sees:"),
+    audio row (caption with heuristic fallback), and the most recent
+    ambient synthesis sentence. Reads only in-memory caches; refreshes
+    on `dotty-refresh` (SSE-driven) plus a slow polling fallback so age
+    labels stay fresh during quiet stretches.
+    """
+    device_id = _pick_perception_device_id()
+    ctx = _build_perception_card_ctx(device_id)
+    return templates.TemplateResponse(request, "perception.html", ctx)
 
 
 @router.post("/actions/smart-mode", response_class=HTMLResponse, include_in_schema=False)

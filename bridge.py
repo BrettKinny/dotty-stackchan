@@ -202,6 +202,35 @@ VISION_API_URL = os.environ.get(
 )
 VISION_TIMEOUT_SEC = float(os.environ.get("VISION_TIMEOUT", "15"))
 VISION_CACHE_TTL_SEC = 60.0
+# Audio captioning — security-grade "what does Dotty hear" describer.
+# Defaults to a Gemini model that accepts the OpenAI-style `input_audio`
+# content-block via OpenRouter; override AUDIO_CAPTION_MODEL if your
+# OpenRouter account routes audio elsewhere. Reuses VISION_API_KEY by
+# default so a single OpenRouter key covers both modalities.
+AUDIO_CAPTION_MODEL = os.environ.get(
+    "AUDIO_CAPTION_MODEL", "google/gemini-2.5-flash",
+)
+AUDIO_CAPTION_API_KEY = os.environ.get(
+    "AUDIO_CAPTION_API_KEY",
+    os.environ.get("VISION_API_KEY", os.environ.get("OPENROUTER_API_KEY", "")),
+)
+AUDIO_CAPTION_API_URL = os.environ.get(
+    "AUDIO_CAPTION_API_URL",
+    "https://openrouter.ai/api/v1/chat/completions",
+)
+AUDIO_CAPTION_TIMEOUT_SEC = float(os.environ.get("AUDIO_CAPTION_TIMEOUT", "20"))
+AUDIO_CACHE_TTL_SEC = 120.0
+# Periodic synthesis of "current environment" — vision desc + audio
+# caption + face/state — into a one-line text record. Phase A sink is
+# a daily NDJSON ring file under CONVO_LOG_DIR; ZeroClaw-side ingestion
+# into FTS memory is Phase C (separate change).
+SCENE_SYNTHESIS_INTERVAL_SEC = float(
+    os.environ.get("SCENE_SYNTHESIS_INTERVAL_SEC", "300")
+)
+SCENE_SYNTHESIS_MIN_GAP_SEC = float(
+    os.environ.get("SCENE_SYNTHESIS_MIN_GAP_SEC", "120")
+)
+SCENE_SYNTHESIS_TRIGGER_STATES = {"story_time", "security", "sleep"}
 SMART_MODEL = os.environ.get("SMART_MODEL", "")
 SMART_API_KEY = os.environ.get("SMART_API_KEY", os.environ.get("OPENROUTER_API_KEY", ""))
 SMART_API_URL = os.environ.get(
@@ -346,6 +375,22 @@ VISION_ROOM_VIEW_SYSTEM_PROMPT = (
     "Never invent names; never name anyone outside the list. "
     "If you are not confident or no match is clear, use the name 'unknown'. "
     "Keep the description to one short sentence."
+)
+# Security-framed audio captioning prompt. Used by /api/audio/explain
+# whenever no caller-supplied prompt overrides it. The framing biases the
+# model toward calling out anything unusual — raised voices, distress,
+# breaking glass, alarms, impacts — while still naming ordinary speech
+# or ambient sounds briefly. Paraphrases speech rather than transcribing
+# verbatim so the cached description doesn't double as a covert
+# transcript log.
+AUDIO_CAPTION_SYSTEM_PROMPT = (
+    "You are listening to a short audio clip from a small family robot's microphone. "
+    "Describe what you hear in 1–2 sentences. "
+    "Note speech (paraphrase briefly, do not transcribe verbatim), music, and ambient sounds. "
+    "Especially flag anything unusual — raised voices, distress, breaking glass, "
+    "alarms, impacts, or sudden loud noises — at the start of your reply. "
+    "If the clip is normal ambient sound or quiet conversation, say so briefly. "
+    "Do not invent details you cannot hear."
 )
 # Sentinel value placed in the multipart `question` field by the
 # xiaozhi-side `_capture_room_description_async` to opt in to the
@@ -2485,6 +2530,12 @@ async def lifespan(app: FastAPI):
         perception_tasks.append(asyncio.create_task(_perception_sound_turner()))
     else:
         log.info("perception sound turner disabled (DOTTY_SOUND_TURNER_ENABLED!=1)")
+    # Scene synthesis — periodic + event-triggered "current environment"
+    # writer. Reads _vision_cache / _audio_cache / _perception_state,
+    # writes a one-line synthesis to a daily NDJSON ring file. Always
+    # safe to run; emits only when there's at least vision-or-audio
+    # signal to summarise.
+    perception_tasks.append(asyncio.create_task(_scene_synthesis_loop()))
     # Layer 5: background calendar refresher (no-op when CALENDAR_IDS empty).
     calendar_task = asyncio.create_task(_calendar_poll_loop())
 
@@ -2795,6 +2846,17 @@ async def perception_feed(request: Request) -> StreamingResponse:
 
 _vision_cache: dict[str, dict] = {}
 _vision_events: dict[str, list[asyncio.Event]] = {}
+
+# Audio caption cache — populated by POST /api/audio/explain. Mirrors
+# _vision_cache shape but holds no raw audio bytes (caption text is the
+# only durable surface; raw audio stays in the request body and is GC'd
+# after the captioning call returns).
+_audio_cache: dict[str, dict] = {}
+
+# Per-device snapshot of the most recent scene synthesis — written by
+# _scene_synthesis_loop, read by the dashboard's Perception card. Text
+# only; the NDJSON sink under CONVO_LOG_DIR is the durable record.
+_scene_synthesis_cache: dict[str, dict] = {}
 
 def _call_vision_api(
     b64_image: str, question: str, *,
@@ -3127,6 +3189,357 @@ async def vision_latest(device_id: str):
             _vision_events.pop(device_id, None)
 
 
+# ---------------------------------------------------------------------------
+# Audio captioning — security-framed "what does Dotty hear" describer
+# ---------------------------------------------------------------------------
+# Mirrors the vision pipeline above. POST a short audio clip (wav/mp3/
+# opus/flac, base64-encoded under the OpenAI-style `input_audio` content
+# block) to an audio-capable model on OpenRouter, cache the textual
+# caption, broadcast a synthetic perception event so the dashboard
+# refreshes. Raw audio bytes are NOT held in the cache — only the text.
+# Phase A: callable by curl now. Phase B (firmware capture relay) lands
+# in a separate change.
+
+# Best-effort guess of the OpenAI-compatible audio format string from a
+# multipart UploadFile. Defaults to "wav" because that's what we'll send
+# from the firmware once the capture path lands. OpenRouter routes
+# "wav" / "mp3" / "opus" / "flac" through to the underlying model.
+_AUDIO_FMT_BY_CONTENT_TYPE = {
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/wave": "wav",
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/ogg": "opus",
+    "audio/opus": "opus",
+    "audio/flac": "flac",
+    "audio/x-flac": "flac",
+}
+
+
+def _audio_format_from_upload(file: UploadFile) -> str:
+    ct = (file.content_type or "").lower().strip()
+    if ct in _AUDIO_FMT_BY_CONTENT_TYPE:
+        return _AUDIO_FMT_BY_CONTENT_TYPE[ct]
+    name = (file.filename or "").lower()
+    for ext, fmt in (
+        (".wav", "wav"), (".mp3", "mp3"), (".ogg", "opus"),
+        (".opus", "opus"), (".flac", "flac"),
+    ):
+        if name.endswith(ext):
+            return fmt
+    return "wav"
+
+
+def _call_audio_caption_api(
+    b64_audio: str, fmt: str, question: str, *,
+    system_prompt: str = AUDIO_CAPTION_SYSTEM_PROMPT,
+) -> str:
+    """Synchronous OpenRouter call. Wrapped via asyncio.to_thread by the
+    endpoint so it doesn't block the event loop. Mirrors the shape of
+    `_call_vision_api` so the failure modes look the same to operators."""
+    import requests as req
+
+    if not AUDIO_CAPTION_API_KEY:
+        log.warning("AUDIO_CAPTION_API_KEY not set")
+        return "I couldn't quite hear that clearly."
+    payload = {
+        "model": AUDIO_CAPTION_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_audio",
+                        "input_audio": {"data": b64_audio, "format": fmt},
+                    },
+                    {"type": "text", "text": question},
+                ],
+            },
+        ],
+        "max_tokens": 200,
+        "temperature": 0.3,
+    }
+    try:
+        resp = req.post(
+            AUDIO_CAPTION_API_URL,
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {AUDIO_CAPTION_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            timeout=AUDIO_CAPTION_TIMEOUT_SEC,
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
+    except Exception:
+        log.exception("audio caption API call failed")
+        return "I couldn't quite hear that clearly."
+
+
+@app.post("/api/audio/explain")
+async def audio_explain(
+    request: Request,
+    question: str = Form("Describe what you hear."),
+    file: UploadFile = File(...),
+):
+    t0 = perf_counter()
+    err_kind: str | None = None
+    try:
+        device_id = request.headers.get("device-id", "unknown")
+        audio_bytes = await file.read()
+        fmt = _audio_format_from_upload(file)
+        log.info(
+            "audio device=%s question=%s bytes=%d format=%s",
+            device_id, question[:80], len(audio_bytes), fmt,
+        )
+        b64_audio = base64.b64encode(audio_bytes).decode("ascii")
+        description = await asyncio.to_thread(
+            _call_audio_caption_api, b64_audio, fmt, question,
+        )
+        _audio_cache[device_id] = {
+            "description": description,
+            "timestamp": perf_counter(),
+            "wall_ts": time.time(),
+            "question": question,
+            "source": "audio_explain",
+        }
+        # Purge stale entries — same TTL-cleanup pattern as _vision_cache.
+        now = perf_counter()
+        for k in [
+            k for k, v in _audio_cache.items()
+            if now - v["timestamp"] > AUDIO_CACHE_TTL_SEC
+        ]:
+            _audio_cache.pop(k, None)
+
+        # Nudge the dashboard via the perception SSE feed so the new
+        # caption shows up without waiting for the next polling tick.
+        _perception_broadcast({
+            "name": "audio_captioned",
+            "device_id": device_id,
+            "ts": time.time(),
+            "data": {
+                "source": "audio_explain",
+                "preview": description[:80],
+            },
+        })
+
+        log.info("audio result device=%s desc=%s", device_id, description[:120])
+        return {"description": description}
+    except Exception:
+        err_kind = "exception"
+        raise
+    finally:
+        if _METRICS_AVAILABLE:
+            _safe_metric(
+                dotty_request_duration_seconds.labels(
+                    endpoint="audio_explain",
+                ).observe,
+                perf_counter() - t0,
+            )
+            if err_kind:
+                _safe_metric(
+                    dotty_request_errors_total.labels(
+                        endpoint="audio_explain", kind=err_kind,
+                    ).inc,
+                )
+
+
+# ---------------------------------------------------------------------------
+# Scene synthesis — periodic "what's happening right now" memory writes
+# ---------------------------------------------------------------------------
+# Composes _vision_cache + _audio_cache + perception_state into one
+# sentence and appends to a daily NDJSON ring file. Phase C (ZeroClaw
+# ingestion of the NDJSON into FTS memory) is tracked separately. The
+# loop self-throttles to SCENE_SYNTHESIS_MIN_GAP_SEC so a burst of
+# face_recognized / state_changed events doesn't spam the file.
+
+_last_synthesis_ts: dict[str, float] = {}
+_SCENE_SYNTHESIS_TRIGGER_EVENTS = {
+    "face_recognized", "audio_captioned", "state_changed",
+}
+
+
+def _scene_synthesis_log_path() -> Path:
+    today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
+    return CONVO_LOG_DIR / f"scene-synthesis-{today}.ndjson"
+
+
+def _compose_scene_synthesis(device_id: str) -> dict | None:
+    """Build the synthesis record dict for `device_id`, or None if there's
+    nothing fresh enough to be worth writing.
+
+    Pulls only from in-memory caches — _vision_cache / _audio_cache /
+    _perception_state. Caller decides whether to actually emit (cadence,
+    min-gap guard)."""
+    now_wall = time.time()
+    now_perf = perf_counter()
+    pstate = _perception_state.get(device_id) or {}
+
+    vision_entry = _vision_cache.get(device_id) or {}
+    has_vision = bool(
+        vision_entry
+        and now_perf - vision_entry.get("timestamp", 0.0)
+        <= VISION_CACHE_TTL_SEC
+    )
+    vision_desc = (
+        (vision_entry.get("description") or "").strip() if has_vision else ""
+    )
+
+    audio_entry = _audio_cache.get(device_id) or {}
+    has_audio = bool(
+        audio_entry
+        and now_perf - audio_entry.get("timestamp", 0.0)
+        <= AUDIO_CACHE_TTL_SEC
+    )
+    audio_desc = (
+        (audio_entry.get("description") or "").strip() if has_audio else ""
+    )
+
+    # Don't emit a record that has literally nothing in it. Face presence
+    # alone is too thin a signal to clutter the log.
+    if not has_vision and not has_audio:
+        return None
+
+    face_id = (pstate.get("last_face_id") or "").strip() or None
+    face_present = bool(pstate.get("face_present"))
+    if face_id and face_id != "unknown":
+        face_phrase = f"{face_id} is in the room."
+    elif face_present:
+        face_phrase = "Someone is in the room."
+    else:
+        face_phrase = "No one is detected."
+
+    state = pstate.get("current_state") or "idle"
+
+    parts: list[str] = []
+    ts_label = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M")
+    parts.append(f"{ts_label} — {face_phrase}")
+    if vision_desc:
+        parts.append(f"Dotty sees {vision_desc.rstrip('.')}.")
+    if audio_desc:
+        parts.append(f"Heard: {audio_desc.rstrip('.')}.")
+    parts.append(f"State: {state}.")
+    text = " ".join(parts)
+
+    return {
+        "ts": datetime.now(LOCAL_TZ).isoformat(),
+        "ts_wall": now_wall,
+        "device": device_id,
+        "text": text,
+        "face_id": face_id,
+        "state": state,
+        "has_vision": has_vision,
+        "has_audio_caption": has_audio,
+    }
+
+
+def _write_scene_synthesis_ndjson(record: dict) -> None:
+    """Append one record to the daily NDJSON ring file. Mirrors the
+    write_security_record pattern (mode 0600, JSON line, no media)."""
+    path = _scene_synthesis_log_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Strip the wall ts before serialising — it's only used in-process
+        # for cache TTL bookkeeping. The isoformat `ts` is the canonical
+        # timestamp on disk.
+        on_disk = {k: v for k, v in record.items() if k != "ts_wall"}
+        line = json.dumps(on_disk, ensure_ascii=False) + "\n"
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(line)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass  # best-effort; first write sets the mode
+    except Exception:
+        log.warning("scene synthesis ndjson write failed", exc_info=True)
+
+
+def _maybe_emit_scene_synthesis(device_id: str, *, reason: str) -> None:
+    """Compose, throttle-check, cache, and write one synthesis record."""
+    record = _compose_scene_synthesis(device_id)
+    if record is None:
+        return
+    now_wall = record["ts_wall"]
+    last = _last_synthesis_ts.get(device_id, 0.0)
+    if now_wall - last < SCENE_SYNTHESIS_MIN_GAP_SEC:
+        return
+    _last_synthesis_ts[device_id] = now_wall
+    _scene_synthesis_cache[device_id] = {
+        "text": record["text"],
+        "ts_wall": now_wall,
+        "face_id": record["face_id"],
+        "state": record["state"],
+    }
+    _write_scene_synthesis_ndjson(record)
+    log.info(
+        "scene_synthesis device=%s reason=%s text=%s",
+        device_id, reason, record["text"][:160],
+    )
+    # Broadcast a synthetic event so the dashboard's SSE listener can
+    # nudge the Perception card to redraw immediately instead of
+    # waiting for the next 10 s polling tick. Same `dotty-refresh`
+    # plumbing the vision/face events use.
+    try:
+        _perception_broadcast({
+            "name": "scene_synthesised",
+            "device_id": device_id,
+            "ts": now_wall,
+            "data": {
+                "reason": reason,
+                "preview": record["text"][:80],
+            },
+        })
+    except Exception:
+        log.warning("scene synthesis broadcast failed", exc_info=True)
+
+
+async def _scene_synthesis_loop() -> None:
+    """Single task that drives both the time-based ticker and the
+    perception-event triggers. Subscribes to the perception bus and
+    races queue.get() against an interval timeout — whichever fires
+    first decides the next emit attempt. Failures never propagate."""
+    queue = _perception_subscribe()
+    try:
+        while True:
+            reason = "tick"
+            try:
+                ev = await asyncio.wait_for(
+                    queue.get(), timeout=SCENE_SYNTHESIS_INTERVAL_SEC,
+                )
+            except asyncio.TimeoutError:
+                ev = None
+            if ev is not None:
+                name = ev.get("name") or ""
+                if name not in _SCENE_SYNTHESIS_TRIGGER_EVENTS:
+                    continue
+                if name == "state_changed":
+                    new_state = (ev.get("data") or {}).get("state")
+                    if new_state not in SCENE_SYNTHESIS_TRIGGER_STATES:
+                        continue
+                reason = name
+                device_ids = [ev.get("device_id")] if ev.get("device_id") else []
+            else:
+                device_ids = list(_perception_state.keys())
+            for did in device_ids:
+                if not did:
+                    continue
+                try:
+                    _maybe_emit_scene_synthesis(did, reason=reason)
+                except Exception:
+                    log.warning(
+                        "scene synthesis emit failed device=%s", did,
+                        exc_info=True,
+                    )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("scene synthesis loop crashed — exiting cleanly")
+    finally:
+        _perception_unsubscribe(queue)
+
+
 @app.post("/api/message", response_model=MessageOut)
 async def message(payload: MessageIn) -> MessageOut:
     session_id = payload.session_id or str(uuid.uuid4())
@@ -3334,6 +3747,8 @@ if _configure_dashboard is not None:
     _configure_dashboard(
         send_message=_dashboard_send_message,
         vision_cache=_vision_cache,
+        audio_cache=_audio_cache,
+        scene_synthesis_cache=_scene_synthesis_cache,
         kid_mode_getter=lambda: KID_MODE,
         kid_mode_setter=_dashboard_set_kid_mode,
         smart_mode_getter=_read_smart_mode,

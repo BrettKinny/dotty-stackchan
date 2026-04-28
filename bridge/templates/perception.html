@@ -1,17 +1,95 @@
-{# Software-side perception indicators. Today: face. Coming next: listening,
-   sound direction. Layout is one row per indicator so adding a new sense is
-   a single new row, not a refactor. Colours mirror the firmware palette
-   (face: yellow detected / green identified, both tuned for RGB565). #}
-<div id="perception-card-body" class="card bg-base-100 shadow-sm overflow-hidden">
-  <div class="card-body p-3">
-    <div class="text-xs text-base-content/60 mb-2 px-1">Perception</div>
-    <ul class="space-y-1.5 text-sm">
-      <li class="flex items-center gap-3" title="{{ face_tip }}">
-        <span aria-hidden="true"
-              style="display:inline-block;width:12px;height:12px;border-radius:9999px;flex-shrink:0;background:{{ face_color }};{% if face_state != 'off' %}box-shadow:0 0 8px {{ face_color }}80;{% endif %}"></span>
-        <span class="flex-1">Face</span>
-        <span class="text-xs {% if face_state == 'off' %}text-base-content/40{% else %}text-base-content/80{% endif %} font-mono truncate max-w-[16rem]">{{ face_label }}</span>
-      </li>
-    </ul>
+{# Perception card — what Dotty is sensing right now. Four sections:
+     1. Face status row (off / detected / identified) — preserved from the
+        prior card so face state regresses cleanly.
+     2. Scene view: cached image preview + VLM "Sees:" description.
+     3. Audio: caption from /api/audio/explain when fresh, falls back to
+        the sound-direction heuristic otherwise.
+     4. Environment: most recent scene-synthesis sentence (hidden when
+        empty — synthesis only fires when there's signal to summarise).
+   Refreshes on `dotty-refresh` SSE nudges and a slow polling tick so
+   age labels don't go stale during quiet stretches. #}
+<div id="perception-card-body" class="card bg-base-100 shadow-sm overflow-hidden"
+     hx-get="/ui/perception"
+     hx-trigger="every 10s, dotty-refresh from:window"
+     hx-swap="outerHTML" hx-target="this">
+  <div class="card-body p-3 space-y-3">
+    <div class="flex items-center justify-between">
+      <span class="text-xs text-base-content/60">Perception</span>
+      <span class="text-[10px] uppercase tracking-wide text-base-content/50">
+        state: <span class="font-mono">{{ current_state }}</span>
+      </span>
+    </div>
+
+    {# 1. Face status row #}
+    <div class="flex items-center gap-3 text-sm" title="{{ face_tip }}">
+      <span aria-hidden="true"
+            style="display:inline-block;width:12px;height:12px;border-radius:9999px;flex-shrink:0;background:{{ face_color }};{% if face_state != 'off' %}box-shadow:0 0 8px {{ face_color }}80;{% endif %}"></span>
+      <span class="flex-1">Face</span>
+      <span class="text-xs {% if face_state == 'off' %}text-base-content/40{% else %}text-base-content/80{% endif %} font-mono truncate max-w-[16rem]">{{ face_label }}</span>
+    </div>
+
+    {# 2. Scene view #}
+    <div class="rounded-lg bg-base-200 p-2 text-sm">
+      {% if latest_vision %}
+      <div class="flex gap-3 items-start">
+        {% if latest_vision.has_photo and device_id %}
+        <img src="/ui/host/robot/photo/{{ device_id }}?t={{ latest_vision.age_label }}"
+             alt="Latest scene"
+             class="w-20 h-20 rounded-md object-cover bg-base-300 flex-shrink-0"
+             onerror="this.style.display='none';">
+        {% else %}
+        <div class="w-20 h-20 rounded-md bg-base-300 flex items-center justify-center flex-shrink-0 text-[10px] text-base-content/50">
+          no photo
+        </div>
+        {% endif %}
+        <div class="min-w-0 flex-1 space-y-1">
+          <div class="text-xs {% if latest_vision.stale %}text-warning{% else %}text-base-content/50{% endif %}">
+            <span class="badge badge-ghost badge-xs font-mono">{{ latest_vision.source }}</span>
+            <span class="ml-1">{{ latest_vision.age_label }} ago</span>
+          </div>
+          <div>
+            <span class="text-base-content/60 text-xs">Sees:</span>
+            <span class="break-words">{{ latest_vision.description or "—" }}</span>
+          </div>
+        </div>
+      </div>
+      {% else %}
+      <div class="text-xs text-base-content/50 py-1">
+        No image captured yet.
+      </div>
+      {% endif %}
+    </div>
+
+    {# 3. Audio #}
+    <div class="rounded-lg bg-base-200 p-2 text-sm">
+      <div class="flex items-baseline justify-between gap-2 mb-1">
+        <span class="text-base-content/60 text-xs">
+          {% if audio_is_caption %}Hears{% else %}Sound{% endif %}:
+        </span>
+        {% if audio_is_caption %}
+        <span class="text-xs {% if audio_stale %}text-warning{% else %}text-base-content/50{% endif %} font-mono">
+          {{ audio_age_label }} ago
+        </span>
+        {% endif %}
+      </div>
+      <div class="break-words {% if not audio_is_caption %}text-base-content/70{% endif %}">
+        {{ audio_text or "No audio captured yet." }}
+      </div>
+    </div>
+
+    {# 4. Environment synthesis (only when present) #}
+    {% if synthesis_text %}
+    <div class="rounded-lg bg-base-200 p-2 text-sm">
+      <div class="flex items-baseline justify-between gap-2 mb-1">
+        <span class="text-base-content/60 text-xs">Environment:</span>
+        <span class="text-xs text-base-content/50 font-mono">
+          {{ synthesis_age_label }} ago
+        </span>
+      </div>
+      <div class="italic break-words text-base-content/80">
+        {{ synthesis_text }}
+      </div>
+    </div>
+    {% endif %}
   </div>
 </div>

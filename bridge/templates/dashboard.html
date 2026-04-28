@@ -526,7 +526,8 @@
       if (name === 'face_detected' || name === 'face_lost'
           || name === 'face_recognized' || name === 'chat_status'
           || name === 'state_changed' || name === 'dance_started'
-          || name === 'dance_ended') {
+          || name === 'dance_ended' || name === 'audio_captioned'
+          || name === 'scene_synthesised') {
         window.dispatchEvent(new CustomEvent('dotty-refresh'));
       }
     };
