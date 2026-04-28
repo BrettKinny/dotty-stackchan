@@ -1634,6 +1634,7 @@ class _ConvoLogger:
         latency_ms: float,
         error: str | None = None,
         latency_phases: dict[str, float] | None = None,
+        type: str = "chat",
     ) -> None:
         now = datetime.now(LOCAL_TZ)
         emoji_used = ""
@@ -1644,6 +1645,7 @@ class _ConvoLogger:
                 break
         record = {
             "ts": now.isoformat(),
+            "type": type,
             "channel": channel or "",
             "session_id": session_id,
             "request_text": request_text,
@@ -4186,6 +4188,7 @@ def _compose_scene_synthesis(device_id: str) -> dict | None:
     return {
         "ts": datetime.now(LOCAL_TZ).isoformat(),
         "ts_wall": now_wall,
+        "type": "scene_synthesis",
         "device": device_id,
         "text": text,
         "face_id": face_id,
