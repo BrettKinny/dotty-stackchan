@@ -82,14 +82,6 @@
     background: conic-gradient(#ef4444, #f59e0b, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899, #ef4444);
     animation: dotty-rainbow-spin 3s linear infinite;
   }
-  /* State + Faces share a row so the cards are the same height. */
-  .dotty-equal-rows {
-    display: grid; grid-template-columns: 1fr;
-    gap: 1.5rem; grid-auto-rows: 1fr;
-  }
-  .dotty-equal-rows > .card { display: flex; flex-direction: column; }
-  .dotty-equal-rows > .card[hidden] { display: none; }
-  .dotty-equal-rows > .card > .card-body { flex: 1 1 auto; }
 </style>
 </head>
 <body class="dotty-body bg-base-200">
@@ -151,7 +143,7 @@
     </div>
   </section>
 
-  <section class="dotty-equal-rows">
+  <section class="flex flex-col" style="gap: 1.5rem;">
     <div id="state-card-body" class="card bg-base-100 shadow-sm overflow-hidden"
          hx-get="/ui/state" hx-trigger="load, every 5s" hx-swap="outerHTML"
          hx-target="this">
