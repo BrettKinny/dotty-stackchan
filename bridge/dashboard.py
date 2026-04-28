@@ -47,6 +47,7 @@ _state: dict[str, Any] = {
     "unsubscribe_events": None,
     "perception_state_getter": None,
     "perception_recent_getter": None,
+    "identity_display_name": None,
 }
 
 
@@ -58,7 +59,8 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
               subscribe_events: Any = None,
               unsubscribe_events: Any = None,
               perception_state_getter: Any = None,
-              perception_recent_getter: Any = None) -> None:
+              perception_recent_getter: Any = None,
+              identity_display_name: Any = None) -> None:
     """Register bridge state with the dashboard. Idempotent."""
     if send_message is not None:
         _state["send_message"] = send_message
@@ -88,6 +90,8 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
         _state["perception_state_getter"] = perception_state_getter
     if perception_recent_getter is not None:
         _state["perception_recent_getter"] = perception_recent_getter
+    if identity_display_name is not None:
+        _state["identity_display_name"] = identity_display_name
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -897,49 +901,57 @@ async def smart_mode_partial(request: Request) -> Any:
     )
 
 
-@router.get("/led-ring-mirror", response_class=HTMLResponse, include_in_schema=False)
-async def led_ring_mirror(request: Request) -> Any:
-    """Debug mirror of the right-ring status indicators.
-
-    Reflects the firmware's right LED half (face / kid / smart / listening)
-    so an operator can see at a glance which signals are active without
-    looking at the physical device. Colours mirror the firmware palette in
-    state_manager.cpp::writePips — keep in sync if those change.
-    """
-    kid_getter = _state.get("kid_mode_getter")
-    smart_getter = _state.get("smart_mode_getter")
+@router.get("/perception", response_class=HTMLResponse, include_in_schema=False)
+async def perception_partial(request: Request) -> Any:
+    """Software-side perception indicators (face today, listening + sound
+    direction next). Lives between the actor controls (Kid/Smart) and the
+    State row so the reading order is: who Dotty is → what Dotty senses →
+    what mode Dotty is in. Updated by 2 s HTMX polling + dotty-refresh
+    nudges fired by the SSE perception feed."""
     psg = _state.get("perception_state_getter")
+    name_lookup = _state.get("identity_display_name")
 
-    kid_mode = bool(kid_getter()) if kid_getter else False
-    smart_mode = bool(smart_getter()) if smart_getter else False
+    face_state = "off"  # off | detected | identified
+    face_label = "off"
+    face_color = "#374151"
+    face_tip = "no face in frame"
 
-    listening = False
-    face_detected = False
-    face_identified = False
     if psg:
         try:
             states = psg() or {}
-            # Single-device deployment: pick the only entry, regardless of
-            # device_id. Multi-device support would iterate; out of scope.
-            for dev in states.values():
-                if not isinstance(dev, dict):
-                    continue
-                listening = bool(dev.get("listening"))
-                face_detected = bool(dev.get("face_present"))
-                identity = (dev.get("last_face_id") or "").strip()
-                face_identified = bool(face_detected and identity and identity != "unknown")
-                break
         except Exception:
-            log.exception("led_ring_mirror: perception_state_getter failed")
+            log.exception("perception card: perception_state_getter failed")
+            states = {}
+        for dev in states.values():
+            if not isinstance(dev, dict):
+                continue
+            if dev.get("face_present"):
+                identity = (dev.get("last_face_id") or "").strip()
+                if identity and identity != "unknown":
+                    name = None
+                    if name_lookup:
+                        try:
+                            name = name_lookup(identity)
+                        except Exception:
+                            name = None
+                    face_state = "identified"
+                    face_label = name or identity
+                    face_color = "#008c1e"
+                    face_tip = f"face: identified ({identity})"
+                else:
+                    face_state = "detected"
+                    face_label = "detected"
+                    face_color = "#a88c00"
+                    face_tip = "face: detected, awaiting identification"
+            break
 
     return templates.TemplateResponse(
-        request, "led_ring_mirror.html",
+        request, "perception.html",
         {
-            "listening": listening,
-            "kid_mode": kid_mode,
-            "smart_mode": smart_mode,
-            "face_detected": face_detected,
-            "face_identified": face_identified,
+            "face_state": face_state,
+            "face_label": face_label,
+            "face_color": face_color,
+            "face_tip": face_tip,
         },
     )
 
@@ -1678,6 +1690,9 @@ async def status_strip(request: Request, placement: str = "header") -> Any:
         else:
             xz_status, xz_tip = "bad", "unraid: no ports responding"
 
+        # Face status now lives in the dedicated Perception card (`/ui/perception`)
+        # rather than the hardware-reachability strip — it's a software signal,
+        # not a "host is alive" signal.
         ctx["dots"] = [
             {"slug": "bridge", "label": "bridge",
              "status": "ok",      "title": f"bridge: up {_humanize_age(bridge_uptime)}"},

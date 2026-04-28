@@ -1,0 +1,17 @@
+{# Software-side perception indicators. Today: face. Coming next: listening,
+   sound direction. Layout is one row per indicator so adding a new sense is
+   a single new row, not a refactor. Colours mirror the firmware palette
+   (face: yellow detected / green identified, both tuned for RGB565). #}
+<div id="perception-card-body" class="card bg-base-100 shadow-sm overflow-hidden">
+  <div class="card-body p-3">
+    <div class="text-xs text-base-content/60 mb-2 px-1">Perception</div>
+    <ul class="space-y-1.5 text-sm">
+      <li class="flex items-center gap-3" title="{{ face_tip }}">
+        <span aria-hidden="true"
+              style="display:inline-block;width:12px;height:12px;border-radius:9999px;flex-shrink:0;background:{{ face_color }};{% if face_state != 'off' %}box-shadow:0 0 8px {{ face_color }}80;{% endif %}"></span>
+        <span class="flex-1">Face</span>
+        <span class="text-xs {% if face_state == 'off' %}text-base-content/40{% else %}text-base-content/80{% endif %} font-mono truncate max-w-[16rem]">{{ face_label }}</span>
+      </li>
+    </ul>
+  </div>
+</div>

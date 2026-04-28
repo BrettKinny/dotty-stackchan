@@ -3,6 +3,13 @@
      hx-get="/ui/state" hx-trigger="load delay:500ms" hx-swap="outerHTML" hx-target="#state-card-body">
   State → <span class="font-semibold">{{ label }}</span>
 </div>
+{# Fire dotty-state-change immediately so the conditional reveal in
+   dashboard.html (Emojis / Talk / Story / Dance sections) flips without
+   waiting for the 5 s state-card refresh tick. #}
+<script>
+  document.dispatchEvent(new CustomEvent('dotty-state-change',
+    {detail: {state: {{ state|tojson }}}}));
+</script>
 {% else %}
 <div class="alert alert-error dotty-alert">{{ error or "State change failed." }}</div>
 {% endif %}

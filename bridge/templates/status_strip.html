@@ -5,14 +5,25 @@
    header layout exists. #}
 <div class="flex items-center gap-3" role="group" aria-label="Host status">
   {% for d in dots %}
+  {% if d.clickable is not defined or d.clickable %}
   <button type="button"
           class="flex items-center gap-1 hover:text-base-content"
           title="{{ d.title }} — click for detail"
           hx-get="/ui/host/{{ d.slug }}"
           hx-target="#host-modal-body" hx-swap="innerHTML"
           hx-on::after-request="document.getElementById('host-modal').showModal()">
-    <span class="status-dot status-{{ d.status }}" aria-hidden="true"></span>
+    <span class="status-dot status-{{ d.status }}"
+          {% if d.color %}style="background:{{ d.color }};box-shadow:0 0 8px {{ d.color }}80;"{% endif %}
+          aria-hidden="true"></span>
     <span class="text-xs text-base-content/60">{{ d.label }}</span>
   </button>
+  {% else %}
+  <span class="flex items-center gap-1" title="{{ d.title }}">
+    <span class="status-dot status-{{ d.status }}"
+          {% if d.color %}style="background:{{ d.color }};box-shadow:0 0 8px {{ d.color }}80;"{% endif %}
+          aria-hidden="true"></span>
+    <span class="text-xs text-base-content/60">{{ d.label }}</span>
+  </span>
+  {% endif %}
   {% endfor %}
 </div>

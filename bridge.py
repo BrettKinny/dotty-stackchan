@@ -3311,6 +3311,20 @@ if _configure_dashboard is not None:
         ok = await _dispatch_set_toggle("", "smart_mode", enabled)
         return {"ok": ok}
 
+    def _identity_display_name(identity: str) -> str | None:
+        """Resolve a household person_id to its display_name, or None if the
+        registry isn't loaded / the id isn't in the roster. Used by the
+        dashboard's Perception card to label an identified face."""
+        if not identity or _household_registry is None:
+            return None
+        try:
+            person = _household_registry.get(identity)
+        except Exception:
+            return None
+        if person is None:
+            return None
+        return getattr(person, "display_name", None) or None
+
     _configure_dashboard(
         send_message=_dashboard_send_message,
         vision_cache=_vision_cache,
@@ -3326,6 +3340,7 @@ if _configure_dashboard is not None:
         unsubscribe_events=_dashboard_unsubscribe_events,
         perception_state_getter=_dashboard_perception_state_getter,
         perception_recent_getter=get_recent_perception,
+        identity_display_name=_identity_display_name,
     )
 
 
