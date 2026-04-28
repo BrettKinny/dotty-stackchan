@@ -1,0 +1,23 @@
+<span class="inline-flex items-center rounded-full bg-base-200 text-xs font-mono text-base-content/70">
+  <a href="https://github.com/BrettKinny/dotty-stackchan" target="_blank" rel="noopener noreferrer"
+     class="pl-2 py-0.5 inline-flex items-center hover:text-base-content"
+     aria-label="Open GitHub repository" title="View on GitHub">
+    <svg class="w-3.5 h-3.5" aria-hidden="true"><use href="#github-mark"/></svg>
+  </a>
+  <a href="https://github.com/BrettKinny/dotty-stackchan/commit/{{ version }}" target="_blank" rel="noopener noreferrer"
+     class="px-2 py-0.5 hover:bg-base-300 hover:text-base-content rounded-full"
+     title="Bridge build — opens this commit on GitHub">v{{ version }}</a>
+  {% if update_available and latest_short %}
+  <span class="w-px h-3 bg-base-content/20" aria-hidden="true"></span>
+  <button type="button"
+          class="pl-1.5 pr-2 py-0.5 inline-flex items-center gap-1 text-warning hover:bg-base-300 rounded-r-full"
+          aria-label="Update available to v{{ latest_short }} — click to preview"
+          title="Update available to v{{ latest_short }} — click to preview"
+          hx-post="/ui/actions/preview-update"
+          hx-target="#update-modal-content" hx-swap="innerHTML"
+          hx-disabled-elt="this"
+          hx-on::after-request="document.getElementById('update-modal').showModal()">
+    <span aria-hidden="true">⬇</span><span>v{{ latest_short }}</span>
+  </button>
+  {% endif %}
+</span>

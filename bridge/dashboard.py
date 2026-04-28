@@ -1131,6 +1131,68 @@ async def preview_update(request: Request) -> Any:
     )
 
 
+_LATEST_SHA_CACHE: dict[str, Any] = {"sha": None, "ts": 0.0}
+_LATEST_SHA_TTL = 600.0  # 10 min — `git ls-remote` is cheap but no need to spam.
+
+
+def _fetch_latest_remote_sha() -> str | None:
+    """Use `git ls-remote` to get the current HEAD of `main` on the public
+    repo without cloning. Cached for 10 min."""
+    import subprocess
+    now = time.time()
+    cached = _LATEST_SHA_CACHE.get("sha")
+    if cached and now - _LATEST_SHA_CACHE["ts"] < _LATEST_SHA_TTL:
+        return cached  # type: ignore[return-value]
+    try:
+        proc = subprocess.run(
+            ["git", "ls-remote", GITHUB_REPO, "refs/heads/main"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            full = proc.stdout.strip().split()[0]
+            if full:
+                _LATEST_SHA_CACHE["sha"] = full
+                _LATEST_SHA_CACHE["ts"] = now
+                return full
+    except Exception as exc:
+        log.debug("ls-remote failed: %s", exc)
+    return None
+
+
+def _check_for_bridge_update() -> tuple[str | None, bool]:
+    """Return (latest_short_sha_or_none, update_available)."""
+    full = _fetch_latest_remote_sha()
+    if not full:
+        return None, False
+    short = full[:7]
+    deployed = BRIDGE_VERSION
+    if not deployed or deployed == "unknown":
+        # Can't compare — don't claim an update is available.
+        return short, False
+    # BRIDGE_VERSION is a short SHA prefix; full starts with it when in sync.
+    if full.startswith(deployed) or deployed.startswith(short):
+        return short, False
+    return short, True
+
+
+@router.get("/version-chip",
+            response_class=HTMLResponse, include_in_schema=False)
+async def version_chip(request: Request) -> Any:
+    """Render the GitHub/version/update chip. Polled by the dashboard
+    header so the update prompt appears without a page reload."""
+    latest_short, update_available = await asyncio.to_thread(
+        _check_for_bridge_update,
+    )
+    return templates.TemplateResponse(
+        request, "version_chip.html",
+        {
+            "version": BRIDGE_VERSION,
+            "latest_short": latest_short,
+            "update_available": update_available,
+        },
+    )
+
+
 def _pull_and_install_bridge() -> tuple[bool, str]:
     """git-clone the public repo into a tmpdir and copy bridge.py +
     bridge/ over the install dir. Caller restarts the service."""

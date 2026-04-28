@@ -93,23 +93,13 @@
           class="ml-2 inline-flex items-center"></span>
   </div>
   <div class="flex-none flex items-center gap-2">
-    <a href="https://github.com/BrettKinny/dotty-stackchan/commit/{{ version }}" target="_blank" rel="noopener noreferrer"
-       class="text-xs font-mono px-2 py-0.5 rounded-full bg-base-200 text-base-content/70 hover:text-base-content hover:bg-base-300 transition-colors"
-       title="Bridge build — opens this commit on GitHub">v{{ version }}</a>
-    <button type="button"
-            class="btn btn-ghost btn-sm btn-circle text-base-content/70 hover:text-base-content"
-            aria-label="Check for update" title="Check for update"
-            hx-post="/ui/actions/preview-update"
-            hx-target="#update-modal-content" hx-swap="innerHTML"
-            hx-disabled-elt="this"
-            hx-on::after-request="document.getElementById('update-modal').showModal()">
-      <span class="text-base leading-none" aria-hidden="true">⬇</span>
-    </button>
-    <a href="https://github.com/BrettKinny/dotty-stackchan" target="_blank" rel="noopener noreferrer"
-       class="btn btn-ghost btn-sm btn-circle text-base-content/70 hover:text-base-content"
-       aria-label="Open GitHub repository" title="View on GitHub">
-      <svg class="w-4 h-4" aria-hidden="true"><use href="#github-mark"/></svg>
-    </a>
+    <span id="version-chip-wrap"
+          hx-get="/ui/version-chip"
+          hx-trigger="load, every 600s"
+          hx-swap="innerHTML"
+          class="inline-flex items-center">
+      {% include "version_chip.html" %}
+    </span>
     <button type="button"
             class="btn btn-ghost btn-sm btn-circle text-base-content/70 hover:text-base-content"
             aria-label="Toggle light / dark theme" title="Toggle light / dark theme"
