@@ -10,7 +10,7 @@ Dotty is a fully self-hosted voice stack for the M5Stack StackChan desktop robot
 
 Out of the box, Dotty ships in **Kid Mode** -- age-appropriate language, safety guardrails, and content filtering are on by default. Disable Kid Mode for a general-purpose assistant. The default persona is named "Dotty" (rename it during `make setup`).
 
-> **v0.1 - early-feedback release.** Dotty works end-to-end on the maintainer's hardware. This first tagged release is to invite real-world feedback before v1.0 polish. **Known issues:** face emoji rendering is missing visual differentiation for 4 of 9 emotions (sad / surprise / love / laughing); sound-direction localizer has a hardware-AEC-related left-bias on M5Stack CoreS3 (energy detection works, direction is unreliable); kid-voice ASR accuracy on SenseVoice has a kid-speech gap that whisper.cpp will close in a follow-up. Full backlog in `tasks.md` (private). Bugs, PRs, and "this didn't work for me" issues all very welcome.
+> **v0.1 - early-feedback release.** Dotty works end-to-end on the maintainer's hardware. This first tagged release is to invite real-world feedback before v1.0 polish. **Known issues:** face emoji rendering is missing visual differentiation for 4 of 9 emotions (sad / surprise / love / laughing); sound-direction localizer has a hardware-AEC-related left-bias on M5Stack CoreS3 (energy detection works, direction is unreliable); kid-voice ASR accuracy on SenseVoice has a kid-speech gap that whisper.cpp will close in a follow-up. Full backlog in `tasks.md` (private). Bugs, PRs, and "this didn't work for me" issues all very welcome. 🍺☕ I haven't tried deploying this end-to-end on a fresh setup yet, so if you do, please get in touch — I'll buy you a beer or a coffee.
 
 ## Why I built this
 
