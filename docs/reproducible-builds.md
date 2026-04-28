@@ -1,3 +1,8 @@
+---
+title: Reproducible Firmware Builds
+description: How Dotty's firmware build produces byte-identical binaries from the same source commit, and how to verify a published release against the source.
+---
+
 # Reproducible Firmware Builds
 
 Dotty's firmware build is designed to be reproducible: the same source commit

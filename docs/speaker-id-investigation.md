@@ -1,3 +1,8 @@
+---
+title: Speaker-ID Investigation Log (Phase 1)
+description: Timeboxed probe (2026-04-25) into whether xiaozhi-esp32-server exposes a speaker-ID hint the bridge could consume as Signal E in the SpeakerResolver.
+---
+
 # Speaker-ID — investigation log (Phase 1, 2026-04-25)
 
 This is the timeboxed half-day probe that came out of the SpeakerResolver
