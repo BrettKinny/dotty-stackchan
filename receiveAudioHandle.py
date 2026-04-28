@@ -50,9 +50,9 @@ def _read_kid_mode_state() -> bool:
 
 
 def _read_smart_mode_state() -> bool:
-    """Smart_mode is sticky across turns and persists across reboot via the
-    state file. Default off — smart_mode opts INTO direct OpenRouter and
-    bypasses ZeroClaw's persona/memory; the safe default is the regular path."""
+    """smart_mode is dashboard-gated and persists across reboot via the state
+    file. The bridge owns the model swap on toggle; this side only reads the
+    bit so `_sync_toggles_once` can paint the firmware pip on reconnect."""
     try:
         with open(_SMART_MODE_STATE_FILE, "r") as f:
             v = f.read().strip().lower()
@@ -113,10 +113,6 @@ _PHRASE_CORRECTIONS: list[tuple[str, float]] = [
     ("take a picture", 0.7),
     ("take a photo of me", 0.7),
     ("take a picture of me", 0.7),
-    # Smart-mode triggers (future)
-    ("smart mode", 0.75),
-    ("think harder", 0.75),
-    ("big brain", 0.75),
     # Common kid requests
     ("tell me a story", 0.7),
     ("sing a song", 0.7),
@@ -209,34 +205,6 @@ VISION_PHRASES = (
     "what color is", "what colour is", "how many", "do you see",
 )
 
-_SMART_MODE_PHRASES = (
-    "smart mode", "think harder", "big brain",
-)
-_SMART_MODE_OFF_PHRASES = (
-    "normal mode", "regular dotty", "regular mode", "stop smart mode",
-)
-
-
-def _is_smart_mode_request(text: str) -> bool:
-    lower = text.lower().strip()
-    return any(phrase in lower for phrase in _SMART_MODE_PHRASES)
-
-
-def _is_smart_mode_off_request(text: str) -> bool:
-    lower = text.lower().strip()
-    return any(phrase in lower for phrase in _SMART_MODE_OFF_PHRASES)
-
-
-def _strip_smart_trigger(text: str) -> str:
-    lower = text.lower()
-    for phrase in sorted(_SMART_MODE_PHRASES, key=len, reverse=True):
-        idx = lower.find(phrase)
-        if idx != -1:
-            remaining = text[:idx] + text[idx + len(phrase):]
-            return re.sub(r'^[\s,.\-!?]+|[\s,.\-!?]+$', '', remaining)
-    return ""
-
-
 # Phase 4 — state-trigger phrases. Each entry: (substring, target_state, ack).
 # Order matters: longer/more-specific phrases first so "good night dotty" beats
 # "good night". Match is case-insensitive substring on the full ASR text.
@@ -291,10 +259,9 @@ async def _send_led_color(conn: "ConnectionHandler", r: int, g: int, b: int) -> 
         await conn.websocket.send(msg)
     except Exception:
         pass
-    # Phase 4 — Smart-mode and kid-mode pips are now firmware-owned (StateManager
-    # 5 Hz re-assert at right ring 8/9). The legacy per-paint re-assertion
-    # (set_led_multi at indices 0 and 6) was removed; the firmware restores
-    # the pips after every chat-state full-ring write within ~200 ms.
+    # Phase 4 — kid_mode + smart_mode pips are firmware-owned (StateManager
+    # 5 Hz re-assert at right ring 8/9). The firmware restores the pips after
+    # every chat-state full-ring write within ~200 ms.
 
 
 async def _send_led_multi(
@@ -306,8 +273,7 @@ async def _send_led_multi(
     ≥ 32163bd). Index 0-5 = LeftNeonLight, 6-11 = RightNeonLight. This
     bypasses the firmware's colour-animation tick, so callers that need
     the pixel to PERSIST across a subsequent set_led_color must re-call
-    this after each full-ring update. (`_send_led_color` does that
-    automatically when `conn.smart_mode_active` is True.)
+    this after each full-ring update.
 
     Defensive: try/except guarded so an old firmware (without this MCP
     tool) degrades to the existing single-flash behaviour rather than
@@ -423,14 +389,13 @@ async def _sync_toggles_once(conn: "ConnectionHandler") -> None:
     restart) so the toggle pips reflect the bridge's persisted state.
 
     Idempotent — repeat calls are no-ops via the `_dotty_toggles_synced`
-    sentinel. Voice-phrase flips (later in startToChat) and dashboard
-    flips (via the bridge) push their own set_toggle MCP calls."""
+    sentinel. Dashboard flips push their own set_toggle MCP calls; smart_mode
+    is dashboard-only by design."""
     if getattr(conn, "_dotty_toggles_synced", False):
         return
     conn._dotty_toggles_synced = True
     kid_on = _read_kid_mode_state()
     smart_on = _read_smart_mode_state()
-    conn.smart_mode_active = smart_on
     await _send_set_toggle(conn, "kid_mode", kid_on)
     await _send_set_toggle(conn, "smart_mode", smart_on)
     try:
@@ -1083,19 +1048,6 @@ async def startToChat(conn: "ConnectionHandler", text):
     actual_text = _apply_asr_corrections(actual_text)
     actual_text = _apply_phrase_corrections(actual_text)
 
-    # Smart-mode session ends when a new user turn arrives that ISN'T a
-    # smart-mode re-trigger. We don't have a chat-completion callback in
-    # this layer, but the next ASR turn from the same connection is a
-    # reliable "the previous response is done" signal. Re-trigger paths
-    # below set the flag back to True before sending the next colour.
-    if getattr(conn, "smart_mode_active", False):
-        # Clear unless the new turn is itself a smart-mode trigger or
-        # the queued smart_mode_next flag (handled below).
-        if not _is_smart_mode_request(actual_text) and not getattr(
-            conn, "smart_mode_next", False
-        ):
-            conn.smart_mode_active = False
-
     if speaker_name:
         conn.current_speaker = speaker_name
     else:
@@ -1171,51 +1123,6 @@ async def startToChat(conn: "ConnectionHandler", text):
             f"state. Say only a SHORT one-liner (under 12 words). "
             f"Suggested: {ack_hint!r}",
         )
-        return
-
-    # Smart-mode OFF — explicit "back to normal" toggle. Sticky-clear via
-    # state file + firmware toggle pip.
-    if _is_smart_mode_off_request(user_text) and getattr(conn, "smart_mode_active", False):
-        conn.logger.bind(tag=TAG).info("Smart mode OFF")
-        conn.smart_mode_active = False
-        _write_smart_mode_state(False)
-        await _send_set_toggle(conn, "smart_mode", False)
-        conn.executor.submit(
-            conn.chat,
-            "[SMART_MODE_OFF] You just turned smart mode off. "
-            "Say only a SHORT one-liner (under 8 words). Example: "
-            "'Back to normal!' / 'Okay, regular Dotty.'",
-        )
-        return
-
-    # Smart-mode ON
-    if _is_smart_mode_request(user_text):
-        remaining_q = _strip_smart_trigger(user_text)
-        conn.logger.bind(tag=TAG).info(f"Smart mode ON: q={remaining_q!r}")
-        conn.smart_mode_active = True
-        _write_smart_mode_state(True)
-        # Visual feedback is the orange toggle pip on right ring index 9 —
-        # StateManager re-asserts at 5 Hz. The legacy full-ring purple flash
-        # was removed because it clobbers the state pip on left ring 0 and
-        # conflicts with the chat-state animation on left ring 1-5.
-        await _send_set_toggle(conn, "smart_mode", True)
-        if remaining_q:
-            _submit_chat(conn, f"[SMART_MODE]\n{remaining_q}")
-        else:
-            conn.smart_mode_next = True
-            conn.executor.submit(
-                conn.chat,
-                "[SMART_MODE_ACK] The user activated Smart Mode. "
-                "Say only: 'Smart mode! What would you like to know?'",
-            )
-        return
-
-    if getattr(conn, 'smart_mode_next', False):
-        conn.smart_mode_next = False
-        conn.smart_mode_active = True
-        _write_smart_mode_state(True)
-        await _send_set_toggle(conn, "smart_mode", True)
-        _submit_chat(conn, f"[SMART_MODE]\n{actual_text}")
         return
 
     if _is_vision_request(user_text):

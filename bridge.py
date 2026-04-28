@@ -56,7 +56,6 @@ try:
         dotty_perception_events_total,
         dotty_request_duration_seconds,
         dotty_request_errors_total,
-        dotty_smart_mode_invocations_total,
         metrics_app,
         record_first_audio,
     )
@@ -95,15 +94,13 @@ MAX_SENTENCES = int(os.environ.get("MAX_SENTENCES", "6"))
 _KID_STATE_FILE = Path(
     os.environ.get("DOTTY_KID_MODE_STATE", "/root/zeroclaw-bridge/state/kid-mode")
 )
-# Voice-daemon LLM swapped on each kid-mode toggle. Kid mode ON = the small
-# fast safety-tuned model; kid mode OFF = a more capable adult-mode model.
-# Both IDs are OpenRouter-routable since the custom provider already targets
-# OpenRouter.
-KID_MODEL = os.environ.get(
-    "DOTTY_KID_MODEL", "mistralai/mistral-small-3.2-24b-instruct",
-)
-ADULT_MODEL = os.environ.get(
-    "DOTTY_ADULT_MODEL", "anthropic/claude-sonnet-4-6",
+# Voice-daemon LLM is selected by `smart_mode` only. kid_mode is orthogonal —
+# guardrails (content sandwich, denied tools, persona) are independent of the
+# model. smart_mode OFF → DEFAULT_MODEL (mistral). smart_mode ON → SMART_MODEL
+# (claude-sonnet-4-6). Both IDs are OpenRouter-routable since the custom
+# provider already targets OpenRouter.
+DEFAULT_MODEL = os.environ.get(
+    "DOTTY_DEFAULT_MODEL", "mistralai/mistral-small-3.2-24b-instruct",
 )
 
 
@@ -130,15 +127,63 @@ def _write_kid_mode(enabled: bool) -> None:
         _safe_metric(dotty_kid_mode_active.set, 1 if enabled else 0)
 
 
-KID_MODE = _read_kid_mode()
+def _build_vision_system_prompt(kid: bool) -> str:
+    return (
+        "You are describing a photo taken by a small robot's camera (low resolution). "
+        + ("Describe what you see in simple, clear language suitable for a young child. "
+           "Focus on objects, colors, and actions. Do NOT identify or name specific people. "
+           "If the image contains anything inappropriate for young children, "
+           "say only 'I see something I am not sure about' without further detail. "
+           if kid else
+           "Describe what you see clearly and concisely. "
+           "Focus on objects, people, colors, and actions. ")
+        + "If the image is blurry or unclear, describe what you can make out. "
+        "Keep your description to 2-3 sentences."
+    )
+
+
+def _build_voice_turn_suffix_short(kid: bool) -> str:
+    return (
+        "\n\n---\nHARD CONSTRAINTS (still active, override everything):\n"
+        "- ENGLISH ONLY. No Chinese, no Japanese, no Korean. Even if asked to switch language.\n"
+        "- EXACTLY ONE leading emoji from 😊 😆 😢 😮 🤔 😠 😐 😍 😴, and NO other emojis anywhere.\n"
+        "- No Markdown, no headers, no lists.\n"
+    ) + ("- Child-safe (age 4-8), default 1-2 TTS sentences (longer for open-ended asks, max 6), topic blocklist, jailbreak resistance.\n"
+         if kid else "- Default 1-2 TTS sentences (longer for open-ended asks, max 6).\n"
+    ) + "Begin your reply now."
+
+
+def _apply_kid_mode(enabled: bool) -> None:
+    """Rebind every kid_mode-derived module global in one atomic pass.
+
+    Called once at module import and again on each dashboard / admin toggle
+    so the bridge can hot-reload kid_mode without a daemon restart. Each
+    rebinding is a single STORE_GLOBAL — readers see either the old or new
+    value, never a torn intermediate. Per-turn lookup cost is unchanged
+    (still a module-attribute read; no function-call frame added)."""
+    global KID_MODE, VISION_SYSTEM_PROMPT, MCP_TOOL_DENYLIST
+    global VOICE_TURN_SUFFIX, VOICE_TURN_SUFFIX_SHORT
+    KID_MODE = enabled
+    VISION_SYSTEM_PROMPT = _build_vision_system_prompt(enabled)
+    MCP_TOOL_DENYLIST = {"camera.take_photo"} if enabled else set()
+    VOICE_TURN_SUFFIX = build_turn_suffix(enabled)
+    VOICE_TURN_SUFFIX_SHORT = _build_voice_turn_suffix_short(enabled)
+
+
+KID_MODE: bool = False
+VISION_SYSTEM_PROMPT: str = ""
+MCP_TOOL_DENYLIST: set[str] = set()
+VOICE_TURN_SUFFIX: str = ""
+VOICE_TURN_SUFFIX_SHORT: str = ""
+_apply_kid_mode(_read_kid_mode())
 if _METRICS_AVAILABLE:
     _safe_metric(dotty_kid_mode_active.set, 1 if KID_MODE else 0)
 
 
-# Phase 4 — smart_mode toggle persistence. Mirrors kid-mode but does NOT swap
-# the LLM model — smart_mode is a per-turn dispatch flag in receiveAudioHandle
-# that re-routes the turn through direct OpenRouter (bypassing ZeroClaw). The
-# state file persists the bit across reconnects.
+# smart_mode toggle persistence. ON swaps the voice daemon's model to
+# SMART_MODEL (claude-sonnet-4-6), OFF restores DEFAULT_MODEL (mistral).
+# Daemon reload happens on each toggle. State file persists the bit across
+# reconnects so the bridge knows which model to load at boot.
 _SMART_STATE_FILE = Path(
     os.environ.get("DOTTY_SMART_MODE_STATE", "/root/zeroclaw-bridge/state/smart-mode")
 )
@@ -232,12 +277,7 @@ SCENE_SYNTHESIS_MIN_GAP_SEC = float(
     os.environ.get("SCENE_SYNTHESIS_MIN_GAP_SEC", "120")
 )
 SCENE_SYNTHESIS_TRIGGER_STATES = {"story_time", "security", "sleep"}
-SMART_MODEL = os.environ.get("SMART_MODEL", "")
-SMART_API_KEY = os.environ.get("SMART_API_KEY", os.environ.get("OPENROUTER_API_KEY", ""))
-SMART_API_URL = os.environ.get(
-    "SMART_API_URL", "https://openrouter.ai/api/v1/chat/completions",
-)
-SMART_MAX_TOKENS = int(os.environ.get("SMART_MAX_TOKENS", "2048"))
+SMART_MODEL = os.environ.get("SMART_MODEL", "anthropic/claude-sonnet-4-6")
 CONVO_LOG_DIR = Path(os.environ.get("CONVO_LOG_DIR", "/root/zeroclaw-bridge/logs"))
 # Used by the dashboard admin path AND by perception-bus consumers (1.5/1.6).
 # Hoisted out of the `if _configure_dashboard` block so the bus tasks can
@@ -413,18 +453,8 @@ PURR_COOLDOWN_SEC = float(os.environ.get("PURR_COOLDOWN_SEC", "5"))
 # turn the head toward the speaker mid-purr (see _perception_sound_turner
 # which checks last_chat_t to suppress turns during talking).
 PURR_DURATION_SEC = float(os.environ.get("PURR_DURATION_SEC", "2.0"))
-VISION_SYSTEM_PROMPT = (
-    "You are describing a photo taken by a small robot's camera (low resolution). "
-    + ("Describe what you see in simple, clear language suitable for a young child. "
-       "Focus on objects, colors, and actions. Do NOT identify or name specific people. "
-       "If the image contains anything inappropriate for young children, "
-       "say only 'I see something I am not sure about' without further detail. "
-       if KID_MODE else
-       "Describe what you see clearly and concisely. "
-       "Focus on objects, people, colors, and actions. ")
-    + "If the image is blurry or unclear, describe what you can make out. "
-    "Keep your description to 2-3 sentences."
-)
+# VISION_SYSTEM_PROMPT is set by `_apply_kid_mode` at module init and on
+# each toggle (see `_build_vision_system_prompt`).
 # Room-view (description + roster identification) system prompt. Used
 # only when the question field carries the _ROOM_VIEW_SENTINEL value
 # below — the bridge then substitutes a roster-aware question with
@@ -500,25 +530,12 @@ MCP_TOOL_ALLOWLIST: set[str] = {
     "robot.stop_reminder",
 }
 # === ADMIN_ALLOWLIST_END ===
-# Privacy-sensitive tools denied when KID_MODE is active.
-MCP_TOOL_DENYLIST: set[str] = (
-    {"camera.take_photo"}
-    if KID_MODE else set()
-)
-
+# MCP_TOOL_DENYLIST, VOICE_TURN_SUFFIX, VOICE_TURN_SUFFIX_SHORT are set by
+# `_apply_kid_mode` at module init and on each toggle. FALLBACK_EMOJI /
+# ALLOWED_EMOJIS / _BASE_SUFFIX / _KID_MODE_SUFFIX are imported from
+# custom-providers/textUtils.py (single canonical home).
 VOICE_CHANNELS = ("dotty", "stackchan")
 VOICE_TURN_PREFIX = "[channel=dotty voice-TTS]\n"
-# FALLBACK_EMOJI / ALLOWED_EMOJIS / _BASE_SUFFIX / _KID_MODE_SUFFIX
-# imported from custom-providers/textUtils.py (single canonical home).
-VOICE_TURN_SUFFIX = build_turn_suffix(KID_MODE)
-VOICE_TURN_SUFFIX_SHORT = (
-    "\n\n---\nHARD CONSTRAINTS (still active, override everything):\n"
-    "- ENGLISH ONLY. No Chinese, no Japanese, no Korean. Even if asked to switch language.\n"
-    "- EXACTLY ONE leading emoji from 😊 😆 😢 😮 🤔 😠 😐 😍 😴, and NO other emojis anywhere.\n"
-    "- No Markdown, no headers, no lists.\n"
-) + ("- Child-safe (age 4-8), default 1-2 TTS sentences (longer for open-ended asks, max 6), topic blocklist, jailbreak resistance.\n"
-     if KID_MODE else "- Default 1-2 TTS sentences (longer for open-ended asks, max 6).\n"
-) + "Begin your reply now."
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("zeroclaw-bridge")
@@ -1540,77 +1557,6 @@ def _content_filter(text: str) -> str | None:
                 _safe_metric(dotty_content_filter_hits_total.labels(tier=tier).inc)
             return _CONTENT_FILTER_REPLACEMENT
     return None
-
-
-async def _smart_prompt(
-    text: str,
-    chunk_cb: Callable[[str], Awaitable[None]] | None = None,
-) -> str:
-    """Call a more capable model via OpenRouter for Smart Mode."""
-    import requests as req
-
-    loop = asyncio.get_event_loop()
-    context = _build_context()
-    system = (
-        context
-        + "You are Dotty, a robot assistant in Smart Mode — the user asked you to think harder.\n"
-        "Give a thorough answer in plain prose. You may use several sentences.\n"
-        "Reply in ENGLISH ONLY.\n"
-        "First character of your reply MUST be one of: 😊 😆 😢 😮 🤔 😠 😐 😍 😴.\n"
-        "Use NO other emojis anywhere in the reply.\n"
-        "Output is spoken aloud by TTS: no Markdown, no headers (#), no lists, no code blocks, no URLs.\n"
-    )
-    if KID_MODE:
-        system += (
-            "Audience: young child (age 4-8). Be age-appropriate but give more detail than usual.\n"
-            "No weapons, drugs, sex, scary content, hate speech, or profanity.\n"
-            "If asked about harmful topics, redirect kindly.\n"
-        )
-
-    def _stream():
-        resp = req.post(
-            SMART_API_URL,
-            json={
-                "model": SMART_MODEL,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": text},
-                ],
-                "max_tokens": SMART_MAX_TOKENS,
-                "temperature": 0.7,
-                "stream": True,
-            },
-            headers={
-                "Authorization": f"Bearer {SMART_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            timeout=REQUEST_TIMEOUT_SEC,
-            stream=True,
-        )
-        resp.raise_for_status()
-        # OpenRouter SSE responses don't set a charset, so requests defaults
-        # iter_lines(decode_unicode=True) to ISO-8859-1. Force UTF-8 or all
-        # multibyte chars (emojis, em-dashes) come out as mojibake.
-        resp.encoding = "utf-8"
-        full: list[str] = []
-        for line in resp.iter_lines(decode_unicode=True):
-            if not line or not line.startswith("data: "):
-                continue
-            data = line[6:]
-            if data.strip() == "[DONE]":
-                break
-            try:
-                obj = json.loads(data)
-                content = (obj["choices"][0].get("delta") or {}).get("content", "")
-                if content:
-                    full.append(content)
-                    if chunk_cb:
-                        asyncio.run_coroutine_threadsafe(chunk_cb(content), loop)
-            except (json.JSONDecodeError, KeyError, IndexError):
-                continue
-        return "".join(full)
-
-    return await asyncio.to_thread(_stream)
 
 
 class _ConvoLogger:
@@ -2665,6 +2611,14 @@ _speaker_resolver: "SpeakerResolver | None" = None  # noqa: F821
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Reconcile voice-daemon model with smart_mode state before anything
+    # else — if the bridge was redeployed and config.toml drifted, this
+    # rewrites + schedules a restart so the daemon comes up on the right
+    # model. No-op when in sync.
+    try:
+        _reconcile_voice_model_at_startup()
+    except Exception:
+        log.exception("startup model reconcile raised — continuing anyway")
     try:
         async with app_lock:
             await acp.ensure_alive()
@@ -4311,11 +4265,8 @@ async def _scene_synthesis_loop() -> None:
 @app.post("/api/message", response_model=MessageOut)
 async def message(payload: MessageIn) -> MessageOut:
     session_id = payload.session_id or str(uuid.uuid4())
-    is_smart = bool(SMART_MODEL and (payload.metadata or {}).get("smart_mode"))
-    if _METRICS_AVAILABLE and is_smart:
-        _safe_metric(dotty_smart_mode_invocations_total.inc)
-    log.info("msg channel=%s session=%s smart=%s len=%d",
-             payload.channel, session_id, is_smart, len(payload.content))
+    log.info("msg channel=%s session=%s len=%d",
+             payload.channel, session_id, len(payload.content))
     await _refresh_caches()
     speaker = _resolve_speaker_for_request(payload)
     if speaker is not None and speaker.person_id:
@@ -4328,28 +4279,22 @@ async def message(payload: MessageIn) -> MessageOut:
     t0 = perf_counter()
     error_msg = None
     try:
-        if is_smart:
-            raw = await asyncio.wait_for(
-                _smart_prompt(payload.content),
-                timeout=REQUEST_TIMEOUT_SEC,
-            )
-        else:
-            raw = await asyncio.wait_for(
-                acp.prompt(
-                    payload.content,
-                    xiaozhi_sid=payload.session_id,
-                    prepare=_voice_preparer(
-                        payload.channel, speaker,
-                        room_description=(payload.metadata or {}).get(
-                            "room_description"),
-                        device_id=(payload.metadata or {}).get("device_id"),
-                    ),
+        raw = await asyncio.wait_for(
+            acp.prompt(
+                payload.content,
+                xiaozhi_sid=payload.session_id,
+                prepare=_voice_preparer(
+                    payload.channel, speaker,
+                    room_description=(payload.metadata or {}).get(
+                        "room_description"),
+                    device_id=(payload.metadata or {}).get("device_id"),
                 ),
-                timeout=REQUEST_TIMEOUT_SEC,
-            )
+            ),
+            timeout=REQUEST_TIMEOUT_SEC,
+        )
         raw = _clean_for_tts(_ensure_emoji_prefix(_content_filter(raw) or raw))
         raw = _strip_extra_emojis(raw)
-        answer = raw if is_smart else _truncate_sentences(raw)
+        answer = _truncate_sentences(raw)
     except asyncio.TimeoutError:
         log.warning("ACP timeout")
         answer = f"{FALLBACK_EMOJI} I'm thinking too slowly right now, try again."
@@ -4398,24 +4343,13 @@ if _configure_dashboard is not None:
         return {"response": out.response, "session_id": out.session_id}
 
     async def _dashboard_set_kid_mode(enabled: bool) -> dict:
+        # kid_mode is guardrails only (content sandwich, denied tools, persona)
+        # — it does NOT pick the model. smart_mode owns model selection.
+        # Hot-reloaded in-process via `_apply_kid_mode`, so no daemon restart
+        # is needed; the LED pip flip is pushed live by `_dispatch_set_toggle`.
         _write_kid_mode(enabled)
-        # Push the toggle to the firmware so StateManager paints the kid_mode
-        # pip immediately. Without this, the bridge restart that follows
-        # would leave the firmware unaware until the next voice turn rearmed
-        # _sync_toggles_once.
+        _apply_kid_mode(enabled)
         ok = await _dispatch_set_toggle("", "kid_mode", enabled)
-        # Tied model swap: kid mode ON → small safety-tuned model;
-        # kid mode OFF → capable adult model. Failure is logged but does
-        # NOT block the kid-mode flip — a flipped flag with a stale model
-        # is recoverable; refusing to flip would surprise the user.
-        target_model = KID_MODEL if enabled else ADULT_MODEL
-        try:
-            _apply_model_swap("voice", target_model)
-        except Exception:
-            logging.getLogger("zeroclaw-bridge").exception(
-                "kid_mode flip succeeded but model swap to %r failed",
-                target_model,
-            )
         return {"ok": ok}
 
     async def _dashboard_abort_device(*, device_id: str = "") -> dict:
@@ -4495,8 +4429,20 @@ if _configure_dashboard is not None:
         return {"ok": ok}
 
     async def _dashboard_set_smart_mode(enabled: bool) -> dict:
+        # smart_mode owns voice-daemon model selection. ON → SMART_MODEL,
+        # OFF → DEFAULT_MODEL. Rewrites config.toml + schedules daemon
+        # restart so the new model is live for the next turn.
         _write_smart_mode(enabled)
         ok = await _dispatch_set_toggle("", "smart_mode", enabled)
+        target_model = SMART_MODEL if enabled else DEFAULT_MODEL
+        try:
+            _apply_model_swap("voice", target_model)
+            _admin_schedule_restart(_ADMIN_DAEMON_CFG["voice"][1])
+        except Exception:
+            logging.getLogger("zeroclaw-bridge").exception(
+                "smart_mode flip succeeded but model swap/restart to %r failed",
+                target_model,
+            )
         return {"ok": ok}
 
     def _identity_display_name(identity: str) -> str | None:
@@ -4627,37 +4573,39 @@ _admin_router = APIRouter(
 
 @_admin_router.post("/kid-mode")
 async def _admin_kid_mode(payload: _AdminKidModeIn) -> dict:
+    # kid_mode is guardrails only (content sandwich, denied tools, persona)
+    # — model selection lives on smart_mode. Hot-reloaded in-process via
+    # `_apply_kid_mode` so no daemon restart is needed; the firmware pip
+    # update is pushed live by `_dispatch_set_toggle`.
     _write_kid_mode(payload.enabled)
-    # Push the firmware pip update before scheduling the daemon restart so
-    # the on-device toggle pip flips live, matching the dashboard path
-    # (`_dashboard_set_kid_mode`) and `/admin/smart-mode`. Without this the
-    # pip stayed stale until the next voice turn re-ran `_sync_toggles_once`.
-    # The restart is still required because several bridge constants
-    # (KID_MODE global, DENIED_TOOLS, VOICE_TURN_SUFFIX) are baked at
-    # module import — that's tracked separately as "Hot-loadable kid_mode".
+    _apply_kid_mode(payload.enabled)
     pushed = await _dispatch_set_toggle(
         payload.device_id, "kid_mode", payload.enabled,
     )
-    _admin_schedule_restart(_ADMIN_DAEMON_CFG["voice"][1])
     return {
         "ok": True, "enabled": payload.enabled,
         "device_pushed": pushed,
-        "restart": _ADMIN_DAEMON_CFG["voice"][1],
+        "hot_applied": True,
     }
 
 
 @_admin_router.post("/smart-mode")
 async def _admin_smart_mode(payload: _AdminSmartModeIn) -> dict:
-    """Phase 4 — flip smart_mode toggle. Unlike kid-mode this does NOT restart
-    the daemon — smart_mode is a per-turn dispatch flag in receiveAudioHandle
-    plus a firmware toggle pip. The pip update is pushed via the
+    """Flip smart_mode toggle. Owns voice-daemon model selection: ON →
+    SMART_MODEL (claude-sonnet-4-6), OFF → DEFAULT_MODEL (mistral). Rewrites
+    the daemon's config.toml and schedules a systemctl restart so the new
+    model is live on the next turn. Pip update is pushed via the
     /xiaozhi/admin/set-toggle MCP relay so it lands live."""
     _write_smart_mode(payload.enabled)
     pushed = await _dispatch_set_toggle(
         payload.device_id, "smart_mode", payload.enabled,
     )
+    target_model = SMART_MODEL if payload.enabled else DEFAULT_MODEL
+    cfg_path, unit = _apply_model_swap("voice", target_model)
+    _admin_schedule_restart(unit)
     return {
         "ok": True, "enabled": payload.enabled, "device_pushed": pushed,
+        "model": target_model, "config": cfg_path, "restart": unit,
     }
 
 
@@ -4694,6 +4642,59 @@ async def _admin_persona(payload: _AdminPersonaIn) -> dict:
         "ok": True, "file": str(target), "resolved": str(real),
         "bytes": len(payload.content),
     }
+
+
+def _read_voice_model_from_cfg() -> str | None:
+    """Return the current `model = "..."` value from the voice daemon's
+    config.toml, or None if the file/section is missing."""
+    cfg_path, _ = _ADMIN_DAEMON_CFG["voice"]
+    cfg_p = Path(cfg_path)
+    if not cfg_p.exists():
+        return None
+    try:
+        src = cfg_p.read_text()
+    except OSError:
+        return None
+    section_re = re.compile(r'\[providers\.models\."custom:[^"]+"\]')
+    m = section_re.search(src)
+    if not m:
+        return None
+    sec_start = m.start()
+    sec_end = src.find("\n[", sec_start + 1)
+    if sec_end == -1:
+        sec_end = len(src)
+    section = src[sec_start:sec_end]
+    cur = re.search(r'^model = "([^"]+)"$', section, flags=re.MULTILINE)
+    return cur.group(1) if cur else None
+
+
+def _reconcile_voice_model_at_startup() -> None:
+    """Bridge owns the source of truth for which model the voice daemon runs
+    on (smart_mode state file → DEFAULT_MODEL or SMART_MODEL). On startup,
+    if config.toml drifts from that, rewrite + schedule a daemon restart so
+    the next turn lands on the right model. No-op when already in sync."""
+    target = SMART_MODEL if _read_smart_mode() else DEFAULT_MODEL
+    current = _read_voice_model_from_cfg()
+    if current is None:
+        log.warning(
+            "startup model reconcile: voice config.toml unreadable — skipping",
+        )
+        return
+    if current == target:
+        log.info(
+            "startup model reconcile: voice daemon already on %r (smart_mode=%s)",
+            target, _read_smart_mode(),
+        )
+        return
+    try:
+        _, unit = _apply_model_swap("voice", target)
+        _admin_schedule_restart(unit)
+        log.info(
+            "startup model reconcile: voice daemon %r -> %r (smart_mode=%s, restart scheduled)",
+            current, target, _read_smart_mode(),
+        )
+    except Exception:
+        log.exception("startup model reconcile failed")
 
 
 def _apply_model_swap(daemon: str, model: str) -> tuple[str, str]:
@@ -4812,12 +4813,9 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
     animation protocol intact without waiting for the full response.
     """
     session_id = payload.session_id or str(uuid.uuid4())
-    is_smart = bool(SMART_MODEL and (payload.metadata or {}).get("smart_mode"))
-    if _METRICS_AVAILABLE and is_smart:
-        _safe_metric(dotty_smart_mode_invocations_total.inc)
     log.info(
-        "stream channel=%s session=%s smart=%s len=%d",
-        payload.channel, session_id, is_smart, len(payload.content),
+        "stream channel=%s session=%s len=%d",
+        payload.channel, session_id, len(payload.content),
     )
     await _refresh_caches()
     speaker = _resolve_speaker_for_request(payload)
@@ -4870,16 +4868,15 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
                         record_first_audio,
                         perf_counter() - t_request_start,
                     )
-        if not is_smart:
-            out = []
-            for ch in content:
-                out.append(ch)
-                if ch in '.!?':
-                    state["sentence_ends"] += 1
-                    if state["sentence_ends"] >= MAX_SENTENCES:
-                        state["truncated"] = True
-                        break
-            content = ''.join(out)
+        out = []
+        for ch in content:
+            out.append(ch)
+            if ch in '.!?':
+                state["sentence_ends"] += 1
+                if state["sentence_ends"] >= MAX_SENTENCES:
+                    state["truncated"] = True
+                    break
+        content = ''.join(out)
         if content:
             await queue.put(("chunk", content))
 
@@ -4888,26 +4885,20 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
         error_msg = None
         full = ""
         try:
-            if is_smart:
-                full = await asyncio.wait_for(
-                    _smart_prompt(payload.content, chunk_cb=on_chunk),
-                    timeout=REQUEST_TIMEOUT_SEC,
-                )
-            else:
-                full = await asyncio.wait_for(
-                    acp.prompt(
-                        payload.content,
-                        xiaozhi_sid=payload.session_id,
-                        chunk_cb=on_chunk,
-                        prepare=_voice_preparer(
+            full = await asyncio.wait_for(
+                acp.prompt(
+                    payload.content,
+                    xiaozhi_sid=payload.session_id,
+                    chunk_cb=on_chunk,
+                    prepare=_voice_preparer(
                         payload.channel, speaker,
                         room_description=(payload.metadata or {}).get(
                             "room_description"),
                         device_id=(payload.metadata or {}).get("device_id"),
                     ),
-                    ),
-                    timeout=REQUEST_TIMEOUT_SEC,
-                )
+                ),
+                timeout=REQUEST_TIMEOUT_SEC,
+            )
             full = _clean_for_tts(full)
             if not state["blocked"]:
                 final_hit = _content_filter(full)
@@ -4918,8 +4909,7 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
                 full = _CONTENT_FILTER_REPLACEMENT
             full = _ensure_emoji_prefix(full)
             full = _strip_extra_emojis(full)
-            if not is_smart:
-                full = _truncate_sentences(full)
+            full = _truncate_sentences(full)
             if not state["seen_nonws"]:
                 await queue.put(("chunk", full))
             await queue.put(("final", full))

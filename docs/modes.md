@@ -53,12 +53,14 @@ The `idle → talk` trigger is the firmware `face_detected` event (any face, fam
 
 ## Toggles (compose freely)
 
-| Toggle | Toggle pip (right ring) | When ON | Persistence |
+| Toggle | Toggle pip (right ring) | What it does | Persistence |
 |---|---|---|---|
-| `kid_mode` | warm pink `(168,80,100)` at index **8** | Safety-tuned model, content sandwich, camera tools denied, kid-safe persona | `/root/zeroclaw-bridge/state/kid-mode` |
-| `smart_mode` | orange `(168,80,0)` at index **9** | Bridge bypasses ZeroClaw and routes the turn through direct OpenRouter (capable model). No memory, no tools. | `/root/zeroclaw-bridge/state/smart-mode` |
+| `kid_mode` | warm pink `(168,80,100)` at index **8** | Guardrails only — content sandwich, camera tools denied, kid-safe persona. Does not pick the model. | `/root/zeroclaw-bridge/state/kid-mode` |
+| `smart_mode` | orange `(168,80,0)` at index **9** | Voice-daemon model selector. ON → `SMART_MODEL` (claude-sonnet-4-6 by default); OFF → `DEFAULT_MODEL` (mistral-small-3.2-24b-instruct). ZeroClaw retains full memory + tools either way. | `/root/zeroclaw-bridge/state/smart-mode` |
 
-Toggles compose: `kid_mode = on` AND `smart_mode = on` is valid (bridge applies the kid-safe sandwich on top of the direct OpenRouter call). Both toggles are sticky across turns, daemon restarts, and reboots.
+The two toggles are orthogonal — they compose freely. `kid_mode = on` AND `smart_mode = on` runs the smart model behind the kid-safe sandwich. Both toggles are sticky across turns, daemon restarts, and reboots.
+
+`smart_mode` is **dashboard- and admin-endpoint-only** — there is no voice trigger. Kids reach Dotty by voice but not the web dashboard, so dashboard-only is the access-control gate that keeps the more capable (and more expensive) model under household-head control.
 
 ---
 
@@ -131,22 +133,15 @@ stateDiagram-v2
 | `tell me a story` / `story time` | `story_time` |
 | `wake up` / `come back` / `are you there` (only when state ∈ `{sleep, security, story_time}`) | `idle` |
 
-Toggle phrases:
-
-| Phrase | Effect |
-|---|---|
-| `smart mode` / `think harder` / `big brain` | `smart_mode = on` (sticky until cleared) |
-| `normal mode` / `regular dotty` / `regular mode` / `stop smart mode` | `smart_mode = off` |
-
-Kid mode is *not* voice-toggleable — it's a guardian-controlled axis driven from the `/admin/kid-mode` endpoint or the dashboard.
+Both `kid_mode` and `smart_mode` are voice-untoggleable — they are guardian-controlled axes driven from the `/admin/kid-mode` and `/admin/smart-mode` endpoints (or the dashboard cards that wrap them).
 
 ### Admin endpoints (localhost-only)
 
 | Endpoint | Body | Effect |
 |---|---|---|
 | `POST /admin/state` | `{"state": "<idle\|talk\|story_time\|security\|sleep\|dance>", "device_id": "<optional>"}` | Push `self.robot.set_state` MCP via xiaozhi-server relay. No daemon restart. |
-| `POST /admin/smart-mode` | `{"enabled": bool, "device_id": "<optional>"}` | Persist + push `self.robot.set_toggle("smart_mode", ...)`. No daemon restart. |
-| `POST /admin/kid-mode` | `{"enabled": bool}` | Persist + swap voice-daemon model + restart daemon. (Pip pushes via the post-restart toggle resync.) |
+| `POST /admin/smart-mode` | `{"enabled": bool, "device_id": "<optional>"}` | Persist + push pip + rewrite voice-daemon `config.toml` model + schedule daemon restart. ON → `SMART_MODEL`, OFF → `DEFAULT_MODEL`. |
+| `POST /admin/kid-mode` | `{"enabled": bool}` | Persist + push pip + restart daemon (guardrail constants are baked at module import). No model swap — that's `smart_mode`'s job. |
 
 ### MCP tools (firmware)
 
@@ -162,14 +157,13 @@ Kid mode is *not* voice-toggleable — it's a guardian-controlled axis driven fr
 | State | Voice path | Memory? | Tools? |
 |---|---|---|---|
 | `idle` | n/a | n/a | n/a |
-| `talk` (default) | xiaozhi → bridge → ZeroClaw ACP (Mistral 3.2 by default) | yes (FTS) | yes |
-| `talk` (smart_mode = on) | xiaozhi → bridge → direct OpenRouter (`SMART_API_URL`) | no | no |
+| `talk` | xiaozhi → bridge → ZeroClaw ACP. Daemon model = `SMART_MODEL` (sonnet-4-6) when smart_mode=on, else `DEFAULT_MODEL` (mistral-small). | yes (FTS) | yes |
 | `story_time` | xiaozhi → bridge → direct OpenRouter (story persona overlay + rolling context) | per-session list (Phase 7) | no |
 | `security` | bridge ambient task (no voice path active) | logs to journal | photo + audio capture |
 | `sleep` | mic stays on for "wake up"; no LLM round-trip | n/a | n/a |
 | `dance` | bridge handler dispatches choreography + audio file | n/a | dance MCP |
 
-`smart_mode` and `story_time` both bypass ZeroClaw — `smart_mode` is one-shot per turn, `story_time` is a sticky state with its own session memory (Phase 7).
+`smart_mode` swaps the voice daemon's model and restarts the daemon — every voice turn still goes through ZeroClaw (full memory + tools), just on the smart model. `story_time` is the only voice path that bypasses ZeroClaw, with its own session memory (Phase 7).
 
 ---
 
@@ -190,6 +184,6 @@ Phase 4 establishes the *rails* — pip, transition events, dispatch helpers, vo
 ## Sources of truth
 
 - **Firmware:** `firmware/main/stackchan/modes/state_manager.{h,cpp}`, `firmware/main/stackchan/modifiers/face_tracking.cpp` (camera-edge hooks), `firmware/main/hal/hal_mcp.cpp` (set_state / set_toggle MCP)
-- **Bridge:** `bridge.py` (`_dispatch_set_state`, `_dispatch_set_toggle`, `_admin_state`, `_admin_smart_mode`, `_update_perception_state` for `state_changed`), `receiveAudioHandle.py` (voice phrases + per-conn toggle sync)
+- **Bridge:** `bridge.py` (`_dispatch_set_state`, `_dispatch_set_toggle`, `_admin_state`, `_admin_smart_mode`, `_admin_kid_mode`, `_apply_model_swap`, `_update_perception_state` for `state_changed`), `receiveAudioHandle.py` (voice state phrases + per-conn toggle sync)
 - **xiaozhi-server patches:** `custom-providers/xiaozhi-patches/http_server.py` (`/xiaozhi/admin/set-state`, `/xiaozhi/admin/set-toggle`), `custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py` (`state_changed` → `conn.current_state`)
 - **Dashboard:** `bridge/dashboard.py` + `bridge/templates/state_card.html` + `bridge/templates/smart_mode.html`

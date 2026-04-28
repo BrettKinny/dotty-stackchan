@@ -164,11 +164,6 @@ class LLMProvider(LLMProviderBase):
                 metadata["room_description"] = lines[0]
                 stripped_user = ""
 
-        if stripped_user.startswith("[SMART_MODE]\n"):
-            stripped_user = stripped_user[len("[SMART_MODE]\n"):]
-            metadata["smart_mode"] = True
-        elif stripped_user.startswith("[SMART_MODE_ACK] "):
-            stripped_user = stripped_user[len("[SMART_MODE_ACK] "):]
         if stripped_user != user_text:
             dialogue = [dict(msg) for msg in dialogue]
             for msg in reversed(dialogue):

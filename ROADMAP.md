@@ -22,7 +22,7 @@ v0.1 is the first tagged release — early-feedback alpha. Everything in this li
 - **Multi-host deployment** -- documented split across Docker host + ZeroClaw host
 - **`make setup` wizard** -- interactive first-run: name your robot, fetch models, validate config
 - **MkDocs Material docs site** -- architecture, protocols, quickstart, troubleshooting, FAQ
-- **Kid Mode channel routing** -- voice channels are kid-safe by default; the bridge's kid-mode sandwich (English-pin, emoji prefix, topic blocklist, jailbreak resistance) only applies when the inbound `channel` is in `VOICE_CHANNELS`, so messaging-platform channels (Discord, Telegram, etc.) skip it automatically. Pair with a separate ZeroClaw daemon on a more capable model for an adult-mode chat surface
+- **Kid Mode channel routing** -- voice channels are kid-safe by default; the bridge's kid-mode sandwich (English-pin, emoji prefix, topic blocklist, jailbreak resistance) only applies when the inbound `channel` is in `VOICE_CHANNELS`, so messaging-platform channels (Discord, Telegram, etc.) skip it automatically. Pair with a separate ZeroClaw daemon on a more capable model for an unrestricted chat surface
 - **Bridge `/admin/*` endpoints** -- localhost-only HTTP API for runtime config mutation: toggle kid-mode (`/admin/kid-mode`), overwrite persona files (`/admin/persona`), swap a daemon's `default_model` in its `config.toml` (`/admin/model`), and amend the MCP tool allowlist (`/admin/safety`, py_compile-validated). Paths and systemd unit names are env-configurable
 
 ## Known issues (as of v0.1)

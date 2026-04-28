@@ -801,18 +801,12 @@ async def vision_latest(request: Request) -> Any:
     return templates.TemplateResponse(request, "vision.html", ctx)
 
 
-# Voice-daemon LLM swapped on kid-mode toggle. Same defaults as bridge.py
-# so the dashboard reflects what the bridge actually loaded.
-KID_MODEL_NAME = os.environ.get(
-    "DOTTY_KID_MODEL", "mistralai/mistral-small-3.2-24b-instruct",
+# Voice-daemon model selection is owned by smart_mode. Mirrors bridge.py
+# defaults so the dashboard reflects what the bridge actually loaded.
+DEFAULT_MODEL_NAME = os.environ.get(
+    "DOTTY_DEFAULT_MODEL", "mistralai/mistral-small-3.2-24b-instruct",
 )
-ADULT_MODEL_NAME = os.environ.get(
-    "DOTTY_ADULT_MODEL", "anthropic/claude-sonnet-4-6",
-)
-# Smart-mode is an independent toggle: when ON, the bridge routes turns to
-# `SMART_MODEL` instead of the kid/adult default. When OFF, the regular
-# kid/adult path is used.
-SMART_MODEL_NAME = os.environ.get("SMART_MODEL", "")
+SMART_MODEL_NAME = os.environ.get("SMART_MODEL", "anthropic/claude-sonnet-4-6")
 
 
 def _short_model(name: str) -> str:
@@ -904,14 +898,11 @@ async def state_set(request: Request, state: str = Form(...)) -> Any:
 async def smart_mode_partial(request: Request) -> Any:
     getter = _state.get("smart_mode_getter")
     enabled = bool(getter()) if getter else False
-    kid_getter = _state.get("kid_mode_getter")
-    kid_enabled = bool(kid_getter()) if kid_getter else True
-    default_model = KID_MODEL_NAME if kid_enabled else ADULT_MODEL_NAME
     return templates.TemplateResponse(
         request, "smart_mode.html",
         {"enabled": enabled, "available": getter is not None,
          "smart_model": _short_model(SMART_MODEL_NAME),
-         "default_model": _short_model(default_model)},
+         "default_model": _short_model(DEFAULT_MODEL_NAME)},
     )
 
 
@@ -1130,9 +1121,9 @@ async def smart_mode_set(request: Request, enabled: str = Form("")) -> Any:
 
 @router.post("/actions/kid-mode", response_class=HTMLResponse, include_in_schema=False)
 async def kid_mode_set(request: Request, enabled: str = Form("")) -> Any:
-    """Persist Kid Mode state to a file the bridge re-reads on startup,
-    then trigger a self-restart via systemctl. The HTTP response returns
-    before the SIGTERM hits (subprocess.Popen + small delay).
+    """Persist Kid Mode state and hot-reload the guardrail globals via the
+    setter (`_dashboard_set_kid_mode` → `_apply_kid_mode`). No daemon
+    restart needed since the 2026-04-29 hot-load refactor.
     """
     setter = _state.get("kid_mode_setter")
     if setter is None:
@@ -1145,21 +1136,6 @@ async def kid_mode_set(request: Request, enabled: str = Form("")) -> Any:
         return templates.TemplateResponse(
             request, "kid_mode_result.html",
             {"ok": False, "error": str(exc)},
-        )
-
-    # Spawn a delayed self-restart so we can return the response first.
-    import subprocess
-    try:
-        subprocess.Popen(
-            ["sh", "-c", "sleep 1 && systemctl restart zeroclaw-bridge"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-    except Exception as exc:
-        log.exception("self-restart spawn failed")
-        return templates.TemplateResponse(
-            request, "kid_mode_result.html",
-            {"ok": False, "error": f"restart failed: {exc}"},
         )
 
     return templates.TemplateResponse(
@@ -2077,26 +2053,29 @@ async def host_detail(request: Request, slug: str) -> Any:
         cpu_c = _cpu_temp_c()
         mem = _read_memory_mb()
         disk = _disk_usage_root()
-        # Smart-mode is the toggle that flips the active LLM. When off,
-        # the kid/adult split applies. We deliberately surface only
-        # "Kid Mode" and "Smart Mode" labels here (no "adult model"
-        # wording) so the dashboard mirrors the user-facing toggle
-        # vocabulary in CLAUDE.md / docs.
+        # Two orthogonal toggles + one active LLM. smart_mode owns model
+        # selection (off → DEFAULT_MODEL, on → SMART_MODEL); kid_mode is
+        # guardrails only.
         kid_getter = _state.get("kid_mode_getter")
         smart_getter = _state.get("smart_mode_getter")
         kid_on = bool(kid_getter()) if kid_getter else None
         smart_on = bool(smart_getter()) if smart_getter else None
+        if smart_on is True:
+            active_llm = _short_model(SMART_MODEL_NAME) or "(unset)"
+        elif smart_on is False:
+            active_llm = _short_model(DEFAULT_MODEL_NAME) or "(unset)"
+        else:
+            active_llm = "unknown"
         facts = [
-            ("Device",    "Raspberry Pi"),
-            ("Status",    "online"),
-            ("Version",   BRIDGE_VERSION),
-            ("Uptime",    _humanize_age(time.time() - _START_TIME)),
-            ("Host up",   _humanize_age(upt) if upt else "n/a"),
-            ("Logs dir",  str(LOG_DIR)),
-            ("Kid Mode",  "on" if kid_on else ("off" if kid_on is False else "unknown")),
-            ("Kid LLM",   _short_model(KID_MODEL_NAME) or "(unset)"),
+            ("Device",     "Raspberry Pi"),
+            ("Status",     "online"),
+            ("Version",    BRIDGE_VERSION),
+            ("Uptime",     _humanize_age(time.time() - _START_TIME)),
+            ("Host up",    _humanize_age(upt) if upt else "n/a"),
+            ("Logs dir",   str(LOG_DIR)),
+            ("Kid Mode",   "on" if kid_on else ("off" if kid_on is False else "unknown")),
             ("Smart Mode", "on" if smart_on else ("off" if smart_on is False else "unknown")),
-            ("Smart LLM", _short_model(SMART_MODEL_NAME) or "(unset)"),
+            ("Active LLM", active_llm),
         ]
         # Bottom-bar diagnostics absorbed into this modal — UI-1 is
         # removing the footer rendering separately, so this becomes the
@@ -2121,17 +2100,13 @@ async def host_detail(request: Request, slug: str) -> Any:
             _tcp_reachable(XIAOZHI_HOST, XIAOZHI_WS_PORT),
         )
         n = await _xiaozhi_device_count()
-        # Smart-mode informs which LLM is currently routing voice turns.
+        # smart_mode owns model selection; kid_mode is guardrails only.
         smart_getter = _state.get("smart_mode_getter")
         smart_on = bool(smart_getter()) if smart_getter else None
         if smart_on is True:
             current_llm = _short_model(SMART_MODEL_NAME) or "(unset)"
         elif smart_on is False:
-            kid_getter = _state.get("kid_mode_getter")
-            kid_on = bool(kid_getter()) if kid_getter else False
-            current_llm = _short_model(
-                KID_MODEL_NAME if kid_on else ADULT_MODEL_NAME
-            ) or "(unset)"
+            current_llm = _short_model(DEFAULT_MODEL_NAME) or "(unset)"
         else:
             current_llm = "unknown"
         # Voice-channel state — derived from the firmware state getter
