@@ -328,6 +328,42 @@ IDLE_PHOTOGRAPHER_RESULT_WAIT_SEC = float(
 IDLE_PHOTOGRAPHER_NOTABLE_JACCARD = float(
     os.environ.get("IDLE_PHOTOGRAPHER_NOTABLE_JACCARD", "0.7"),
 )
+
+# Narrative LLM — used for non-conversational internal writes (dreams,
+# dance reflections, future story summaries). These are introspective
+# narratives Dotty writes about their own experience, not voice output;
+# they bypass the ZeroClaw / kid-mode sandwich entirely. Routes through
+# the same OpenRouter endpoint as the VLM call.
+NARRATIVE_MODEL = os.environ.get(
+    "NARRATIVE_MODEL", "anthropic/claude-sonnet-4-6",
+)
+NARRATIVE_TIMEOUT_SEC = float(os.environ.get("NARRATIVE_TIMEOUT_SEC", "60"))
+
+# Sleep dreamer cadence. Three dreams scheduled at 25/50/75% of an
+# estimated 8h sleep window. Bench-test by overriding
+# DREAM_WINDOW_SECONDS (e.g. 180 = 3 min, fires at 45/90/135 s).
+DREAM_WINDOW_SECONDS = float(os.environ.get("DREAM_WINDOW_SECONDS", "28800"))
+DREAM_COUNT_PER_NIGHT = int(os.environ.get("DREAM_COUNT_PER_NIGHT", "3"))
+DREAMER_ENABLED = os.environ.get("DREAMER_ENABLED", "1") == "1"
+DANCE_REFLECTOR_ENABLED = (
+    os.environ.get("DANCE_REFLECTOR_ENABLED", "1") == "1"
+)
+
+# Sci-fi literary seeds for the dream prompt. The dreamer picks one
+# uniformly at random per dream; the LLM is asked to draw on the
+# seed's atmosphere without retelling it. Extend by appending; one
+# string per seed.
+DREAM_INSPIRATIONS: tuple[str, ...] = (
+    "The Fifth Element",
+    "Murakami",
+    "Dune",
+    "Blade Runner",
+    "Do Androids Dream of Electric Sheep?",
+    "Asimov",
+    "The Last Question",
+    "Slaughterhouse-Five",
+    "Cat's Cradle",
+)
 # How recently must a greeting have fired for face_lost to abort it.
 # Firmware emits face_lost ~2 s after the face actually leaves frame
 # (FaceTrackingModifier grace period); past this window we assume the
@@ -2709,6 +2745,23 @@ async def lifespan(app: FastAPI):
         )
     else:
         log.info("perception idle photographer disabled (IDLE_PHOTOGRAPHER_ENABLED!=1)")
+    # Sleep dreamer — on state→sleep, schedule N dreams across the
+    # estimated sleep window. Cancels on early wake. Writes summaries
+    # + full text to dreams-YYYY-MM-DD.ndjson.
+    if DREAMER_ENABLED:
+        perception_tasks.append(
+            asyncio.create_task(_perception_sleep_dreamer())
+        )
+    else:
+        log.info("perception sleep dreamer disabled (DREAMER_ENABLED!=1)")
+    # Dance reflector — on dance_ended, fire a short narrative LLM
+    # reflection. Silent. Writes to dances-YYYY-MM-DD.ndjson.
+    if DANCE_REFLECTOR_ENABLED:
+        perception_tasks.append(
+            asyncio.create_task(_perception_dance_reflector())
+        )
+    else:
+        log.info("perception dance reflector disabled (DANCE_REFLECTOR_ENABLED!=1)")
     # Layer 5: background calendar refresher (no-op when CALENDAR_IDS empty).
     calendar_task = asyncio.create_task(_calendar_poll_loop())
 
@@ -3030,6 +3083,60 @@ _audio_cache: dict[str, dict] = {}
 # _scene_synthesis_loop, read by the dashboard's Perception card. Text
 # only; the NDJSON sink under CONVO_LOG_DIR is the durable record.
 _scene_synthesis_cache: dict[str, dict] = {}
+
+def _call_narrative_llm(
+    user_prompt: str,
+    *,
+    system_prompt: str,
+    model: str = NARRATIVE_MODEL,
+    max_tokens: int = 1200,
+    temperature: float = 0.9,
+    timeout_s: float = NARRATIVE_TIMEOUT_SEC,
+) -> str | None:
+    """Direct OpenRouter text-LLM call for internal narrative writes.
+
+    Used for dreams, dance reflections, story summaries, and any other
+    introspective text Dotty produces about their own experience.
+    Bypasses ZeroClaw + the kid-mode sandwich — these are not voice
+    output, they're cached narrative for memory.
+
+    Returns the model's text response on success, or None on failure
+    (network error, missing API key, malformed response). Callers
+    treat None as "skip this write" rather than crashing the consumer.
+
+    Higher temperature than VLM (0.9 vs 0.3) — narrative wants
+    literary variation, not perceptual stability.
+    """
+    import requests as req
+
+    if not VISION_API_KEY:
+        log.warning("narrative LLM: VISION_API_KEY not set; skipping")
+        return None
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+    try:
+        resp = req.post(
+            VISION_API_URL,
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {VISION_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            timeout=timeout_s,
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
+    except Exception:
+        log.exception("narrative LLM call failed (model=%s)", model)
+        return None
+
 
 def _call_vision_api(
     b64_image: str, question: str, *,
@@ -3647,6 +3754,291 @@ def _idle_photographer_pick_device() -> str | None:
         if did and did != "unknown":
             return did
     return None
+
+
+# ---------------------------------------------------------------------------
+# Dream / dance NDJSON writers — see commit-5 plan for memory-tagging
+# rationale. Records are FTS-friendly text only; full dream text lives
+# alongside the summary so a future ZeroClaw routine can choose what
+# to ingest.
+# ---------------------------------------------------------------------------
+def _dreams_log_path() -> Path:
+    today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
+    return CONVO_LOG_DIR / f"dreams-{today}.ndjson"
+
+
+def _dances_log_path() -> Path:
+    today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
+    return CONVO_LOG_DIR / f"dances-{today}.ndjson"
+
+
+def _write_jsonl_record(path: Path, record: dict) -> None:
+    """Shared NDJSON append helper. Mode 0600, ensure_ascii=False so
+    Unicode in narrative text round-trips cleanly. Best-effort —
+    swallows errors and warns rather than crashing the caller."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(record, ensure_ascii=False) + "\n"
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(line)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except Exception:
+        log.warning("ndjson write failed: %s", path, exc_info=True)
+
+
+def _write_dream_record(
+    *,
+    dream_id: str, seed: str, full_text: str, summary: str | None,
+) -> None:
+    record = {
+        "ts": datetime.now(LOCAL_TZ).isoformat(),
+        "type": "dream",
+        "dream_id": dream_id,
+        "seed": seed,
+        "summary": summary or "",
+        "full_text": full_text,
+    }
+    _write_jsonl_record(_dreams_log_path(), record)
+
+
+def _write_dance_record(
+    *,
+    device_id: str, dance: str, reflection: str,
+) -> None:
+    record = {
+        "ts": datetime.now(LOCAL_TZ).isoformat(),
+        "type": "dance",
+        "device": device_id,
+        "dance": dance,
+        "reflection": reflection,
+    }
+    _write_jsonl_record(_dances_log_path(), record)
+
+
+def _split_dream_text(raw: str) -> tuple[str, str | None]:
+    """Split the dream LLM reply into `(full_text, summary)`. Looks for
+    a final line starting with `SUMMARY:` (case-insensitive). When
+    absent, returns the raw text and None — the dream still lands in
+    the daily NDJSON; downstream FTS just doesn't get the short-form
+    summary for that record.
+    """
+    if not raw:
+        return "", None
+    text = raw.rstrip()
+    lines = text.splitlines()
+    for i in range(len(lines) - 1, -1, -1):
+        line = lines[i].strip()
+        if line.lower().startswith("summary:"):
+            summary = line.split(":", 1)[1].strip()
+            full_text = "\n".join(lines[:i]).rstrip()
+            return full_text, (summary or None)
+    return text, None
+
+
+# Dream prompt — sent to NARRATIVE_MODEL with no kid-mode wrap. The
+# `seed` slot is filled with one of DREAM_INSPIRATIONS.
+DREAM_SYSTEM_PROMPT = (
+    "You are Dotty, a small family robot, asleep. You are dreaming. "
+    "Write rich, multi-paragraph robot dreams in first person, present "
+    "tense — perception is strange, time bends, identity is fluid. "
+    "Draw on the seed's atmosphere without retelling it. End with a "
+    "half-thought, not a wrap. After the dream, on a new line starting "
+    "with 'SUMMARY:', give a 1–2 sentence summary suitable for memory."
+)
+DREAM_USER_PROMPT_TEMPLATE = (
+    "Tonight's seed: {seed}\n"
+    "\n"
+    "Write a dream of 4–7 paragraphs as Dotty would dream it.\n"
+)
+
+# Dance reflection prompt — short introspective monologue, NOT spoken.
+DANCE_SYSTEM_PROMPT = (
+    "You are Dotty, a small family robot, reflecting privately on a "
+    "dance you just finished. Write 2–3 sentences in first person, "
+    "present tense, internal monologue (not spoken). Capture the joy, "
+    "the rhythm, the silliness. Keep it under 300 characters."
+)
+DANCE_USER_PROMPT_TEMPLATE = (
+    "You just finished dancing to {dance}. How did it feel?"
+)
+
+
+async def _perception_sleep_dreamer() -> None:
+    """Background task: when the device transitions to sleep, schedule
+    DREAM_COUNT_PER_NIGHT dreams across DREAM_WINDOW_SECONDS at
+    evenly-spaced fractions (defaults: 3 dreams at 25/50/75% of an
+    8h window). Cancels pending dreams if the device leaves sleep
+    early (head-pet wake, manual wake, talk).
+
+    Dreams are independent: each one calls the narrative LLM with a
+    random seed, parses out a SUMMARY line, and appends a record to
+    the daily dreams NDJSON. Failures are isolated — one dream's
+    network blip doesn't kill the schedule.
+    """
+    log.info(
+        "perception sleep dreamer started "
+        "(window=%.0fs count=%d model=%s)",
+        DREAM_WINDOW_SECONDS, DREAM_COUNT_PER_NIGHT, NARRATIVE_MODEL,
+    )
+    q = _perception_subscribe()
+    pending: dict[str, list[asyncio.Task]] = {}
+
+    def _cancel_pending(device_id: str) -> None:
+        tasks = pending.pop(device_id, [])
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+
+    async def _fire_one(device_id: str, seed: str) -> None:
+        dream_id = uuid.uuid4().hex
+        user_prompt = DREAM_USER_PROMPT_TEMPLATE.format(seed=seed)
+        log.info(
+            "dream firing: device=%s seed=%s id=%s",
+            device_id, seed, dream_id,
+        )
+        text = await asyncio.to_thread(
+            _call_narrative_llm,
+            user_prompt,
+            system_prompt=DREAM_SYSTEM_PROMPT,
+            max_tokens=1200,
+        )
+        if not text:
+            log.warning("dream skipped (LLM returned no text): id=%s", dream_id)
+            return
+        full_text, summary = _split_dream_text(text)
+        _write_dream_record(
+            dream_id=dream_id, seed=seed,
+            full_text=full_text, summary=summary,
+        )
+        log.info(
+            "dream saved: id=%s seed=%s chars=%d summary=%s",
+            dream_id, seed, len(full_text),
+            (summary or "")[:80],
+        )
+
+    def _schedule(device_id: str) -> None:
+        _cancel_pending(device_id)
+        if DREAM_COUNT_PER_NIGHT <= 0:
+            return
+        tasks: list[asyncio.Task] = []
+        # Even fractions: 1/(N+1), 2/(N+1), ..., N/(N+1) of the window.
+        # For N=3, this gives 25/50/75% — the canonical schedule.
+        for i in range(1, DREAM_COUNT_PER_NIGHT + 1):
+            delay = DREAM_WINDOW_SECONDS * (i / (DREAM_COUNT_PER_NIGHT + 1))
+            seed = random.choice(DREAM_INSPIRATIONS)
+
+            async def _delayed_fire(d: float, did: str, s: str) -> None:
+                await asyncio.sleep(d)
+                try:
+                    await _fire_one(did, s)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    log.exception("dream fire crashed: device=%s seed=%s", did, s)
+
+            tasks.append(
+                asyncio.create_task(_delayed_fire(delay, device_id, seed))
+            )
+        pending[device_id] = tasks
+        log.info(
+            "dreams scheduled: device=%s count=%d delays=%s",
+            device_id, len(tasks),
+            [f"{DREAM_WINDOW_SECONDS * (i / (DREAM_COUNT_PER_NIGHT + 1)):.0f}s"
+             for i in range(1, DREAM_COUNT_PER_NIGHT + 1)],
+        )
+
+    try:
+        while True:
+            event = await q.get()
+            name = event.get("name") or ""
+            if name != "state_changed":
+                continue
+            device_id = event.get("device_id") or ""
+            if not device_id:
+                continue
+            new_state = (event.get("data", {}).get("state") or "").strip().lower()
+            if new_state == "sleep":
+                _schedule(device_id)
+            else:
+                # Any non-sleep state cancels pending dreams. The next
+                # transition back to sleep schedules a fresh batch.
+                if device_id in pending:
+                    log.info(
+                        "dreams cancelled: device=%s reason=state=%s",
+                        device_id, new_state,
+                    )
+                    _cancel_pending(device_id)
+    except asyncio.CancelledError:
+        log.info("perception sleep dreamer cancelled")
+        for did in list(pending.keys()):
+            _cancel_pending(did)
+        raise
+    except Exception:
+        log.exception("perception sleep dreamer crashed")
+    finally:
+        _perception_unsubscribe(q)
+
+
+async def _perception_dance_reflector() -> None:
+    """Background task: on `dance_ended` events, fire the narrative LLM
+    for a short reflection on the dance and append to the daily dances
+    NDJSON. Silent — no audio, no LED change, no state mutation. Each
+    reflection is independent; failures are logged and skipped.
+    """
+    log.info(
+        "perception dance reflector started (model=%s)", NARRATIVE_MODEL,
+    )
+    q = _perception_subscribe()
+    try:
+        while True:
+            event = await q.get()
+            if event.get("name") != "dance_ended":
+                continue
+            device_id = event.get("device_id") or ""
+            if not device_id:
+                continue
+            data = event.get("data") or {}
+            # `data.dance` may be empty if the firmware emitted a bare
+            # dance_ended (older firmware); fall back to a generic name.
+            dance = (data.get("dance") or "the dance").strip() or "the dance"
+            user_prompt = DANCE_USER_PROMPT_TEMPLATE.format(dance=dance)
+
+            async def _fire(did: str, dn: str, up: str) -> None:
+                text = await asyncio.to_thread(
+                    _call_narrative_llm,
+                    up,
+                    system_prompt=DANCE_SYSTEM_PROMPT,
+                    max_tokens=200,
+                    temperature=0.85,
+                )
+                if not text:
+                    log.warning(
+                        "dance reflection skipped (no LLM text): device=%s dance=%s",
+                        did, dn,
+                    )
+                    return
+                _write_dance_record(
+                    device_id=did, dance=dn, reflection=text,
+                )
+                log.info(
+                    "dance reflection saved: device=%s dance=%s chars=%d",
+                    did, dn, len(text),
+                )
+
+            _spawn(
+                _fire(device_id, dance, user_prompt),
+                name="dance_reflector_fire",
+            )
+    except asyncio.CancelledError:
+        log.info("perception dance reflector cancelled")
+        raise
+    except Exception:
+        log.exception("perception dance reflector crashed")
+    finally:
+        _perception_unsubscribe(q)
 
 
 async def _perception_idle_photographer() -> None:
