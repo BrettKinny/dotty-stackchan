@@ -392,6 +392,17 @@ async def cards(request: Request) -> Any:
 
 
 _ALLOWED_EMOJIS = ("😊", "😆", "😢", "😮", "🤔", "😠", "😐", "😍", "😴")
+_EMOJI_FACE_NAMES = {
+    "😊": "happy",
+    "😆": "laughing",
+    "😢": "sad",
+    "😮": "surprised",
+    "🤔": "thinking",
+    "😠": "angry",
+    "😐": "neutral",
+    "😍": "loving",
+    "😴": "sleepy",
+}
 
 # Songs live on the xiaozhi-server filesystem at this absolute container path
 # (host: /mnt/user/appdata/xiaozhi-server/songs/, mounted :ro). The bridge
@@ -532,7 +543,14 @@ async def mood(request: Request, emoji: str = Form(...)) -> Any:
             request, "say_result.html",
             {"ok": False, "error": "Unknown emoji."},
         )
-    prompt = f"Make the {emoji} face. Reply with just '{emoji} ok'."
+    name = _EMOJI_FACE_NAMES.get(emoji, "")
+    if name:
+        prompt = (
+            f"Make the {emoji} face. Reply with exactly: "
+            f"'{emoji} This is my {name} face.' — nothing else."
+        )
+    else:
+        prompt = f"Make the {emoji} face. Reply with just '{emoji} ok'."
     return await _inject_or_error(request, prompt, label=f"make the {emoji} face")
 
 
