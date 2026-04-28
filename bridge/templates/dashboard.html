@@ -20,11 +20,10 @@
       crossorigin="anonymous">
 <style>
   html, body { -webkit-tap-highlight-color: transparent; }
-  /* DaisyUI's `.card` sets `display: flex` explicitly, which overrides the
-     HTML `hidden` attribute (since explicit `display` beats the user-agent
-     `[hidden] { display: none }` rule). The conditional-reveal JS at the
-     bottom of this template relies on `el.hidden = true` to hide the
-     Emojis card when state ≠ idle, so we have to force `[hidden]` to win
+  /* DaisyUI's `.card` and `.card-body` both set `display: flex` explicitly,
+     which overrides the user-agent `[hidden] { display: none }` rule. The
+     conditional-reveal JS at the bottom of this template uses `el.hidden`
+     to swap the State card's inner sections, so we force `[hidden]` to win
      against any class-based display. !important is load-bearing here. */
   [hidden] { display: none !important; }
   .safe-top { padding-top: env(safe-area-inset-top); }
@@ -154,86 +153,93 @@
     </div>
   </section>
 
-  <section class="flex flex-col" style="gap: 1.5rem;">
-    <div id="state-card-body" class="card bg-base-100 shadow-sm overflow-hidden"
-         hx-get="/ui/state" hx-trigger="load, dotty-refresh from:window" hx-swap="outerHTML"
-         hx-target="this">
-      <div class="card-body p-3 animate-pulse">
-        <div class="h-4 bg-base-300 rounded w-1/4"></div>
+  {# Combined State card. Top half = state selector (loaded from /ui/state).
+     Bottom half = state-conditional content; exactly one inner section is
+     visible at a time, flipped by the `dotty-state-change` listener below.
+     They share one `.card` shell so the buttons + contextual UI read as a
+     single connected surface, divided by a thin rule. #}
+  <section>
+    <div class="card bg-base-100 shadow-sm overflow-hidden">
+      <div id="state-card-body"
+           hx-get="/ui/state" hx-trigger="load, dotty-refresh from:window" hx-swap="outerHTML"
+           hx-target="this">
+        <div class="card-body p-3 animate-pulse">
+          <div class="h-4 bg-base-300 rounded w-1/4"></div>
+        </div>
       </div>
-    </div>
 
-    <div id="emojis-section" class="card bg-base-100 shadow-sm">
-      <div class="card-body p-3">
-        <div class="text-xs text-base-content/60 mb-2 px-1">Emojis</div>
-        <div class="flex gap-1 w-full flex-1 items-center">
-          {% for e in ["😊","😆","😢","😮","🤔","😠","😐","😍","😴"] %}
-          <form hx-post="/ui/actions/mood" hx-target="#mood-result" hx-swap="afterbegin"
-                hx-disabled-elt="find button"
-                class="flex-1">
-            <input type="hidden" name="emoji" value="{{ e }}">
-            <button type="submit" class="btn btn-ghost text-lg min-h-9 w-full p-0">{{ e }}</button>
+      <div id="state-context" class="border-t border-base-300">
+        <div id="emojis-section" class="card-body p-3">
+          <div class="text-xs text-base-content/60 mb-2 px-1">Emojis</div>
+          <div class="flex gap-1 w-full flex-1 items-center">
+            {% for e in ["😊","😆","😢","😮","🤔","😠","😐","😍","😴"] %}
+            <form hx-post="/ui/actions/mood" hx-target="#mood-result" hx-swap="afterbegin"
+                  hx-disabled-elt="find button"
+                  class="flex-1">
+              <input type="hidden" name="emoji" value="{{ e }}">
+              <button type="submit" class="btn btn-ghost text-lg min-h-9 w-full p-0">{{ e }}</button>
+            </form>
+            {% endfor %}
+          </div>
+          <div id="mood-result" class="mt-2 empty:hidden"></div>
+        </div>
+
+        <div id="say-section" class="card-body p-3" hidden>
+          <div class="text-xs text-base-content/60 mb-2 px-1">Talk</div>
+          <form hx-post="/ui/actions/say" hx-target="#say-result" hx-swap="innerHTML"
+                hx-disabled-elt="find button, find input"
+                hx-on::after-request="if(event.detail.successful){this.reset();var i=this.querySelector('input[name=text]');if(i)i.focus();}"
+                hx-on::input="(function(f){var i=f.querySelector('input[name=text]');var b=f.querySelector('button[type=submit]');if(i&&b)b.disabled=!i.value.trim();})(this)"
+                class="flex flex-col sm:flex-row gap-2">
+            <input type="text" name="text" placeholder="Say something…"
+                   class="input input-bordered flex-1" maxlength="500" autocomplete="off"
+                   enterkeyhint="send" required>
+            <button type="submit" class="btn btn-primary min-h-12" disabled>Send</button>
           </form>
-          {% endfor %}
+          <div id="say-result" class="mt-2 empty:hidden"></div>
         </div>
-        <div id="mood-result" class="mt-2 empty:hidden"></div>
-      </div>
-    </div>
-  </section>
 
-  <section id="say-section" hidden>
-    <div class="card bg-base-100 shadow-sm">
-      <div class="card-body p-3">
-        <div class="text-xs text-base-content/60 mb-2 px-1">Talk</div>
-        <form hx-post="/ui/actions/say" hx-target="#say-result" hx-swap="innerHTML"
-              hx-disabled-elt="find button, find input"
-              hx-on::after-request="if(event.detail.successful){this.reset();var i=this.querySelector('input[name=text]');if(i)i.focus();}"
-              hx-on::input="(function(f){var i=f.querySelector('input[name=text]');var b=f.querySelector('button[type=submit]');if(i&&b)b.disabled=!i.value.trim();})(this)"
-              class="flex flex-col sm:flex-row gap-2">
-          <input type="text" name="text" placeholder="Say something…"
-                 class="input input-bordered flex-1" maxlength="500" autocomplete="off"
-                 enterkeyhint="send" required>
-          <button type="submit" class="btn btn-primary min-h-12" disabled>Send</button>
-        </form>
-        <div id="say-result" class="mt-2 empty:hidden"></div>
-      </div>
-    </div>
-  </section>
-
-  <section id="story-section" hidden>
-    <div class="card bg-base-100 shadow-sm">
-      <div class="card-body p-3">
-        <div class="text-xs text-base-content/60 mb-2 px-1">Start a story</div>
-        <form hx-post="/ui/actions/start-story" hx-target="#story-result" hx-swap="innerHTML"
-              hx-disabled-elt="find button, find input"
-              hx-on::after-request="if(event.detail.successful){this.reset();var i=this.querySelector('input[name=text]');if(i)i.focus();}"
-              hx-on::input="(function(f){var i=f.querySelector('input[name=text]');var b=f.querySelector('button[type=submit]');if(i&&b)b.disabled=!i.value.trim();})(this)"
-              class="flex flex-col sm:flex-row gap-2">
-          <input type="text" name="text" placeholder="Start a new story about…"
-                 class="input input-bordered flex-1" maxlength="500" autocomplete="off"
-                 enterkeyhint="send" required>
-          <button type="submit" class="btn btn-primary min-h-12" disabled>Start story</button>
-        </form>
-        <div id="story-result" class="mt-2 empty:hidden"></div>
-      </div>
-    </div>
-  </section>
-
-  <section id="dance-section" hidden>
-    <div class="card bg-base-100 shadow-sm">
-      <div class="card-body p-3">
-        <div class="text-xs text-base-content/60 mb-2 px-1">Dance &amp; sing</div>
-        <form hx-post="/ui/actions/dance" hx-target="#dance-result" hx-swap="afterbegin"
-              hx-disabled-elt="find button">
-          <button class="btn btn-outline w-full min-h-12">💃🎤 Dance &amp; sing</button>
-        </form>
-        <div class="text-xs text-base-content/50 mt-3 mb-1 px-1">Or play a specific track</div>
-        <div id="songs-list" hx-get="/ui/songs"
-             hx-trigger="load, every 30s"
-             hx-swap="innerHTML">
-          <div class="text-xs text-base-content/40 text-center py-2">Loading…</div>
+        <div id="story-section" class="card-body p-3" hidden>
+          <div class="text-xs text-base-content/60 mb-2 px-1">Start a story</div>
+          <form hx-post="/ui/actions/start-story" hx-target="#story-result" hx-swap="innerHTML"
+                hx-disabled-elt="find button, find input"
+                hx-on::after-request="if(event.detail.successful){this.reset();var i=this.querySelector('input[name=text]');if(i)i.focus();}"
+                hx-on::input="(function(f){var i=f.querySelector('input[name=text]');var b=f.querySelector('button[type=submit]');if(i&&b)b.disabled=!i.value.trim();})(this)"
+                class="flex flex-col sm:flex-row gap-2">
+            <input type="text" name="text" placeholder="Start a new story about…"
+                   class="input input-bordered flex-1" maxlength="500" autocomplete="off"
+                   enterkeyhint="send" required>
+            <button type="submit" class="btn btn-primary min-h-12" disabled>Start story</button>
+          </form>
+          <div id="story-result" class="mt-2 empty:hidden"></div>
         </div>
-        <div id="dance-result" class="mt-2 empty:hidden"></div>
+
+        <div id="dance-section" class="card-body p-3" hidden>
+          <div class="text-xs text-base-content/60 mb-2 px-1">Dance &amp; sing</div>
+          <form hx-post="/ui/actions/dance" hx-target="#dance-result" hx-swap="afterbegin"
+                hx-disabled-elt="find button">
+            <button class="btn btn-outline w-full min-h-12">💃🎤 Dance &amp; sing</button>
+          </form>
+          <div class="text-xs text-base-content/50 mt-3 mb-1 px-1">Or play a specific track</div>
+          <div id="songs-list" hx-get="/ui/songs"
+               hx-trigger="load, every 30s"
+               hx-swap="innerHTML">
+            <div class="text-xs text-base-content/40 text-center py-2">Loading…</div>
+          </div>
+          <div id="dance-result" class="mt-2 empty:hidden"></div>
+        </div>
+
+        <div id="sleep-section" class="card-body p-3" hidden>
+          <div class="text-xs text-base-content/60 px-1">
+            💤 Sleeping — Dotty isn't listening. Pick another state to wake them.
+          </div>
+        </div>
+
+        <div id="security-section" class="card-body p-3" hidden>
+          <div class="text-xs text-base-content/60 px-1">
+            🛡 Security mode — Dotty is watching the room. Open the Robot card for live scene context.
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -336,19 +342,23 @@
 
 <script>
   // Conditional reveal: state.html dispatches `dotty-state-change` after
-  // each htmx swap. Single listener flips `hidden` per element so each
-  // state shows exactly one of: Emojis (idle), Talk (talk), Story
-  // (story_time), Dance (dance). Sleep / security hide all four.
+  // each htmx swap. Exactly one inner section in #state-context is shown
+  // per state — the bottom half of the State card mutates with the top.
+  var STATE_SECTION_FOR = {
+    idle:       'emojis-section',
+    talk:       'say-section',
+    story_time: 'story-section',
+    dance:      'dance-section',
+    sleep:      'sleep-section',
+    security:   'security-section'
+  };
   document.addEventListener('dotty-state-change', function (e) {
     var s = (e.detail && e.detail.state) || 'idle';
-    var emojis = document.getElementById('emojis-section');
-    var say    = document.getElementById('say-section');
-    var story  = document.getElementById('story-section');
-    var dance  = document.getElementById('dance-section');
-    if (emojis) emojis.hidden = (s !== 'idle');
-    if (say)    say.hidden    = (s !== 'talk');
-    if (story)  story.hidden  = (s !== 'story_time');
-    if (dance)  dance.hidden  = (s !== 'dance');
+    var visible = STATE_SECTION_FOR[s] || 'emojis-section';
+    Object.keys(STATE_SECTION_FOR).forEach(function (key) {
+      var el = document.getElementById(STATE_SECTION_FOR[key]);
+      if (el) el.hidden = (STATE_SECTION_FOR[key] !== visible);
+    });
   });
 
   // Belt-and-suspenders: state.html dispatches via inline <script> on each
