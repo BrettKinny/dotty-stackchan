@@ -1,0 +1,34 @@
+{# Result fragment for the kebab "Reboot" item. Lists the three component
+   outcomes, then polls /health with the same self-recovery pattern as
+   restart_result.html so the UI flips back to "ready" once the bridge is
+   back. The bridge restart itself is the longest-pole — robot announce is
+   instant, xiaozhi container restart takes a few seconds. #}
+<div class="alert alert-info dotty-alert flex flex-col items-stretch gap-2"
+     hx-get="/health" hx-trigger="load delay:5s, every 2s"
+     hx-swap="none"
+     hx-on::after-request="if(event.detail.successful){this.remove();}"
+     hx-on::load="(function(el){setTimeout(function(){
+       if(!el.isConnected) return;
+       var err=document.createElement('div');
+       err.className='alert alert-error dotty-alert';
+       err.textContent='Bridge did not come back after 60s. Check systemctl status zeroclaw-bridge.';
+       el.replaceWith(err);
+     },60000);})(this)">
+  <div class="font-semibold">Restarting bridge + server + robot…</div>
+  <ul class="text-xs space-y-1">
+    {% for name, r in results.items() %}
+    <li>
+      <span class="font-mono">{{ name }}:</span>
+      {% if r.ok %}
+      <span class="text-success">ok</span>
+      {% else %}
+      <span class="text-warning">skipped</span>
+      {% endif %}
+      <span class="text-base-content/60">— {{ r.detail }}</span>
+      {% if r.note %}
+      <div class="text-base-content/50 italic ml-4">{{ r.note }}</div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</div>

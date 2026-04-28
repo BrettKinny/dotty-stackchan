@@ -46,6 +46,7 @@ _state: dict[str, Any] = {
     "subscribe_events": None,
     "unsubscribe_events": None,
     "perception_state_getter": None,
+    "perception_recent_getter": None,
 }
 
 
@@ -56,7 +57,8 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
               inject_to_device: Any = None, abort_device: Any = None,
               subscribe_events: Any = None,
               unsubscribe_events: Any = None,
-              perception_state_getter: Any = None) -> None:
+              perception_state_getter: Any = None,
+              perception_recent_getter: Any = None) -> None:
     """Register bridge state with the dashboard. Idempotent."""
     if send_message is not None:
         _state["send_message"] = send_message
@@ -84,6 +86,8 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
         _state["unsubscribe_events"] = unsubscribe_events
     if perception_state_getter is not None:
         _state["perception_state_getter"] = perception_state_getter
+    if perception_recent_getter is not None:
+        _state["perception_recent_getter"] = perception_recent_getter
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -351,12 +355,12 @@ async def cards(request: Request) -> Any:
         sc_status, sc_detail, sc_last = "unknown", "no voice activity today", ""
     else:
         age = time.time() - last_seen_ts
-        if age < 600:
-            sc_status, sc_detail = "ok", "active"
-        elif age < 86400:
-            sc_status, sc_detail = "warn", "idle"
-        else:
-            sc_status, sc_detail = "bad", "stale"
+        # Binary heartbeat — voice idle is normal (mornings, sleep), so
+        # we no longer warn on it. The robot pill only goes red when the
+        # heartbeat is genuinely absent past the bridge's perception
+        # staleness threshold (mirrored on the device side as actual
+        # disconnection symptoms).
+        sc_status, sc_detail = "ok", "active"
         sc_last = f"{_humanize_age(age)} ago"
 
     if not XIAOZHI_HOST:
@@ -436,9 +440,18 @@ async def device_status(request: Request) -> Any:
 
 
 @router.get("/alerts/count", response_class=HTMLResponse, include_in_schema=False)
-async def alerts_count(request: Request) -> Any:
-    """Q6: count today's errored turns from the convo log so the header
-    badge shows it."""
+async def alerts_count(request: Request, chip: int = 0) -> Any:
+    """Q6: count today's errored turns from the convo log.
+
+    Two render modes share the same count so the dashboard polls one URL:
+      - default: legacy floating ``alerts_badge.html`` (kept for
+        compatibility — currently unused by dashboard.html since the badge
+        was folded into the Errors filter chip).
+      - ``?chip=1``: returns the chip's label text (``Errors`` or
+        ``Errors (N)``) plus an inline script that toggles ``btn-error`` on
+        the chip. innerHTML swap target is the chip itself, so the script
+        runs against its own parent element.
+    """
     today = datetime.now().strftime("%Y-%m-%d")
     path = _log_path_for(today)
     n = 0
@@ -455,6 +468,16 @@ async def alerts_count(request: Request) -> Any:
                     n += 1
         except OSError:
             pass
+    if chip:
+        # Don't tint the chip red — selection (`btn-primary` via setFeedFilter)
+        # is the only "selected" cue; the chip just shows a warning glyph +
+        # count when there are unread errors. User feedback: red without
+        # selection looked permanently selected.
+        if n > 0:
+            return HTMLResponse(
+                f'<span aria-hidden="true" class="mr-0.5">⚠</span>Errors ({n})'
+            )
+        return HTMLResponse("Errors")
     return templates.TemplateResponse(
         request, "alerts_badge.html",
         {"count": n},
@@ -662,6 +685,50 @@ async def say(request: Request, text: str = Form(...)) -> Any:
             {"ok": False, "error": "Message was empty after sanitisation."},
         )
     return await _inject_or_error(request, text, label=text)
+
+
+@router.post("/actions/start-story", response_class=HTMLResponse,
+             include_in_schema=False)
+async def start_story(request: Request, text: str = Form(...)) -> Any:
+    """Inject a story-seed prompt and (if needed) flip state to story_time.
+
+    Reuses say_result.html — the success layout fits "you said / Dotty
+    replied" naturally for a seed payload too.
+    """
+    text = (text or "").strip()
+    if not text:
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": "Empty seed — describe a story for Dotty to start."},
+        )
+    if len(text) > 500:
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": "Too long — keep it under 500 characters."},
+        )
+    # Same sanitisation as /actions/say: strip C0 + DEL, collapse whitespace.
+    text = re.sub(r"[\x00-\x1f\x7f]+", " ", text)
+    text = " ".join(text.split())
+    if not text:
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": "Seed was empty after sanitisation."},
+        )
+    # Flip into story_time first if we're not already there, so the seed
+    # turn lands in the right narrative state. Best-effort: a setter
+    # failure shouldn't block the inject — Dotty can still start a story
+    # while in idle/talk, just without the state-pip / story-mode prompt
+    # tweaks the firmware applies.
+    getter = _state.get("state_getter")
+    setter = _state.get("state_setter")
+    current = (getter() if getter else "") or ""
+    if setter is not None and current != "story_time":
+        try:
+            await setter("story_time")
+        except Exception:
+            log.exception("start-story state flip failed (continuing with inject)")
+    seed = f"Tell a new story about: {text}"
+    return await _inject_or_error(request, seed, label=text)
 
 
 def _latest_vision_entry() -> tuple[str, dict] | None:
@@ -1185,6 +1252,133 @@ async def restart_bridge(request: Request) -> Any:
     )
 
 
+# --- Reboot-all: kebab-menu single-click full restart --------------------
+#
+# Combines the three component restarts (firmware / xiaozhi-server / bridge)
+# behind a single confirm-then-go button. The robot-side step is best-effort:
+# the firmware does not yet expose an MCP reboot tool, so we announce the
+# reboot through the existing inject-text pipeline (the kid hears Dotty say
+# what's happening). When a `self.system.reboot` MCP tool lands in the
+# firmware, swap the inject for that tool — the rest of the sequence stays.
+#
+# Auth-wise: the dashboard router this endpoint is registered on already
+# carries `Depends(_verify_dashboard_auth)`. The bridge.py top-level
+# `_admin_router` (the canonical /admin/* mount) is localhost-only and is
+# the right place for shell-level mutations triggered by external scripts;
+# this endpoint is intentionally exposed via /ui/actions so it inherits the
+# dashboard's HTTP Basic auth and is reachable from a phone on the LAN —
+# which is what the user-facing kebab needs.
+
+XIAOZHI_RESTART_USER = os.environ.get("DOTTY_XIAOZHI_SSH_USER", "root")
+XIAOZHI_COMPOSE_DIR = os.environ.get(
+    "DOTTY_XIAOZHI_COMPOSE_DIR", "/mnt/user/appdata/xiaozhi-server",
+)
+
+
+def _ssh_restart_xiaozhi() -> tuple[bool, str]:
+    """SSH from this host to the Unraid Docker host and `docker compose
+    restart` the xiaozhi-server container. Returns (ok, detail). Skips
+    silently with ok=False if SSH/keys aren't set up — caller logs and
+    continues so the reboot-all flow is partially-successful rather than
+    blocking on a single component."""
+    if not XIAOZHI_HOST:
+        return False, "XIAOZHI_HOST not set"
+    import subprocess
+    cmd = [
+        "ssh", "-o", "StrictHostKeyChecking=no",
+        "-o", "BatchMode=yes",  # don't prompt for password
+        "-o", "ConnectTimeout=5",
+        f"{XIAOZHI_RESTART_USER}@{XIAOZHI_HOST}",
+        f"cd {XIAOZHI_COMPOSE_DIR} && docker compose restart",
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if proc.returncode == 0:
+            return True, "restart command dispatched"
+        return False, f"ssh exit {proc.returncode}: {proc.stderr.strip()[:200]}"
+    except subprocess.TimeoutExpired:
+        return False, "ssh timed out after 30s"
+    except FileNotFoundError:
+        return False, "ssh binary not found on bridge host"
+    except Exception as exc:  # noqa: BLE001
+        return False, f"{exc.__class__.__name__}: {exc}"
+
+
+@router.post("/actions/reboot-all",
+             response_class=HTMLResponse, include_in_schema=False)
+async def reboot_all(request: Request) -> Any:
+    """Combined firmware + xiaozhi-server + bridge restart sequence.
+
+    Sequence:
+      1. Firmware: announce the reboot via inject-text. (Will be swapped
+         to a real MCP reboot tool once the firmware exposes one.)
+      2. xiaozhi-server: SSH to Unraid and `docker compose restart`. Skipped
+         gracefully if SSH isn't keyed up.
+      3. Bridge self-restart with a 2s delay so this HTTP response can
+         flush before SIGTERM lands.
+    """
+    results: dict[str, dict[str, Any]] = {}
+
+    # 1. Firmware — announce + (eventual) tool call. Best-effort.
+    inject = _state.get("inject_to_device")
+    if inject is not None:
+        try:
+            inject_result = await inject(
+                text="I'm rebooting now — back in a moment.",
+            )
+            results["robot"] = {
+                "ok": bool(inject_result.get("ok")),
+                "detail": (
+                    "announce dispatched"
+                    if inject_result.get("ok")
+                    else inject_result.get("error", "inject failed")
+                ),
+                "note": (
+                    "firmware MCP reboot tool not yet implemented — "
+                    "device announces but does not actually reboot"
+                ),
+            }
+        except Exception as exc:  # noqa: BLE001
+            log.exception("reboot-all: robot inject failed")
+            results["robot"] = {
+                "ok": False,
+                "detail": f"{exc.__class__.__name__}: {exc}",
+            }
+    else:
+        results["robot"] = {
+            "ok": False, "detail": "inject path not configured",
+        }
+
+    # 2. xiaozhi-server — SSH to Unraid and docker compose restart.
+    xz_ok, xz_detail = await asyncio.to_thread(_ssh_restart_xiaozhi)
+    results["server"] = {"ok": xz_ok, "detail": xz_detail}
+    if not xz_ok:
+        log.warning(
+            "reboot-all: xiaozhi restart skipped — %s", xz_detail,
+        )
+
+    # 3. Bridge self-restart — delayed 2s so the response flushes.
+    import subprocess
+    bridge_ok = True
+    bridge_detail = "delayed 2s self-restart scheduled"
+    try:
+        subprocess.Popen(
+            ["bash", "-c", "sleep 2 && systemctl restart zeroclaw-bridge"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.exception("reboot-all: bridge self-restart spawn failed")
+        bridge_ok = False
+        bridge_detail = f"{exc.__class__.__name__}: {exc}"
+    results["bridge"] = {"ok": bridge_ok, "detail": bridge_detail}
+
+    return templates.TemplateResponse(
+        request, "reboot_all_result.html",
+        {"results": results},
+    )
+
+
 # --- P8: PWA manifest + icon ----------------------------------------------
 
 _DOTTY_ICON_PATH = Path(__file__).parent / "assets" / "dotty-icon.svg"
@@ -1375,19 +1569,18 @@ async def status_strip(request: Request, placement: str = "header") -> Any:
             sc_tip = "Dotty: no voice activity today"
         else:
             age = time.time() - last_seen_ts
-            if age < 600:
-                sc_status, sc_tip = "ok", f"Dotty: active {_humanize_age(age)} ago"
-            elif age < 86400:
-                sc_status, sc_tip = "warn", f"Dotty: idle {_humanize_age(age)} ago"
-            else:
-                sc_status, sc_tip = "bad", f"Dotty: stale {_humanize_age(age)} ago"
+            # Binary heartbeat — voice idle is normal, no warn band.
+            # Real connectivity loss surfaces via perception_state_getter
+            # below, which DOES still keep its warn semantics because a
+            # stale perception bus is a real bug worth flagging.
+            sc_status = "ok"
+            sc_tip = f"Dotty: active {_humanize_age(age)} ago"
 
-        # Downgrade the dot when the perception sensors have gone quiet
-        # past the bridge staleness threshold (face/sound bus, not voice).
-        # Voice activity may be 0 in the morning while perception should
-        # still be ticking over from face_detected etc — a stale bus
-        # means the firmware-side perception path is hung even if voice
-        # is technically reachable.
+        # Perception bus liveness — kept as a warn-only signal because a
+        # stale bus genuinely indicates a hung firmware perception path
+        # (face/sound events stopped flowing past PERCEPTION_STALE_THRESHOLD_S
+        # in bridge.py). This is the only path that can degrade the robot
+        # dot below "ok" in the redesigned binary model.
         psg = _state.get("perception_state_getter")
         if psg is not None:
             try:
@@ -1478,20 +1671,51 @@ async def host_detail(request: Request, slug: str) -> Any:
 
     facts: list[tuple[str, str]] = []
     title = ""
+    extra: dict[str, Any] = {}
 
     if slug == "bridge":
         title = "Bridge"
         upt = _proc_uptime_sec()
+        cpu_c = _cpu_temp_c()
+        mem = _read_memory_mb()
+        disk = _disk_usage_root()
+        # Smart-mode is the toggle that flips the active LLM. When off,
+        # the kid/adult split applies. We deliberately surface only
+        # "Kid Mode" and "Smart Mode" labels here (no "adult model"
+        # wording) so the dashboard mirrors the user-facing toggle
+        # vocabulary in CLAUDE.md / docs.
+        kid_getter = _state.get("kid_mode_getter")
+        smart_getter = _state.get("smart_mode_getter")
+        kid_on = bool(kid_getter()) if kid_getter else None
+        smart_on = bool(smart_getter()) if smart_getter else None
         facts = [
-            ("status",    "online"),
-            ("version",   BRIDGE_VERSION),
-            ("uptime",    _humanize_age(time.time() - _START_TIME)),
-            ("host up",   _humanize_age(upt) if upt else "n/a"),
-            ("logs dir",  str(LOG_DIR)),
-            ("kid model", _short_model(KID_MODEL_NAME)),
-            ("adult model", _short_model(ADULT_MODEL_NAME)),
-            ("smart model", _short_model(SMART_MODEL_NAME) or "(unset)"),
+            ("Device",    "Raspberry Pi"),
+            ("Status",    "online"),
+            ("Version",   BRIDGE_VERSION),
+            ("Uptime",    _humanize_age(time.time() - _START_TIME)),
+            ("Host up",   _humanize_age(upt) if upt else "n/a"),
+            ("Logs dir",  str(LOG_DIR)),
+            ("Kid Mode",  "on" if kid_on else ("off" if kid_on is False else "unknown")),
+            ("Kid LLM",   _short_model(KID_MODEL_NAME) or "(unset)"),
+            ("Smart Mode", "on" if smart_on else ("off" if smart_on is False else "unknown")),
+            ("Smart LLM", _short_model(SMART_MODEL_NAME) or "(unset)"),
         ]
+        # Bottom-bar diagnostics absorbed into this modal — UI-1 is
+        # removing the footer rendering separately, so this becomes the
+        # canonical place to read host vitals.
+        extra["diagnostics"] = {
+            "cpu_c": cpu_c,
+            "cpu_warn": cpu_c is not None and cpu_c >= 75,
+            "mem_pct": (
+                int(round((mem[0] / mem[1]) * 100)) if mem and mem[1] else None
+            ),
+            "mem_warn": bool(mem and mem[1] and (mem[0] / mem[1]) > 0.85),
+            "disk_pct": (
+                int(round((disk[0] / disk[1]) * 100)) if disk and disk[1] else None
+            ),
+            "disk_warn": bool(disk and disk[1] and (disk[0] / disk[1]) > 0.85),
+            "uptime": _humanize_age(upt) if upt else None,
+        }
     elif slug == "server":
         title = "Server (xiaozhi-esp32-server)"
         ota_ok, ws_ok = await asyncio.gather(
@@ -1499,12 +1723,41 @@ async def host_detail(request: Request, slug: str) -> Any:
             _tcp_reachable(XIAOZHI_HOST, XIAOZHI_WS_PORT),
         )
         n = await _xiaozhi_device_count()
+        # Smart-mode informs which LLM is currently routing voice turns.
+        smart_getter = _state.get("smart_mode_getter")
+        smart_on = bool(smart_getter()) if smart_getter else None
+        if smart_on is True:
+            current_llm = _short_model(SMART_MODEL_NAME) or "(unset)"
+        elif smart_on is False:
+            kid_getter = _state.get("kid_mode_getter")
+            kid_on = bool(kid_getter()) if kid_getter else False
+            current_llm = _short_model(
+                KID_MODEL_NAME if kid_on else ADULT_MODEL_NAME
+            ) or "(unset)"
+        else:
+            current_llm = "unknown"
+        # Voice-channel state — derived from the firmware state getter
+        # the dashboard already reads. talk / story_time mean active.
+        st_getter = _state.get("state_getter")
+        firmware_state = (st_getter() if st_getter else None) or "idle"
+        voice_active = firmware_state in ("talk", "story_time")
+        # TTS / ASR provider names — these live in the xiaozhi-server
+        # YAML on Unraid; the bridge does not currently poll for them.
+        # TODO: when xiaozhi exposes /xiaozhi/admin/config (or similar),
+        # query it instead of hardcoding. For now we surface the known
+        # deployment values so the modal isn't blank.
         facts = [
-            ("host",     XIAOZHI_HOST or "(unset)"),
+            ("Host",     XIAOZHI_HOST or "(unset)"),
             ("OTA :%d" % XIAOZHI_OTA_PORT, "reachable" if ota_ok else "unreachable"),
             ("WS :%d"  % XIAOZHI_WS_PORT,  "reachable" if ws_ok  else "unreachable"),
-            ("devices connected",
-             "—" if n is None else f"{n}"),
+            ("Devices connected", "—" if n is None else f"{n}"),
+            ("Voice channel", "active" if voice_active else "idle"),
+            ("Current LLM", current_llm),
+            ("TTS provider", "LocalPiper"),
+            ("ASR provider", "SenseVoice"),
+            # TODO: surface today's xiaozhi error count once the bridge
+            # tails the container log or xiaozhi exposes a metric.
+            ("Recent errors today", "—"),
         ]
     else:  # robot
         title = "Robot (StackChan)"
@@ -1562,20 +1815,197 @@ async def host_detail(request: Request, slug: str) -> Any:
                         )
                     else:
                         perception_label = "live"
+        # Pick the most-recent VLM-cached entry's device id for the
+        # "latest view" thumbnail. The /ui/host/robot/photo/{mac}
+        # endpoint serves the JPEG bytes — we don't link directly to
+        # /api/vision/latest/{mac} because that endpoint is JSON-only
+        # and blocks waiting for a fresh capture.
+        latest = _latest_vision_entry()
+        if latest is not None:
+            extra["photo_device_id"] = latest[0]
         facts = [
-            ("device class", "M5Stack StackChan (ESP32-S3)"),
-            ("connection",
+            ("Device class", "M5Stack StackChan (ESP32-S3)"),
+            ("Connection",
              "online" if (n is not None and n > 0)
              else ("offline" if n == 0 else "unknown")),
-            ("last seen",   seen),
-            ("current state", current),
-            ("perception",  perception_label),
+            ("Last seen",   seen),
+            ("Current state", current),
+            ("Perception",  perception_label),
         ]
 
     return templates.TemplateResponse(
         request, "host_detail.html",
-        {"title": title, "facts": facts, "slug": slug},
+        {"title": title, "facts": facts, "slug": slug, **extra},
     )
+
+
+# Robot modal photo — serves the cached JPEG from _vision_cache as
+# image/jpeg so the modal can render it with a plain <img src>. We
+# can't point the <img> at /api/vision/latest/{mac} because that
+# endpoint blocks for up to 15 s waiting for a fresh capture and
+# returns JSON, not an image. Returns 404 if there's no cached entry,
+# which lets the modal's onerror handler swap in a placeholder.
+@router.get("/host/robot/photo/{device_id}", include_in_schema=False)
+async def host_robot_photo(device_id: str) -> Response:
+    cache = _state.get("vision_cache") or {}
+    entry = cache.get(device_id)
+    if not entry or not entry.get("jpeg_bytes"):
+        raise HTTPException(404, "no cached photo")
+    return Response(
+        content=entry["jpeg_bytes"],
+        media_type="image/jpeg",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+# --- "Scene context" panel for the Robot modal ---------------------------
+# Surfaces what Dotty has lately seen and heard. Composes three sources:
+#   1. _vision_cache — most-recent VLM photo + description (room_view today,
+#      security_capture once the relays land).
+#   2. perception ring buffer — last ~20 face_detected/face_lost/sound_event/
+#      state_changed events, populated from bridge._perception_broadcast.
+#   3. security_watch.RECENT_CYCLES — last few security cycles (text-only;
+#      currently every cycle is errors=[photo_dispatch_failed,...] until the
+#      xiaozhi-server admin route lands).
+# Polled by the Robot modal every ~7 s via HTMX. Returns rendered HTML so
+# the panel can be hot-swapped without client-side JSON shuffling.
+
+_AUDIO_SUMMARY_WINDOW_S: float = 120.0  # "last 2 min"
+
+
+def _summarise_audio_from_perception(events: list[dict]) -> str:
+    """Heuristic: summarise sound_event entries in the last
+    _AUDIO_SUMMARY_WINDOW_S seconds. Returns a one-liner suitable for the
+    "What Dotty hears" line. Pure function — no I/O.
+
+    We don't have transcripts; the firmware emits direction + balance +
+    energy. We bucket direction (left/right/center) and report counts.
+    """
+    now = time.time()
+    sounds = [
+        ev for ev in events
+        if ev.get("name") == "sound_event"
+        and isinstance(ev.get("ts"), (int, float))
+        and (now - float(ev["ts"])) <= _AUDIO_SUMMARY_WINDOW_S
+    ]
+    if not sounds:
+        return "Quiet — no sound impulses in the last 2 min."
+    by_dir: dict[str, int] = {}
+    for ev in sounds:
+        d = (ev.get("data") or {}).get("direction") or "unknown"
+        by_dir[d] = by_dir.get(d, 0) + 1
+    parts = [f"{n} from {d}" for d, n in sorted(by_dir.items(), key=lambda kv: -kv[1])]
+    return f"{len(sounds)} sound impulse{'s' if len(sounds) != 1 else ''} in last 2 min — " + ", ".join(parts) + "."
+
+
+def _render_perception_event(ev: dict) -> dict:
+    """Format one perception event for display. Returns a dict with
+    pre-computed fields the template can render flat."""
+    name = ev.get("name") or ""
+    data = ev.get("data") or {}
+    ts = ev.get("ts")
+    age_label = "—"
+    if isinstance(ts, (int, float)):
+        age_label = _humanize_age(max(0.0, time.time() - float(ts)))
+    detail = ""
+    if name == "sound_event":
+        d = data.get("direction") or "?"
+        e = data.get("energy")
+        if e is not None:
+            try:
+                detail = f"from {d}, energy {int(e):,}"
+            except (TypeError, ValueError):
+                detail = f"from {d}"
+        else:
+            detail = f"from {d}"
+    elif name == "state_changed":
+        s = data.get("state") or "?"
+        detail = f"→ {s}"
+    elif name == "face_recognized":
+        ident = data.get("identity") or "?"
+        detail = f"as {ident}"
+    return {"name": name, "age_label": age_label, "detail": detail}
+
+
+def _build_security_panel_ctx(device_id: str) -> dict:
+    """Assemble the template context for security_panel.html. Pulls from
+    _vision_cache, the perception ring (via the configured getter), and
+    bridge.security_watch.RECENT_CYCLES (filtered to device_id)."""
+    cache = _state.get("vision_cache") or {}
+    cache_entry = cache.get(device_id) or {}
+
+    latest_vision: dict | None = None
+    if cache_entry:
+        wall_ts = cache_entry.get("wall_ts")
+        age_label = "—"
+        if isinstance(wall_ts, (int, float)):
+            age_label = _humanize_age(max(0.0, time.time() - float(wall_ts)))
+        latest_vision = {
+            "description": (cache_entry.get("description") or "").strip(),
+            "source": cache_entry.get("source") or "room_view",
+            "age_label": age_label,
+            "has_photo": bool(cache_entry.get("jpeg_bytes")),
+        }
+
+    perception_getter = _state.get("perception_recent_getter")
+    perception_events: list[dict] = []
+    if perception_getter is not None:
+        try:
+            perception_events = perception_getter(device_id, 12) or []
+        except Exception:
+            log.warning("perception_recent_getter raised", exc_info=True)
+            perception_events = []
+
+    audio_summary = _summarise_audio_from_perception(perception_events)
+    perception_view = [_render_perception_event(e) for e in perception_events]
+
+    # Security cycles — pull text-only records from the existing ring buffer.
+    cycles_view: list[dict] = []
+    try:
+        from bridge import security_watch  # local import — avoid hard dep
+        all_cycles = security_watch.get_recent_cycles(limit=10)
+    except Exception:
+        all_cycles = []
+    for rec in all_cycles:
+        if rec.get("device") != device_id:
+            continue
+        # The ts on cycle records is an isoformat string from
+        # datetime.now(LOCAL_TZ); show its hh:mm:ss tail for the panel.
+        ts_iso = rec.get("ts") or ""
+        ts_short = ts_iso[11:19] if len(ts_iso) >= 19 else ts_iso
+        cycles_view.append({
+            "ts_short": ts_short,
+            "photo_desc": (rec.get("photo_desc") or "").strip(),
+            "audio_transcript": rec.get("audio_transcript") or "—",
+            "errors": rec.get("errors") or [],
+        })
+        if len(cycles_view) >= 5:
+            break
+
+    state_getter = _state.get("state_getter")
+    current_state = (state_getter() if state_getter else None) or "idle"
+
+    return {
+        "device_id": device_id,
+        "current_state": current_state,
+        "latest_vision": latest_vision,
+        "audio_summary": audio_summary,
+        "perception_events": perception_view,
+        "cycles": cycles_view,
+    }
+
+
+@router.get("/security/recent/{device_id}", response_class=HTMLResponse,
+            include_in_schema=False)
+async def security_recent(request: Request, device_id: str) -> Any:
+    """Render the Robot modal's "Scene context" panel for ``device_id``.
+
+    HTMX swaps this in every ~7 s. Inherits dashboard auth via the router-
+    level dependency. Composes from in-memory sources only — no disk I/O,
+    no media bytes leave the process.
+    """
+    ctx = _build_security_panel_ctx(device_id)
+    return templates.TemplateResponse(request, "security_panel.html", ctx)
 
 
 # --- P13 + P12: SSE event stream for live log + error toasts -------------
