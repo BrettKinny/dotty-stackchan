@@ -105,6 +105,10 @@ Run `make help` for the full list. Key targets:
 
 ## Firmware iteration
 
+The `firmware/` directory at the root of this repo is a **git submodule** that pins a release of the StackChan firmware fork (`BrettKinny/StackChan` @ `dotty`). It exists so the public repo has a reproducible firmware-version pointer; updating it is a *release* action, not a development action. The build commands below operate inside that submodule and are appropriate for users who only have this repo cloned.
+
+If you maintain a separate firmware checkout for active development (recommended for non-trivial firmware work — keeps the submodule clean and avoids accidental commits into a release pin), point the same `docker run` invocations at that checkout instead and bump the submodule pointer here only when cutting a release.
+
 Build + flash the StackChan firmware locally with the cached IDF container — no GHA round-trip needed for dev cycles.
 
 ```bash
