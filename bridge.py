@@ -340,6 +340,16 @@ FACE_NAME_GREET_QUIET_AFTER_CHAT_SEC = float(
 DOTTY_IDLE_VISION_COOLDOWN_SEC = float(
     os.environ.get("DOTTY_IDLE_VISION_COOLDOWN_SEC", "120"),
 )
+# Talk-active gate kickoff allowance. The xiaozhi-side handler dispatches
+# the room_view capture while state is still `idle`; the JPEG arrives at
+# the bridge ~2-3 s later, by which time the firmware has auto-transitioned
+# to `talk` (face_tracking → WakeWordInvoke). Without an allowance the
+# kickoff capture — the only photo for that conversation's greeting — is
+# gated to the "no one in view" stub. Subsequent face_detected events
+# during the same turn arrive well after this window and stay gated.
+ROOM_VIEW_TALK_KICKOFF_GRACE_SEC = float(
+    os.environ.get("ROOM_VIEW_TALK_KICKOFF_GRACE_SEC", "5.0"),
+)
 # Idle photographer — fires a silent take_photo every IDLE_PHOTOGRAPHER_*
 # seconds (uniform jitter) while the device is genuinely idle. No servo
 # motion, no LED change, no audio cue. The capture itself is identical
@@ -3333,7 +3343,23 @@ async def vision_explain(
             # gate for room-view + face-recognition".
             current_state = (state.get("current_state") or "idle").lower()
             listening = bool(state.get("listening"))
-            talk_active = current_state == "talk" or listening
+            last_state_change_t = state.get("last_state_change_t", 0.0)
+            # Allow the kickoff capture of a fresh talk turn through —
+            # see ROOM_VIEW_TALK_KICKOFF_GRACE_SEC docstring. Note that
+            # `listening` is True during the kickoff (the firmware enters
+            # LISTENING state immediately after wake), so it cannot be a
+            # disqualifier here. Subsequent face_detected events during
+            # the same turn arrive >grace seconds after the transition and
+            # stay gated regardless of listening flag.
+            talk_kickoff = (
+                current_state == "talk"
+                and (wall_now - last_state_change_t)
+                    < ROOM_VIEW_TALK_KICKOFF_GRACE_SEC
+            )
+            talk_active = (
+                (current_state == "talk" or listening)
+                and not talk_kickoff
+            )
             if dance_active or talk_active or cooldown_age < DOTTY_IDLE_VISION_COOLDOWN_SEC:
                 if dance_active:
                     log.info(
@@ -3343,8 +3369,9 @@ async def vision_explain(
                 elif talk_active:
                     log.info(
                         "room_view skipped: device=%s reason=talk_active "
-                        "(state=%s listening=%s)",
+                        "(state=%s listening=%s age=%.2fs)",
                         device_id, current_state, listening,
+                        wall_now - last_state_change_t,
                     )
                 else:
                     log.info(
