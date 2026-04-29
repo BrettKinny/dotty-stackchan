@@ -75,6 +75,7 @@ Designed but not yet started. Roughly in priority order.
 - **Runtime OTA provisioning** -- captive-portal WiFi + OTA URL setup on first boot (no rebuild to retarget)
 - **Layer 2.5 stereo mic + camera person tracking** -- sound-source localization + camera fusion for 360° awareness in idle mode
 - **Phase 3 continuous vision classifier** -- EfficientDet/YOLOX at 1Hz on the Docker host GPU once dual RTX 3060s land
+- **Sleep-mode "dream" memory compaction** -- while Dotty is in `sleep` state (idle, overnight), a background pass feeds the day's ZeroClaw memory writes (perception events, conversation turns, declared facts, scene snapshots) to the smart model for compaction + summarisation. Two outputs: rewrite/prune the raw memory store (drop duplicates and low-signal perception spam, keep durable facts and notable events), and emit a separate human-readable daily summary that next-day turns can pull as "yesterday's context". Sleep-state-gated so the heavy LLM call never runs during interactive states. Pairs with the per-person memory and ambient scene memory work
 - **Variant board port guide** -- walkthrough for adding support for other ESP32-S3 boards
 
 ## Community wishlist
