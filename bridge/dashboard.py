@@ -50,6 +50,7 @@ _state: dict[str, Any] = {
     "perception_state_getter": None,
     "perception_recent_getter": None,
     "identity_display_name": None,
+    "last_user_line_getter": None,
 }
 
 
@@ -64,7 +65,8 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
               unsubscribe_events: Any = None,
               perception_state_getter: Any = None,
               perception_recent_getter: Any = None,
-              identity_display_name: Any = None) -> None:
+              identity_display_name: Any = None,
+              last_user_line_getter: Any = None) -> None:
     """Register bridge state with the dashboard. Idempotent."""
     if send_message is not None:
         _state["send_message"] = send_message
@@ -100,6 +102,8 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
         _state["perception_recent_getter"] = perception_recent_getter
     if identity_display_name is not None:
         _state["identity_display_name"] = identity_display_name
+    if last_user_line_getter is not None:
+        _state["last_user_line_getter"] = last_user_line_getter
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -937,8 +941,9 @@ def _build_perception_card_ctx(device_id: str | None) -> dict:
 
     Composes face state (existing 3-state dot), latest VLM image preview
     + description, latest audio caption (with the existing
-    sound-direction heuristic as fallback), and the most recent scene
-    synthesis sentence. Reads only in-memory caches — no I/O.
+    sound-direction heuristic as fallback), the most recent user voice
+    line, and the most recent scene synthesis sentence. Reads only
+    in-memory caches — no I/O.
     """
     psg = _state.get("perception_state_getter")
     name_lookup = _state.get("identity_display_name")
@@ -946,7 +951,7 @@ def _build_perception_card_ctx(device_id: str | None) -> dict:
     audio_cache = _state.get("audio_cache") or {}
     synth_cache = _state.get("scene_synthesis_cache") or {}
     perception_recent = _state.get("perception_recent_getter")
-    state_getter = _state.get("state_getter")
+    last_user_line_getter = _state.get("last_user_line_getter")
 
     # --- face state (preserved from the prior 3-state implementation) ---
     face_state = "off"
@@ -1052,6 +1057,32 @@ def _build_perception_card_ctx(device_id: str | None) -> dict:
                 events = []
         audio_text = _summarise_audio_from_perception(events)
 
+    # --- last user voice line (post-ASR transcript) ---
+    # Mirrors the audio-caption staleness convention: dim past 100 s so
+    # the badge fades rather than vanishing mid-glance.
+    latest_voice_line: dict | None = None
+    if device_id and last_user_line_getter:
+        try:
+            entry = last_user_line_getter(device_id) or {}
+        except Exception:
+            log.warning("last_user_line_getter raised", exc_info=True)
+            entry = {}
+        if entry:
+            text = (entry.get("text") or "").strip()
+            wall_ts = entry.get("wall_ts")
+            age_label = "—"
+            stale = False
+            if isinstance(wall_ts, (int, float)):
+                age_s = max(0.0, time.time() - float(wall_ts))
+                age_label = _humanize_age(age_s)
+                stale = age_s > 100.0
+            if text:
+                latest_voice_line = {
+                    "text": text,
+                    "age_label": age_label,
+                    "stale": stale,
+                }
+
     # --- scene synthesis ---
     synth_entry = (synth_cache.get(device_id) or {}) if device_id else {}
     synthesis_text = (synth_entry.get("text") or "").strip()
@@ -1060,8 +1091,6 @@ def _build_perception_card_ctx(device_id: str | None) -> dict:
         synthesis_age_label = _humanize_age(
             max(0.0, time.time() - float(synth_entry["ts_wall"]))
         )
-
-    current_state = (state_getter() if state_getter else None) or "idle"
 
     return {
         "device_id": device_id or "",
@@ -1078,9 +1107,9 @@ def _build_perception_card_ctx(device_id: str | None) -> dict:
         "audio_age_label": audio_age_label,
         "audio_is_caption": audio_is_caption,
         "audio_stale": audio_stale,
+        "latest_voice_line": latest_voice_line,
         "synthesis_text": synthesis_text,
         "synthesis_age_label": synthesis_age_label,
-        "current_state": current_state,
     }
 
 

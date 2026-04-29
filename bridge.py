@@ -3040,6 +3040,31 @@ _audio_cache: dict[str, dict] = {}
 # only; the NDJSON sink under CONVO_LOG_DIR is the durable record.
 _scene_synthesis_cache: dict[str, dict] = {}
 
+# Per-device snapshot of the most recent user voice line (post-ASR) so
+# the dashboard's Perception "Sound" section can render "Said: …" without
+# tailing the convo NDJSON. Populated at /api/message + /api/message/stream
+# entry; the NDJSON sink remains the durable record.
+_LAST_USER_LINE_MAX_CHARS = 512
+_last_user_line_cache: dict[str, dict] = {}
+
+
+def _record_last_user_line(device_id: str | None, text: str) -> None:
+    if not device_id:
+        return
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return
+    if len(cleaned) > _LAST_USER_LINE_MAX_CHARS:
+        cleaned = cleaned[: _LAST_USER_LINE_MAX_CHARS - 1] + "…"
+    _last_user_line_cache[device_id] = {
+        "text": cleaned,
+        "wall_ts": time.time(),
+    }
+
+
+def _get_last_user_line(device_id: str) -> dict | None:
+    return _last_user_line_cache.get(device_id)
+
 def _call_narrative_llm(
     user_prompt: str,
     *,
@@ -4267,6 +4292,9 @@ async def message(payload: MessageIn) -> MessageOut:
     session_id = payload.session_id or str(uuid.uuid4())
     log.info("msg channel=%s session=%s len=%d",
              payload.channel, session_id, len(payload.content))
+    _record_last_user_line(
+        (payload.metadata or {}).get("device_id"), payload.content,
+    )
     await _refresh_caches()
     speaker = _resolve_speaker_for_request(payload)
     if speaker is not None and speaker.person_id:
@@ -4477,6 +4505,7 @@ if _configure_dashboard is not None:
         perception_state_getter=_dashboard_perception_state_getter,
         perception_recent_getter=get_recent_perception,
         identity_display_name=_identity_display_name,
+        last_user_line_getter=_get_last_user_line,
     )
 
 
@@ -4816,6 +4845,9 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
     log.info(
         "stream channel=%s session=%s len=%d",
         payload.channel, session_id, len(payload.content),
+    )
+    _record_last_user_line(
+        (payload.metadata or {}).get("device_id"), payload.content,
     )
     await _refresh_caches()
     speaker = _resolve_speaker_for_request(payload)
