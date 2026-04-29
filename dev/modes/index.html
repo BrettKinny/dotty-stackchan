@@ -2414,7 +2414,7 @@
 <tr>
 <th>Toggle</th>
 <th>Toggle pip (right ring)</th>
-<th>When ON</th>
+<th>What it does</th>
 <th>Persistence</th>
 </tr>
 </thead>
@@ -2422,18 +2422,19 @@
 <tr>
 <td><code>kid_mode</code></td>
 <td>warm pink <code>(168,80,100)</code> at index <strong>8</strong></td>
-<td>Safety-tuned model, content sandwich, camera tools denied, kid-safe persona</td>
+<td>Guardrails only — content sandwich, camera tools denied, kid-safe persona. Does not pick the model.</td>
 <td><code>/root/zeroclaw-bridge/state/kid-mode</code></td>
 </tr>
 <tr>
 <td><code>smart_mode</code></td>
 <td>orange <code>(168,80,0)</code> at index <strong>9</strong></td>
-<td>Bridge bypasses ZeroClaw and routes the turn through direct OpenRouter (capable model). No memory, no tools.</td>
+<td>Voice-daemon model selector. ON → <code>SMART_MODEL</code> (claude-sonnet-4-6 by default); OFF → <code>DEFAULT_MODEL</code> (mistral-small-3.2-24b-instruct). ZeroClaw retains full memory + tools either way.</td>
 <td><code>/root/zeroclaw-bridge/state/smart-mode</code></td>
 </tr>
 </tbody>
 </table>
-<p>Toggles compose: <code>kid_mode = on</code> AND <code>smart_mode = on</code> is valid (bridge applies the kid-safe sandwich on top of the direct OpenRouter call). Both toggles are sticky across turns, daemon restarts, and reboots.</p>
+<p>The two toggles are orthogonal — they compose freely. <code>kid_mode = on</code> AND <code>smart_mode = on</code> runs the smart model behind the kid-safe sandwich. Both toggles are sticky across turns, daemon restarts, and reboots.</p>
+<p><code>smart_mode</code> is <strong>dashboard- and admin-endpoint-only</strong> — there is no voice trigger. Kids reach Dotty by voice but not the web dashboard, so dashboard-only is the access-control gate that keeps the more capable (and more expensive) model under household-head control.</p>
 <hr />
 <h2 id="led-contract-12-pixel-ring">LED contract (12-pixel ring)<a class="headerlink" href="#led-contract-12-pixel-ring" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>LEFT RING (global 0–5)              RIGHT RING (global 6–11)
@@ -2553,26 +2554,7 @@
 </tr>
 </tbody>
 </table>
-<p>Toggle phrases:</p>
-<table>
-<thead>
-<tr>
-<th>Phrase</th>
-<th>Effect</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>smart mode</code> / <code>think harder</code> / <code>big brain</code></td>
-<td><code>smart_mode = on</code> (sticky until cleared)</td>
-</tr>
-<tr>
-<td><code>normal mode</code> / <code>regular dotty</code> / <code>regular mode</code> / <code>stop smart mode</code></td>
-<td><code>smart_mode = off</code></td>
-</tr>
-</tbody>
-</table>
-<p>Kid mode is <em>not</em> voice-toggleable — it's a guardian-controlled axis driven from the <code>/admin/kid-mode</code> endpoint or the dashboard.</p>
+<p>Both <code>kid_mode</code> and <code>smart_mode</code> are voice-untoggleable — they are guardian-controlled axes driven from the <code>/admin/kid-mode</code> and <code>/admin/smart-mode</code> endpoints (or the dashboard cards that wrap them).</p>
 <h3 id="admin-endpoints-localhost-only">Admin endpoints (localhost-only)<a class="headerlink" href="#admin-endpoints-localhost-only" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -2591,12 +2573,12 @@
 <tr>
 <td><code>POST /admin/smart-mode</code></td>
 <td><code>{"enabled": bool, "device_id": "&lt;optional&gt;"}</code></td>
-<td>Persist + push <code>self.robot.set_toggle("smart_mode", ...)</code>. No daemon restart.</td>
+<td>Persist + push pip + rewrite voice-daemon <code>config.toml</code> model + schedule daemon restart. ON → <code>SMART_MODEL</code>, OFF → <code>DEFAULT_MODEL</code>.</td>
 </tr>
 <tr>
 <td><code>POST /admin/kid-mode</code></td>
 <td><code>{"enabled": bool}</code></td>
-<td>Persist + swap voice-daemon model + restart daemon. (Pip pushes via the post-restart toggle resync.)</td>
+<td>Persist + push pip + restart daemon (guardrail constants are baked at module import). No model swap — that's <code>smart_mode</code>'s job.</td>
 </tr>
 </tbody>
 </table>
@@ -2641,16 +2623,10 @@
 <td>n/a</td>
 </tr>
 <tr>
-<td><code>talk</code> (default)</td>
-<td>xiaozhi → bridge → ZeroClaw ACP (Mistral 3.2 by default)</td>
+<td><code>talk</code></td>
+<td>xiaozhi → bridge → ZeroClaw ACP. Daemon model = <code>SMART_MODEL</code> (sonnet-4-6) when smart_mode=on, else <code>DEFAULT_MODEL</code> (mistral-small).</td>
 <td>yes (FTS)</td>
 <td>yes</td>
-</tr>
-<tr>
-<td><code>talk</code> (smart_mode = on)</td>
-<td>xiaozhi → bridge → direct OpenRouter (<code>SMART_API_URL</code>)</td>
-<td>no</td>
-<td>no</td>
 </tr>
 <tr>
 <td><code>story_time</code></td>
@@ -2678,7 +2654,7 @@
 </tr>
 </tbody>
 </table>
-<p><code>smart_mode</code> and <code>story_time</code> both bypass ZeroClaw — <code>smart_mode</code> is one-shot per turn, <code>story_time</code> is a sticky state with its own session memory (Phase 7).</p>
+<p><code>smart_mode</code> swaps the voice daemon's model and restarts the daemon — every voice turn still goes through ZeroClaw (full memory + tools), just on the smart model. <code>story_time</code> is the only voice path that bypasses ZeroClaw, with its own session memory (Phase 7).</p>
 <hr />
 <h2 id="implementation-status">Implementation status<a class="headerlink" href="#implementation-status" title="Permanent link">&para;</a></h2>
 <table>
@@ -2722,7 +2698,7 @@
 <h2 id="sources-of-truth">Sources of truth<a class="headerlink" href="#sources-of-truth" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Firmware:</strong> <code>firmware/main/stackchan/modes/state_manager.{h,cpp}</code>, <code>firmware/main/stackchan/modifiers/face_tracking.cpp</code> (camera-edge hooks), <code>firmware/main/hal/hal_mcp.cpp</code> (set_state / set_toggle MCP)</li>
-<li><strong>Bridge:</strong> <code>bridge.py</code> (<code>_dispatch_set_state</code>, <code>_dispatch_set_toggle</code>, <code>_admin_state</code>, <code>_admin_smart_mode</code>, <code>_update_perception_state</code> for <code>state_changed</code>), <code>receiveAudioHandle.py</code> (voice phrases + per-conn toggle sync)</li>
+<li><strong>Bridge:</strong> <code>bridge.py</code> (<code>_dispatch_set_state</code>, <code>_dispatch_set_toggle</code>, <code>_admin_state</code>, <code>_admin_smart_mode</code>, <code>_admin_kid_mode</code>, <code>_apply_model_swap</code>, <code>_update_perception_state</code> for <code>state_changed</code>), <code>receiveAudioHandle.py</code> (voice state phrases + per-conn toggle sync)</li>
 <li><strong>xiaozhi-server patches:</strong> <code>custom-providers/xiaozhi-patches/http_server.py</code> (<code>/xiaozhi/admin/set-state</code>, <code>/xiaozhi/admin/set-toggle</code>), <code>custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py</code> (<code>state_changed</code> → <code>conn.current_state</code>)</li>
 <li><strong>Dashboard:</strong> <code>bridge/dashboard.py</code> + <code>bridge/templates/state_card.html</code> + <code>bridge/templates/smart_mode.html</code></li>
 </ul>
