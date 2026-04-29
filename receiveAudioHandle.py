@@ -241,6 +241,21 @@ def _is_wake_phrase(text: str) -> bool:
     return any(phrase in lower for phrase in _WAKE_PHRASES)
 
 
+_HELP_PHRASES = (
+    "what can you do",
+    "what do you do",
+    "how do i use you",
+    "how do you work",
+    "help me out",
+    "what are your features",
+)
+
+
+def _is_help_request(text: str) -> bool:
+    lower = text.lower().strip()
+    return any(phrase in lower for phrase in _HELP_PHRASES)
+
+
 async def _send_led_color(conn: "ConnectionHandler", r: int, g: int, b: int) -> None:
     try:
         msg = json.dumps({
@@ -1122,6 +1137,20 @@ async def startToChat(conn: "ConnectionHandler", text):
             f"[STATE_CHANGE:{target_state}] You just entered {target_state} "
             f"state. Say only a SHORT one-liner (under 12 words). "
             f"Suggested: {ack_hint!r}",
+        )
+        return
+
+    if _is_help_request(user_text):
+        conn.logger.bind(tag=TAG).info(f"Help intent detected: {user_text[:60]}")
+        conn.executor.submit(
+            conn.chat,
+            "[HELP_SUMMARY] The user asked what you can do. Reply in 2-3 short "
+            "sentences listing your main abilities, in plain spoken language: "
+            "you can chat, look around with your camera (\"what do you see\"), "
+            "tell stories (\"tell me a story\"), dance and sing (\"do the "
+            "macarena\", \"sing a song\"), and switch states like sleep or "
+            "watching the room (\"go to sleep\", \"keep watch\"). Keep it "
+            "warm and brief, do NOT list every phrase — just the categories.",
         )
         return
 
