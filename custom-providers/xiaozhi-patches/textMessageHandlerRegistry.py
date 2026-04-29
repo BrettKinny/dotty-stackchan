@@ -119,6 +119,24 @@ class EventTextMessageHandler(TextMessageHandler):
         # needs the dual-event handling.
         elif event_name == "face_detected":
             try:
+                # Talk-active gate: subsequent face_detected events while
+                # already in a conversation (face flicker mid-turn, user
+                # leaning in/out of frame) must NOT re-trigger room_view
+                # capture. The first face_detected of a session still
+                # reaches here because conn.current_state is "idle" at
+                # that moment — the IDLE→TALK transition is what this
+                # very event drives. Subsequent flicker events arrive
+                # after state has become "talk", and re-running room_view
+                # there can broadcast a fresh face_recognized that fires
+                # a stacked "Hi NAME" mid-turn. See dotty-private
+                # tasks.md "Talk-active gate for room-view + face-
+                # recognition" entry for the full audit.
+                cstate = (getattr(conn, "current_state", "") or "").lower()
+                if cstate == "talk":
+                    conn.logger.bind(tag=TAG).debug(
+                        "room_view: skipped face_detected — current_state=talk"
+                    )
+                    return
                 if (not getattr(conn, "_room_description", None)
                         and not getattr(
                             conn, "_room_description_in_flight", False)):

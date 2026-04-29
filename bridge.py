@@ -3320,11 +3320,31 @@ async def vision_explain(
             last_capture = state.get("last_room_view_capture_t", 0.0)
             cooldown_age = wall_now - last_capture
             dance_active = _is_dance_active(device_id)
-            if dance_active or cooldown_age < DOTTY_IDLE_VISION_COOLDOWN_SEC:
+            # Talk-active gate: skip room_view VLM during an active
+            # conversation. The xiaozhi-side textMessageHandlerRegistry
+            # already short-circuits face_detected → take_photo when
+            # current_state == "talk", so this branch only fires for
+            # photos arriving via other paths (idle photographer,
+            # security_watch, manual MCP). Belt-and-braces — keep both
+            # gates because the bridge sees photos that the xiaozhi side
+            # never spawned. Listening included so a wake-word turn that
+            # opens the mic before state has fully transitioned still
+            # gates correctly. See dotty-private tasks.md "Talk-active
+            # gate for room-view + face-recognition".
+            current_state = (state.get("current_state") or "idle").lower()
+            listening = bool(state.get("listening"))
+            talk_active = current_state == "talk" or listening
+            if dance_active or talk_active or cooldown_age < DOTTY_IDLE_VISION_COOLDOWN_SEC:
                 if dance_active:
                     log.info(
                         "room_view skipped: device=%s reason=dance_active",
                         device_id,
+                    )
+                elif talk_active:
+                    log.info(
+                        "room_view skipped: device=%s reason=talk_active "
+                        "(state=%s listening=%s)",
+                        device_id, current_state, listening,
                     )
                 else:
                     log.info(
