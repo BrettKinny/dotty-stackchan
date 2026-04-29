@@ -1,6 +1,6 @@
 {% if ok %}
 <div class="alert alert-info dotty-alert"
-     hx-get="/ui/state" hx-trigger="load delay:500ms" hx-swap="outerHTML" hx-target="#state-card-body">
+     hx-get="/ui/state" hx-trigger="load delay:500ms" hx-swap="innerHTML" hx-target="#state-card-body">
   State → <span class="font-semibold">{{ label }}</span>
 </div>
 {# Fire dotty-state-change immediately so the conditional reveal in

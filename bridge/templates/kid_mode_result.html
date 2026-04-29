@@ -1,6 +1,6 @@
 {% if ok %}
 <div class="alert alert-info dotty-alert"
-     hx-get="/ui/kid-mode" hx-trigger="load delay:300ms" hx-swap="outerHTML" hx-target="#kid-card-body">
+     hx-get="/ui/kid-mode" hx-trigger="load delay:300ms" hx-swap="innerHTML" hx-target="#kid-card-body">
   Kid Mode &rarr; <span class="font-semibold">{{ "on" if new_state else "off" }}</span>
 </div>
 <script>window.dispatchEvent(new CustomEvent('dotty-refresh'));</script>

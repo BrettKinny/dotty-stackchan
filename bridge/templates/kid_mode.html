@@ -1,24 +1,22 @@
-<div id="kid-card-body" class="card bg-base-100 shadow-sm overflow-hidden">
-  <div class="card-body p-3">
-    <form hx-post="/ui/actions/kid-mode" hx-target="#kid-result" hx-swap="innerHTML"
-          hx-disabled-elt="find input"
-          class="flex items-center justify-between gap-3">
-      <div class="min-w-0">
-        <div class="font-semibold text-sm">Kid Mode</div>
-        <div class="text-xs text-base-content/60">
-          {% if enabled %}content sandwich, camera denied, kid persona{% else %}guardrails off{% endif %}
-        </div>
+<div class="card-body p-3">
+  <form hx-post="/ui/actions/kid-mode" hx-target="#kid-result" hx-swap="innerHTML"
+        hx-disabled-elt="find input"
+        class="flex items-center justify-between gap-3">
+    <div class="min-w-0">
+      <div class="font-semibold text-sm">Kid Mode</div>
+      <div class="text-xs text-base-content/60">
+        {% if enabled %}content sandwich, camera denied, kid persona{% else %}guardrails off{% endif %}
       </div>
-      <input type="hidden" name="enabled" value="{{ 'false' if enabled else 'true' }}">
-      <label class="flex items-center gap-2 cursor-pointer">
-        <span class="text-xs text-base-content/60">{{ "on" if enabled else "off" }}</span>
-        <input type="checkbox"
-               class="toggle toggle-secondary toggle-lg"
-               {% if enabled %}checked{% endif %}
-               onchange="if(confirm('Switch Kid Mode {{ 'off' if enabled else 'on' }}?')){this.form.querySelector('[name=enabled]').value=this.checked?'true':'false';this.form.requestSubmit();}else{this.checked=!this.checked;}"
-               {% if not available %}disabled{% endif %}>
-      </label>
-    </form>
-    <div id="kid-result" class="mt-2 empty:hidden"></div>
-  </div>
+    </div>
+    <input type="hidden" name="enabled" value="{{ 'false' if enabled else 'true' }}">
+    <label class="flex items-center gap-2 cursor-pointer">
+      <span class="text-xs text-base-content/60">{{ "on" if enabled else "off" }}</span>
+      <input type="checkbox"
+             class="toggle toggle-secondary toggle-lg"
+             {% if enabled %}checked{% endif %}
+             onchange="if(confirm('Switch Kid Mode {{ 'off' if enabled else 'on' }}?')){this.form.querySelector('[name=enabled]').value=this.checked?'true':'false';this.form.requestSubmit();}else{this.checked=!this.checked;}"
+             {% if not available %}disabled{% endif %}>
+    </label>
+  </form>
+  <div id="kid-result" class="mt-2 empty:hidden"></div>
 </div>
