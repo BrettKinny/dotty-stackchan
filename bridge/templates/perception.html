@@ -16,6 +16,11 @@
       <span class="text-xs text-base-content/60">Perception</span>
     </div>
 
+    {% if current_state == 'sleep' %}
+    <div class="rounded-lg bg-base-200 p-3 text-sm text-base-content/70">
+      💤 Sleeping — Dotty isn't listening. Pick another state to wake them.
+    </div>
+    {% else %}
     <div class="grid gap-3 sm:grid-cols-2">
       {# SIGHT — face state + scene view. #}
       <div class="space-y-3">
@@ -126,6 +131,7 @@
         {{ synthesis_text }}
       </div>
     </div>
+    {% endif %}
     {% endif %}
   </div>
 </div>

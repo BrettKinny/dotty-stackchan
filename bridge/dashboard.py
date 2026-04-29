@@ -952,6 +952,12 @@ def _build_perception_card_ctx(device_id: str | None) -> dict:
     synth_cache = _state.get("scene_synthesis_cache") or {}
     perception_recent = _state.get("perception_recent_getter")
     last_user_line_getter = _state.get("last_user_line_getter")
+    state_getter = _state.get("state_getter")
+    try:
+        current_state = (state_getter() if state_getter else None) or "idle"
+    except Exception:
+        log.exception("perception card: state_getter failed")
+        current_state = "idle"
 
     # --- face state (preserved from the prior 3-state implementation) ---
     face_state = "off"
@@ -1094,6 +1100,7 @@ def _build_perception_card_ctx(device_id: str | None) -> dict:
 
     return {
         "device_id": device_id or "",
+        "current_state": current_state,
         "face_state": face_state,
         "face_label": face_label,
         "face_color": face_color,

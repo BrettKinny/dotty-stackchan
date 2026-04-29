@@ -218,11 +218,9 @@
           <div id="dance-result" class="mt-2 empty:hidden"></div>
         </div>
 
-        <div id="sleep-section" class="card-body p-3" hidden>
-          <div class="text-xs text-base-content/60 px-1">
-            💤 Sleeping — Dotty isn't listening. Pick another state to wake them.
-          </div>
-        </div>
+        {# Sleep state intentionally renders no inner section here — the
+           sleep banner now lives in the Perception card. #}
+        <div id="sleep-section" class="card-body p-3" hidden></div>
 
         <div id="security-section" class="card-body p-3" hidden>
           <div class="text-xs text-base-content/60 px-1">
