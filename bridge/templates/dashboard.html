@@ -105,15 +105,6 @@
             onclick="var d=document.documentElement;var n=d.getAttribute('data-theme')==='dark'?'light':'dark';d.setAttribute('data-theme',n);try{localStorage.setItem('dotty-theme',n)}catch(e){}">
       <span class="text-base leading-none" aria-hidden="true">🌓</span>
     </button>
-    <button type="button"
-            class="btn btn-ghost btn-sm btn-circle text-warning"
-            aria-label="Reboot bridge + xiaozhi-server + robot"
-            title="Reboot bridge + xiaozhi-server + robot"
-            hx-post="/ui/actions/reboot-all"
-            hx-target="#restart-result" hx-swap="innerHTML"
-            hx-confirm="Restart bridge + server + robot — about 30 seconds outage. Confirm?">
-      <span class="text-base leading-none" aria-hidden="true">🔄</span>
-    </button>
   </div>
 </header>
 
