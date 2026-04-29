@@ -55,7 +55,7 @@ The `idle → talk` trigger is the firmware `face_detected` event (any face, fam
 
 | Toggle | Toggle pip (right ring) | What it does | Persistence |
 |---|---|---|---|
-| `kid_mode` | warm pink `(168,80,100)` at index **8** | Guardrails only — content sandwich, camera tools denied, kid-safe persona. Does not pick the model. | `/root/zeroclaw-bridge/state/kid-mode` |
+| `kid_mode` | salmon pink `(220,80,80)` at index **8** | Guardrails only — content sandwich, camera tools denied, kid-safe persona. Does not pick the model. | `/root/zeroclaw-bridge/state/kid-mode` |
 | `smart_mode` | orange `(168,80,0)` at index **9** | Voice-daemon model selector. ON → `SMART_MODEL` (claude-sonnet-4-6 by default); OFF → `DEFAULT_MODEL` (mistral-small-3.2-24b-instruct). ZeroClaw retains full memory + tools either way. | `/root/zeroclaw-bridge/state/smart-mode` |
 
 The two toggles are orthogonal — they compose freely. `kid_mode = on` AND `smart_mode = on` runs the smart model behind the kid-safe sandwich. Both toggles are sticky across turns, daemon restarts, and reboots.
@@ -83,7 +83,7 @@ LEFT RING (global 0–5)              RIGHT RING (global 6–11)
 | 0–5 | left | StateManager (state arc) | All six paint the current mutex-state colour. Dance suppresses and lets the rainbow animation own the ring. |
 | 6 | right | StateManager (face state pip) | Yellow `(168,140,0)` when a face is detected; green `(0,140,30)` when the bridge has identified the face via room-view VLM + roster match (mutex on the same pixel). Identified state has a 4 s firmware-side timeout — bridge refreshes by calling `self.robot.set_face_identified` again on each successful match. |
 | 7, 10 | right | StateManager (locked off) | Reserved for future indicators (low-battery is a known candidate). Re-asserted to `(0,0,0)` every 200 ms as defense-in-depth. |
-| 8 | right | StateManager (`kid_mode` pip) | Warm pink `(168,80,100)` when kid_mode = on; off otherwise. |
+| 8 | right | StateManager (`kid_mode` pip) | Salmon pink `(220,80,80)` when kid_mode = on; off otherwise. The earlier `(168,80,100)` hue read as purple/magenta after PY32 RGB565 quantization (B > G gave a cool cast); salmon keeps G == B for an unambiguous warm pink. |
 | 9 | right | StateManager (`smart_mode` pip) | Orange `(168,80,0)` when smart_mode = on; off otherwise. |
 | 11 | right | StateManager (listening pip) | Red `(120,0,0)` while xiaozhi is in `LISTENING` (mic open, ASR active, user's turn); off otherwise. Driven by `stackchan_display.cc::set_listening_pixel` which now routes through `StateManager::setListening(bool)` and emits a `chat_status` perception event for the dashboard mirror. Bottom of the right ring; spatially separated from the toggle pips. |
 
