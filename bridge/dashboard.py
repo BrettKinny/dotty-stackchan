@@ -805,6 +805,49 @@ async def vision_latest(request: Request) -> Any:
     return templates.TemplateResponse(request, "vision.html", ctx)
 
 
+@router.get("/vision/photo", include_in_schema=False)
+async def vision_photo(download: int = 0) -> Response:
+    """Serve the latest captured JPEG. ?download=1 forces an attachment."""
+    pick = _latest_vision_entry()
+    if pick is None:
+        raise HTTPException(status_code=404, detail="no recent capture")
+    device_id, entry = pick
+    jpeg = entry.get("jpeg_bytes")
+    if not jpeg:
+        raise HTTPException(status_code=404, detail="no recent capture")
+    headers: dict[str, str] = {"Cache-Control": "no-store"}
+    if download:
+        ts = int(entry.get("wall_ts") or time.time())
+        safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", str(device_id)) or "device"
+        filename = f"dotty-{safe_id}-{ts}.jpg"
+        headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return Response(content=jpeg, media_type="image/jpeg", headers=headers)
+
+
+@router.get("/vision/large", response_class=HTMLResponse, include_in_schema=False)
+async def vision_large(request: Request) -> Any:
+    """Modal body for the full-size capture preview + download link."""
+    pick = _latest_vision_entry()
+    ctx: dict[str, Any] = {"have_photo": False}
+    if pick is not None:
+        device_id, entry = pick
+        jpeg = entry.get("jpeg_bytes")
+        elapsed = max(0.0, time.monotonic() - entry.get("timestamp", time.monotonic()))
+        # Cache-buster — the photo URL is stable across captures so without
+        # this the browser would hand back the previous JPEG when the modal
+        # reopens after a new capture.
+        cb = int(entry.get("wall_ts") or time.time())
+        ctx = {
+            "have_photo": jpeg is not None,
+            "device_id": device_id,
+            "description": entry.get("description", ""),
+            "question": entry.get("question", ""),
+            "age": _humanize_age(elapsed),
+            "cache_buster": cb,
+        }
+    return templates.TemplateResponse(request, "vision_large.html", ctx)
+
+
 # Voice-daemon model selection is owned by smart_mode. Mirrors bridge.py
 # defaults so the dashboard reflects what the bridge actually loaded.
 DEFAULT_MODEL_NAME = os.environ.get(

@@ -1,0 +1,24 @@
+{% if have_photo %}
+<img src="/ui/vision/photo?t={{ cache_buster }}"
+     alt="Latest capture"
+     class="w-full rounded-lg bg-base-300"
+     style="max-height:75vh;object-fit:contain;">
+<div class="text-xs text-base-content/50 mt-2">{{ age }} ago{% if question %} &middot; "{{ question }}"{% endif %}</div>
+{% if description %}
+<div class="text-sm mt-2 break-words whitespace-pre-wrap">{{ description }}</div>
+{% endif %}
+<div class="modal-action">
+  <a href="/ui/vision/photo?download=1" download
+     class="btn btn-primary btn-sm">⬇ Download</a>
+  <form method="dialog">
+    <button class="btn btn-sm">Close</button>
+  </form>
+</div>
+{% else %}
+<div class="text-sm text-base-content/50">No recent photo.</div>
+<div class="modal-action">
+  <form method="dialog">
+    <button class="btn btn-sm">Close</button>
+  </form>
+</div>
+{% endif %}

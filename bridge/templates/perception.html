@@ -43,10 +43,18 @@
           {% if latest_vision %}
           <div class="flex gap-3 items-start">
             {% if latest_vision.has_photo and device_id %}
-            <img src="/ui/host/robot/photo/{{ device_id }}?t={{ latest_vision.age_label }}"
-                 alt="Latest scene"
-                 class="w-20 h-20 rounded-md object-cover bg-base-300 flex-shrink-0"
-                 onerror="this.style.display='none';">
+            <button type="button"
+                    hx-get="/ui/vision/large"
+                    hx-target="#vision-modal-body" hx-swap="innerHTML"
+                    hx-on::after-request="document.getElementById('vision-modal').showModal()"
+                    class="flex-shrink-0 cursor-pointer p-0"
+                    style="background:transparent;border:0;"
+                    aria-label="Open full-size photo">
+              <img src="/ui/host/robot/photo/{{ device_id }}?t={{ latest_vision.age_label }}"
+                   alt="Latest scene"
+                   class="w-20 h-20 rounded-md object-cover bg-base-300"
+                   onerror="this.style.display='none';">
+            </button>
             {% else %}
             <div class="w-20 h-20 rounded-md bg-base-300 flex items-center justify-center flex-shrink-0 text-[10px] text-base-content/50">
               no photo
