@@ -32,6 +32,11 @@ from typing import Literal
 VISION_AGE_GATE_SEC = 60.0
 AUDIO_AGE_GATE_SEC = 120.0
 SCENE_SYNTH_AGE_GATE_SEC = 600.0
+# Identification is "fresh" for this many seconds after the last
+# face_recognized event. Spans the natural HuMan-detector flicker so a
+# brief drop-out doesn't collapse the snapshot from "identified" to
+# "detected" or "off". Mirrors FACE_IDENTITY_TTL_SEC in bridge.py.
+FACE_IDENTITY_AGE_GATE_SEC = 30.0
 
 
 FaceState = Literal["off", "detected", "identified"]
@@ -125,22 +130,40 @@ def snapshot(
     """
     pstate: dict = perception_state.get(device_id, {}) if device_id else {}
 
+    # Identification is TTL-bound on `last_face_recognized_t`, not on
+    # `face_present`. The HuMan detector flickers (face_lost/face_detected
+    # pairs ~1 s apart) — using face_present alone collapsed identity to
+    # "detected" within a second of the room-view VLM matching. We keep
+    # the chip green for FACE_IDENTITY_AGE_GATE_SEC after the last match.
     face: FaceState = "off"
     face_id: str | None = None
-    if pstate.get("face_present"):
-        identity = (pstate.get("last_face_id") or "").strip()
-        if identity and identity != "unknown":
-            face = "identified"
-            face_id = identity
-        else:
-            face = "detected"
+    identity = (pstate.get("last_face_id") or "").strip()
+    last_recog_age = _age_or_none(pstate.get("last_face_recognized_t"))
+    identified_fresh = (
+        identity
+        and identity != "unknown"
+        and last_recog_age is not None
+        and last_recog_age <= FACE_IDENTITY_AGE_GATE_SEC
+    )
+    if identified_fresh:
+        face = "identified"
+        face_id = identity
+    elif pstate.get("face_present"):
+        face = "detected"
 
     # Mood is set by _parse_room_view_response when the VLM returns a
-    # value from _ROOM_VIEW_MOODS. Cleared on face_lost so it doesn't
-    # outlast the person it describes.
+    # value from _ROOM_VIEW_MOODS. Bound to the identification: lives as
+    # long as the identified-face TTL, scrubbed once the face is no longer
+    # identified or fresh.
     raw_mood = (pstate.get("face_mood") or "").strip().lower()
-    face_mood = raw_mood if raw_mood else None
-    if face == "off":
+    mood_age = _age_or_none(pstate.get("face_mood_t"))
+    mood_fresh = (
+        bool(raw_mood)
+        and mood_age is not None
+        and mood_age <= FACE_IDENTITY_AGE_GATE_SEC
+    )
+    face_mood = raw_mood if mood_fresh else None
+    if face != "identified":
         face_mood = None
 
     listening = bool(pstate.get("listening"))

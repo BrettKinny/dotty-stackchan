@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bridge.perception import PerceptionSnapshot, snapshot
 from bridge.perception.cache import (
     AUDIO_AGE_GATE_SEC,
+    FACE_IDENTITY_AGE_GATE_SEC,
     SCENE_SYNTH_AGE_GATE_SEC,
     VISION_AGE_GATE_SEC,
 )
@@ -70,24 +71,59 @@ class FaceStateTests(unittest.TestCase):
         self.assertEqual(snap.face, "detected")
         self.assertIsNone(snap.face_id)
 
-    def test_face_present_with_identity_is_identified(self):
+    def test_face_present_with_fresh_identity_is_identified(self):
+        now = time.time()
+        caches = _empty_caches()
+        caches["perception_state"][DEVICE] = {
+            "face_present": True,
+            "last_face_id": "hudson",
+            "last_face_recognized_t": now - 1.0,
+        }
+        snap = snapshot(DEVICE, **caches)
+        self.assertEqual(snap.face, "identified")
+        self.assertEqual(snap.face_id, "hudson")
+
+    def test_face_absent_with_fresh_identity_still_identified(self):
+        # TTL semantics: detector flicker briefly clears face_present, but
+        # we keep the identification visible for FACE_IDENTITY_AGE_GATE_SEC
+        # so the dashboard chip + perception snapshot don't collapse to
+        # "off"/"detected" between flicker frames.
+        now = time.time()
+        caches = _empty_caches()
+        caches["perception_state"][DEVICE] = {
+            "face_present": False,
+            "last_face_id": "hudson",
+            "last_face_recognized_t": now - 1.0,
+        }
+        snap = snapshot(DEVICE, **caches)
+        self.assertEqual(snap.face, "identified")
+        self.assertEqual(snap.face_id, "hudson")
+
+    def test_face_absent_with_stale_identity_is_off(self):
+        # Past the TTL we drop back to "off" — person actually left.
+        now = time.time()
+        caches = _empty_caches()
+        caches["perception_state"][DEVICE] = {
+            "face_present": False,
+            "last_face_id": "hudson",
+            "last_face_recognized_t": now - (FACE_IDENTITY_AGE_GATE_SEC + 5),
+        }
+        snap = snapshot(DEVICE, **caches)
+        self.assertEqual(snap.face, "off")
+        self.assertIsNone(snap.face_id)
+
+    def test_identity_without_recognized_timestamp_is_not_identified(self):
+        # `last_face_recognized_t` is the load-bearing freshness signal —
+        # a stray `last_face_id` without a timestamp can't promote face to
+        # identified (would have done so under the pre-TTL behaviour).
         caches = _empty_caches()
         caches["perception_state"][DEVICE] = {
             "face_present": True,
             "last_face_id": "hudson",
         }
         snap = snapshot(DEVICE, **caches)
-        self.assertEqual(snap.face, "identified")
-        self.assertEqual(snap.face_id, "hudson")
-
-    def test_face_absent_overrides_identity(self):
-        caches = _empty_caches()
-        caches["perception_state"][DEVICE] = {
-            "face_present": False,
-            "last_face_id": "hudson",
-        }
-        snap = snapshot(DEVICE, **caches)
-        self.assertEqual(snap.face, "off")
+        self.assertEqual(snap.face, "detected")
+        self.assertIsNone(snap.face_id)
 
 
 class VisionAudioTTLTests(unittest.TestCase):
@@ -152,7 +188,9 @@ class PromptBlockTests(unittest.TestCase):
         now = time.time()
         caches = _empty_caches()
         caches["perception_state"][DEVICE] = {
-            "face_present": True, "last_face_id": "hudson",
+            "face_present": True,
+            "last_face_id": "hudson",
+            "last_face_recognized_t": now - 1.0,
         }
         snap = snapshot(DEVICE, **caches)
         block = snap.to_prompt_block()
@@ -160,9 +198,12 @@ class PromptBlockTests(unittest.TestCase):
         self.assertTrue(block.endswith("\n"))
 
     def test_identified_face_renders_name(self):
+        now = time.time()
         caches = _empty_caches()
         caches["perception_state"][DEVICE] = {
-            "face_present": True, "last_face_id": "hudson",
+            "face_present": True,
+            "last_face_id": "hudson",
+            "last_face_recognized_t": now - 1.0,
         }
         snap = snapshot(DEVICE, **caches)
         self.assertIn("hudson", snap.to_prompt_block())
@@ -209,7 +250,9 @@ class PromptBlockTests(unittest.TestCase):
         now = time.time()
         caches = _empty_caches()
         caches["perception_state"][DEVICE] = {
-            "face_present": True, "last_face_id": "hudson",
+            "face_present": True,
+            "last_face_id": "hudson",
+            "last_face_recognized_t": now - 1.0,
         }
         caches["scene_synthesis_cache"][DEVICE] = {
             "text": "Cup of tea on the table.", "ts_wall": now,
@@ -231,34 +274,55 @@ class SnapshotIsFrozen(unittest.TestCase):
 
 class FaceMoodTests(unittest.TestCase):
 
-    def test_mood_plumbed_through_when_face_present(self):
+    def test_mood_plumbed_through_when_face_identified_and_fresh(self):
+        now = time.time()
         caches = _empty_caches()
         caches["perception_state"][DEVICE] = {
             "face_present": True,
             "last_face_id": "hudson",
+            "last_face_recognized_t": now - 1.0,
             "face_mood": "engaged",
+            "face_mood_t": now - 1.0,
         }
         snap = snapshot(DEVICE, **caches)
         self.assertEqual(snap.face_mood, "engaged")
 
-    def test_mood_cleared_when_face_absent(self):
-        # If face_lost handling missed the mood pop somehow, the
-        # snapshot still scrubs it so a stale mood can't ride into
-        # the prompt after the person leaves.
+    def test_mood_cleared_when_face_absent_and_stale(self):
+        # No identification timestamp + no mood timestamp = stale on both
+        # axes. Snapshot scrubs the mood so it can't ride into the prompt.
         caches = _empty_caches()
         caches["perception_state"][DEVICE] = {
             "face_present": False,
-            "face_mood": "engaged",  # stale
+            "face_mood": "engaged",  # stale (no face_mood_t)
+        }
+        snap = snapshot(DEVICE, **caches)
+        self.assertIsNone(snap.face_mood)
+
+    def test_mood_dropped_when_identification_stale(self):
+        # Mood lives or dies with the identification — once identification
+        # ages past FACE_IDENTITY_AGE_GATE_SEC, mood goes too even if its
+        # own timestamp is still within window.
+        now = time.time()
+        caches = _empty_caches()
+        caches["perception_state"][DEVICE] = {
+            "face_present": False,
+            "last_face_id": "hudson",
+            "last_face_recognized_t": now - (FACE_IDENTITY_AGE_GATE_SEC + 5),
+            "face_mood": "engaged",
+            "face_mood_t": now - 1.0,
         }
         snap = snapshot(DEVICE, **caches)
         self.assertIsNone(snap.face_mood)
 
     def test_mood_renders_in_prompt_block(self):
+        now = time.time()
         caches = _empty_caches()
         caches["perception_state"][DEVICE] = {
             "face_present": True,
             "last_face_id": "hudson",
+            "last_face_recognized_t": now - 1.0,
             "face_mood": "tired",
+            "face_mood_t": now - 1.0,
         }
         block = snapshot(DEVICE, **caches).to_prompt_block()
         self.assertIn("hudson", block)

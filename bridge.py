@@ -331,6 +331,28 @@ FACE_NAME_GREET_TEMPLATE = os.environ.get(
 FACE_NAME_GREET_QUIET_AFTER_CHAT_SEC = float(
     os.environ.get("FACE_NAME_GREET_QUIET_AFTER_CHAT_SEC", "10"),
 )
+# How long a freshly identified person stays "identified" in bridge state
+# after their last face_recognized event. Spans the natural detection flicker
+# (HuMan model drops out across pose/exposure changes; firmware grace is only
+# 800 ms) so the dashboard chip + talk-turn perception don't collapse to
+# "unrecognised" the first time the bbox blinks. Cleared eagerly on real
+# departures via the refresh loop's freshness check, not on every face_lost.
+FACE_IDENTITY_TTL_SEC = float(
+    os.environ.get("FACE_IDENTITY_TTL_SEC", "30"),
+)
+# Cadence of the periodic set_face_identified MCP refresh while the same
+# person stays in frame. Firmware's identified-pip self-timeout is ~4 s; a
+# 3 s refresh keeps the green pip continuously lit without racing the
+# timeout. Refresh stops once last_face_recognized_t goes stale (TTL above)
+# or the firmware reports face genuinely lost for >FACE_IDENTITY_REFRESH_QUIET_SEC.
+FACE_IDENTITY_REFRESH_INTERVAL_SEC = float(
+    os.environ.get("FACE_IDENTITY_REFRESH_INTERVAL_SEC", "3.0"),
+)
+# How long after a face_lost the refresh loop will keep firing. Bridges the
+# detection flicker without lighting the pip for an empty room.
+FACE_IDENTITY_REFRESH_QUIET_SEC = float(
+    os.environ.get("FACE_IDENTITY_REFRESH_QUIET_SEC", "2.0"),
+)
 
 # Idle photo cooldown. Autonomous (firmware-initiated, room-view sentinel)
 # photo captures are rate-limited per device to avoid thrashing the VLM
@@ -1751,6 +1773,7 @@ def _perception_broadcast(event: dict) -> None:
     name = event.get("name") or ""
     if _METRICS_AVAILABLE and name in (
         "face_detected", "face_lost", "sound_event", "state_changed",
+        "face_identified_applied", "face_identified_rejected",
     ):
         _safe_metric(
             dotty_perception_events_total.labels(type=name).inc,
@@ -1784,14 +1807,12 @@ def _update_perception_state(device_id: str, name: str,
     elif name == "face_lost":
         state["face_present"] = False
         state["last_face_lost_t"] = ts
-        # Drop the cached identity — the dashboard derives "identified vs just
-        # detected" from this, so leaving stale `last_face_id` would keep the
-        # face pixel green after the person walked away.
-        state.pop("last_face_id", None)
-        # Mood is bound to the person; clear when they leave so the
-        # next talk turn doesn't ship stale "engaged" into the prompt.
-        state.pop("face_mood", None)
-        state.pop("face_mood_t", None)
+        # NOTE: don't pop last_face_id / face_mood here. The HuMan detector
+        # flickers (face_detected/face_lost pairs every ~1 s while a person
+        # stands in frame). Popping on every face_lost made the dashboard
+        # chip and the firmware green pip collapse to "detected" within
+        # one second of identification. Freshness is enforced at read time
+        # via FACE_IDENTITY_TTL_SEC against last_face_recognized_t.
     elif name == "sound_event":
         state["last_sound_dir"] = data.get("direction")
         state["last_sound_t"] = ts
@@ -2403,6 +2424,76 @@ async def _perception_face_greeter() -> None:
         _perception_unsubscribe(q)
 
 
+def get_fresh_face_id(device_id: str, now: float | None = None) -> str | None:
+    """TTL-aware accessor for `last_face_id`. Returns the cached identity if
+    it was confirmed within FACE_IDENTITY_TTL_SEC, else None.
+
+    Single source of truth for "is this person still identified?" across
+    the dashboard chip, talk-turn perception snapshot, and the LED refresh
+    loop. Replaces the previous "pop on face_lost" approach which collapsed
+    identity within ~1 s of detector flicker.
+    """
+    state = _perception_state.get(device_id) or {}
+    identity = (state.get("last_face_id") or "").strip()
+    if not identity or identity == "unknown":
+        return None
+    last_t = state.get("last_face_recognized_t") or 0.0
+    if not last_t:
+        return None
+    wall_now = now if now is not None else time.time()
+    if (wall_now - last_t) > FACE_IDENTITY_TTL_SEC:
+        return None
+    return identity
+
+
+async def _perception_face_identified_refresher() -> None:
+    """Periodically re-fire `set_face_identified` MCP while a person stays
+    in frame. Firmware self-times-out the green pip after ~4 s; without a
+    refresh the LED would only be green for the first 4 s of every 2-min
+    VLM-cooldown window. This loop runs at FACE_IDENTITY_REFRESH_INTERVAL_SEC
+    and skips devices whose identity is stale (TTL-expired) or whose face
+    has been genuinely lost for >FACE_IDENTITY_REFRESH_QUIET_SEC.
+    """
+    log.info(
+        "perception face-identified refresher started "
+        "(interval=%.1fs ttl=%.0fs quiet_after_lost=%.1fs)",
+        FACE_IDENTITY_REFRESH_INTERVAL_SEC,
+        FACE_IDENTITY_TTL_SEC,
+        FACE_IDENTITY_REFRESH_QUIET_SEC,
+    )
+    try:
+        while True:
+            await asyncio.sleep(FACE_IDENTITY_REFRESH_INTERVAL_SEC)
+            wall_now = time.time()
+            for device_id, state in list(_perception_state.items()):
+                if not isinstance(state, dict):
+                    continue
+                identity = get_fresh_face_id(device_id, wall_now)
+                if not identity:
+                    continue
+                # If face has been lost for longer than the quiet window,
+                # skip — we don't want to light the pip for an empty room
+                # even if the TTL hasn't expired yet.
+                face_present = bool(state.get("face_present"))
+                last_lost = state.get("last_face_lost_t") or 0.0
+                if not face_present and last_lost:
+                    if (wall_now - last_lost) > FACE_IDENTITY_REFRESH_QUIET_SEC:
+                        continue
+                log.info(
+                    "face_identified_refresh: device=%s identity=%s",
+                    device_id, identity,
+                )
+                _spawn(
+                    _dispatch_set_face_identified(device_id),
+                    name="dispatch_set_face_identified_refresh",
+                )
+    except asyncio.CancelledError:
+        log.info("perception face-identified refresher cancelled")
+        raise
+    except Exception:
+        log.exception("perception face-identified refresher crashed")
+
+
 # ---------------------------------------------------------------------------
 # Purr-on-head-pet (Option B: server-pushed pre-rendered asset)
 # ---------------------------------------------------------------------------
@@ -2647,6 +2738,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_perception_wake_word_turner()),
         asyncio.create_task(_perception_face_lost_aborter()),
         asyncio.create_task(_perception_purr_player()),
+        asyncio.create_task(_perception_face_identified_refresher()),
     ]
     # Security state capture loop — text-only photo + audio every
     # SECURITY_CAPTURE_INTERVAL_SEC, JPEG/audio bytes discarded after
@@ -3407,8 +3499,9 @@ async def vision_explain(
             description = parsed_desc or _ROOM_VIEW_NO_PERSON
             if parsed_mood:
                 # Plumb mood into perception state so the talk-turn
-                # PerceptionSnapshot picks it up. Cleared on face_lost
-                # by the existing event handler (last_face_id pop).
+                # PerceptionSnapshot picks it up. TTL-bound — read sites
+                # check `face_mood_t` against FACE_IDENTITY_TTL_SEC (mood
+                # lives or dies with the identification it was attached to).
                 pstate = _perception_state.setdefault(device_id, {})
                 pstate["face_mood"] = parsed_mood
                 pstate["face_mood_t"] = time.time()
@@ -4190,9 +4283,11 @@ def _compose_scene_synthesis(device_id: str) -> dict | None:
     if not has_vision and not has_audio:
         return None
 
-    face_id = (pstate.get("last_face_id") or "").strip() or None
+    # Use the TTL-aware accessor so a flickering detector doesn't collapse
+    # `face_id` to None within ~1 s of identification.
+    face_id = get_fresh_face_id(device_id)
     face_present = bool(pstate.get("face_present"))
-    if face_id and face_id != "unknown":
+    if face_id:
         face_phrase = f"{face_id} is in the room."
     elif face_present:
         face_phrase = "Someone is in the room."
@@ -4422,10 +4517,19 @@ if _configure_dashboard is not None:
         # — it does NOT pick the model. smart_mode owns model selection.
         # Hot-reloaded in-process via `_apply_kid_mode`, so no daemon restart
         # is needed; the LED pip flip is pushed live by `_dispatch_set_toggle`.
+        # Bridge-side flip (file + globals) runs unconditionally so guardrails
+        # take effect immediately. If the firmware MCP dispatch fails, return
+        # ok=False with an error so the dashboard surfaces the desync —
+        # otherwise the LED + on-device toggle pip would silently stay stale.
         _write_kid_mode(enabled)
         _apply_kid_mode(enabled)
         ok = await _dispatch_set_toggle("", "kid_mode", enabled)
-        return {"ok": ok}
+        if not ok:
+            return {
+                "ok": False,
+                "error": "firmware did not acknowledge — LED + on-device toggle stale; bridge guardrails are flipped",
+            }
+        return {"ok": True}
 
     async def _dashboard_abort_device(*, device_id: str = "") -> dict:
         """Fire-and-forget POST to xiaozhi-server's admin abort route."""
@@ -4508,17 +4612,26 @@ if _configure_dashboard is not None:
         # OFF → DEFAULT_MODEL. Rewrites config.toml + schedules daemon
         # restart so the new model is live for the next turn.
         _write_smart_mode(enabled)
-        ok = await _dispatch_set_toggle("", "smart_mode", enabled)
+        dispatch_ok = await _dispatch_set_toggle("", "smart_mode", enabled)
         target_model = SMART_MODEL if enabled else DEFAULT_MODEL
+        swap_err: str | None = None
         try:
             _apply_model_swap("voice", target_model)
             _admin_schedule_restart(_ADMIN_DAEMON_CFG["voice"][1])
-        except Exception:
+        except Exception as exc:
             logging.getLogger("zeroclaw-bridge").exception(
                 "smart_mode flip succeeded but model swap/restart to %r failed",
                 target_model,
             )
-        return {"ok": ok}
+            swap_err = f"model swap/restart to {target_model!r} failed: {exc}"
+        errors: list[str] = []
+        if not dispatch_ok:
+            errors.append("firmware did not acknowledge set_toggle (LED pip stale)")
+        if swap_err:
+            errors.append(swap_err)
+        if errors:
+            return {"ok": False, "error": "; ".join(errors)}
+        return {"ok": True}
 
     def _identity_display_name(identity: str) -> str | None:
         """Resolve a household person_id to its display_name, or None if the

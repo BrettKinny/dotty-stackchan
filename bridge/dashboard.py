@@ -1023,9 +1023,21 @@ def _build_perception_card_ctx(device_id: str | None) -> dict:
             if isinstance(v, dict):
                 dev_state = v
                 break
-    if dev_state and dev_state.get("face_present"):
+    # Identity rendering is TTL-bound on `last_face_recognized_t` so the
+    # chip stays green across detector flicker (HuMan model drops the bbox
+    # for ~1 s every few seconds even when a person is plainly in frame).
+    # Falls back to "detected" when face_present alone is true; "off" when
+    # both signals are absent. Mirrors bridge/perception/cache.py.
+    if dev_state:
         identity = (dev_state.get("last_face_id") or "").strip()
-        if identity and identity != "unknown":
+        last_recog_t = dev_state.get("last_face_recognized_t") or 0.0
+        identified_fresh = (
+            identity
+            and identity != "unknown"
+            and last_recog_t
+            and (time.time() - float(last_recog_t)) <= 30.0
+        )
+        if identified_fresh:
             name = None
             if name_lookup:
                 try:
@@ -1036,7 +1048,7 @@ def _build_perception_card_ctx(device_id: str | None) -> dict:
             face_label = name or identity
             face_color = "#008c1e"
             face_tip = f"face: identified ({identity})"
-        else:
+        elif dev_state.get("face_present"):
             face_state = "detected"
             face_label = "detected"
             face_color = "#a88c00"
@@ -1185,12 +1197,23 @@ async def smart_mode_set(request: Request, enabled: str = Form("")) -> Any:
         raise HTTPException(503, "smart_mode_setter not configured")
     new_state = enabled.lower() in ("on", "true", "1", "yes")
     try:
-        await setter(new_state)
+        result = await setter(new_state)
     except Exception as exc:
         log.exception("smart_mode setter failed")
         return templates.TemplateResponse(
             request, "smart_mode_result.html",
             {"ok": False, "error": str(exc)},
+        )
+    if isinstance(result, dict):
+        ok = bool(result.get("ok"))
+        err = result.get("error")
+    else:
+        ok = bool(result)
+        err = None
+    if not ok:
+        return templates.TemplateResponse(
+            request, "smart_mode_result.html",
+            {"ok": False, "error": err or "Smart mode toggle failed."},
         )
     return templates.TemplateResponse(
         request, "smart_mode_result.html",
@@ -1209,14 +1232,24 @@ async def kid_mode_set(request: Request, enabled: str = Form("")) -> Any:
         raise HTTPException(503, "kid_mode_setter not configured")
     new_state = enabled.lower() in ("on", "true", "1", "yes")
     try:
-        await setter(new_state)
+        result = await setter(new_state)
     except Exception as exc:
         log.exception("kid_mode setter failed")
         return templates.TemplateResponse(
             request, "kid_mode_result.html",
             {"ok": False, "error": str(exc)},
         )
-
+    if isinstance(result, dict):
+        ok = bool(result.get("ok"))
+        err = result.get("error")
+    else:
+        ok = bool(result)
+        err = None
+    if not ok:
+        return templates.TemplateResponse(
+            request, "kid_mode_result.html",
+            {"ok": False, "error": err or "Kid mode toggle failed."},
+        )
     return templates.TemplateResponse(
         request, "kid_mode_result.html",
         {"ok": True, "new_state": new_state},
@@ -2376,6 +2409,14 @@ def _render_perception_event(ev: dict) -> dict:
     elif name == "face_recognized":
         ident = data.get("identity") or "?"
         detail = f"as {ident}"
+    elif name == "face_identified_applied":
+        # Firmware accepted set_face_identified MCP — green pip lit.
+        detail = "green pip lit"
+    elif name == "face_identified_rejected":
+        # Firmware no-op'd set_face_identified MCP (face was gone past the
+        # flicker grace window). Surfaced so the dashboard shows when the
+        # bridge tried but the device couldn't honour it.
+        detail = "no face in frame"
     return {"name": name, "age_label": age_label, "detail": detail}
 
 
