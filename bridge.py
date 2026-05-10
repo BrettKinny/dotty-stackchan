@@ -96,11 +96,21 @@ _KID_STATE_FILE = Path(
 )
 # Voice-daemon LLM is selected by `smart_mode` only. kid_mode is orthogonal —
 # guardrails (content sandwich, denied tools, persona) are independent of the
-# model. smart_mode OFF → DEFAULT_MODEL (mistral). smart_mode ON → SMART_MODEL
-# (claude-sonnet-4-6). Both IDs are OpenRouter-routable since the custom
-# provider already targets OpenRouter.
+# model. smart_mode OFF → DEFAULT_MODEL. smart_mode ON → SMART_MODEL.
+#
+# Multi-profile mode (optional, opt-in): when DEFAULT_MODEL and SMART_MODEL
+# live behind different provider URLs (e.g. local Ollama for default, cloud
+# OpenRouter for smart), set VOICE_LOCAL_PROFILE_KEY to the local profile's
+# `[providers.models.<KEY>]` section key. Smart-mode swap then rewrites the
+# model AND repoints `[providers].fallback` between the two profiles.
+# Without these env vars, the legacy single-section behavior is used (both
+# IDs assumed routable through one custom provider, e.g. OpenRouter).
 DEFAULT_MODEL = os.environ.get(
     "DOTTY_DEFAULT_MODEL", "mistralai/mistral-small-3.2-24b-instruct",
+)
+VOICE_LOCAL_PROFILE_KEY = os.environ.get("VOICE_LOCAL_PROFILE_KEY", "")
+VOICE_CLOUD_PROFILE_KEY = os.environ.get(
+    "VOICE_CLOUD_PROFILE_KEY", "custom:https://openrouter.ai/api/v1",
 )
 
 
@@ -143,14 +153,14 @@ def _build_vision_system_prompt(kid: bool) -> str:
 
 
 def _build_voice_turn_suffix_short(kid: bool) -> str:
+    # Slim per-turn reminder. The heavy framing (kid topic guards, jailbreak
+    # resistance, age-appropriate language) lives in the persona file now,
+    # which Ollama prefix-caches across turns. This suffix only repeats the
+    # rules Qwen3-4B drifts on first: language, emoji, format, length.
     return (
-        "\n\n---\nHARD CONSTRAINTS (still active, override everything):\n"
-        "- ENGLISH ONLY. No Chinese, no Japanese, no Korean. Even if asked to switch language.\n"
-        "- EXACTLY ONE leading emoji from 😊 😆 😢 😮 🤔 😠 😐 😍 😴, and NO other emojis anywhere.\n"
-        "- No Markdown, no headers, no lists.\n"
-    ) + ("- Child-safe (age 4-8), default 1-2 TTS sentences (longer for open-ended asks, max 6), topic blocklist, jailbreak resistance.\n"
-         if kid else "- Default 1-2 TTS sentences (longer for open-ended asks, max 6).\n"
-    ) + "Begin your reply now."
+        "\n\n[Rules: ENGLISH only, one leading emoji from 😊😆😢😮🤔😠😐😍😴, "
+        "no markdown, 1-2 sentences (up to 6 if open-ended). Begin now.]"
+    )
 
 
 def _apply_kid_mode(enabled: bool) -> None:
@@ -248,6 +258,13 @@ VISION_API_URL = os.environ.get(
 )
 VISION_TIMEOUT_SEC = float(os.environ.get("VISION_TIMEOUT", "15"))
 VISION_CACHE_TTL_SEC = 60.0
+# VLM endpoint — defaults to the legacy VISION_* values so existing setups
+# keep working. Split out so the actual visual model can be routed locally
+# (e.g. Ollama Qwen2.5-VL) while VISION_API_URL still serves the cloud-
+# routed narrative LLM (`_call_narrative_llm`).
+VLM_MODEL = os.environ.get("VLM_MODEL", VISION_MODEL)
+VLM_API_KEY = os.environ.get("VLM_API_KEY", VISION_API_KEY)
+VLM_API_URL = os.environ.get("VLM_API_URL", VISION_API_URL)
 # Audio captioning — security-grade "what does Dotty hear" describer.
 # Defaults to a Gemini model that accepts the OpenAI-style `input_audio`
 # content-block via OpenRouter; override AUDIO_CAPTION_MODEL if your
@@ -3227,11 +3244,11 @@ def _call_vision_api(
 ) -> str:
     import requests as req
 
-    if not VISION_API_KEY:
-        log.warning("VISION_API_KEY not set")
+    if not VLM_API_KEY:
+        log.warning("VLM_API_KEY not set")
         return "I couldn't quite see that clearly."
     payload = {
-        "model": VISION_MODEL,
+        "model": VLM_MODEL,
         "messages": [
             {"role": "system", "content": system_prompt},
             {
@@ -3250,10 +3267,10 @@ def _call_vision_api(
     }
     try:
         resp = req.post(
-            VISION_API_URL,
+            VLM_API_URL,
             json=payload,
             headers={
-                "Authorization": f"Bearer {VISION_API_KEY}",
+                "Authorization": f"Bearer {VLM_API_KEY}",
                 "Content-Type": "application/json",
             },
             timeout=VISION_TIMEOUT_SEC,
@@ -3771,6 +3788,275 @@ async def audio_explain(
                         endpoint="audio_explain", kind=err_kind,
                     ).inc,
                 )
+
+
+# ---------------------------------------------------------------------------
+# Tier 2 voice escalation — bridge-side dispatcher for tool_calls emitted
+# by the slim Tier1Slim custom provider in xiaozhi-server. Three endpoints:
+#
+#   POST /api/voice/escalate    — synchronous tool dispatcher
+#   POST /api/voice/memory_log  — async turn log (fire-and-forget)
+#   POST /api/voice/remember    — async fact store (fire-and-forget)
+#
+# Memory ops bypass ZeroClaw's HTTP gateway (which requires a bearer auth
+# token that's stored encrypted in config) and read/write brain.db directly
+# via SQLite. Schema is stable — `memories(id, key, content, category,
+# namespace, ...)` with FTS5 triggers maintaining `memories_fts` on every
+# insert/update/delete. think_hard skips ACP entirely and hits llama-swap
+# directly with model=qwen3.6:27b — same speedup motivation as the rest of
+# the slim path: avoid ZeroClaw's 24K-token agent overhead on the voice
+# thread.
+
+_VOICE_MEMORY_DB = Path(os.environ.get(
+    "VOICE_MEMORY_DB", "/root/.zeroclaw/workspace/memory/brain.db",
+))
+_VOICE_THINKER_URL = os.environ.get(
+    "VOICE_THINKER_URL", "http://192.168.1.67:8080/v1/chat/completions",
+)
+_VOICE_THINKER_MODEL = os.environ.get("VOICE_THINKER_MODEL", "qwen3.6:27b")
+_VOICE_THINKER_TIMEOUT = float(os.environ.get("VOICE_THINKER_TIMEOUT", "30"))
+
+
+def _voice_memory_search_blocking(query: str, limit: int = 5) -> list[dict]:
+    """FTS5 search across `memories`. Read-only, WAL-friendly. Returns
+    top-N by rank, newest-leaning. Empty list on any error."""
+    import sqlite3
+    if not _VOICE_MEMORY_DB.exists():
+        log.warning("voice memory: db not found at %s", _VOICE_MEMORY_DB)
+        return []
+    safe = (query or "").replace('"', '""').strip()
+    if not safe:
+        return []
+    fts = f'"{safe}"'
+    try:
+        conn = sqlite3.connect(
+            f"file:{_VOICE_MEMORY_DB}?mode=ro", uri=True, timeout=2,
+        )
+        try:
+            conn.row_factory = sqlite3.Row
+            cur = conn.execute(
+                """
+                SELECT m.key, m.content, m.category, m.namespace, m.created_at
+                FROM memories_fts
+                JOIN memories m ON m.rowid = memories_fts.rowid
+                WHERE memories_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?
+                """,
+                (fts, limit),
+            )
+            return [dict(r) for r in cur.fetchall()]
+        finally:
+            conn.close()
+    except Exception:
+        log.exception("voice memory search failed for query=%r", query[:60])
+        return []
+
+
+def _voice_memory_store_blocking(
+    *, content: str, category: str = "conversation",
+    namespace: str = "voice", importance: float = 0.5,
+    session_id: str | None = None,
+) -> bool:
+    """Insert a row into `memories`. FTS5 triggers maintain the index."""
+    import sqlite3
+    if not _VOICE_MEMORY_DB.exists():
+        log.warning("voice memory: db not found at %s", _VOICE_MEMORY_DB)
+        return False
+    if not content or not content.strip():
+        return False
+    now = datetime.now(ZoneInfo("UTC")).isoformat()
+    mem_id = str(uuid.uuid4())
+    base_key = f"voice_{category}_{now}_{mem_id[:8]}"
+    try:
+        conn = sqlite3.connect(str(_VOICE_MEMORY_DB), timeout=5)
+        try:
+            conn.execute(
+                """
+                INSERT INTO memories
+                  (id, key, content, category, namespace,
+                   importance, created_at, updated_at, session_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (mem_id, base_key, content.strip(), category, namespace,
+                 importance, now, now, session_id),
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception:
+        log.exception("voice memory store failed (category=%s)", category)
+        return False
+
+
+async def _voice_tool_memory_lookup(args: dict, session_id: str) -> str:
+    query = (args.get("query") or "").strip()
+    if not query:
+        return "(empty query)"
+    rows = await asyncio.to_thread(_voice_memory_search_blocking, query, 5)
+    if not rows:
+        return "(no memories found)"
+    snippets = []
+    for r in rows[:3]:
+        c = (r.get("content") or "").strip()
+        if len(c) > 200:
+            c = c[:197] + "..."
+        snippets.append(c)
+    return " | ".join(snippets)
+
+
+async def _voice_tool_think_hard(args: dict, session_id: str) -> str:
+    """Direct call to llama-swap with model=qwen3.6:27b. Skips ACP/ZeroClaw
+    entirely — same motivation as Tier 1: avoid the agent overhead on the
+    voice critical path. Cold-load worst case ~25s (masked by the filler)."""
+    question = (args.get("question") or "").strip()
+    if not question:
+        return "(empty question)"
+
+    def _post() -> str:
+        resp = requests.post(
+            _VOICE_THINKER_URL,
+            json={
+                "model": _VOICE_THINKER_MODEL,
+                "messages": [
+                    {"role": "system", "content":
+                        "Answer the user's question concisely in 1-2 sentences. Be precise."},
+                    {"role": "user", "content": question},
+                ],
+                "max_tokens": 200,
+                "temperature": 0.3,
+                "stream": False,
+                # qwen3 defaults to reasoning mode; without this the entire
+                # max_tokens budget gets eaten by `<think>...` tokens routed
+                # into reasoning_content and `content` comes back empty.
+                "chat_template_kwargs": {"enable_thinking": False},
+            },
+            timeout=_VOICE_THINKER_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return (data["choices"][0]["message"].get("content") or "").strip()[:500]
+
+    try:
+        return await asyncio.to_thread(_post)
+    except requests.exceptions.Timeout:
+        return "(I'm slow today, try again in a moment)"
+    except Exception:
+        log.exception("voice think_hard failed")
+        return "(thinking failed)"
+
+
+async def _voice_tool_take_photo(args: dict, session_id: str) -> str:
+    """v1: read the latest cached vision description (≤30s old). Future:
+    actively fire take_photo MCP and await a fresh description."""
+    best_desc = ""
+    best_age = 1e9
+    for cache in _vision_cache.values():
+        age = perf_counter() - cache.get("timestamp", 0)
+        if age < best_age and cache.get("description"):
+            best_age = age
+            best_desc = cache.get("description", "")
+    if best_desc and best_age <= 30:
+        return best_desc[:300]
+    return "(I can't see anything fresh right now)"
+
+
+async def _voice_tool_play_song(args: dict, session_id: str) -> str:
+    """v1 stub: log + acknowledge. No /xiaozhi/admin/play-song endpoint
+    exists yet; wiring is a follow-up."""
+    name = (args.get("name") or "").strip()
+    log.info("voice play_song requested but not yet wired: %s", name)
+    return f"requested ({name})"
+
+
+async def _voice_tool_set_led(args: dict, session_id: str) -> str:
+    """v1 stub: log + acknowledge. No bare /xiaozhi/admin/set-led endpoint;
+    LED control today goes via firmware MCP from the LLM, which Tier 1
+    bypasses. Wiring is a follow-up."""
+    side = (args.get("side") or "").strip()
+    color = (args.get("color") or "").strip()
+    log.info("voice set_led requested but not yet wired: side=%s color=%s", side, color)
+    return f"ok ({side}={color})"
+
+
+_VOICE_TOOLS = {
+    "memory_lookup": _voice_tool_memory_lookup,
+    "think_hard": _voice_tool_think_hard,
+    "take_photo": _voice_tool_take_photo,
+    "play_song": _voice_tool_play_song,
+    "set_led": _voice_tool_set_led,
+}
+
+
+class VoiceEscalateIn(BaseModel):
+    tool: str
+    args: dict = {}
+    session_id: str | None = None
+
+
+class VoiceMemoryLogIn(BaseModel):
+    user: str
+    assistant: str
+    session_id: str | None = None
+
+
+class VoiceRememberIn(BaseModel):
+    fact: str
+    session_id: str | None = None
+
+
+@app.post("/api/voice/escalate")
+async def voice_escalate(payload: VoiceEscalateIn):
+    """Synchronous Tier 2 tool dispatcher. Called by tier1_slim when the 4B
+    emits a tool_call. Returns {"result": "..."} which the provider folds
+    back into its second (streaming) model call."""
+    tool = payload.tool or ""
+    handler = _VOICE_TOOLS.get(tool)
+    if not handler:
+        log.warning("voice escalate: unknown tool %r", tool)
+        return {"result": f"(unknown tool: {tool})"}
+    try:
+        result = await handler(payload.args or {}, payload.session_id or "")
+    except Exception:
+        log.exception("voice escalate %r failed", tool)
+        return {"result": f"({tool} failed)"}
+    return {"result": result}
+
+
+@app.post("/api/voice/memory_log", status_code=204)
+async def voice_memory_log(payload: VoiceMemoryLogIn):
+    """Fire-and-forget turn log. namespace=voice, category=conversation."""
+    user = (payload.user or "").strip()[:500]
+    assistant = (payload.assistant or "").strip()[:1000]
+    if not user and not assistant:
+        return
+    content = f"user: {user} | assistant: {assistant}"
+    _spawn(
+        asyncio.to_thread(
+            _voice_memory_store_blocking,
+            content=content, category="conversation", namespace="voice",
+            importance=0.3, session_id=payload.session_id,
+        ),
+        name="voice_memory_log",
+    )
+
+
+@app.post("/api/voice/remember", status_code=204)
+async def voice_remember(payload: VoiceRememberIn):
+    """Fire-and-forget fact store. namespace=voice, category=core (longer
+    retention than conversation)."""
+    fact = (payload.fact or "").strip()[:300]
+    if not fact:
+        return
+    _spawn(
+        asyncio.to_thread(
+            _voice_memory_store_blocking,
+            content=fact, category="core", namespace="voice",
+            importance=0.7, session_id=payload.session_id,
+        ),
+        name="voice_remember",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -4834,8 +5120,12 @@ async def _admin_persona(payload: _AdminPersonaIn) -> dict:
 
 
 def _read_voice_model_from_cfg() -> str | None:
-    """Return the current `model = "..."` value from the voice daemon's
-    config.toml, or None if the file/section is missing."""
+    """Return the current `model = "..."` value of the voice daemon's
+    active provider profile, or None if the file/section is missing.
+
+    In multi-profile mode (VOICE_LOCAL_PROFILE_KEY set), the active
+    profile is whichever `[providers].fallback` points at. In legacy
+    mode, it's the only `custom:URL` section."""
     cfg_path, _ = _ADMIN_DAEMON_CFG["voice"]
     cfg_p = Path(cfg_path)
     if not cfg_p.exists():
@@ -4844,11 +5134,22 @@ def _read_voice_model_from_cfg() -> str | None:
         src = cfg_p.read_text()
     except OSError:
         return None
-    section_re = re.compile(r'\[providers\.models\."custom:[^"]+"\]')
-    m = section_re.search(src)
-    if not m:
-        return None
-    sec_start = m.start()
+
+    if VOICE_LOCAL_PROFILE_KEY:
+        fb = re.search(r'^fallback = "([^"]+)"$', src, flags=re.MULTILINE)
+        if fb is None:
+            return None
+        active_key = fb.group(1)
+        section_pat = f'[providers.models."{active_key}"]'
+        sec_start = src.find(section_pat)
+        if sec_start < 0:
+            return None
+    else:
+        section_re = re.compile(r'\[providers\.models\."custom:[^"]+"\]')
+        m = section_re.search(src)
+        if not m:
+            return None
+        sec_start = m.start()
     sec_end = src.find("\n[", sec_start + 1)
     if sec_end == -1:
         sec_end = len(src)
@@ -4886,12 +5187,31 @@ def _reconcile_voice_model_at_startup() -> None:
         log.exception("startup model reconcile failed")
 
 
+def _voice_profile_for_model(model: str) -> str | None:
+    """Map a target model to the voice config profile that should own it.
+    Returns None when multi-profile mode is not configured (caller falls
+    back to legacy single-section behavior).
+
+    In multi-profile mode, DEFAULT_MODEL routes to the local profile and
+    everything else (including SMART_MODEL) routes to the cloud profile.
+    Cloud is the safe default for unknown IDs since cloud providers
+    (OpenRouter) accept arbitrary model strings; Ollama would 404."""
+    if not VOICE_LOCAL_PROFILE_KEY:
+        return None
+    if model == DEFAULT_MODEL:
+        return VOICE_LOCAL_PROFILE_KEY
+    return VOICE_CLOUD_PROFILE_KEY
+
+
 def _apply_model_swap(daemon: str, model: str) -> tuple[str, str]:
-    """Rewrite the `model = "..."` line inside the custom-provider section
-    of the named daemon's config.toml. Returns (cfg_path, unit). Caller is
-    responsible for scheduling the systemctl restart so this can be reused
-    from flows that already schedule a restart of their own (e.g. the kid
-    mode toggle)."""
+    """Rewrite the `model = "..."` line inside the appropriate provider
+    section of the named daemon's config.toml. Returns (cfg_path, unit).
+    Caller is responsible for scheduling the systemctl restart.
+
+    Voice daemon supports multi-profile mode: when VOICE_LOCAL_PROFILE_KEY
+    is set, the function picks the right `[providers.models.<KEY>]`
+    section by model name AND repoints `[providers].fallback` at it.
+    Without the env var, falls back to legacy single-section behavior."""
     if daemon not in _ADMIN_DAEMON_CFG:
         raise HTTPException(
             status_code=400,
@@ -4904,6 +5224,44 @@ def _apply_model_swap(daemon: str, model: str) -> tuple[str, str]:
     if not cfg_p.exists():
         raise HTTPException(status_code=404, detail=f"config not found: {cfg_path}")
     src = cfg_p.read_text()
+
+    profile_key = _voice_profile_for_model(model) if daemon == "voice" else None
+    if profile_key:
+        section_pat = f'[providers.models."{profile_key}"]'
+        sec_start = src.find(section_pat)
+        if sec_start < 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"profile section not found: {section_pat}",
+            )
+        sec_end = src.find("\n[", sec_start + 1)
+        if sec_end == -1:
+            sec_end = len(src)
+        section = src[sec_start:sec_end]
+        new_section, n = re.subn(
+            r'^model = ".*"$',
+            f'model = "{model}"',
+            section, count=1, flags=re.MULTILINE,
+        )
+        if n == 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"model line not found in profile {profile_key!r}",
+            )
+        src = src[:sec_start] + new_section + src[sec_end:]
+        src, fb_n = re.subn(
+            r'^fallback = "[^"]+"$',
+            f'fallback = "{profile_key}"',
+            src, count=1, flags=re.MULTILINE,
+        )
+        if fb_n == 0:
+            raise HTTPException(
+                status_code=500,
+                detail="[providers].fallback line not found",
+            )
+        cfg_p.write_text(src)
+        return (cfg_path, unit)
+
     section_re = re.compile(r'\[providers\.models\."custom:[^"]+"\]')
     m = section_re.search(src)
     if not m:

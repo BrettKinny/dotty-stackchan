@@ -13,9 +13,10 @@ delete_audio: true
 
 selected_module:
   VAD: SileroVAD
-  ASR: FunASR
-  # ASR: WhisperLocal     # <-- uncomment to swap from FunASR (kid-speech win)
-  LLM: ZeroClawLLM
+  ASR: WhisperLocal
+  # ASR: FunASR           # <-- swap back to FunASR (CPU, lower recall on kid speech)
+  LLM: Tier1Slim
+  # LLM: ZeroClawLLM       # <-- legacy: voice via ZeroClaw ACP (24K-token tax per turn)
   # LLM: OpenAICompat      # <-- switch to direct OpenAI-compatible LLM
   TTS: LocalPiper
   Memory: nomem
@@ -46,7 +47,14 @@ VAD:
     threshold: 0.5
     threshold_low: 0.3
     model_dir: models/snakers4_silero-vad
-    min_silence_duration_ms: 700
+    # 600ms silence before turn end. 500ms cuts off kids mid-sentence on long
+    # asks ("can you tell me a story about... [breath] ...the dragon"). 600 is
+    # the empirical compromise: ~100ms tighter than the legacy 700 default,
+    # still tolerant of the breath-pauses kids actually take.
+    min_silence_duration_ms: 600
+    # Filter sub-250ms blips (coughs, giggles, room noise) so they don't
+    # falsely open a turn. Important once silence threshold drops.
+    min_speech_duration_ms: 250
 
 ASR:
   FunASR:
@@ -67,10 +75,11 @@ ASR:
     language: en
     # Fallback model id when model_dir is empty (faster-whisper auto-fetch).
     model_size: small.en
-    # Phase 1 = CPU-only. For Phase 2 (when GPUs are available) flip
-    # device: cuda + compute_type: float16 — no Python changes needed.
-    device: cpu
-    compute_type: int8
+    # GPU-resident: container has `runtime: nvidia` + device reservations.
+    # ~250 MB VRAM at float16, fast enough for live voice. Falls back gracefully
+    # to CPU if CUDA isn't available — flip both lines to revert.
+    device: cuda
+    compute_type: float16
     beam_size: 1
     cpu_threads: 0
     # Optional decoder bias — short list of canonical phrases improves
@@ -94,6 +103,25 @@ TTS:
     output_dir: tmp/
 
 LLM:
+  # Tier 1 slim — direct to llama-swap or any OpenAI-compatible endpoint with
+  # OpenAI function-calling-style tool escalation. Calls bridge.py
+  # /api/voice/escalate when the model emits tool_calls (memory_lookup,
+  # think_hard, take_photo, play_song, set_led). See
+  # custom-providers/tier1_slim/tier1_slim.py and personas/dotty_voice.md.
+  # Voice memory writes go to bridge /api/voice/{memory_log,remember}.
+  Tier1Slim:
+    type: tier1_slim
+    url: <LLAMA_SWAP_URL>      # e.g. http://192.168.1.67:8080/v1
+    api_key: <LLAMA_SWAP_KEY>  # any string; llama-swap doesn't enforce auth
+    model: <LLAMA_SWAP_MODEL>  # e.g. qwen3.5:4b
+    persona_file: personas/dotty_voice.md
+    timeout: 60
+    max_tokens: 256
+    temperature: 0.7
+
+  # Legacy: full ZeroClaw ACP path (memory, agent tools, autonomy) — pays
+  # ~24K tokens of system prompt + tool schemas every turn. Tier1Slim
+  # introduced 2026-05-1x to skip that cost on the voice critical path.
   ZeroClawLLM:
     type: zeroclaw
     url: http://<ZEROCLAW_HOST>:8080/api/message/stream
