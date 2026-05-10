@@ -1,14 +1,8 @@
 <div class="card-body p-3">
   <div class="text-xs text-base-content/60 mb-2">Persona</div>
   {% if available %}
-  <form hx-post="/ui/actions/persona" hx-target="#persona-card" hx-swap="innerHTML"
-        class="flex items-center gap-2">
-    <select name="name" class="select select-bordered select-sm flex-1"
-            onchange="this.form.requestSubmit()">
-      {% for p in available %}
-      <option value="{{ p }}" {% if p == current %}selected{% endif %}>{{ p }}</option>
-      {% endfor %}
-    </select>
+  <div class="flex items-center gap-2">
+    <div class="flex-1 text-sm font-mono">{{ current }}</div>
     <button type="button" class="btn btn-ghost btn-xs"
             hx-get="/ui/persona/view"
             hx-target="#persona-modal-content" hx-swap="innerHTML"
@@ -16,14 +10,10 @@
             title="View the active persona file">
       view
     </button>
-  </form>
-  {% if switching %}
-  <div class="alert alert-info py-2 text-xs mt-2">
-    Switching to <strong>{{ current }}</strong> — bridge restarting…
   </div>
-  {% elif error %}
-  <div class="alert alert-error py-2 text-xs mt-2">{{ error }}</div>
-  {% endif %}
+  <div class="text-xs text-base-content/40 mt-1">
+    Pinned by <code>PERSONA</code> env var in docker-compose. Change + redeploy to switch.
+  </div>
   {% else %}
   <div class="text-xs text-base-content/50">
     🎭 No personas found at <code>{{ personas_dir }}</code>.

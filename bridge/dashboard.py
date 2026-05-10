@@ -1614,13 +1614,16 @@ async def update_bridge(request: Request) -> Any:
     )
 
 
-# --- P16: persona switcher ------------------------------------------------
+# --- Persona display (read-only) ------------------------------------------
+#
+# Persona is now pinned by the xiaozhi-server container's PERSONA env var
+# (see docker-compose.yml). The dashboard shows the active file name + a
+# read-only view of its contents — no runtime switcher, since the env-var
+# pin would clobber any state-file write anyway. To switch personas, edit
+# docker-compose `PERSONA=...` and redeploy.
 
 PERSONAS_DIR = Path(
     os.environ.get("DOTTY_PERSONAS_DIR", "/root/zeroclaw-bridge/personas")
-)
-PERSONA_STATE_FILE = Path(
-    os.environ.get("DOTTY_PERSONA_STATE", "/root/zeroclaw-bridge/state/persona")
 )
 
 
@@ -1630,23 +1633,21 @@ def _list_personas() -> list[str]:
     return sorted(p.stem for p in PERSONAS_DIR.glob("*.md"))
 
 
-def _current_persona() -> str:
-    if PERSONA_STATE_FILE.exists():
-        try:
-            v = PERSONA_STATE_FILE.read_text().strip()
-            if v in _list_personas():
-                return v
-        except OSError:
-            pass
-    return "default"
+def _active_persona() -> str:
+    # Source of truth is the xiaozhi-server container's PERSONA env var.
+    # The bridge runs in its own systemd unit and doesn't see that env, but
+    # we mirror it here via DOTTY_ACTIVE_PERSONA on the bridge service unit
+    # (set in zeroclaw-bridge.service alongside the model env vars).
+    name = os.environ.get("DOTTY_ACTIVE_PERSONA", "default").strip()
+    return name or "default"
 
 
 @router.get("/persona/view", response_class=HTMLResponse, include_in_schema=False)
 async def persona_view(request: Request, name: str = "") -> Any:
-    """F6: read-only view of a persona file. Restricted to entries in
+    """Read-only view of a persona file. Restricted to entries in
     _list_personas() so ?name=../etc/passwd is impossible."""
     available = _list_personas()
-    name = (name or "").strip() or _current_persona()
+    name = (name or "").strip() or _active_persona()
     ctx: dict[str, Any] = {"name": name}
     if name not in available:
         ctx["error"] = f"Unknown persona: {name}"
@@ -1657,7 +1658,6 @@ async def persona_view(request: Request, name: str = "") -> Any:
     except OSError as exc:
         ctx["error"] = f"Read failed: {exc}"
         return templates.TemplateResponse(request, "persona_view.html", ctx)
-    # Cap at 50k chars — defensive; persona files are usually small.
     ctx["content"] = content[:50_000]
     if len(content) > 50_000:
         ctx["truncated"] = True
@@ -1668,44 +1668,8 @@ async def persona_view(request: Request, name: str = "") -> Any:
 async def persona_partial(request: Request) -> Any:
     return templates.TemplateResponse(
         request, "persona.html",
-        {"available": _list_personas(), "current": _current_persona(),
+        {"available": _list_personas(), "current": _active_persona(),
          "personas_dir": str(PERSONAS_DIR)},
-    )
-
-
-@router.post("/actions/persona", response_class=HTMLResponse,
-             include_in_schema=False)
-async def persona_set(request: Request, name: str = Form(...)) -> Any:
-    available = _list_personas()
-    if name not in available:
-        return templates.TemplateResponse(
-            request, "persona.html",
-            {"available": available, "current": _current_persona(),
-             "personas_dir": str(PERSONAS_DIR),
-             "error": f"Unknown persona: {name}"},
-        )
-    PERSONA_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    PERSONA_STATE_FILE.write_text(name)
-    # Spawn delayed self-restart so the new persona is picked up by the
-    # bridge's voice-wrap (it reads the state file at startup).
-    import subprocess
-    try:
-        subprocess.Popen(
-            ["sh", "-c", "sleep 1 && systemctl restart zeroclaw-bridge"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-    except Exception as exc:
-        return templates.TemplateResponse(
-            request, "persona.html",
-            {"available": available, "current": name,
-             "personas_dir": str(PERSONAS_DIR),
-             "error": f"set but restart failed: {exc}"},
-        )
-    return templates.TemplateResponse(
-        request, "persona.html",
-        {"available": available, "current": name,
-         "personas_dir": str(PERSONAS_DIR), "switching": True},
     )
 
 
