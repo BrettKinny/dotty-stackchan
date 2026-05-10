@@ -13,10 +13,10 @@ WorkingDirectory=/root/zeroclaw-bridge
 Environment=ZEROCLAW_BIN=/root/.cargo/bin/zeroclaw
 # Voice-daemon LLM tier identities. Bridge uses these in multi-profile mode
 # (set via VOICE_LOCAL_PROFILE_KEY / VOICE_CLOUD_PROFILE_KEY below) to flip
-# `[providers].fallback` between local Ollama and OpenRouter on smart_mode.
+# `[providers].fallback` between local llama-swap and OpenRouter on smart_mode.
 Environment=DOTTY_DEFAULT_MODEL=qwen3.5:4b
 Environment=SMART_MODEL=anthropic/claude-sonnet-4-6
-Environment=VOICE_LOCAL_PROFILE_KEY=custom:http://<XIAOZHI_HOST>:11434/v1
+Environment=VOICE_LOCAL_PROFILE_KEY=custom:http://<XIAOZHI_HOST>:8080/v1
 Environment=VOICE_CLOUD_PROFILE_KEY=custom:https://openrouter.ai/api/v1
 # Mirror of xiaozhi-server's PERSONA env var so the dashboard can show what's
 # active. Keep these two in sync; the actual persona load happens in the
