@@ -15,6 +15,10 @@ Environment=ZEROCLAW_BIN=/root/.cargo/bin/zeroclaw
 # (set via VOICE_LOCAL_PROFILE_KEY / VOICE_CLOUD_PROFILE_KEY below) to flip
 # `[providers].fallback` between local llama-swap and OpenRouter on smart_mode.
 Environment=DOTTY_DEFAULT_MODEL=qwen3.5:4b
+# 27B cold-load on llama-swap (UD-Q4_K_XL @ 96K) is ~41s. Bridge's
+# voice think_hard tool dispatches a direct call to qwen3.6:27b — bump
+# this if you push 27B context higher or run on slower hardware.
+Environment=VOICE_THINKER_TIMEOUT=90
 Environment=SMART_MODEL=anthropic/claude-sonnet-4-6
 Environment=VOICE_LOCAL_PROFILE_KEY=custom:http://<XIAOZHI_HOST>:8080/v1
 Environment=VOICE_CLOUD_PROFILE_KEY=custom:https://openrouter.ai/api/v1
