@@ -2421,7 +2421,7 @@
 <tbody>
 <tr>
 <td><code>kid_mode</code></td>
-<td>warm pink <code>(168,80,100)</code> at index <strong>8</strong></td>
+<td>salmon pink <code>(220,80,80)</code> at index <strong>8</strong></td>
 <td>Guardrails only — content sandwich, camera tools denied, kid-safe persona. Does not pick the model.</td>
 <td><code>/root/zeroclaw-bridge/state/kid-mode</code></td>
 </tr>
@@ -2479,7 +2479,7 @@
 <td>8</td>
 <td>right</td>
 <td>StateManager (<code>kid_mode</code> pip)</td>
-<td>Warm pink <code>(168,80,100)</code> when kid_mode = on; off otherwise.</td>
+<td>Salmon pink <code>(220,80,80)</code> when kid_mode = on; off otherwise. The earlier <code>(168,80,100)</code> hue read as purple/magenta after PY32 RGB565 quantization (B &gt; G gave a cool cast); salmon keeps G == B for an unambiguous warm pink.</td>
 </tr>
 <tr>
 <td>9</td>
