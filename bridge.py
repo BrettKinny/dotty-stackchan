@@ -295,6 +295,45 @@ SCENE_SYNTHESIS_MIN_GAP_SEC = float(
 )
 SCENE_SYNTHESIS_TRIGGER_STATES = {"story_time", "security", "sleep"}
 SMART_MODEL = os.environ.get("SMART_MODEL", "anthropic/claude-sonnet-4-6")
+
+# Voice provider selector. Default ("zeroclaw") preserves the legacy
+# _apply_model_swap path (rewrite /root/.zeroclaw/config.toml + restart
+# zeroclaw-bridge). Set to "tier1slim" when xiaozhi-server's Tier1Slim
+# provider owns the voice path — smart_mode then hot-swaps Tier1Slim's
+# model/url/api_key in place via /xiaozhi/admin/set-tier1slim-model.
+DOTTY_VOICE_PROVIDER = os.environ.get("DOTTY_VOICE_PROVIDER", "zeroclaw").strip().lower()
+# Local backend (smart_mode OFF) — llama-swap on Unraid running the
+# slim model (qwen3.5:4b is what Tier1Slim invokes; the 27B is reached
+# downstream by think_hard via bridge, not directly). URL must include
+# the OpenAI-compat /v1 suffix. Defaults match data/.config.yaml on the
+# live xiaozhi-server.
+TIER1SLIM_LOCAL_URL = os.environ.get(
+    "TIER1SLIM_LOCAL_URL", "http://192.168.1.67:8080/v1",
+)
+TIER1SLIM_LOCAL_API_KEY = os.environ.get("TIER1SLIM_LOCAL_API_KEY", "dotty-voice")
+TIER1SLIM_LOCAL_MODEL = os.environ.get("TIER1SLIM_LOCAL_MODEL", "qwen3.5:4b")
+# Cloud backend (smart_mode ON) — OpenRouter, model defaults to SMART_MODEL.
+# api_key MUST be set explicitly via TIER1SLIM_CLOUD_API_KEY in the systemd
+# unit (or as OPENROUTER_API_KEY) — the bridge has no other path to the key
+# (ZeroClaw stores it encrypted). Empty key → admin endpoint will refuse to
+# blank api_key on the live provider, so the OFF→ON flip will fail with a
+# clean error rather than 401-loop. Local→cloud requires this; cloud→local
+# does not.
+TIER1SLIM_CLOUD_URL = os.environ.get(
+    "TIER1SLIM_CLOUD_URL", "https://openrouter.ai/api/v1",
+)
+TIER1SLIM_CLOUD_API_KEY = os.environ.get(
+    "TIER1SLIM_CLOUD_API_KEY", os.environ.get("OPENROUTER_API_KEY", ""),
+)
+
+
+def _tier1slim_target_for_smart_mode(enabled: bool) -> tuple[str, str, str]:
+    """Return (model, url, api_key) for the Tier1Slim runtime swap given
+    the desired smart_mode state. ON → cloud (Sonnet via OpenRouter),
+    OFF → local llama-swap."""
+    if enabled:
+        return (SMART_MODEL, TIER1SLIM_CLOUD_URL, TIER1SLIM_CLOUD_API_KEY)
+    return (TIER1SLIM_LOCAL_MODEL, TIER1SLIM_LOCAL_URL, TIER1SLIM_LOCAL_API_KEY)
 CONVO_LOG_DIR = Path(os.environ.get("CONVO_LOG_DIR", "/root/zeroclaw-bridge/logs"))
 # Used by the dashboard admin path AND by perception-bus consumers (1.5/1.6).
 # Hoisted out of the `if _configure_dashboard` block so the bus tasks can
@@ -2124,6 +2163,41 @@ async def _dispatch_set_face_identified(device_id: str) -> bool:
     return await asyncio.to_thread(_post)
 
 
+async def _dispatch_set_tier1slim_model(
+    model: str, url: str = "", api_key: str = "",
+) -> bool:
+    """Hot-swap the running Tier1Slim provider's model (and optionally url /
+    api_key) via the xiaozhi-server admin endpoint. Used by smart_mode flip
+    when DOTTY_VOICE_PROVIDER=tier1slim — replaces the legacy
+    _apply_model_swap path which rewrites the ZeroClaw voice daemon's
+    config.toml (irrelevant when voice runs through xiaozhi/Tier1Slim).
+    Returns True on 2xx."""
+    if not _XIAOZHI_HOST:
+        log.warning("set_tier1slim_model: XIAOZHI_HOST not set")
+        return False
+    url_endpoint = (
+        f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/set-tier1slim-model"
+    )
+    payload: dict[str, str] = {"model": model}
+    if url:
+        payload["url"] = url
+    if api_key:
+        payload["api_key"] = api_key
+
+    def _post() -> bool:
+        try:
+            r = requests.post(url_endpoint, json=payload, timeout=3)
+            if r.status_code >= 400:
+                log.warning("set_tier1slim_model %s: %s", r.status_code, r.text[:200])
+                return False
+            return True
+        except Exception as exc:
+            log.warning("set_tier1slim_model failed: %s", exc)
+            return False
+
+    return await asyncio.to_thread(_post)
+
+
 async def _dispatch_set_toggle(device_id: str, name: str, enabled: bool) -> bool:
     """Phase 4 helper: fire MCP self.robot.set_toggle at the firmware via the
     /xiaozhi/admin/set-toggle route. Toggle name must be one of:
@@ -3803,9 +3877,12 @@ async def audio_explain(
 # via SQLite. Schema is stable — `memories(id, key, content, category,
 # namespace, ...)` with FTS5 triggers maintaining `memories_fts` on every
 # insert/update/delete. think_hard skips ACP entirely and hits llama-swap
-# directly with model=qwen3.6:27b — same speedup motivation as the rest of
-# the slim path: avoid ZeroClaw's 24K-token agent overhead on the voice
-# thread.
+# directly with model=qwen3.6:27b-think — same speedup motivation as the
+# rest of the slim path, plus the 2026-05-15 llama-swap split puts the
+# small-context 27B in the `voice` matrix set so it stays resident
+# alongside qwen3.5:4b instead of evicting it on every escalation. See
+# audits/pi-rpc-spike-report.md and dotty-stackchan/docs/cookbook/
+# llama-swap-concurrent-models.md.
 
 _VOICE_MEMORY_DB = Path(os.environ.get(
     "VOICE_MEMORY_DB", "/root/.zeroclaw/workspace/memory/brain.db",
@@ -3813,7 +3890,7 @@ _VOICE_MEMORY_DB = Path(os.environ.get(
 _VOICE_THINKER_URL = os.environ.get(
     "VOICE_THINKER_URL", "http://192.168.1.67:8080/v1/chat/completions",
 )
-_VOICE_THINKER_MODEL = os.environ.get("VOICE_THINKER_MODEL", "qwen3.6:27b")
+_VOICE_THINKER_MODEL = os.environ.get("VOICE_THINKER_MODEL", "qwen3.6:27b-think")
 _VOICE_THINKER_TIMEOUT = float(os.environ.get("VOICE_THINKER_TIMEOUT", "30"))
 
 
@@ -3907,9 +3984,11 @@ async def _voice_tool_memory_lookup(args: dict, session_id: str) -> str:
 
 
 async def _voice_tool_think_hard(args: dict, session_id: str) -> str:
-    """Direct call to llama-swap with model=qwen3.6:27b. Skips ACP/ZeroClaw
-    entirely — same motivation as Tier 1: avoid the agent overhead on the
-    voice critical path. Cold-load worst case ~25s (masked by the filler)."""
+    """Direct call to llama-swap with model=qwen3.6:27b-think. Skips
+    ACP/ZeroClaw entirely — same motivation as Tier 1: avoid the agent
+    overhead on the voice critical path. Under the 2026-05-15 llama-swap
+    split this alias is in the `voice` matrix set and stays resident
+    alongside qwen3.5:4b, so most escalations are warm (no cold-load)."""
     question = (args.get("question") or "").strip()
     if not question:
         return "(empty question)"
@@ -3962,22 +4041,98 @@ async def _voice_tool_take_photo(args: dict, session_id: str) -> str:
     return "(I can't see anything fresh right now)"
 
 
+_VOICE_PLAY_SONG_ASSET_BASE = os.environ.get(
+    "VOICE_PLAY_SONG_ASSET_BASE",
+    "/opt/xiaozhi-esp32-server/config/assets/songs",
+)
+# Module-level catalog cache so repeated "play X" turns don't refetch.
+_VOICE_PLAY_SONG_CACHE: dict[str, object] = {"files": [], "fetched_at": 0.0}
+_VOICE_PLAY_SONG_TTL_SEC = 60.0
+
+
+async def _voice_tool_play_song_catalog() -> list[str]:
+    """Return the song basenames mounted in xiaozhi-server's assets dir, with
+    a 60 s in-process cache. Empty list on failure."""
+    now = perf_counter()
+    fetched_at = float(_VOICE_PLAY_SONG_CACHE.get("fetched_at") or 0.0)
+    if now - fetched_at < _VOICE_PLAY_SONG_TTL_SEC:
+        return list(_VOICE_PLAY_SONG_CACHE.get("files") or [])
+    if not _XIAOZHI_HOST:
+        return []
+    url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/songs"
+
+    def _fetch() -> list[str]:
+        try:
+            r = requests.get(url, timeout=2)
+            if r.status_code >= 400:
+                return []
+            data = r.json()
+            files = data.get("files") or []
+            return [f for f in files if isinstance(f, str)]
+        except Exception:
+            return []
+
+    files = await asyncio.to_thread(_fetch)
+    _VOICE_PLAY_SONG_CACHE["files"] = files
+    _VOICE_PLAY_SONG_CACHE["fetched_at"] = now
+    return list(files)
+
+
+def _voice_tool_play_song_match(query: str, files: list[str]) -> str | None:
+    """Resolve a free-form song name to a catalogue basename. Strategy:
+    case-insensitive exact-stem match first, then substring containment of
+    either side. Returns None when nothing reasonable matches."""
+    if not query or not files:
+        return None
+    q = query.strip().lower()
+    q_stem = os.path.splitext(q)[0].strip()
+    best: tuple[int, str] | None = None
+    for f in files:
+        stem = os.path.splitext(f)[0].lower()
+        if stem == q_stem:
+            return f
+        if q_stem and (q_stem in stem or stem in q_stem):
+            score = abs(len(stem) - len(q_stem))
+            if best is None or score < best[0]:
+                best = (score, f)
+    return best[1] if best else None
+
+
 async def _voice_tool_play_song(args: dict, session_id: str) -> str:
-    """v1 stub: log + acknowledge. No /xiaozhi/admin/play-song endpoint
-    exists yet; wiring is a follow-up."""
+    """Resolve `args["name"]` to a song file in the xiaozhi assets dir and
+    fire it via /xiaozhi/admin/play-asset. Returns a short status string for
+    the LLM to incorporate into its final answer."""
     name = (args.get("name") or "").strip()
-    log.info("voice play_song requested but not yet wired: %s", name)
-    return f"requested ({name})"
+    if not name:
+        return "(no song name given)"
+    if not _XIAOZHI_HOST:
+        log.warning("play_song: XIAOZHI_HOST not set")
+        return "(can't reach xiaozhi-server)"
+    files = await _voice_tool_play_song_catalog()
+    if not files:
+        return "(song catalogue is empty)"
+    match = _voice_tool_play_song_match(name, files)
+    if match is None:
+        sample = ", ".join(os.path.splitext(f)[0] for f in files[:5])
+        return f"(no match for '{name}'; have: {sample})"
+    asset = f"{_VOICE_PLAY_SONG_ASSET_BASE.rstrip('/')}/{match}"
+    url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/play-asset"
 
+    def _post() -> tuple[bool, str]:
+        try:
+            r = requests.post(url, json={"asset": asset}, timeout=3)
+            if r.status_code == 200:
+                return True, ""
+            return False, f"HTTP {r.status_code}: {r.text[:120]}"
+        except Exception as exc:
+            return False, str(exc)
 
-async def _voice_tool_set_led(args: dict, session_id: str) -> str:
-    """v1 stub: log + acknowledge. No bare /xiaozhi/admin/set-led endpoint;
-    LED control today goes via firmware MCP from the LLM, which Tier 1
-    bypasses. Wiring is a follow-up."""
-    side = (args.get("side") or "").strip()
-    color = (args.get("color") or "").strip()
-    log.info("voice set_led requested but not yet wired: side=%s color=%s", side, color)
-    return f"ok ({side}={color})"
+    ok, err = await asyncio.to_thread(_post)
+    if ok:
+        log.info("voice play_song dispatched: %s", match)
+        return f"playing {os.path.splitext(match)[0]}"
+    log.warning("voice play_song failed (%s): %s", match, err)
+    return f"(couldn't play {match}: {err})"
 
 
 _VOICE_TOOLS = {
@@ -3985,7 +4140,6 @@ _VOICE_TOOLS = {
     "think_hard": _voice_tool_think_hard,
     "take_photo": _voice_tool_take_photo,
     "play_song": _voice_tool_play_song,
-    "set_led": _voice_tool_set_led,
 }
 
 
@@ -4895,21 +5049,29 @@ if _configure_dashboard is not None:
 
     async def _dashboard_set_smart_mode(enabled: bool) -> dict:
         # smart_mode owns voice-daemon model selection. ON → SMART_MODEL,
-        # OFF → DEFAULT_MODEL. Rewrites config.toml + schedules daemon
-        # restart so the new model is live for the next turn.
+        # OFF → DEFAULT_MODEL. Under DOTTY_VOICE_PROVIDER=tier1slim, the swap
+        # is a sub-second hot-mutation of the live Tier1Slim provider via
+        # the xiaozhi admin endpoint (no restart). Otherwise we fall through
+        # to the legacy ZeroClaw config.toml rewrite + daemon restart.
         _write_smart_mode(enabled)
         dispatch_ok = await _dispatch_set_toggle("", "smart_mode", enabled)
-        target_model = SMART_MODEL if enabled else DEFAULT_MODEL
         swap_err: str | None = None
-        try:
-            _apply_model_swap("voice", target_model)
-            _admin_schedule_restart(_ADMIN_DAEMON_CFG["voice"][1])
-        except Exception as exc:
-            logging.getLogger("zeroclaw-bridge").exception(
-                "smart_mode flip succeeded but model swap/restart to %r failed",
-                target_model,
-            )
-            swap_err = f"model swap/restart to {target_model!r} failed: {exc}"
+        if DOTTY_VOICE_PROVIDER == "tier1slim":
+            t_model, t_url, t_api = _tier1slim_target_for_smart_mode(enabled)
+            ok = await _dispatch_set_tier1slim_model(t_model, t_url, t_api)
+            if not ok:
+                swap_err = f"tier1slim hot-swap to {t_model!r} failed"
+        else:
+            target_model = SMART_MODEL if enabled else DEFAULT_MODEL
+            try:
+                _apply_model_swap("voice", target_model)
+                _admin_schedule_restart(_ADMIN_DAEMON_CFG["voice"][1])
+            except Exception as exc:
+                logging.getLogger("zeroclaw-bridge").exception(
+                    "smart_mode flip succeeded but model swap/restart to %r failed",
+                    target_model,
+                )
+                swap_err = f"model swap/restart to {target_model!r} failed: {exc}"
         errors: list[str] = []
         if not dispatch_ok:
             errors.append("firmware did not acknowledge set_toggle (LED pip stale)")
@@ -5067,14 +5229,23 @@ async def _admin_kid_mode(payload: _AdminKidModeIn) -> dict:
 @_admin_router.post("/smart-mode")
 async def _admin_smart_mode(payload: _AdminSmartModeIn) -> dict:
     """Flip smart_mode toggle. Owns voice-daemon model selection: ON →
-    SMART_MODEL (claude-sonnet-4-6), OFF → DEFAULT_MODEL (mistral). Rewrites
-    the daemon's config.toml and schedules a systemctl restart so the new
-    model is live on the next turn. Pip update is pushed via the
-    /xiaozhi/admin/set-toggle MCP relay so it lands live."""
+    SMART_MODEL (claude-sonnet-4-6), OFF → DEFAULT_MODEL (local). Under
+    DOTTY_VOICE_PROVIDER=tier1slim, this is a sub-second hot-mutation of
+    the live Tier1Slim provider in xiaozhi-server via /xiaozhi/admin/
+    set-tier1slim-model — no restart. Otherwise the legacy ZeroClaw
+    config.toml rewrite + systemctl restart applies. Pip update is pushed
+    via /xiaozhi/admin/set-toggle so it lands live in either case."""
     _write_smart_mode(payload.enabled)
     pushed = await _dispatch_set_toggle(
         payload.device_id, "smart_mode", payload.enabled,
     )
+    if DOTTY_VOICE_PROVIDER == "tier1slim":
+        t_model, t_url, t_api = _tier1slim_target_for_smart_mode(payload.enabled)
+        swap_ok = await _dispatch_set_tier1slim_model(t_model, t_url, t_api)
+        return {
+            "ok": True, "enabled": payload.enabled, "device_pushed": pushed,
+            "model": t_model, "swap_ok": swap_ok, "provider": "tier1slim",
+        }
     target_model = SMART_MODEL if payload.enabled else DEFAULT_MODEL
     cfg_path, unit = _apply_model_swap("voice", target_model)
     _admin_schedule_restart(unit)
@@ -5161,9 +5332,46 @@ def _read_voice_model_from_cfg() -> str | None:
 def _reconcile_voice_model_at_startup() -> None:
     """Bridge owns the source of truth for which model the voice daemon runs
     on (smart_mode state file → DEFAULT_MODEL or SMART_MODEL). On startup,
-    if config.toml drifts from that, rewrite + schedule a daemon restart so
-    the next turn lands on the right model. No-op when already in sync."""
-    target = SMART_MODEL if _read_smart_mode() else DEFAULT_MODEL
+    push the desired state at the live provider so the next turn lands on
+    the right model.
+
+    Under DOTTY_VOICE_PROVIDER=tier1slim, fire one POST at the xiaozhi
+    admin endpoint — covers both bridge-restart-after-flip and
+    xiaozhi-restart-which-reverted-to-yaml cases. Best-effort: failures are
+    logged but don't block startup, and the next dashboard flip will
+    re-attempt anyway. Otherwise (legacy ZeroClaw path), if config.toml
+    drifts, rewrite + schedule a daemon restart."""
+    smart = _read_smart_mode()
+    if DOTTY_VOICE_PROVIDER == "tier1slim":
+        t_model, t_url, t_api = _tier1slim_target_for_smart_mode(smart)
+
+        async def _push() -> None:
+            ok = await _dispatch_set_tier1slim_model(t_model, t_url, t_api)
+            if ok:
+                log.info(
+                    "startup tier1slim reconcile: pushed model=%r (smart_mode=%s)",
+                    t_model, smart,
+                )
+            else:
+                log.warning(
+                    "startup tier1slim reconcile failed: model=%r (smart_mode=%s) "
+                    "— next dashboard flip will retry",
+                    t_model, smart,
+                )
+
+        try:
+            asyncio.get_running_loop().create_task(_push())
+        except RuntimeError:
+            # Called outside an event loop (early lifespan path) — schedule
+            # via run_until_complete fallback. asyncio.run isn't safe here
+            # because lifespan owns the loop; just log and move on, the
+            # first smart-mode flip will fix it.
+            log.warning(
+                "startup tier1slim reconcile: no running loop, deferring to first flip",
+            )
+        return
+
+    target = SMART_MODEL if smart else DEFAULT_MODEL
     current = _read_voice_model_from_cfg()
     if current is None:
         log.warning(
@@ -5173,7 +5381,7 @@ def _reconcile_voice_model_at_startup() -> None:
     if current == target:
         log.info(
             "startup model reconcile: voice daemon already on %r (smart_mode=%s)",
-            target, _read_smart_mode(),
+            target, smart,
         )
         return
     try:
@@ -5181,7 +5389,7 @@ def _reconcile_voice_model_at_startup() -> None:
         _admin_schedule_restart(unit)
         log.info(
             "startup model reconcile: voice daemon %r -> %r (smart_mode=%s, restart scheduled)",
-            current, target, _read_smart_mode(),
+            current, target, smart,
         )
     except Exception:
         log.exception("startup model reconcile failed")
