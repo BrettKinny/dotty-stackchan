@@ -37,7 +37,18 @@ So Dotty is the version that passes: every component runs on hardware I own, eve
 
 Behaviour is a **six-state mutex** (`idle / talk / story_time / security / sleep / dance`) plus two orthogonal toggles (`kid_mode`, `smart_mode`), all owned by the firmware StateManager. Voice phrases, camera edges, and dashboard controls all flow through it.
 
-The 12-pixel LED ring shows the current state at a glance: **left ring 0-5 is the state arc** (all six pixels paint the state colour — green for `talk`, warm for `story_time`, dim blue for `sleep`, white-flashing for `security`, rainbow for `dance`, off for `idle`). On the right ring, **indices 8-9 are toggle pips** for kid_mode (salmon pink) and smart_mode (orange), and **index 11 (bottom) lights red while you have the turn** (LISTENING). The `idle → talk` transition fires on `face_detected` from the firmware; VLM identity recognition runs in parallel and feeds the LLM context.
+The 12-pixel LED ring shows the current state at a glance. **Left ring 0-5 is the state arc** — all six pixels paint the state colour, matching the dashboard's state buttons:
+
+|   | State |
+|---|---|
+| ⚫ | `idle` — ambient awareness; ring off. Default. |
+| 🟢 | `talk` — conversation engaged. |
+| 🟠 | `story_time` — long-running interactive story. |
+| ⚪ | `security` — watching the room (1 Hz white flash). |
+| 🔵 | `sleep` — quiescent, mic open for "wake up". |
+| 🟣 | `dance` — rainbow sweep + choreography. |
+
+On the right ring, **indices 8-9 are toggle pips** for kid_mode (salmon pink) and smart_mode (orange), and **index 11 (bottom) lights red while you have the turn** (LISTENING). The `idle → talk` transition fires on `face_detected` from the firmware; VLM identity recognition runs in parallel and feeds the LLM context.
 
 Full state taxonomy, colour palette, transition diagram, and per-state backing architecture: [`docs/modes.md`](./docs/modes.md).
 
