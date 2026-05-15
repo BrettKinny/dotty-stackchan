@@ -102,6 +102,7 @@ latency is roughly 5 seconds, dominated by the LLM round-trip.
 - [Change the persona](cookbook/change-persona.md) -- give Dotty a different personality.
 - [Swap the voice](cookbook/swap-voice.md) -- try a different TTS voice.
 - [Run fully local](cookbook/run-fully-local.md) -- Ollama compose profile, zero cloud dependencies.
+- [Run two local models concurrently](cookbook/llama-swap-concurrent-models.md) -- keep a small voice model and a big "think" model both resident via llama-swap's matrix DSL.
 - [Disable Kid Mode](cookbook/disable-kid-mode.md) -- for unrestricted use.
 - [Architecture overview](architecture.md) -- full data flow.
 - [Kid Mode](kid-mode.md) -- on by default, what it enforces.
