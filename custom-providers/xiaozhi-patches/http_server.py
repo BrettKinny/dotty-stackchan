@@ -351,6 +351,57 @@ class SimpleHttpServer:
             "question": question,
         })
 
+    async def _dotty_set_tier1slim_model(self, request: "web.Request") -> "web.Response":
+        """POST /xiaozhi/admin/set-tier1slim-model
+        Body: {"model": "...", "url": "<optional>", "api_key": "<optional>"}
+
+        Hot-mutate the running Tier1Slim provider's model / url / api_key.
+        The LLM provider is shared across every ConnectionHandler, so a
+        single mutation here repoints all current and future turns at the
+        new backend on the very next call — no docker restart, no yaml
+        rewrite. Used by the bridge's smart_mode flip to swing between
+        local llama-swap (default) and cloud OpenRouter (smart).
+
+        Persistence: this endpoint does NOT update data/.config.yaml, so a
+        container restart reverts to the yaml default. The bridge owns
+        startup reconciliation — on bridge boot it re-asserts the right
+        model based on the smart_mode state file.
+        """
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        model = (data.get("model") or "").strip()
+        url = (data.get("url") or "").strip()
+        api_key = (data.get("api_key") or "").strip()
+        if not model:
+            return web.json_response({"error": "model required"}, status=400)
+        # Late-bind the import so a stale `from ... import shared_llm` at
+        # module load time doesn't return None forever.
+        import core.portal_bridge as _portal_bridge
+        llm = _portal_bridge.shared_llm
+        if llm is None:
+            return web.json_response(
+                {"error": "shared_llm not initialized yet"}, status=503,
+            )
+        setter = getattr(llm, "set_runtime", None)
+        if not callable(setter):
+            return web.json_response(
+                {"error": f"current LLM provider {type(llm).__name__!r} "
+                          f"has no set_runtime — selected_module.LLM is "
+                          f"probably not Tier1Slim"},
+                status=409,
+            )
+        try:
+            setter(model=model, url=url or None, api_key=api_key or None)
+        except Exception as exc:
+            return web.json_response({"error": str(exc)}, status=500)
+        return web.json_response({
+            "ok": True,
+            "model": getattr(llm, "model", None),
+            "url": getattr(llm, "base_url", None),
+        })
+
     async def _dotty_list_songs(self, request: "web.Request") -> "web.Response":
         """GET /xiaozhi/admin/songs — list audio files mounted at
         /opt/xiaozhi-esp32-server/config/assets/songs/.
@@ -668,6 +719,10 @@ class SimpleHttpServer:
                         web.post(
                             "/xiaozhi/admin/play-asset",
                             self._dotty_play_asset,
+                        ),
+                        web.post(
+                            "/xiaozhi/admin/set-tier1slim-model",
+                            self._dotty_set_tier1slim_model,
                         ),
                         web.get(
                             "/xiaozhi/admin/songs",

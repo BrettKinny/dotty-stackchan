@@ -105,28 +105,6 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "set_led",
-            "description": "Set the colour of one of Dotty's LED rings.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "side": {
-                        "type": "string",
-                        "enum": ["left", "right"],
-                        "description": "Which ring to change.",
-                    },
-                    "color": {
-                        "type": "string",
-                        "description": "Colour name: 'red', 'green', 'blue', 'warm', 'off'.",
-                    },
-                },
-                "required": ["side", "color"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "take_photo",
             "description": "Look through Dotty's camera and return a short description of what's visible.",
             "parameters": {"type": "object", "properties": {}},
@@ -138,11 +116,10 @@ TOOLS = [
 # `None` means silent (fire-and-forget actions land instantly so a filler
 # would be misleading).
 TOOL_FILLERS = {
-    "memory_lookup": "🤔 Hmm, let me think.",
-    "think_hard": "🤔 Let me work that out.",
+    "memory_lookup": None,
+    "think_hard": None,
     "take_photo": "😮 Let me have a look.",
     "play_song": None,
-    "set_led": None,
 }
 
 
@@ -190,6 +167,21 @@ class LLMProvider(LLMProviderBase):
         self._persona = _load_persona(persona_path)
         if not self._persona:
             self._persona = config.get("system_prompt") or ""
+
+    def set_runtime(self, model=None, url=None, api_key=None):
+        """Hot-mutate the model/url/api_key without re-instantiating. Driven
+        by /xiaozhi/admin/set-tier1slim-model so the bridge's smart_mode flip
+        repoints the next turn at a different backend (local llama-swap vs.
+        cloud OpenRouter) with no docker restart."""
+        if model:
+            self.model = model
+        if url:
+            self.base_url = url.rstrip("/")
+        if api_key:
+            self.api_key = api_key
+        logger.bind(tag=TAG).info(
+            f"Tier1 runtime swap: model={self.model!r} url={self.base_url!r}"
+        )
 
     # ------------------------------------------------------------------
     # message + payload assembly
@@ -341,7 +333,7 @@ class LLMProvider(LLMProviderBase):
 
     def _dispatch_tool(self, name, args, session_id):
         """POST to bridge /api/voice/escalate, return the result string. Tools
-        with no useful return value (play_song, set_led) get a generic 'ok'."""
+        with no useful return value (play_song) get a generic 'ok'."""
         timeout = BRIDGE_TIMEOUT_LONG if name == "think_hard" else BRIDGE_TIMEOUT_SHORT
         try:
             r = requests.post(

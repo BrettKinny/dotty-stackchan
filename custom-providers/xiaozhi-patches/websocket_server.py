@@ -61,6 +61,12 @@ class WebSocketServer:
         self._llm = modules["llm"] if "llm" in modules else None
         self._intent = modules["intent"] if "intent" in modules else None
         self._memory = modules["memory"] if "memory" in modules else None
+        # DOTTY-PATCH: expose the shared LLM provider so the admin HTTP
+        # server's /xiaozhi/admin/set-tier1slim-model route can hot-mutate
+        # its runtime config (smart_mode flips Tier1Slim between local
+        # llama-swap and cloud OpenRouter without a daemon restart).
+        import core.portal_bridge as _portal_bridge
+        _portal_bridge.shared_llm = self._llm
 
         auth_config = self.config["server"].get("auth", {})
         self.auth_enable = auth_config.get("enabled", False)
@@ -198,6 +204,10 @@ class WebSocketServer:
                     self._asr = modules["asr"]
                 if "llm" in modules:
                     self._llm = modules["llm"]
+                    # DOTTY-PATCH: keep the shared singleton in sync with
+                    # the freshly-initialised LLM after a config reload.
+                    import core.portal_bridge as _portal_bridge
+                    _portal_bridge.shared_llm = self._llm
                 if "intent" in modules:
                     self._intent = modules["intent"]
                 if "memory" in modules:
