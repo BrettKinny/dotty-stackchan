@@ -3318,9 +3318,19 @@ def _call_vision_api(
 ) -> str:
     import requests as req
 
+    # Missing-key path is loud + unambiguous so the upstream LLM can't confabulate
+    # a description around a soft-fail string. Observed 2026-05-10: bare "I
+    # couldn't quite see that clearly" let xiaozhi's LLM invent "It's a sunny
+    # day outside" with zero camera input.
     if not VLM_API_KEY:
-        log.warning("VLM_API_KEY not set")
-        return "I couldn't quite see that clearly."
+        log.error(
+            "VLM call aborted — VLM_API_KEY/VISION_API_KEY/OPENROUTER_API_KEY "
+            "all unset; set one in zeroclaw-bridge.service Environment="
+        )
+        return (
+            "ERROR: my camera is offline right now. Tell the user the vision "
+            "system is unavailable and do not guess at what the photo shows."
+        )
     payload = {
         "model": VLM_MODEL,
         "messages": [
@@ -3353,7 +3363,10 @@ def _call_vision_api(
         return resp.json()["choices"][0]["message"]["content"].strip()
     except Exception:
         log.exception("vision API call failed")
-        return "I couldn't quite see that clearly."
+        return (
+            "ERROR: the vision service didn't respond. Tell the user you "
+            "couldn't process the photo and do not guess at what it shows."
+        )
 
 
 # ---------------------------------------------------------------------------
