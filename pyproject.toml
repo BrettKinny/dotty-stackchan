@@ -1,0 +1,36 @@
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+extend-exclude = [
+    ".venv",
+    ".venv-singing",
+    ".worktrees",
+    "firmware",
+    "node_modules",
+    "dotty-pi-ext/node_modules",
+]
+
+[tool.ruff.lint]
+# Conservative starter set: pyflakes + pycodestyle errors. Style/format
+# concerns (E501 line-length, formatting) deferred to a future PR so this
+# one stays reviewable.
+select = ["E", "F"]
+ignore = [
+    "E501",  # line-length — defer to formatter PR
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately mutate sys.path before imports, define throwaway
+# fake-clock lambdas, and pack one-line mock setups on a single line.
+"tests/**" = ["E402", "E702", "E731"]
+"custom-providers/pi_voice/tests/**" = ["E402", "E731"]
+# bridge.py has an intentional late `from fastapi import APIRouter` after
+# the admin-router setup block. Refactoring it would just create churn.
+"bridge.py" = ["E402"]
+# xiaozhi-patches are bind-mount overrides that have to preserve upstream
+# file structure (imports after a duck-typed shim class, etc.) — adding a
+# top-level import block would diverge from the source they're patching.
+"custom-providers/xiaozhi-patches/**" = ["E402"]
+# zeroclaw.py imports core.utils.textUtils after the try/except dance
+# that ensures the bind-mount path resolves first.
+"custom-providers/zeroclaw/zeroclaw.py" = ["E402"]

@@ -46,17 +46,17 @@ jobs:
       - name: Parse .config.yaml
         run: python3 -c "import yaml; yaml.safe_load(open('.config.yaml'))"
 
-  python-syntax:
-    name: Python Syntax
+  lint:
+    name: Ruff Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Check Python syntax
-        run: |
-          for f in bridge.py receiveAudioHandle.py $(find custom-providers -name '*.py'); do
-            echo "Checking $f"
-            python3 -c "import ast; ast.parse(open('$f').read())"
-          done
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - name: ruff check
+        run: ruff check .
 
   python-tests:
     name: Python Tests
@@ -138,7 +138,7 @@ jobs:
   notify-failure:
     name: Notify on Failure
     runs-on: ubuntu-latest
-    needs: [yaml-lint, compose-validate, config-parse, python-syntax, python-tests, pi-ext-tests, frontmatter-check, docs-links]
+    needs: [yaml-lint, compose-validate, config-parse, lint, python-tests, pi-ext-tests, frontmatter-check, docs-links]
     if: failure()
     env:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

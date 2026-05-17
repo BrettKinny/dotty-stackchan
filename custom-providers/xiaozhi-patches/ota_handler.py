@@ -10,7 +10,7 @@ from typing import Dict, List, Tuple
 from aiohttp import web
 
 from core.auth import AuthManager
-from core.utils.util import get_local_ip, get_vision_url
+from core.utils.util import get_local_ip
 from core.api.base_handler import BaseHandler
 
 TAG = __name__

@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 # Ensure the repo root is importable when running this file directly.
@@ -376,11 +376,8 @@ class TestHouseholdRegistryEnrichment(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("About raw_identity", prompt)  # no enrichment block
 
     async def test_birthday_today_acknowledged_in_prompt(self):
-        from datetime import date, datetime
-        from zoneinfo import ZoneInfo
         # Build a registry whose `days_until_birthday()` returns 0
         # regardless of real-world date, so the test isn't a flake.
-        from bridge.household import Person
 
         class _ZeroDayPerson:
             id = "hudson"

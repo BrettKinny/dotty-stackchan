@@ -181,7 +181,7 @@ class WebSocketServer:
                 if new_config is None:
                     self.logger.bind(tag=TAG).error("获取新配置失败")
                     return False
-                self.logger.bind(tag=TAG).info(f"获取新配置成功")
+                self.logger.bind(tag=TAG).info("获取新配置成功")
                 update_vad = check_vad_update(self.config, new_config)
                 update_asr = check_asr_update(self.config, new_config)
                 self.logger.bind(tag=TAG).info(
@@ -212,7 +212,7 @@ class WebSocketServer:
                     self._intent = modules["intent"]
                 if "memory" in modules:
                     self._memory = modules["memory"]
-                self.logger.bind(tag=TAG).info(f"更新配置任务执行完毕")
+                self.logger.bind(tag=TAG).info("更新配置任务执行完毕")
                 return True
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"更新服务器配置失败: {str(e)}")

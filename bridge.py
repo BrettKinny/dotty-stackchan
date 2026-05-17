@@ -13,10 +13,10 @@ import sys
 import time
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Awaitable, Callable, Optional, TypedDict
+from typing import Awaitable, Callable, Optional, TypedDict
 from zoneinfo import ZoneInfo
 
 # Sibling import shim — custom-providers/textUtils.py is the canonical
@@ -32,8 +32,6 @@ from pydantic import BaseModel
 from textUtils import (
     ALLOWED_EMOJIS,
     FALLBACK_EMOJI,
-    _BASE_SUFFIX,
-    _KID_MODE_SUFFIX,
     build_turn_suffix,
 )
 

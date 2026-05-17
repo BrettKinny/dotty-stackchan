@@ -1038,7 +1038,7 @@ async def resume_vad_detection(conn: "ConnectionHandler"):
 
 async def startToChat(conn: "ConnectionHandler", text):
     speaker_name = None
-    language_tag = None
+    _language_tag = None
     actual_text = text
 
     try:
@@ -1046,7 +1046,7 @@ async def startToChat(conn: "ConnectionHandler", text):
             data = json.loads(text)
             if "speaker" in data and "content" in data:
                 speaker_name = data["speaker"]
-                language_tag = data["language"]
+                _language_tag = data["language"]
                 actual_text = data["content"]
                 conn.logger.bind(tag=TAG).info(f"解析到说话人信息: {speaker_name}")
     except (json.JSONDecodeError, KeyError):
@@ -1098,7 +1098,7 @@ async def startToChat(conn: "ConnectionHandler", text):
         "emotion": "thinking",
         "session_id": conn.session_id,
     })
-    conn.logger.bind(tag=TAG).info(f"Sending thinking emotion frame to device")
+    conn.logger.bind(tag=TAG).info("Sending thinking emotion frame to device")
     await conn.websocket.send(thinking_frame)
 
     user_text = actual_text

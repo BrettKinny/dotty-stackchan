@@ -185,7 +185,7 @@ class LLMProvider(LLMProviderBase):
             logger.bind(tag=TAG).error(f"OpenAICompat HTTP error: {exc}")
             yield f"{FALLBACK_EMOJI} My brain returned an error."
             return
-        except Exception as exc:
+        except Exception:
             logger.bind(tag=TAG).exception("OpenAICompat request error")
             yield f"{FALLBACK_EMOJI} Something went wrong, please try again."
             return

@@ -72,7 +72,7 @@ def _try_sox(output: Path, duration: float) -> bool:
     return _run_sox(output)
 
 
-def _write_wav(path: Path, pcm16: "np.ndarray") -> None:  # type: ignore[name-defined]
+def _write_wav(path: Path, pcm16: "np.ndarray") -> None:  # type: ignore[name-defined]  # noqa: F821
     """Write a minimal 16-bit mono WAV (no soundfile dependency)."""
     data = pcm16.astype("<i2").tobytes()
     byte_rate = SAMPLE_RATE * 2
