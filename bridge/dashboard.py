@@ -11,7 +11,6 @@ service. Cards for unset hosts render as "unknown".
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import logging
 import os
@@ -228,27 +227,6 @@ def _log_path_for(date_str: str) -> Path:
     return LOG_DIR / f"convo-{date_str}.ndjson"
 
 
-_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
-
-def _safe_date(date_str: str | None) -> str:
-    """Validate ?date= query; fall back to today on anything weird."""
-    if date_str and _DATE_RE.match(date_str):
-        return date_str
-    return datetime.now().strftime("%Y-%m-%d")
-
-
-def _looks_like_xiaozhi_system_msg(text: str) -> bool:
-    """Heuristic: voice-channel turns whose user payload is mostly Chinese
-    are xiaozhi-server's automated wrap-up / system-injected prompts, not
-    something the kid actually said. Filter them out of the dashboard log
-    so the conversation history stays readable."""
-    if not text:
-        return False
-    cjk = sum(1 for c in text if 0x4E00 <= ord(c) <= 0x9FFF)
-    return cjk >= 3 and cjk / max(1, len(text)) > 0.3
-
-
 def _clean_request_text(s: str) -> str:
     """Strip the wrapped `[Context] ... [User] <payload>` preamble.
 
@@ -306,105 +284,12 @@ def _stackchan_last_seen() -> float | None:
     return last_voice_ts
 
 
-def _read_recent_log_entries(date_str: str, limit: int = 20) -> list[dict[str, Any]]:
-    path = _log_path_for(date_str)
-    if not path.exists():
-        return []
-    try:
-        lines = path.read_bytes().splitlines()
-    except OSError:
-        return []
-    out: list[dict[str, Any]] = []
-    for line in reversed(lines):
-        if not line.strip():
-            continue
-        try:
-            rec = json.loads(line)
-        except Exception:
-            continue
-        ts = rec.get("ts", "")
-        try:
-            time_str = datetime.fromisoformat(
-                ts.replace("Z", "+00:00")
-            ).astimezone().strftime("%H:%M:%S")
-        except Exception:
-            time_str = ts[-8:] if ts else "?"
-        cleaned_request = _clean_request_text(rec.get("request_text") or "")
-        if _looks_like_xiaozhi_system_msg(cleaned_request):
-            continue
-        phases = rec.get("latency_phases")
-        if not isinstance(phases, dict):
-            phases = None
-        out.append({
-            "time": time_str,
-            "channel": rec.get("channel") or "?",
-            "request": cleaned_request[:400],
-            "response": (rec.get("response_text") or "")[:1000],
-            "latency_ms": rec.get("latency_ms", "?"),
-            "latency_phases": phases,
-            "error": rec.get("error"),
-        })
-        if len(out) >= limit:
-            break
-    return out
-
-
 @router.get("", response_class=HTMLResponse, include_in_schema=False)
 async def dashboard(request: Request) -> Any:
     chip_ctx = await asyncio.to_thread(_build_chip_context)
     return templates.TemplateResponse(
         request, "dashboard.html",
         {"version": BRIDGE_VERSION, **chip_ctx},
-    )
-
-
-@router.get("/cards", response_class=HTMLResponse, include_in_schema=False)
-async def cards(request: Request) -> Any:
-    bridge_uptime = time.time() - _START_TIME
-
-    xiaozhi_ota_ok, xiaozhi_ws_ok = await asyncio.gather(
-        _tcp_reachable(XIAOZHI_HOST, XIAOZHI_OTA_PORT),
-        _tcp_reachable(XIAOZHI_HOST, XIAOZHI_WS_PORT),
-    )
-
-    last_seen_ts = _stackchan_last_seen()
-    if last_seen_ts is None:
-        sc_status, sc_detail, sc_last = "unknown", "no voice activity today", ""
-    else:
-        age = time.time() - last_seen_ts
-        # Binary heartbeat — voice idle is normal (mornings, sleep), so
-        # we no longer warn on it. The robot pill only goes red when the
-        # heartbeat is genuinely absent past the bridge's perception
-        # staleness threshold (mirrored on the device side as actual
-        # disconnection symptoms).
-        sc_status, sc_detail = "ok", "active"
-        sc_last = f"{_humanize_age(age)} ago"
-
-    if not XIAOZHI_HOST:
-        xiaozhi_status = "unknown"
-        xiaozhi_detail = "XIAOZHI_HOST env not set"
-    elif xiaozhi_ota_ok and xiaozhi_ws_ok:
-        xiaozhi_status = "ok"
-        xiaozhi_detail = f"OTA :{XIAOZHI_OTA_PORT} + WS :{XIAOZHI_WS_PORT}"
-    elif xiaozhi_ota_ok or xiaozhi_ws_ok:
-        xiaozhi_status = "warn"
-        xiaozhi_detail = "partial: " + (
-            f"OTA :{XIAOZHI_OTA_PORT}" if xiaozhi_ota_ok else f"WS :{XIAOZHI_WS_PORT}"
-        )
-    else:
-        xiaozhi_status = "bad"
-        xiaozhi_detail = "no ports responding"
-
-    cards_data = [
-        {"name": "StackChan", "kind": "robot", "status": sc_status,
-         "detail": sc_detail, "last_seen": sc_last},
-        {"name": "ZeroClaw bridge", "kind": "host", "status": "ok",
-         "detail": f"bridge up {_humanize_age(bridge_uptime)}", "last_seen": ""},
-        {"name": "xiaozhi-server", "kind": "host", "status": xiaozhi_status,
-         "detail": xiaozhi_detail, "last_seen": ""},
-    ]
-    return templates.TemplateResponse(
-        request, "cards.html", {"cards": cards_data}
     )
 
 
@@ -780,29 +665,6 @@ def _latest_vision_entry() -> tuple[str, dict] | None:
         cache.items(), key=lambda kv: kv[1].get("timestamp", 0.0)
     )
     return device_id, entry
-
-
-@router.get("/vision/latest", response_class=HTMLResponse, include_in_schema=False)
-async def vision_latest(request: Request) -> Any:
-    """Render a thumbnail + description for the most recent capture, if any."""
-    pick = _latest_vision_entry()
-    ctx: dict[str, Any] = {"have_photo": False}
-    if pick is not None:
-        device_id, entry = pick
-        jpeg = entry.get("jpeg_bytes")
-        # `timestamp` is a perf_counter() value — relative, so use elapsed.
-        elapsed = max(0.0, time.monotonic() - entry.get("timestamp", time.monotonic()))
-        ctx = {
-            "have_photo": jpeg is not None,
-            "device_id": device_id,
-            "description": entry.get("description", ""),
-            "question": entry.get("question", ""),
-            "age": _humanize_age(elapsed),
-            "thumbnail_b64": (
-                base64.b64encode(jpeg).decode("ascii") if jpeg else ""
-            ),
-        }
-    return templates.TemplateResponse(request, "vision.html", ctx)
 
 
 @router.get("/vision/photo", include_in_schema=False)
@@ -1256,36 +1118,6 @@ async def kid_mode_set(request: Request, enabled: str = Form("")) -> Any:
     )
 
 
-# --- Q3: stop / abort current TTS ----------------------------------------
-
-@router.post("/actions/stop", response_class=HTMLResponse,
-             include_in_schema=False)
-async def stop(request: Request) -> Any:
-    abort = _state.get("abort_device")
-    if abort is None:
-        return templates.TemplateResponse(
-            request, "say_result.html",
-            {"ok": False, "error": "Abort path not configured."},
-        )
-    try:
-        result = await abort()
-    except Exception as exc:
-        log.exception("dashboard stop action failed")
-        return templates.TemplateResponse(
-            request, "say_result.html",
-            {"ok": False, "error": f"Bridge error: {exc.__class__.__name__}"},
-        )
-    if not result.get("ok"):
-        return templates.TemplateResponse(
-            request, "say_result.html",
-            {"ok": False, "error": result.get("error", "abort failed")},
-        )
-    return templates.TemplateResponse(
-        request, "say_result.html",
-        {"ok": True, "sent": "Stop", "response": "Aborted."},
-    )
-
-
 # --- P15: update bridge from GitHub --------------------------------------
 
 GITHUB_REPO = os.environ.get(
@@ -1614,65 +1446,6 @@ async def update_bridge(request: Request) -> Any:
     )
 
 
-# --- Persona display (read-only) ------------------------------------------
-#
-# Persona is now pinned by the xiaozhi-server container's PERSONA env var
-# (see docker-compose.yml). The dashboard shows the active file name + a
-# read-only view of its contents — no runtime switcher, since the env-var
-# pin would clobber any state-file write anyway. To switch personas, edit
-# docker-compose `PERSONA=...` and redeploy.
-
-PERSONAS_DIR = Path(
-    os.environ.get("DOTTY_PERSONAS_DIR", "/root/zeroclaw-bridge/personas")
-)
-
-
-def _list_personas() -> list[str]:
-    if not PERSONAS_DIR.is_dir():
-        return []
-    return sorted(p.stem for p in PERSONAS_DIR.glob("*.md"))
-
-
-def _active_persona() -> str:
-    # Source of truth is the xiaozhi-server container's PERSONA env var.
-    # The bridge runs in its own systemd unit and doesn't see that env, but
-    # we mirror it here via DOTTY_ACTIVE_PERSONA on the bridge service unit
-    # (set in zeroclaw-bridge.service alongside the model env vars).
-    name = os.environ.get("DOTTY_ACTIVE_PERSONA", "default").strip()
-    return name or "default"
-
-
-@router.get("/persona/view", response_class=HTMLResponse, include_in_schema=False)
-async def persona_view(request: Request, name: str = "") -> Any:
-    """Read-only view of a persona file. Restricted to entries in
-    _list_personas() so ?name=../etc/passwd is impossible."""
-    available = _list_personas()
-    name = (name or "").strip() or _active_persona()
-    ctx: dict[str, Any] = {"name": name}
-    if name not in available:
-        ctx["error"] = f"Unknown persona: {name}"
-        return templates.TemplateResponse(request, "persona_view.html", ctx)
-    path = PERSONAS_DIR / f"{name}.md"
-    try:
-        content = path.read_text(encoding="utf-8", errors="replace")
-    except OSError as exc:
-        ctx["error"] = f"Read failed: {exc}"
-        return templates.TemplateResponse(request, "persona_view.html", ctx)
-    ctx["content"] = content[:50_000]
-    if len(content) > 50_000:
-        ctx["truncated"] = True
-    return templates.TemplateResponse(request, "persona_view.html", ctx)
-
-
-@router.get("/persona", response_class=HTMLResponse, include_in_schema=False)
-async def persona_partial(request: Request) -> Any:
-    return templates.TemplateResponse(
-        request, "persona.html",
-        {"available": _list_personas(), "current": _active_persona(),
-         "personas_dir": str(PERSONAS_DIR)},
-    )
-
-
 # --- P7: restart bridge ---------------------------------------------------
 
 @router.post("/actions/restart-bridge",
@@ -1966,39 +1739,9 @@ def _disk_usage_root() -> tuple[int, int] | None:
         return None
 
 
-@router.get("/metrics", response_class=HTMLResponse, include_in_schema=False)
-async def metrics(request: Request) -> Any:
-    cpu_c = _cpu_temp_c()
-    mem = _read_memory_mb()
-    disk = _disk_usage_root()
-    upt = _proc_uptime_sec()
-    rows = [
-        {"label": "CPU temp",
-         "value": f"{cpu_c:.1f} °C" if cpu_c else "n/a",
-         "warn": cpu_c is not None and cpu_c >= 75},
-        {"label": "Memory",
-         "value": (f"{mem[0]} / {mem[1]} MB" if mem else "n/a"),
-         "warn": mem is not None and mem[1] and (mem[0] / mem[1]) > 0.85},
-        {"label": "Disk /",
-         "value": (f"{disk[0]} / {disk[1]} GiB" if disk else "n/a"),
-         "warn": disk is not None and disk[1] and (disk[0] / disk[1]) > 0.85},
-        {"label": "Host uptime",
-         "value": _humanize_age(upt) if upt else "n/a",
-         "warn": False},
-        {"label": "Bridge uptime",
-         "value": _humanize_age(time.time() - _START_TIME),
-         "warn": False},
-    ]
-    return templates.TemplateResponse(
-        request, "metrics.html", {"rows": rows}
-    )
-
-
 # Single-page redesign: compact host dots (header placement) + system pills
 # (footer placement). One endpoint, two placements, polled at the same 10s
-# cadence. Replaces /ui/cards + /ui/metrics + /ui/vision/latest in the new
-# layout; the older endpoints remain for compatibility but no longer have
-# callers in dashboard.html.
+# cadence.
 @router.get("/status-strip", response_class=HTMLResponse, include_in_schema=False)
 async def status_strip(request: Request, placement: str = "header") -> Any:
     placement = placement if placement in ("header", "footer") else "header"
@@ -2512,12 +2255,3 @@ async def events_stream(request: Request) -> StreamingResponse:
     )
 
 
-@router.get("/logs", response_class=HTMLResponse, include_in_schema=False)
-async def logs(request: Request, date: str | None = None) -> Any:
-    chosen = _safe_date(date)
-    entries = _read_recent_log_entries(chosen, limit=20)
-    today = datetime.now().strftime("%Y-%m-%d")
-    return templates.TemplateResponse(
-        request, "logs.html",
-        {"entries": entries, "date": chosen, "is_today": chosen == today},
-    )
