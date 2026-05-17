@@ -29,6 +29,12 @@ credentials.*
 sbom.json
 sbom-server.json
 
+# pytest-cov artifacts (regenerated each run)
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+
 # Frontend build deps for the dashboard's vendored Tailwind bundle.
 # package.json + tailwind.config.js are committed; build artifacts and
 # the npm install state are not. Re-run `npm install && npm run build:css`

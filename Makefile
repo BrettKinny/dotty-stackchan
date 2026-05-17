@@ -18,7 +18,7 @@ BOLD   := \033[1m
 RESET  := \033[0m
 
 # ── Targets ──────────────────────────────────────────────────────────
-.PHONY: help setup fetch-models doctor audit up down logs status voice-list voice-install sbom verify-firmware _preflight-compose
+.PHONY: help setup fetch-models doctor audit up down logs status voice-list voice-install sbom verify-firmware test lint check _preflight-compose
 
 # ─────────────────────────────────────────────────────────────────────
 # _preflight-compose — fail fast if Docker Compose v2 plugin is missing
@@ -56,6 +56,20 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BOLD)%-15s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
+
+# ─────────────────────────────────────────────────────────────────────
+# Dev-loop targets — same commands CI runs, single source of truth.
+# Assumes a venv with `pytest pytest-cov ruff` available on PATH. If
+# you use a project venv, run e.g.  `source .venv/bin/activate && make check`.
+# ─────────────────────────────────────────────────────────────────────
+test: ## Run Python unit tests with coverage gate
+	pytest tests/ custom-providers/pi_voice/tests/ \
+		--cov --cov-report=term --cov-fail-under=43
+
+lint: ## Run ruff lint over the repo
+	ruff check .
+
+check: lint test ## Run lint + tests (the CI gate)
 
 # ─────────────────────────────────────────────────────────────────────
 # setup — interactive first-run wizard

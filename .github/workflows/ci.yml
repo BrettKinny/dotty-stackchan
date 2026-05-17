@@ -68,7 +68,7 @@ jobs:
           python-version: "3.12"
       - name: Install test dependencies
         run: |
-          pip install pytest
+          pip install pytest pytest-cov
           pip install \
             'fastapi>=0.115,<1' \
             'uvicorn[standard]>=0.34,<1' \
@@ -80,8 +80,12 @@ jobs:
             'numpy>=1.24,<3' \
             'aiohttp>=3.9,<4' \
             'requests>=2.31,<3'
-      - name: Run bridge + pi_voice unit tests
-        run: pytest tests/ custom-providers/pi_voice/tests/ -v --tb=short
+      - name: Run bridge + pi_voice unit tests with coverage
+        # --cov-fail-under locks in today's measured coverage as the
+        # floor; lower the gate only when intentionally removing tests.
+        run: |
+          pytest tests/ custom-providers/pi_voice/tests/ -v --tb=short \
+            --cov --cov-report=term --cov-fail-under=43
 
   pi-ext-tests:
     name: dotty-pi-ext TS Tests

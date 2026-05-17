@@ -1,0 +1,33 @@
+# Pre-commit hooks — catch lint and trivial issues before they reach CI.
+#
+# Setup:  pip install pre-commit && pre-commit install
+# Manual: pre-commit run --all-files
+#
+# Mirrors `make lint` so local pre-commit and CI's lint job agree.
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.13
+    hooks:
+      - id: ruff
+        args: [--fix]
+      # Formatter is deliberately omitted — running `ruff format` repo-wide
+      # would touch every file; defer to a future opt-in PR.
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '^firmware/'
+      - id: end-of-file-fixer
+        exclude: '^firmware/'
+      - id: check-yaml
+        exclude: '^(mkdocs\.yml|\.github/workflows/.*\.yml|firmware/)'
+        # mkdocs.yml uses python tags (!!python/name:...) that PyYAML
+        # safe_load can't resolve; GHA workflows use the same. yamllint
+        # already lints them in CI.
+      - id: check-json
+        exclude: '^firmware/'
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+        exclude: '^(songs/|firmware/)'
