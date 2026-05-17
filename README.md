@@ -28,18 +28,18 @@ So Dotty is the version that passes: every component runs on hardware I own, eve
 - **Streaming responses** — the bridge streams LLM output to the voice pipeline for lower perceived latency.
 - **Emoji expressions** — every response starts with an emoji that the firmware maps to a face animation (smile, laugh, sad, surprise, thinking, angry, love, sleepy, neutral).
 - **MCP tools** — ZeroClaw exposes tools (web search, memory, etc.) to the LLM via the Model Context Protocol.
-- **States, toggles & LEDs** — `kid_mode` and `smart_mode` toggles are shipped and persist across reboots; smart-mode flips hot-swap the inner-loop LLM in-process (no daemon restart). The six-state mutex (`idle / talk / story_time / security / sleep / dance`) + 12-pixel LED ring are designed and partially wired bridge-side; the firmware `StateManager` that paints the ring is a Phase 4 work item not yet built. See "States, Toggles & LEDs" below and [`docs/modes.md`](./docs/modes.md).
+- **States, toggles & LEDs** — a six-state mutex (`idle / talk / story_time / security / sleep / dance`) plus two orthogonal toggles (`kid_mode`, `smart_mode`), all owned by the firmware StateManager and surfaced on the 12-pixel LED ring. Shipped on the active firmware fork (commit `d78118b`, 2026-04-27); the `firmware/firmware/` submodule pin in this repo lags, so flash from the active fork to get it. See "States, Toggles & LEDs" below and [`docs/modes.md`](./docs/modes.md).
 - **Vision (camera)** — the robot's built-in camera can capture images for multimodal LLM queries.
 - **Calendar context** — optional calendar integration feeds upcoming events into the conversation context.
 - **Hackable** — every seam is swappable: LLM, TTS, ASR, agent framework. Fork it, rip out what you don't want, wire in your own.
 
 ## States, Toggles & LEDs
 
-> Honesty note: the bridge-side machinery for the six-state model — perception bus, dashboard mirror, voice-phrase routing, `kid_mode` / `smart_mode` toggles — is shipped and working. The firmware `StateManager` that owns the on-device LED contract and emits `state_changed` events is a designed-but-not-yet-built Phase 4 deliverable. The table below describes the target model; see [`docs/modes.md`](./docs/modes.md) for which parts ship today.
+Behaviour is a **six-state mutex** (`idle / talk / story_time / security / sleep / dance`) plus two orthogonal toggles (`kid_mode`, `smart_mode`), all owned by the firmware StateManager (shipped on the active fork in commit `d78118b`, 2026-04-27; bench checks tracked in [#38](https://github.com/BrettKinny/dotty-stackchan/issues/38)). Voice phrases, camera edges, and dashboard controls all flow through it.
 
-Behaviour is modelled as a **six-state mutex** (`idle / talk / story_time / security / sleep / dance`) plus two orthogonal toggles (`kid_mode`, `smart_mode`). Voice phrases, camera edges, and dashboard controls all flow through it.
+> Note: the `firmware/firmware/` submodule pin in this repo deliberately lags the active fork — flashing from the submodule won't give you Phase 4 yet. See the "Firmware iteration" section in [`CLAUDE.md`](./CLAUDE.md) and the submodule-pin caveat in [`docs/modes.md`](./docs/modes.md).
 
-The 12-pixel LED ring will show the current state at a glance once Phase 4 ships. **Left ring 0-5 is the state arc** — all six pixels paint the state colour, matching the dashboard's state buttons:
+The 12-pixel LED ring shows the current state at a glance. **Left ring 0-5 is the state arc** — all six pixels paint the state colour, matching the dashboard's state buttons:
 
 |   | State |
 |---|---|

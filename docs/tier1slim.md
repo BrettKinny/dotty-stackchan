@@ -48,7 +48,7 @@ Smart-mode flips the inner-loop target between local and cloud:
 
 | `smart_mode` | Model | URL | Notes |
 |---|---|---|---|
-| OFF (default) | `TIER1SLIM_LOCAL_MODEL` (`qwen3.5:4b`) | `TIER1SLIM_LOCAL_URL` (llama-swap, `http://192.168.1.67:8080/v1` by default) | Free, fast, fully local. |
+| OFF (default) | `TIER1SLIM_LOCAL_MODEL` (`qwen3.5:4b`) | `TIER1SLIM_LOCAL_URL` (llama-swap, `http://localhost:8080/v1` by default) | Free, fast, fully local. |
 | ON | `SMART_MODEL` (`anthropic/claude-sonnet-4-6`) | `TIER1SLIM_CLOUD_URL` (`https://openrouter.ai/api/v1` by default) | Costs money. Requires `TIER1SLIM_CLOUD_API_KEY` (or `OPENROUTER_API_KEY`) to be set. |
 
 The flip is in-process and instant — the next turn lands on the new backend with no docker restart. The Tier1Slim instance is mutated by `set_runtime(model, url, api_key)` in `tier1_slim.py` (driven from the bridge by `_apply_tier1slim_runtime` → `/xiaozhi/admin/set-tier1slim-model`).
@@ -127,13 +127,13 @@ Environment variables (read by the bridge for smart-mode flips):
 | Variable | Default | Purpose |
 |---|---|---|
 | `DOTTY_VOICE_PROVIDER` | `zeroclaw` | Set to `tier1slim` to enable the hot-swap path. |
-| `TIER1SLIM_LOCAL_URL` | `http://192.168.1.67:8080/v1` | Inner-loop endpoint when smart_mode is OFF. |
+| `TIER1SLIM_LOCAL_URL` | `http://localhost:8080/v1` | Inner-loop endpoint when smart_mode is OFF. |
 | `TIER1SLIM_LOCAL_MODEL` | `qwen3.5:4b` | Model name on the local endpoint. |
 | `TIER1SLIM_LOCAL_API_KEY` | `dotty-voice` | Sent as `Authorization: Bearer …`. llama-swap ignores. |
 | `TIER1SLIM_CLOUD_URL` | `https://openrouter.ai/api/v1` | Endpoint when smart_mode is ON. |
 | `TIER1SLIM_CLOUD_API_KEY` | _(unset; falls back to `OPENROUTER_API_KEY`)_ | Required for OFF→ON smart-mode flip. |
 | `SMART_MODEL` | `anthropic/claude-sonnet-4-6` | Model name when smart_mode is ON. |
-| `BRIDGE_URL` | `http://192.168.1.54:8080` | Where Tier1Slim posts escalations. |
+| `BRIDGE_URL` | `http://localhost:8080` | Where Tier1Slim posts escalations. |
 | `BRIDGE_TIMEOUT_SHORT` | `5` (s) | Timeout for `memory_lookup` etc. |
 | `BRIDGE_TIMEOUT_LONG` | `30` (s) | Timeout for `think_hard`. |
 

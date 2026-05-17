@@ -20,7 +20,7 @@ description: ZeroClaw agent runtime, the model matrix (Tier1Slim inner loop + es
 
 | Path | Model | Where | When called |
 |---|---|---|---|
-| Tier1Slim inner loop (smart_mode OFF) | `qwen3.5:4b` | local llama-swap (`http://192.168.1.67:8080/v1` by default) | Every plain conversational turn. ~500 ms warm. |
+| Tier1Slim inner loop (smart_mode OFF) | `qwen3.5:4b` | local llama-swap (`TIER1SLIM_LOCAL_URL`, defaults to `http://localhost:8080/v1`) | Every plain conversational turn. ~500 ms warm. |
 | Tier1Slim inner loop (smart_mode ON) | `anthropic/claude-sonnet-4-6` (`SMART_MODEL`) | OpenRouter | Every conversational turn while smart_mode is on. |
 | Tier1Slim escalation: `think_hard` | `qwen3.6:27b-think` | local llama-swap | Multi-step reasoning, 3+ digit arithmetic, anything the small model would have to guess at. |
 | Tier1Slim escalation: `memory_lookup` | (no LLM call — FTS) | ZeroClaw memory | `"do you remember…"` queries. |
