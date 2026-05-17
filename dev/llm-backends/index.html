@@ -2171,15 +2171,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-ollama-local" class="md-nav__link">
+  <a href="#2-llama-swap-local-multi-model" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Ollama (local)
+        2. llama-swap (local, multi-model)
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="2. Ollama (local)">
+    <nav class="md-nav" aria-label="2. llama-swap (local, multi-model)">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2194,10 +2194,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#start-the-stack" class="md-nav__link">
+  <a href="#start" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Start the stack
+        Start
       
     </span>
   </a>
@@ -2232,27 +2232,16 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-zeroclaw-advanced" class="md-nav__link">
+  <a href="#3-tier1slim-two-tier-voice-current-default" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. ZeroClaw (advanced)
+        3. Tier1Slim (two-tier voice — current default)
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="3. ZeroClaw (advanced)">
+    <nav class="md-nav" aria-label="3. Tier1Slim (two-tier voice — current default)">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#prerequisites_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Prerequisites
-      
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#configyaml-snippet_2" class="md-nav__link">
@@ -2267,6 +2256,56 @@
         
           <li class="md-nav__item">
   <a href="#notes_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-zeroclaw-always-on-single-tier-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. ZeroClaw (always-on single-tier agent)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. ZeroClaw (always-on single-tier agent)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configyaml-snippet_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        .config.yaml snippet
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notes_3" class="md-nav__link">
     <span class="md-ellipsis">
       
         Notes
@@ -2324,7 +2363,7 @@
 
 
 <h1 id="choose-your-llm-backend">Choose Your LLM Backend<a class="headerlink" href="#choose-your-llm-backend" title="Permanent link">&para;</a></h1>
-<p>Three LLM backend options, from simplest to most capable. All plug into
+<p>Four LLM backend options, from simplest to most capable. All plug into
 the same xiaozhi-server pipeline — you switch by changing <code>selected_module.LLM</code>
 and the matching block under <code>LLM:</code> in <code>.config.yaml</code>.</p>
 <h2 id="comparison">Comparison<a class="headerlink" href="#comparison" title="Permanent link">&para;</a></h2>
@@ -2333,8 +2372,9 @@ and the matching block under <code>LLM:</code> in <code>.config.yaml</code>.</p>
 <tr>
 <th></th>
 <th>OpenAI-compatible API</th>
-<th>Ollama (local)</th>
-<th>ZeroClaw</th>
+<th>llama-swap (local, multi-model)</th>
+<th>Tier1Slim (two-tier voice)</th>
+<th>ZeroClaw (single-tier agent)</th>
 </tr>
 </thead>
 <tbody>
@@ -2342,49 +2382,64 @@ and the matching block under <code>LLM:</code> in <code>.config.yaml</code>.</p>
 <td><strong>Provider key</strong></td>
 <td><code>OpenAICompat</code></td>
 <td><code>OpenAICompat</code></td>
+<td><code>Tier1Slim</code></td>
 <td><code>ZeroClawLLM</code></td>
 </tr>
 <tr>
 <td><strong>Runs where</strong></td>
 <td>Cloud (OpenRouter, OpenAI, etc.)</td>
-<td>Local GPU on Docker host</td>
+<td>Local GPU host (Docker, llama.cpp)</td>
+<td>Inner loop on llama-swap; escalations through the bridge</td>
 <td>ZeroClaw host or Docker host</td>
 </tr>
 <tr>
 <td><strong>Latency</strong></td>
 <td>300-800 ms (network-bound)</td>
-<td>200-600 ms (GPU-bound)</td>
-<td>500-1500 ms (agent overhead)</td>
+<td>200-600 ms (GPU-bound; <code>qwen3.5:4b</code> warm &lt;500 ms)</td>
+<td>&lt;500 ms plain chat; +bridge round-trip on tool calls</td>
+<td>500-1500 ms (full agent overhead on every turn)</td>
 </tr>
 <tr>
 <td><strong>Cost</strong></td>
 <td>Pay-per-token</td>
 <td>Free (electricity + hardware)</td>
+<td>Free for inner loop; pay-per-token in smart mode</td>
 <td>Free (electricity + hardware)</td>
 </tr>
 <tr>
 <td><strong>Privacy</strong></td>
 <td>Tokens sent to cloud provider</td>
 <td>Fully local, nothing leaves LAN</td>
-<td>Fully local (if Ollama backend)</td>
+<td>Fully local for plain turns; cloud only when smart_mode is on</td>
+<td>Fully local (if local LLM backend)</td>
 </tr>
 <tr>
 <td><strong>Setup complexity</strong></td>
 <td>Low — API key + model name</td>
-<td>Medium — GPU, Nvidia toolkit, model pull</td>
+<td>Medium — GPU, Docker, GGUF download</td>
+<td>Medium — llama-swap + Tier1Slim block; bridge for escalations</td>
 <td>High — ZeroClaw install, bridge, systemd</td>
 </tr>
 <tr>
 <td><strong>Memory / tools</strong></td>
 <td>None</td>
 <td>None</td>
+<td><code>memory_lookup</code> / <code>think_hard</code> / <code>take_photo</code> / <code>play_song</code> via escalation</td>
 <td>Yes — persistent memory, 70+ tools, MCP</td>
+</tr>
+<tr>
+<td><strong>Hot-swappable</strong></td>
+<td>Restart container</td>
+<td>Restart container</td>
+<td><strong>Yes</strong> — <code>set_runtime()</code> mutates the live provider; smart-mode flip is instant</td>
+<td>No — daemon restart on model swap</td>
 </tr>
 <tr>
 <td><strong>Best for</strong></td>
 <td>Quick start, best-in-class models</td>
-<td>Privacy, offline use, no recurring cost</td>
-<td>Agentic features, tool use, long-term memory</td>
+<td>Privacy + concurrent multi-model serving</td>
+<td>Default for snappy voice; agent features only when needed</td>
+<td>Always-on agentic features, deep tool use</td>
 </tr>
 </tbody>
 </table>
@@ -2412,19 +2467,21 @@ and the matching block under <code>LLM:</code> in <code>.config.yaml</code>.</p>
 <li><code>persona_file</code> is loaded as the system prompt.</li>
 <li>No memory between sessions — each request is stateless.</li>
 </ul>
-<h2 id="2-ollama-local">2. Ollama (local)<a class="headerlink" href="#2-ollama-local" title="Permanent link">&para;</a></h2>
-<p>Same <code>OpenAICompat</code> provider pointed at a local Ollama instance. Use the
-included <code>compose.local.override.yml</code> to add an Ollama container alongside
-xiaozhi-server.</p>
+<h2 id="2-llama-swap-local-multi-model">2. llama-swap (local, multi-model)<a class="headerlink" href="#2-llama-swap-local-multi-model" title="Permanent link">&para;</a></h2>
+<p><code>OpenAICompat</code> provider pointed at a local llama-swap instance. llama-swap fronts upstream llama.cpp and routes per-model requests to per-alias <code>llama-server</code> children, with declarative co-residency (the <code>voice</code> matrix set keeps <code>qwen3.5:4b</code> and <code>qwen3.6:27b-think</code> both warm) and on-demand swap to other sets (e.g. <code>coding</code> for <code>qwen3.6:27b@96K</code>). Recommended local backend when you want to run more than one model at a time without paying repeated cold-load costs.</p>
 <h3 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h3>
 <ul>
-<li>NVIDIA GPU with enough VRAM (RTX 3060 12 GB+ recommended).</li>
-<li>NVIDIA Container Toolkit installed on the Docker host.</li>
+<li>NVIDIA GPU (dual RTX 3060 12 GB tested; single 3090 works too).</li>
+<li>NVIDIA Container Toolkit on the GPU host.</li>
+<li>GGUF model files downloaded into <code>/mnt/user/appdata/llama-models/</code> (or your equivalent path).</li>
 </ul>
-<h3 id="start-the-stack">Start the stack<a class="headerlink" href="#start-the-stack" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>compose.all-in-one.yml<span class="w"> </span>-f<span class="w"> </span>compose.local.override.yml<span class="w"> </span>up<span class="w"> </span>-d
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>ollama<span class="w"> </span>ollama<span class="w"> </span>pull<span class="w"> </span>qwen3:8b
+<h3 id="start">Start<a class="headerlink" href="#start" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Container: ghcr.io/mostlygeek/llama-swap:cuda</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># Config:    /mnt/user/appdata/llama-swap/config.yaml</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>docker<span class="w"> </span>start<span class="w"> </span>llama-swap
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>curl<span class="w"> </span>http://&lt;LLAMA_SWAP_HOST&gt;:8080/health
 </code></pre></div>
+<p>See <a href="../cookbook/llama-swap-concurrent-models/">cookbook/llama-swap-concurrent-models.md</a> for the matrix-set config that pairs <code>qwen3.5:4b</code> (voice inner loop) with <code>qwen3.6:27b-think</code> (<code>think_hard</code> target).</p>
 <h3 id="configyaml-snippet_1"><code>.config.yaml</code> snippet<a class="headerlink" href="#configyaml-snippet_1" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">selected_module</span><span class="p">:</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">LLM</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OpenAICompat</span>
@@ -2432,47 +2489,73 @@ xiaozhi-server.</p>
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="nt">LLM</span><span class="p">:</span>
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">OpenAICompat</span><span class="p">:</span>
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">openai_compat</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://ollama:11434/v1</span><span class="w">             </span><span class="c1"># container-to-container DNS</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unused</span><span class="w">                         </span><span class="c1"># Ollama ignores this field</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">qwen3:8b</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">    </span><span class="nt">persona_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">personas/default.md</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://&lt;LLAMA_SWAP_HOST&gt;:8080/v1</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">any-string</span><span class="w">                     </span><span class="c1"># llama-swap ignores</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">qwen3.5:4b</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">    </span><span class="nt">persona_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">personas/dotty_voice.md</span>
 <a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">    </span><span class="nt">max_tokens</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">256</span>
 <a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">    </span><span class="nt">temperature</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.7</span>
 <a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">    </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">60</span>
 </code></pre></div>
 <h3 id="notes_1">Notes<a class="headerlink" href="#notes_1" title="Permanent link">&para;</a></h3>
 <ul>
-<li><code>url</code> uses the Docker service name <code>ollama</code> (not <code>localhost</code>) because
-  xiaozhi-server and Ollama share the <code>dotty</code> bridge network.</li>
-<li>Larger models (30B MoE) need ~18 GB VRAM; 8B fits in ~5 GB.</li>
+<li>Larger models (27B Q4) need ~12 GB VRAM single-card or ~10/10 layer-split across two cards.</li>
+<li>Cold load on Q4_K_M 27B is ~20 s with upstream llama.cpp (was 70 s on Ollama; 2.15× generation speedup too).</li>
 <li>No memory between sessions — stateless like the cloud option.</li>
+<li>If you don't need concurrent multi-model serving, Ollama is the simpler single-binary alternative.</li>
 </ul>
-<h2 id="3-zeroclaw-advanced">3. ZeroClaw (advanced)<a class="headerlink" href="#3-zeroclaw-advanced" title="Permanent link">&para;</a></h2>
-<p>The <code>ZeroClawLLM</code> provider routes through the FastAPI bridge on the ZeroClaw host
-into a long-running ZeroClaw agent process. ZeroClaw handles its own LLM
-calls (to OpenRouter, Ollama, or any supported provider), persistent memory,
-tool execution, and MCP integration.</p>
+<h2 id="3-tier1slim-two-tier-voice-current-default">3. Tier1Slim (two-tier voice — current default)<a class="headerlink" href="#3-tier1slim-two-tier-voice-current-default" title="Permanent link">&para;</a></h2>
+<p>The default in the shipped <code>.config.yaml</code>. A small, fast model (<code>qwen3.5:4b</code> against llama-swap) handles every plain conversational turn without involving the bridge. When the model emits a structured <code>tool_call</code>, the provider escalates to <code>POST /api/voice/escalate</code> and the bridge dispatches the tool (ZeroClaw memory for <code>memory_lookup</code>, <code>qwen3.6:27b-think</code> for <code>think_hard</code>, the VLM for <code>take_photo</code>, or <code>/xiaozhi/admin/play-asset</code> for <code>play_song</code>).</p>
+<p>Smart-mode flips repoint the inner loop at a cloud model (default <code>anthropic/claude-sonnet-4-6</code>) via in-process <code>set_runtime()</code> — no docker restart and no daemon restart.</p>
+<h3 id="configyaml-snippet_2"><code>.config.yaml</code> snippet<a class="headerlink" href="#configyaml-snippet_2" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">selected_module</span><span class="p">:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">LLM</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Tier1Slim</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="nt">LLM</span><span class="p">:</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="nt">Tier1Slim</span><span class="p">:</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tier1_slim</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;LLAMA_SWAP_URL&gt;</span><span class="w">                   </span><span class="c1"># e.g. http://192.168.1.67:8080/v1</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;LLAMA_SWAP_KEY&gt;</span><span class="w">               </span><span class="c1"># any string; llama-swap ignores</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">qwen3.5:4b</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">    </span><span class="nt">persona_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">personas/dotty_voice.md</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">    </span><span class="nt">max_tokens</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">256</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="w">    </span><span class="nt">temperature</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.7</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="w">    </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">60</span>
+</code></pre></div>
+<p>Plus environment variables (consumed by the bridge for smart-mode dispatch):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>DOTTY_VOICE_PROVIDER=tier1slim
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>TIER1SLIM_CLOUD_API_KEY=sk-or-...           # required for OFF→ON smart-mode flip
+</code></pre></div>
+<p>Full reference: <a href="../tier1slim/">tier1slim.md</a>.</p>
+<h3 id="notes_2">Notes<a class="headerlink" href="#notes_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The inner loop bypasses the bridge entirely on plain turns, so <code>bridge.py</code> going down doesn't break chitchat (only tool calls fail).</li>
+<li><code>set_runtime()</code> lets the bridge hot-swap the live provider — used for smart-mode flips and would also support per-time-of-day model selection in future.</li>
+<li>Persona uses <code>personas/dotty_voice.md</code>; the top-level <code>prompt:</code> block is deliberately ignored because the 4 B chat template only honours one system message.</li>
+</ul>
+<h2 id="4-zeroclaw-always-on-single-tier-agent">4. ZeroClaw (always-on single-tier agent)<a class="headerlink" href="#4-zeroclaw-always-on-single-tier-agent" title="Permanent link">&para;</a></h2>
+<p>The <code>ZeroClawLLM</code> provider routes through the FastAPI bridge on the ZeroClaw host into a long-running ZeroClaw agent process. ZeroClaw handles its own LLM calls (to OpenRouter, Ollama, or any supported provider), persistent memory, tool execution, and MCP integration. Every voice turn round-trips through ZeroClaw — heavier than Tier1Slim, but you get the full agent loop on every turn whether you need it or not.</p>
 <h3 id="prerequisites_1">Prerequisites<a class="headerlink" href="#prerequisites_1" title="Permanent link">&para;</a></h3>
 <ul>
 <li>ZeroClaw installed on the ZeroClaw host (or another host): <code>cargo install zeroclaw</code>.</li>
 <li><code>bridge.py</code> running as a systemd service (<code>zeroclaw-bridge.service</code>).</li>
 <li>Persona configured in <code>~/.zeroclaw/workspace/</code> (<code>SOUL.md</code>, <code>IDENTITY.md</code>, etc.).</li>
 </ul>
-<h3 id="configyaml-snippet_2"><code>.config.yaml</code> snippet<a class="headerlink" href="#configyaml-snippet_2" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">selected_module</span><span class="p">:</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">LLM</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ZeroClawLLM</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="nt">LLM</span><span class="p">:</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="nt">ZeroClawLLM</span><span class="p">:</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">zeroclaw</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://&lt;ZEROCLAW_HOST&gt;:8080/api/message/stream</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span><span class="nt">channel</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dotty</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">    </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">90</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">    </span><span class="nt">system_prompt</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">      </span><span class="no">You are &lt;ROBOT_NAME&gt;, a desktop robot (StackChan body). Begin every reply</span>
-<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="w">      </span><span class="no">with a single emoji, then speak naturally in 1-3 short TTS-friendly sentences.</span>
+<h3 id="configyaml-snippet_3"><code>.config.yaml</code> snippet<a class="headerlink" href="#configyaml-snippet_3" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">selected_module</span><span class="p">:</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">LLM</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ZeroClawLLM</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="nt">LLM</span><span class="p">:</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span><span class="nt">ZeroClawLLM</span><span class="p">:</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">zeroclaw</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://&lt;ZEROCLAW_HOST&gt;:8080/api/message/stream</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">    </span><span class="nt">channel</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dotty</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">    </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">90</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">    </span><span class="nt">system_prompt</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">      </span><span class="no">You are &lt;ROBOT_NAME&gt;, a desktop robot (StackChan body). Begin every reply</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">      </span><span class="no">with a single emoji, then speak naturally in 1-3 short TTS-friendly sentences.</span>
 </code></pre></div>
-<h3 id="notes_2">Notes<a class="headerlink" href="#notes_2" title="Permanent link">&para;</a></h3>
+<h3 id="notes_3">Notes<a class="headerlink" href="#notes_3" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Higher latency because ZeroClaw may invoke tools or consult memory before
   replying. The <code>timeout: 90</code> accommodates this.</li>
@@ -2480,22 +2563,25 @@ tool execution, and MCP integration.</p>
   Qwen3's Chinese-leak tendency (see <a href="../brain/">brain.md</a>).</li>
 <li>Persistent memory (SQLite-backed) means the robot remembers across sessions.</li>
 <li>Supports 70+ built-in tools plus any MCP servers you connect.</li>
+<li>Set <code>DOTTY_VOICE_PROVIDER=zeroclaw</code> (the default) so smart-mode flips know to rewrite ZeroClaw's <code>config.toml</code> rather than Tier1Slim's runtime.</li>
 </ul>
 <h2 id="switching-backends">Switching backends<a class="headerlink" href="#switching-backends" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Edit <code>.config.yaml</code> — change <code>selected_module.LLM</code> and the relevant <code>LLM:</code> block.</li>
+<li>If you're switching the smart-mode dispatch path, also set <code>DOTTY_VOICE_PROVIDER</code> (<code>tier1slim</code> or <code>zeroclaw</code>) in the bridge's systemd unit env block.</li>
 <li>Restart xiaozhi-server: <code>docker compose restart xiaozhi-server</code>.</li>
-<li>Test with a voice command or curl to the bridge endpoint.</li>
+<li>Test with a voice command or <code>curl</code> to the bridge endpoint.</li>
 </ol>
-<p>All three <code>LLM:</code> blocks can coexist in the config; only the one named in
-<code>selected_module.LLM</code> is active.</p>
+<p>All four <code>LLM:</code> blocks can coexist in the config; only the one named in <code>selected_module.LLM</code> is active.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../brain/">brain.md</a> — ZeroClaw architecture and the bridge in detail.</li>
+<li><a href="../tier1slim/">tier1slim.md</a> — the default voice path in detail.</li>
+<li><a href="../brain/">brain.md</a> — model matrix and ZeroClaw architecture.</li>
 <li><a href="../voice-pipeline/">voice-pipeline.md</a> — ASR, TTS, and VAD modules.</li>
 <li><a href="../architecture/">architecture.md</a> — how the LLM slot fits into the full pipeline.</li>
+<li><a href="../cookbook/llama-swap-concurrent-models/">cookbook/llama-swap-concurrent-models.md</a> — running multiple resident models on one GPU.</li>
 </ul>
-<p>Last verified: 2026-04-25.</p>
+<p>Last verified: 2026-05-17.</p>
 
 
 

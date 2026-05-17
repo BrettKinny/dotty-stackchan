@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="ZeroClaw agent runtime, Qwen3 LLM via OpenRouter, and the FastAPI bridge.">
+        <meta name="description" content="ZeroClaw agent runtime, the model matrix (Tier1Slim inner loop + escalation targets, legacy ZeroClawLLM), and the FastAPI bridge.">
       
       
       
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#brain-zeroclaw-qwen3-openrouter" class="md-skip">
+        <a href="#brain-zeroclaw-the-model-matrix-the-bridge" class="md-skip">
           Skip to content
         </a>
       
@@ -2132,6 +2132,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#model-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model matrix
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#zeroclaw-architecture" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2182,22 +2193,66 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-llm-qwen3-30b-a3b-instruct-2507" class="md-nav__link">
+  <a href="#the-llms" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The LLM — Qwen3-30B-A3B-Instruct-2507
+        The LLMs
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="The LLM — Qwen3-30B-A3B-Instruct-2507">
+    <nav class="md-nav" aria-label="The LLMs">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#qwen3-30b-a3b-instruct-2507-legacy-zeroclawllm-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Qwen3-30B-A3B-Instruct-2507 (legacy ZeroClawLLM path)
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#qwen3-caveat-chinese-leak-and-long-context-drift" class="md-nav__link">
     <span class="md-ellipsis">
       
         Qwen3 caveat — Chinese leak and long-context drift
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#qwen354b-tier1slim-inner-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        qwen3.5:4b (Tier1Slim inner loop)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#qwen3627b-think-tier1slim-think_hard-target" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        qwen3.6:27b-think (Tier1Slim think_hard target)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cloud-models-smart_mode-visual-audio" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cloud models (smart_mode + visual + audio)
       
     </span>
   </a>
@@ -2251,15 +2306,86 @@
   
 
 
-<h1 id="brain-zeroclaw-qwen3-openrouter">Brain — ZeroClaw + Qwen3 + OpenRouter<a class="headerlink" href="#brain-zeroclaw-qwen3-openrouter" title="Permanent link">&para;</a></h1>
+<h1 id="brain-zeroclaw-the-model-matrix-the-bridge">Brain — ZeroClaw + the model matrix + the bridge<a class="headerlink" href="#brain-zeroclaw-the-model-matrix-the-bridge" title="Permanent link">&para;</a></h1>
 <h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
 <ul>
-<li>The brain is <strong><a href="https://github.com/zeroclaw-labs/zeroclaw">ZeroClaw</a></strong> — a Rust AI-agent runtime (MIT/Apache-2.0 dual-licensed) that runs on the ZeroClaw host, installed via <code>cargo install</code>.</li>
-<li>A <strong>FastAPI bridge</strong> (<code>bridge.py</code>) accepts HTTP POSTs from xiaozhi-server's LLM provider and translates them into <strong>ACP (Agent Client Protocol) JSON-RPC 2.0 over stdio</strong> against a long-running <code>zeroclaw acp</code> child process.</li>
-<li>The LLM is <strong><a href="https://huggingface.co/Qwen/Qwen3-30B-A3B-Instruct-2507">Qwen3-30B-A3B-Instruct-2507</a></strong> — a 30.5 B-param MoE with 3.3 B active per token — accessed via <strong>OpenRouter</strong>.</li>
-<li>Persona lives in Markdown files under <code>~/.zeroclaw/workspace/</code> (<code>SOUL.md</code>, <code>IDENTITY.md</code>, <code>MEMORY.md</code>, <code>AGENTS.md</code>, and optionally <code>USER.md</code>). These are hot-read — no rebuild to change the persona.</li>
-<li>Known weak spot: Qwen3 tends to leak Chinese on long-context English-only prompts. Bridge compensates with a per-turn English+emoji sandwich (prefix + suffix) wrapping any turn with <code>channel="stackchan"</code>.</li>
+<li>The "brain" is two cooperating pieces: <strong><a href="https://github.com/zeroclaw-labs/zeroclaw">ZeroClaw</a></strong> (a Rust AI-agent runtime, MIT/Apache-2.0 dual-licensed) on the ZeroClaw host, plus a <strong>FastAPI bridge</strong> (<code>bridge.py</code>) that fronts it over HTTP.</li>
+<li>The bridge accepts POSTs from the voice path and translates them into <strong>ACP (Agent Client Protocol) JSON-RPC 2.0 over stdio</strong> against a long-running <code>zeroclaw acp</code> child.</li>
+<li><strong>Which LLM runs which turn depends on the active voice provider.</strong> Two paths coexist:</li>
+<li><strong>Tier1Slim path (default in <code>.config.yaml</code>)</strong> — small/fast model (<code>qwen3.5:4b</code> on a local llama-swap by default) handles every conversational turn; only tool calls escalate to the bridge. Smart-mode flips the inner-loop model to a cloud model in-process.</li>
+<li><strong>ZeroClawLLM path (legacy)</strong> — every turn runs through ZeroClaw with <a href="https://huggingface.co/Qwen/Qwen3-30B-A3B-Instruct-2507">Qwen3-30B-A3B-Instruct-2507</a> (a 30.5 B-param MoE, 3.3 B active per token) via OpenRouter.</li>
+<li>The bridge picks the smart-mode dispatch path based on the <code>DOTTY_VOICE_PROVIDER</code> env var: <code>"tier1slim"</code> → hot-swap via <code>/xiaozhi/admin/set-tier1slim-model</code>; <code>"zeroclaw"</code> → rewrite ZeroClaw's <code>config.toml</code> and restart the daemon.</li>
+<li>Persona lives in two different places depending on path: Tier1Slim reads <code>personas/dotty_voice.md</code>; ZeroClawLLM reads <code>~/.zeroclaw/workspace/{SOUL,IDENTITY,MEMORY,AGENTS}.md</code>. See <a href="../cookbook/change-persona/">change-persona.md</a>.</li>
+<li>Known weak spot of Qwen3: it leaks Chinese on long-context English-only prompts. Both paths compensate — the bridge wraps <code>channel="stackchan"</code> turns in an English+emoji sandwich; Tier1Slim appends an English-only suffix per turn.</li>
 </ul>
+<h2 id="model-matrix">Model matrix<a class="headerlink" href="#model-matrix" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Model</th>
+<th>Where</th>
+<th>When called</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tier1Slim inner loop (smart_mode OFF)</td>
+<td><code>qwen3.5:4b</code></td>
+<td>local llama-swap (<code>http://192.168.1.67:8080/v1</code> by default)</td>
+<td>Every plain conversational turn. ~500 ms warm.</td>
+</tr>
+<tr>
+<td>Tier1Slim inner loop (smart_mode ON)</td>
+<td><code>anthropic/claude-sonnet-4-6</code> (<code>SMART_MODEL</code>)</td>
+<td>OpenRouter</td>
+<td>Every conversational turn while smart_mode is on.</td>
+</tr>
+<tr>
+<td>Tier1Slim escalation: <code>think_hard</code></td>
+<td><code>qwen3.6:27b-think</code></td>
+<td>local llama-swap</td>
+<td>Multi-step reasoning, 3+ digit arithmetic, anything the small model would have to guess at.</td>
+</tr>
+<tr>
+<td>Tier1Slim escalation: <code>memory_lookup</code></td>
+<td>(no LLM call — FTS)</td>
+<td>ZeroClaw memory</td>
+<td><code>"do you remember…"</code> queries.</td>
+</tr>
+<tr>
+<td>Tier1Slim escalation: <code>take_photo</code></td>
+<td><code>google/gemini-2.0-flash-001</code> (<code>VLM_MODEL</code>)</td>
+<td>OpenRouter (or local Ollama if <code>VLM_API_URL</code> is repointed)</td>
+<td>Camera describe.</td>
+</tr>
+<tr>
+<td>Tier1Slim escalation: <code>play_song</code></td>
+<td>(no LLM call)</td>
+<td>Firmware via xiaozhi <code>/xiaozhi/admin/play-asset</code></td>
+<td>Song request.</td>
+</tr>
+<tr>
+<td>ZeroClawLLM (legacy single tier)</td>
+<td><code>Qwen3-30B-A3B-Instruct-2507</code></td>
+<td>OpenRouter</td>
+<td>Every turn when <code>selected_module.LLM = ZeroClawLLM</code>.</td>
+</tr>
+<tr>
+<td>Vision narrative LLM (security/scene synthesis)</td>
+<td><code>VISION_MODEL</code> (<code>google/gemini-2.0-flash-001</code> by default)</td>
+<td>OpenRouter</td>
+<td>Bridge-internal — describes the camera frame for journaling and security mode.</td>
+</tr>
+<tr>
+<td>Audio captioning (security mode)</td>
+<td><code>AUDIO_CAPTION_MODEL</code> (<code>google/gemini-2.5-flash</code> by default)</td>
+<td>OpenRouter</td>
+<td>Bridge-internal — <code>what does Dotty hear</code> describer.</td>
+</tr>
+</tbody>
+</table>
+<p>The full Tier1Slim wire format, escalation payload, and <code>set_runtime()</code> hot-swap are documented in <a href="../tier1slim/">tier1slim.md</a>.</p>
 <h2 id="zeroclaw-architecture">ZeroClaw architecture<a class="headerlink" href="#zeroclaw-architecture" title="Permanent link">&para;</a></h2>
 <p>From <a href="https://github.com/zeroclaw-labs/zeroclaw">github.com/zeroclaw-labs/zeroclaw</a> (see <a href="../references/#brain">references.md</a>):</p>
 <table>
@@ -2311,7 +2437,7 @@
 <tr>
 <td><code>SOUL.md</code></td>
 <td>"Core identity and operating principles"</td>
-<td>The configured persona's voice, values, role in the household. <code>channel="stackchan"</code> section was removed (2026-04-24) after the bridge-level enforcement subsumed it.</td>
+<td>The configured persona's voice, values, role in the household. The dedicated <code>channel="stackchan"</code> section was removed after bridge-level English-only enforcement subsumed it.</td>
 </tr>
 <tr>
 <td><code>IDENTITY.md</code></td>
@@ -2346,26 +2472,55 @@
 <p>See <a href="../protocols/#acp">protocols.md</a> for the ACP wire format.</p>
 <h2 id="the-bridge-bridgepy">The bridge — <code>bridge.py</code><a class="headerlink" href="#the-bridge-bridgepy" title="Permanent link">&para;</a></h2>
 <p>Lives at <code>&lt;BRIDGE_PATH&gt;/bridge.py</code>, runs under systemd (<code>zeroclaw-bridge.service</code>).</p>
-<p><strong>Responsibilities:</strong></p>
+<p><strong>HTTP surface:</strong></p>
 <table>
 <thead>
 <tr>
-<th>HTTP endpoint</th>
+<th>Endpoint</th>
+<th>Caller</th>
 <th>Purpose</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>POST /api/message</code></td>
-<td>Accept a message + channel, return a response string. Called by the xiaozhi ZeroClawLLM provider.</td>
+<td><code>ZeroClawLLM</code> (legacy single-tier)</td>
+<td>Accept a message + channel, return a response string.</td>
+</tr>
+<tr>
+<td><code>POST /api/voice/escalate</code></td>
+<td><code>Tier1Slim</code></td>
+<td>Dispatch a tool call (<code>memory_lookup</code> / <code>think_hard</code> / <code>take_photo</code> / <code>play_song</code>) and return the result.</td>
+</tr>
+<tr>
+<td><code>POST /api/voice/remember</code></td>
+<td><code>Tier1Slim</code></td>
+<td>Fire-and-forget: persist a <code>[REMEMBER: ...]</code> fact extracted from the model's reply.</td>
+</tr>
+<tr>
+<td><code>POST /api/voice/memory_log</code></td>
+<td><code>Tier1Slim</code></td>
+<td>Fire-and-forget: log the completed turn so ZeroClaw indexes it for future recall.</td>
+</tr>
+<tr>
+<td><code>POST /api/perception/event</code></td>
+<td>xiaozhi-server perception relay</td>
+<td>Receive <code>face_detected</code> / <code>face_lost</code> / <code>sound_event</code> / <code>state_changed</code> events from the firmware via xiaozhi.</td>
 </tr>
 <tr>
 <td><code>GET /health</code></td>
+<td>health checks</td>
 <td>Liveness probe.</td>
+</tr>
+<tr>
+<td><code>POST /admin/*</code> (localhost-only)</td>
+<td>operator scripts</td>
+<td>Runtime mutations (kid-mode, persona, model, safety).</td>
 </tr>
 </tbody>
 </table>
-<p><strong>Responsibilities per turn:</strong></p>
+<p>See <a href="../protocols/">protocols.md</a> for exact wire formats.</p>
+<p><strong>Per-turn responsibilities on the <code>ZeroClawLLM</code> path:</strong></p>
 <ol>
 <li>Spawn (or reuse) a <code>zeroclaw acp</code> child, holding stdin/stdout open.</li>
 <li>Send JSON-RPC <code>session/new</code> to get a fresh session_id. <em>(Note: currently one <code>session/new</code> per turn — see session reuse in <a href="../latent-capabilities/#brain-unused">latent-capabilities.md</a>.)</em></li>
@@ -2375,7 +2530,15 @@
 <li>Run <code>_ensure_emoji_prefix()</code> — if the first non-whitespace char isn't in the 9-emoji allowlist (😊😆😢😮🤔😠😐😍😴), prepend 😐.</li>
 <li>Return JSON <code>{"response": "&lt;cleaned text&gt;"}</code>.</li>
 </ol>
-<h2 id="the-llm-qwen3-30b-a3b-instruct-2507">The LLM — Qwen3-30B-A3B-Instruct-2507<a class="headerlink" href="#the-llm-qwen3-30b-a3b-instruct-2507" title="Permanent link">&para;</a></h2>
+<p><strong>Per-turn responsibilities on the <code>Tier1Slim</code> path:</strong></p>
+<p>The bridge doesn't see plain conversational turns at all — they happen entirely inside Tier1Slim against llama-swap. The bridge is invoked only when the small model emits a <code>tool_call</code>, at which point it:</p>
+<ol>
+<li>Looks up the tool name and dispatches to ZeroClaw (<code>memory_lookup</code>), llama-swap's <code>qwen3.6:27b-think</code> (<code>think_hard</code>), the VLM (<code>take_photo</code>), or xiaozhi's <code>/xiaozhi/admin/play-asset</code> (<code>play_song</code>).</li>
+<li>Returns the result string truncated to 1000 chars.</li>
+<li>Separately, accepts <code>/api/voice/remember</code> and <code>/api/voice/memory_log</code> posts so future <code>memory_lookup</code> calls find the new content.</li>
+</ol>
+<h2 id="the-llms">The LLMs<a class="headerlink" href="#the-llms" title="Permanent link">&para;</a></h2>
+<h3 id="qwen3-30b-a3b-instruct-2507-legacy-zeroclawllm-path">Qwen3-30B-A3B-Instruct-2507 (legacy <code>ZeroClawLLM</code> path)<a class="headerlink" href="#qwen3-30b-a3b-instruct-2507-legacy-zeroclawllm-path" title="Permanent link">&para;</a></h3>
 <p>From the <a href="https://huggingface.co/Qwen/Qwen3-30B-A3B-Instruct-2507">HuggingFace card</a>:</p>
 <table>
 <thead>
@@ -2447,8 +2610,18 @@
 <li>xiaozhi-server's top-level <code>prompt:</code> is also English-only.</li>
 <li>The bridge adds <strong>both a prefix and a suffix</strong> around every voice turn — the suffix sits at the end-of-prompt position (max attention) and reiterates the constraint. 8/8 adversarial prompts (broken English, embedded Japanese, short utterances) passed cleanly after this change.</li>
 </ol>
+<h3 id="qwen354b-tier1slim-inner-loop">qwen3.5:4b (Tier1Slim inner loop)<a class="headerlink" href="#qwen354b-tier1slim-inner-loop" title="Permanent link">&para;</a></h3>
+<p>Local on llama-swap (Unraid, dual RTX 3060). Fast: ~500 ms warm round-trip including TTS dispatch. Trained for tool calling, which is what lets the four-tool catalogue work reliably at 4 B. See <a href="../tier1slim/">tier1slim.md</a> for the wire format.</p>
+<h3 id="qwen3627b-think-tier1slim-think_hard-target">qwen3.6:27b-think (Tier1Slim <code>think_hard</code> target)<a class="headerlink" href="#qwen3627b-think-tier1slim-think_hard-target" title="Permanent link">&para;</a></h3>
+<p>Local on the same llama-swap, separate alias. ~18 tok/s generation, ~30 s cold-load. Co-resident with <code>qwen3.5:4b</code> under the <code>voice</code> matrix set in <code>llama-swap/config.yaml</code> so an escalation doesn't evict the inner loop. See <a href="../cookbook/llama-swap-concurrent-models/">cookbook/llama-swap-concurrent-models.md</a>.</p>
+<h3 id="cloud-models-smart_mode-visual-audio">Cloud models (smart_mode + visual + audio)<a class="headerlink" href="#cloud-models-smart_mode-visual-audio" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Smart-mode inner loop:</strong> <code>anthropic/claude-sonnet-4-6</code> (<code>SMART_MODEL</code> env var). Used by Tier1Slim when smart_mode is on; flipped in-process via <code>set_runtime()</code>.</li>
+<li><strong>VLM (<code>take_photo</code>, security camera frames):</strong> <code>google/gemini-2.0-flash-001</code> (<code>VLM_MODEL</code>).</li>
+<li><strong>Audio captioning (security mode):</strong> <code>google/gemini-2.5-flash</code> (<code>AUDIO_CAPTION_MODEL</code>).</li>
+</ul>
 <h2 id="openrouter">OpenRouter<a class="headerlink" href="#openrouter" title="Permanent link">&para;</a></h2>
-<p>Routing: OpenRouter fronts the Qwen3 model, handles multiple upstream providers, and exposes an OpenAI-compatible API. ZeroClaw's config references it via an <code>openrouter</code> provider section with encrypted API key.</p>
+<p>Routing: OpenRouter fronts cloud models (<code>SMART_MODEL</code>, <code>VLM_MODEL</code>, <code>AUDIO_CAPTION_MODEL</code>, and the legacy ZeroClaw path's Qwen3-30B). It handles multiple upstream providers and exposes an OpenAI-compatible API. ZeroClaw's config references it via an <code>openrouter</code> provider section with an encrypted API key; the bridge reads <code>OPENROUTER_API_KEY</code> from the systemd unit's environment for the VLM and audio-caption calls.</p>
 <p>Observability OpenRouter itself offers (not currently surfaced in this stack):
 - Per-request latency + cost dashboards.
 - Multi-model A/B routing.
@@ -2456,12 +2629,14 @@
 <p>If per-turn latency ever needs deeper analysis than ZeroClaw's <code>state/costs.jsonl</code> and <code>state/runtime-trace.jsonl</code>, OpenRouter's dashboard is where to look next.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
+<li><a href="../tier1slim/">tier1slim.md</a> — the default voice path.</li>
 <li><a href="../protocols/#acp">protocols.md</a> — exact ACP RPC surface the bridge speaks.</li>
-<li><a href="../voice-pipeline/">voice-pipeline.md</a> — what drives the bridge (xiaozhi's LLM provider).</li>
+<li><a href="../voice-pipeline/">voice-pipeline.md</a> — what drives the bridge.</li>
+<li><a href="../llm-backends/">llm-backends.md</a> — choosing between Tier1Slim, ZeroClawLLM, OpenAICompat.</li>
 <li><a href="../latent-capabilities/#brain-unused">latent-capabilities.md</a> — streaming, session reuse, tool-use, MCP-server mode.</li>
 <li><a href="../references/#brain">references.md</a> — ZeroClaw, ACP, Qwen3, OpenRouter links.</li>
 </ul>
-<p>Last verified: 2026-04-24.</p>
+<p>Last verified: 2026-05-17.</p>
 
 
 

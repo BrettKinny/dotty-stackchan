@@ -6,11 +6,11 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="M5Stack StackChan hardware specs, CoreS3 ESP32-S3 SoC, and servo chassis.">
+        <meta name="description" content="How the Tier1Slim provider runs a small/fast model for inner-loop chat and escalates tool calls to ZeroClaw via the bridge.">
       
       
       
-        <link rel="canonical" href="https://brettkinny.github.io/dotty-stackchan/dev/hardware/">
+        <link rel="canonical" href="https://brettkinny.github.io/dotty-stackchan/dev/tier1slim/">
       
       
       
@@ -23,7 +23,7 @@
     
     
       
-        <title>Hardware - Dotty</title>
+        <title>Tier1Slim — Two-Tier Voice LLM - Dotty</title>
       
     
     
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#hardware-m5stack-stackchan" class="md-skip">
+        <a href="#tier1slim-two-tier-voice-llm" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Hardware
+              Tier1Slim — Two-Tier Voice LLM
             
           </span>
         </div>
@@ -2121,10 +2121,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#tldr" class="md-nav__link">
+  <a href="#when-to-use-it" class="md-nav__link">
     <span class="md-ellipsis">
       
-        TL;DR
+        When to use it
       
     </span>
   </a>
@@ -2132,10 +2132,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-soc-and-board-m5stack-cores3" class="md-nav__link">
+  <a href="#models-and-routing" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The SoC and board: M5Stack CoreS3
+        Models and routing
       
     </span>
   </a>
@@ -2143,10 +2143,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-the-stackchan-kit-adds-on-top" class="md-nav__link">
+  <a href="#the-four-escalation-tools" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What the StackChan kit adds on top
+        The four escalation tools
       
     </span>
   </a>
@@ -2154,10 +2154,60 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#firmware-lineage" class="md-nav__link">
+  <a href="#wire-format" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Firmware lineage
+        Wire format
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Wire format">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#inner-loop-call-model-llama-swap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inner-loop call (model → llama-swap)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#escalation-call-tier1slim-bridge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Escalation call (Tier1Slim → bridge)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#memory-side-channel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Memory side channel
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
       
     </span>
   </a>
@@ -2165,32 +2215,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#on-device-mcp-tools" class="md-nav__link">
+  <a href="#persona-handling" class="md-nav__link">
     <span class="md-ellipsis">
       
-        On-device MCP tools
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#peripherals-the-firmware-could-expose-but-doesnt-per-current-observation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Peripherals the firmware could expose but doesn't (per current observation)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#safety-relevant-hardware-facts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Safety-relevant hardware facts
+        Persona handling
       
     </span>
   </a>
@@ -2228,313 +2256,235 @@
   
 
 
-<h1 id="hardware-m5stack-stackchan">Hardware — M5Stack StackChan<a class="headerlink" href="#hardware-m5stack-stackchan" title="Permanent link">&para;</a></h1>
-<h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
+<h1 id="tier1slim-two-tier-voice-llm">Tier1Slim — Two-Tier Voice LLM<a class="headerlink" href="#tier1slim-two-tier-voice-llm" title="Permanent link">&para;</a></h1>
+<p>Tier1Slim is one of two LLM providers Dotty can use for the voice path; the other is <code>ZeroClawLLM</code> (full agent runtime, single tier). Tier1Slim splits the work in two:</p>
 <ul>
-<li>The robot body is the <strong>M5Stack StackChan</strong> kit: an M5Stack <strong>CoreS3</strong> (ESP32-S3) head on a 2-servo chassis.</li>
-<li>The CoreS3 supplies the SoC, display, camera, mic array, speaker, IMU, proximity, microSD, NFC, IR — all integrated.</li>
-<li>The <em>StackChan kit</em> adds the head-yaw servo, head-pitch servo, 12 RGB LEDs, 3-zone touch panel, 700 mAh supplementary battery, USB-C, and the 3D-printed body.</li>
-<li>Firmware on the device is built from <a href="https://github.com/m5stack/StackChan"><code>m5stack/StackChan</code></a> — an Arduino C++ codebase that bundles the <strong>XiaoZhi AI agent</strong> client. It is <strong>not</strong> the same codebase as <code>meganetaaan/stack-chan</code> (the original Moddable/JS project) or <code>78/xiaozhi-esp32</code> (generic voice-assistant firmware).</li>
-<li>The device advertises itself over the Xiaozhi WebSocket protocol and exposes <strong>on-device tools via MCP</strong> (see <a href="../protocols/">protocols.md</a>).</li>
+<li><strong>Inner loop</strong> — every plain conversational turn goes directly to a small, fast model (default: <code>qwen3.5:4b</code> against a local llama-swap endpoint), no bridge round-trip. Warm latency is well under 1 s.</li>
+<li><strong>Escalation</strong> — when the small model emits a structured <code>tool_call</code>, Tier1Slim POSTs the call to the bridge's <code>/api/voice/escalate</code> endpoint, which dispatches to ZeroClaw memory, the 27 B thinker, or a firmware MCP tool, then streams the final answer back through TTS.</li>
 </ul>
-<h2 id="the-soc-and-board-m5stack-cores3">The SoC and board: M5Stack CoreS3<a class="headerlink" href="#the-soc-and-board-m5stack-cores3" title="Permanent link">&para;</a></h2>
-<p>All values from <a href="https://docs.m5stack.com/en/core/CoreS3"><code>docs.m5stack.com/en/core/CoreS3</code></a> (see <a href="../references/#hardware">references.md</a>).</p>
+<p>The provider is selected with <code>selected_module.LLM: Tier1Slim</code> in <code>.config.yaml</code>. Source: <code>custom-providers/tier1_slim/tier1_slim.py</code>.</p>
+<h2 id="when-to-use-it">When to use it<a class="headerlink" href="#when-to-use-it" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Component</th>
-<th>Spec</th>
+<th>You want</th>
+<th>Use</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>SoC</td>
-<td>ESP32-S3, dual-core Xtensa LX7 @ 240 MHz</td>
+<td>Snappy chitchat ("what colour is the sky?") under 1 s</td>
+<td><strong>Tier1Slim</strong></td>
 </tr>
 <tr>
-<td>Flash</td>
-<td>16 MB</td>
+<td>Every voice turn to go through a full agent loop (memory, multi-step reasoning, tool chains)</td>
+<td><code>ZeroClawLLM</code></td>
 </tr>
 <tr>
-<td>PSRAM</td>
-<td>8 MB Quad</td>
-</tr>
-<tr>
-<td>Display</td>
-<td>2.0″ IPS, 320×240, ILI9342C, capacitive touch</td>
-</tr>
-<tr>
-<td>Camera</td>
-<td>GC0308, 0.3 MP (built-in)</td>
-</tr>
-<tr>
-<td>Proximity / ambient-light</td>
-<td>LTR-553ALS-WA</td>
-</tr>
-<tr>
-<td>IMU</td>
-<td>BMI270 (6-axis accel + gyro)</td>
-</tr>
-<tr>
-<td>Magnetometer</td>
-<td>BMM150 (3-axis) — gives 9-axis combined with BMI270</td>
-</tr>
-<tr>
-<td>Mic codec</td>
-<td>ES7210, dual-mic input</td>
-</tr>
-<tr>
-<td>Speaker amp</td>
-<td>AW88298, 16-bit I2S, 1 W</td>
-</tr>
-<tr>
-<td>PMU</td>
-<td>AXP2101</td>
-</tr>
-<tr>
-<td>Battery (internal)</td>
-<td>500 mAh Li-ion</td>
-</tr>
-<tr>
-<td>RTC</td>
-<td>BM8563</td>
-</tr>
-<tr>
-<td>microSD</td>
-<td>Supported, up to 16 GB</td>
-</tr>
-<tr>
-<td>Wi-Fi</td>
-<td>2.4 GHz only</td>
-</tr>
-<tr>
-<td>BLE</td>
-<td>Yes</td>
-</tr>
-<tr>
-<td>USB</td>
-<td>USB-C (device + power)</td>
-</tr>
-<tr>
-<td>Dimensions</td>
-<td>54.0 × 54.0 × 15.5 mm (unit only)</td>
-</tr>
-<tr>
-<td>Weight</td>
-<td>72.7 g (unit only)</td>
+<td>Voice path that can hot-swap between local and cloud backends with no daemon restart</td>
+<td><strong>Tier1Slim</strong></td>
 </tr>
 </tbody>
 </table>
-<h2 id="what-the-stackchan-kit-adds-on-top">What the StackChan kit adds on top<a class="headerlink" href="#what-the-stackchan-kit-adds-on-top" title="Permanent link">&para;</a></h2>
-<p>Values from <a href="https://github.com/m5stack/StackChan"><code>m5stack/StackChan</code> README</a> (see <a href="../references/#hardware">references.md</a>):</p>
+<p>Bridge code reads <code>DOTTY_VOICE_PROVIDER</code> to know which path is live. <code>"zeroclaw"</code> (default) means smart-mode flips rewrite ZeroClaw's TOML and restart the daemon; <code>"tier1slim"</code> means smart-mode flips call <code>/xiaozhi/admin/set-tier1slim-model</code> to hot-swap the live provider in xiaozhi-server.</p>
+<h2 id="models-and-routing">Models and routing<a class="headerlink" href="#models-and-routing" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>                    selected_module.LLM = Tier1Slim
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>                                │
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>                                ▼
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>                Tier1Slim (custom-providers/tier1_slim/)
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>                                │
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>            ┌───────────────────┴────────────────────┐
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>            │                                        │
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>   No tool_calls emitted                  tool_calls emitted
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>            │                                        │
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>            ▼                                        ▼
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>   llama-swap (default)                  POST /api/voice/escalate
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>   qwen3.5:4b @ :8080/v1                 ──→ bridge.py
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>   ~500 ms warm                                      │
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>                                  ┌─────────────────┼─────────────────┬─────────────┐
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>                                  ▼                 ▼                 ▼             ▼
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>                          memory_lookup       think_hard          play_song    take_photo
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>                          (ZeroClaw FTS)      (qwen3.6:27b-think) (firmware)   (VLM via bridge)
+</code></pre></div>
+<p>Smart-mode flips the inner-loop target between local and cloud:</p>
 <table>
 <thead>
 <tr>
-<th>Component</th>
-<th>Spec</th>
+<th><code>smart_mode</code></th>
+<th>Model</th>
+<th>URL</th>
+<th>Notes</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Head-yaw servo</td>
-<td>Feedback servo, 360° horizontal rotation</td>
+<td>OFF (default)</td>
+<td><code>TIER1SLIM_LOCAL_MODEL</code> (<code>qwen3.5:4b</code>)</td>
+<td><code>TIER1SLIM_LOCAL_URL</code> (llama-swap, <code>http://192.168.1.67:8080/v1</code> by default)</td>
+<td>Free, fast, fully local.</td>
 </tr>
 <tr>
-<td>Head-pitch servo</td>
-<td>Feedback servo, 90° vertical movement</td>
-</tr>
-<tr>
-<td>Front-panel LEDs</td>
-<td>12 × RGB, arranged in two rows</td>
-</tr>
-<tr>
-<td>Touch panel</td>
-<td>3-zone (beyond the display's own touch)</td>
-</tr>
-<tr>
-<td>NFC</td>
-<td>Yes, reader + writer</td>
-</tr>
-<tr>
-<td>IR</td>
-<td>Transmitter + receiver</td>
-</tr>
-<tr>
-<td>Supplementary battery</td>
-<td>700 mAh</td>
-</tr>
-<tr>
-<td>Chassis</td>
-<td>3D-printed body, base, feet (STL published)</td>
+<td>ON</td>
+<td><code>SMART_MODEL</code> (<code>anthropic/claude-sonnet-4-6</code>)</td>
+<td><code>TIER1SLIM_CLOUD_URL</code> (<code>https://openrouter.ai/api/v1</code> by default)</td>
+<td>Costs money. Requires <code>TIER1SLIM_CLOUD_API_KEY</code> (or <code>OPENROUTER_API_KEY</code>) to be set.</td>
 </tr>
 </tbody>
 </table>
-<p><strong>Note on battery size.</strong> The CoreS3's internal battery is 500 mAh; the StackChan kit documents 700 mAh. The StackChan kit appears to bundle an external cell that supersedes or supplements the CoreS3 internal one. Check the physical kit to confirm before quoting battery life numbers.</p>
-<h2 id="firmware-lineage">Firmware lineage<a class="headerlink" href="#firmware-lineage" title="Permanent link">&para;</a></h2>
-<p>Three related codebases — do not confuse them:</p>
+<p>The flip is in-process and instant — the next turn lands on the new backend with no docker restart. The Tier1Slim instance is mutated by <code>set_runtime(model, url, api_key)</code> in <code>tier1_slim.py</code> (driven from the bridge by <code>_apply_tier1slim_runtime</code> → <code>/xiaozhi/admin/set-tier1slim-model</code>).</p>
+<h2 id="the-four-escalation-tools">The four escalation tools<a class="headerlink" href="#the-four-escalation-tools" title="Permanent link">&para;</a></h2>
+<p>The catalogue is intentionally small to stay reliable on a 4 B model. Defined in <code>tier1_slim.py:TOOLS</code>.</p>
 <table>
 <thead>
 <tr>
-<th>Repo</th>
-<th>Language</th>
+<th>Tool</th>
 <th>Purpose</th>
-<th>Runs on StackChan?</th>
+<th>Bridge dispatch</th>
+<th>Filler phrase</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><a href="https://github.com/meganetaaan/stack-chan"><code>meganetaaan/stack-chan</code></a></td>
-<td>TypeScript / JavaScript on Moddable SDK</td>
-<td>Original open-source Stack-chan (Shinya Ishikawa)</td>
-<td>Yes (but not what we run)</td>
+<td><code>memory_lookup</code></td>
+<td>Recall a fact from a past conversation. Use when the user says "do you remember…" or refers to a past topic by name.</td>
+<td>ZeroClaw memory (FTS). Short timeout (<code>BRIDGE_TIMEOUT_SHORT</code>, default 5 s).</td>
+<td>none (lands fast)</td>
 </tr>
 <tr>
-<td><a href="https://github.com/m5stack/StackChan"><code>m5stack/StackChan</code></a></td>
-<td>Arduino C++</td>
-<td>M5Stack's official firmware — bundles XiaoZhi AI agent, targets CoreS3</td>
-<td><strong>Yes — this is what we flash</strong></td>
+<td><code>think_hard</code></td>
+<td>Delegate a hard question (multi-step planning, 3+ digit arithmetic).</td>
+<td><code>qwen3.6:27b-think</code> via llama-swap. Long timeout (<code>BRIDGE_TIMEOUT_LONG</code>, default 30 s).</td>
+<td>none</td>
 </tr>
 <tr>
-<td><a href="https://github.com/78/xiaozhi-esp32"><code>78/xiaozhi-esp32</code></a></td>
-<td>Arduino C++</td>
-<td>Generic multi-board voice assistant firmware (70+ target boards)</td>
-<td>Runs on the same ESP32-S3 but is a different application — you pick one, not both</td>
+<td><code>play_song</code></td>
+<td>Play a song through the speaker.</td>
+<td>Bridge → xiaozhi <code>/xiaozhi/admin/play-asset</code>.</td>
+<td>none (fire-and-forget)</td>
+</tr>
+<tr>
+<td><code>take_photo</code></td>
+<td>Look through Dotty's camera and describe what's visible.</td>
+<td>Bridge → VLM (<code>VLM_MODEL</code>, default <code>google/gemini-2.0-flash-001</code>).</td>
+<td>"😮 Let me have a look."</td>
 </tr>
 </tbody>
 </table>
-<p>Our pipeline uses <code>m5stack/StackChan</code> because it comes with the robot-body integration (servos, avatar rendering, LED patterns, MCP tools mapped to peripherals) already done. <code>78/xiaozhi-esp32</code> is the upstream <em>protocol</em> reference — the voice channel speaks the same WebSocket protocol regardless.</p>
-<h2 id="on-device-mcp-tools">On-device MCP tools<a class="headerlink" href="#on-device-mcp-tools" title="Permanent link">&para;</a></h2>
-<p>The device acts as an <strong>MCP server</strong> — after the WS <code>hello</code> handshake, it advertises its tools to xiaozhi-server via <code>tools/list</code> (JSON-RPC 2.0 inside <code>type: mcp</code> messages). See <a href="../protocols/#mcp-tools-over-ws">protocols.md</a> for the exact wire format.</p>
-<p>Tool names follow the dotted-namespace convention from the <code>78/xiaozhi-esp32</code> MCP protocol doc (e.g. <code>self.audio_speaker.set_volume</code>, <code>self.get_device_status</code>). The <strong>registration sites</strong> in the firmware use <code>McpServer::AddTool</code> for public tools and <code>McpServer::AddUserOnlyTool</code> for privileged/hidden ones.</p>
-<p>Per internal deployment observation, the live firmware advertises <strong>11 tools</strong>. The mapping below is from that observation plus the <code>m5stack/StackChan</code> README's feature list — <strong>verify against the handshake logs</strong> (<code>docker logs xiaozhi-esp32-server | grep tools/list</code>) before relying on exact tool names:</p>
-<table>
-<thead>
-<tr>
-<th>#</th>
-<th>Tool (functional)</th>
-<th>Hardware touched</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>1</td>
-<td>Head yaw</td>
-<td>Yaw feedback servo</td>
-</tr>
-<tr>
-<td>2</td>
-<td>Head pitch</td>
-<td>Pitch feedback servo</td>
-</tr>
-<tr>
-<td>3</td>
-<td>LED color</td>
-<td>12× RGB LEDs</td>
-</tr>
-<tr>
-<td>4</td>
-<td>Camera — <code>take_photo</code></td>
-<td>GC0308 camera</td>
-</tr>
-<tr>
-<td>5</td>
-<td>Reminders / timer</td>
-<td>RTC (BM8563) + software</td>
-</tr>
-<tr>
-<td>6</td>
-<td>Volume</td>
-<td>AW88298 amp</td>
-</tr>
-<tr>
-<td>7</td>
-<td>Display brightness</td>
-<td>ILI9342C backlight</td>
-</tr>
-<tr>
-<td>8</td>
-<td>Screen theme</td>
-<td>Avatar renderer</td>
-</tr>
-<tr>
-<td>9</td>
-<td>Face expression</td>
-<td>Avatar renderer (see <a href="../protocols/#emotion-protocol">protocols.md</a>)</td>
-</tr>
-<tr>
-<td>10</td>
-<td>Get device status</td>
-<td>All (battery, RSSI, uptime)</td>
-</tr>
-<tr>
-<td>11</td>
-<td>Reboot</td>
-<td>MCU</td>
-</tr>
-</tbody>
-</table>
-<p><strong>Action item</strong> to make this table canonical: capture a real <code>tools/list</code> response and commit the tool-name column verbatim. Tracked in <a href="../latent-capabilities/#observability">latent-capabilities.md</a> as an observability gap.</p>
-<h2 id="peripherals-the-firmware-could-expose-but-doesnt-per-current-observation">Peripherals the firmware could expose but doesn't (per current observation)<a class="headerlink" href="#peripherals-the-firmware-could-expose-but-doesnt-per-current-observation" title="Permanent link">&para;</a></h2>
-<p>These are real hardware features with no documented MCP tool in the default firmware today. See <a href="../latent-capabilities/#hardware-unused">latent-capabilities.md</a> for prioritization.</p>
-<table>
-<thead>
-<tr>
-<th>Peripheral</th>
-<th>Capability</th>
-<th>Why it'd matter</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>BMI270 + BMM150 (9-axis IMU)</td>
-<td>Shake / gesture / orientation detection</td>
-<td>Tap-to-activate, shake-to-reset; orientation-aware responses</td>
-</tr>
-<tr>
-<td>LTR-553 proximity sensor</td>
-<td>Hand-approach detection, ambient light</td>
-<td>Wake-on-approach; auto-dim at night</td>
-</tr>
-<tr>
-<td>NFC module</td>
-<td>Tag read/write</td>
-<td>Tap an NFC card/toy to trigger a scripted interaction</td>
-</tr>
-<tr>
-<td>IR tx/rx</td>
-<td>Learn + replay IR codes</td>
-<td>Universal-remote mode for legacy appliances</td>
-</tr>
-<tr>
-<td>microSD slot</td>
-<td>Offline asset storage</td>
-<td>Pre-bundled sound packs, offline fallback voices</td>
-</tr>
-<tr>
-<td>3-zone touch panel</td>
-<td>Multi-zone tap/swipe</td>
-<td>Gesture controls without using the display's touch</td>
-</tr>
-<tr>
-<td>Camera (beyond <code>take_photo</code>)</td>
-<td>Video streaming / on-device vision preprocessing</td>
-<td>Privacy-preserving local vision before sending to a VLLM</td>
-</tr>
-</tbody>
-</table>
-<h2 id="safety-relevant-hardware-facts">Safety-relevant hardware facts<a class="headerlink" href="#safety-relevant-hardware-facts" title="Permanent link">&para;</a></h2>
+<p>Per-tool filler phrases (<code>tier1_slim.py:TOOL_FILLERS</code>) give TTS something to say while a slow tool runs. <code>None</code> means silent — used where the action lands instantly or would make a filler misleading.</p>
+<h2 id="wire-format">Wire format<a class="headerlink" href="#wire-format" title="Permanent link">&para;</a></h2>
+<h3 id="inner-loop-call-model-llama-swap">Inner-loop call (model → llama-swap)<a class="headerlink" href="#inner-loop-call-model-llama-swap" title="Permanent link">&para;</a></h3>
+<p>Plain OpenAI-compatible chat completion with <code>tools=auto</code>. The slim 4 B model decides whether to answer directly or emit a <code>tool_calls</code> array.</p>
+<h3 id="escalation-call-tier1slim-bridge">Escalation call (Tier1Slim → bridge)<a class="headerlink" href="#escalation-call-tier1slim-bridge" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="err">POST {BRIDGE_URL}/api/voice/escalate</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="err">Content-Type: application/json</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="err">{</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="err">  &quot;tool&quot;: &quot;&lt;tool_name&gt;&quot;,</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="err">  &quot;args&quot;: {&quot;query&quot;: &quot;...&quot;} | {&quot;question&quot;: &quot;...&quot;} | {&quot;name&quot;: &quot;...&quot;} | {},</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="err">  &quot;session_id&quot;: &quot;&lt;xiaozhi session id&gt;&quot;</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="err">}</span>
+</code></pre></div>
+<p>Response:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span><span class="nt">&quot;result&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;short string, truncated to 1000 chars&gt;&quot;</span><span class="p">}</span>
+</code></pre></div>
+<p><code>memory_lookup</code> and <code>think_hard</code> block until the result arrives. <code>play_song</code> and <code>take_photo</code> block too but the bridge returns quickly because the side effect is dispatched downstream.</p>
+<h3 id="memory-side-channel">Memory side channel<a class="headerlink" href="#memory-side-channel" title="Permanent link">&para;</a></h3>
+<p>Two fire-and-forget POSTs run alongside escalation:</p>
 <ul>
-<li><strong>Mic is I2S via ES7210.</strong> Hot whenever the firmware chooses — there is no hardware mic-mute. The privacy-indicator LED item in <a href="../ROADMAP.md"><code>ROADMAP.md</code></a> exists because of this.</li>
-<li><strong>Servos can move fast.</strong> Feedback servos in a kids' environment can startle. The StackChan kit uses the M5Stack Avatar library's ease functions; the velocity cap is a firmware-side choice, not a hardware limit. See the "Servo speed caps" item in <a href="../ROADMAP.md"><code>ROADMAP.md</code></a>.</li>
-<li><strong>Camera has no shutter.</strong> Software-only enable. The <code>take_photo</code> MCP tool should always co-activate a distinct LED state (see child-safety task).</li>
+<li><code>POST /api/voice/remember</code> — <code>{"fact": "...", "session_id": "..."}</code>. Triggered when the model emits a <code>[REMEMBER: ...]</code> marker inside the final reply. The marker is stripped before TTS.</li>
+<li><code>POST /api/voice/memory_log</code> — <code>{"user": "...", "assistant": "...", "session_id": "..."}</code>. Logs the turn so ZeroClaw can index it for future <code>memory_lookup</code> calls. Posted at end-of-turn.</li>
 </ul>
+<p>Both have 2 s timeouts and never raise — failures log and continue.</p>
+<h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
+<p>Provider block in <code>.config.yaml</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">selected_module</span><span class="p">:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">LLM</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Tier1Slim</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="nt">LLM</span><span class="p">:</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="nt">Tier1Slim</span><span class="p">:</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tier1_slim</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;LLAMA_SWAP_URL&gt;</span><span class="w">          </span><span class="c1"># e.g. http://192.168.1.67:8080/v1</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;LLAMA_SWAP_KEY&gt;</span><span class="w">      </span><span class="c1"># any string; llama-swap doesn&#39;t enforce</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">qwen3.5:4b</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">    </span><span class="nt">max_tokens</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">256</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">    </span><span class="nt">temperature</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.7</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="w">    </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">60</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="w">    </span><span class="nt">persona_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">personas/dotty_voice.md</span>
+</code></pre></div>
+<p>Environment variables (read by the bridge for smart-mode flips):</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DOTTY_VOICE_PROVIDER</code></td>
+<td><code>zeroclaw</code></td>
+<td>Set to <code>tier1slim</code> to enable the hot-swap path.</td>
+</tr>
+<tr>
+<td><code>TIER1SLIM_LOCAL_URL</code></td>
+<td><code>http://192.168.1.67:8080/v1</code></td>
+<td>Inner-loop endpoint when smart_mode is OFF.</td>
+</tr>
+<tr>
+<td><code>TIER1SLIM_LOCAL_MODEL</code></td>
+<td><code>qwen3.5:4b</code></td>
+<td>Model name on the local endpoint.</td>
+</tr>
+<tr>
+<td><code>TIER1SLIM_LOCAL_API_KEY</code></td>
+<td><code>dotty-voice</code></td>
+<td>Sent as <code>Authorization: Bearer …</code>. llama-swap ignores.</td>
+</tr>
+<tr>
+<td><code>TIER1SLIM_CLOUD_URL</code></td>
+<td><code>https://openrouter.ai/api/v1</code></td>
+<td>Endpoint when smart_mode is ON.</td>
+</tr>
+<tr>
+<td><code>TIER1SLIM_CLOUD_API_KEY</code></td>
+<td><em>(unset; falls back to <code>OPENROUTER_API_KEY</code>)</em></td>
+<td>Required for OFF→ON smart-mode flip.</td>
+</tr>
+<tr>
+<td><code>SMART_MODEL</code></td>
+<td><code>anthropic/claude-sonnet-4-6</code></td>
+<td>Model name when smart_mode is ON.</td>
+</tr>
+<tr>
+<td><code>BRIDGE_URL</code></td>
+<td><code>http://192.168.1.54:8080</code></td>
+<td>Where Tier1Slim posts escalations.</td>
+</tr>
+<tr>
+<td><code>BRIDGE_TIMEOUT_SHORT</code></td>
+<td><code>5</code> (s)</td>
+<td>Timeout for <code>memory_lookup</code> etc.</td>
+</tr>
+<tr>
+<td><code>BRIDGE_TIMEOUT_LONG</code></td>
+<td><code>30</code> (s)</td>
+<td>Timeout for <code>think_hard</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="persona-handling">Persona handling<a class="headerlink" href="#persona-handling" title="Permanent link">&para;</a></h2>
+<p>Tier1Slim uses a single small system prompt (<code>personas/dotty_voice.md</code> by default) and discards xiaozhi-server's top-level <code>prompt:</code> block. The 4 B chat template only honours one system message, and xiaozhi's default prompt is sized for the ZeroClawLLM agentic path — concatenating both starves the small model's attention. If no <code>persona_file</code> is set, Tier1Slim falls back to merging the dialogue's system messages.</p>
+<p>The emoji + English rules are appended per turn via <code>build_turn_suffix(KID_MODE)</code> (<code>custom-providers/textUtils.py</code>). Same set as elsewhere: 😊😆😢😮🤔😠😐😍😴. Fallback prefix is 😐.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../protocols/#mcp-tools-over-ws">protocols.md</a> — how the device advertises these tools.</li>
-<li><a href="../latent-capabilities/#hardware-unused">latent-capabilities.md</a> — what to do with the unused peripherals.</li>
-<li><a href="../references/#hardware">references.md</a> — all upstream hardware links.</li>
+<li><a href="../voice-pipeline/">voice-pipeline.md</a> — where Tier1Slim sits in the ASR → LLM → TTS chain.</li>
+<li><a href="../brain/">brain.md</a> — the ZeroClaw agent that Tier1Slim escalates to.</li>
+<li><a href="../protocols/">protocols.md</a> — <code>/api/voice/escalate</code>, <code>/api/voice/remember</code>, <code>/api/voice/memory_log</code> wire formats.</li>
+<li><a href="../llm-backends/">llm-backends.md</a> — choosing between Tier1Slim, ZeroClawLLM, OpenAICompat.</li>
+<li><a href="../modes/">modes.md</a> — how smart_mode swaps the inner-loop backend.</li>
+<li><a href="../cookbook/llama-swap-concurrent-models/">cookbook/llama-swap-concurrent-models.md</a> — running <code>qwen3.5:4b</code> + <code>qwen3.6:27b-think</code> concurrently on one GPU pair so Tier1Slim's escalation tools don't evict the inner-loop model.</li>
 </ul>
-<p>Last verified: 2026-05-17.</p>
 
 
 

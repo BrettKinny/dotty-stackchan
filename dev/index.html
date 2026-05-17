@@ -2327,7 +2327,11 @@ re-verify claims against the canonical specs rather than trusting our paraphrase
 <td><a href="voice-pipeline/">voice-pipeline.md</a></td>
 </tr>
 <tr>
-<td>Understand the brain (ZeroClaw + LLM)</td>
+<td>Understand the default voice LLM (Tier1Slim + escalation)</td>
+<td><a href="tier1slim/">tier1slim.md</a></td>
+</tr>
+<tr>
+<td>Understand the brain (model matrix + ZeroClaw)</td>
 <td><a href="brain/">brain.md</a></td>
 </tr>
 <tr>
@@ -2365,15 +2369,16 @@ re-verify claims against the canonical specs rather than trusting our paraphrase
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── README.md                ← you are here (index)
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── architecture.md          ← high-level data flow, actor responsibilities
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── hardware.md              ← M5Stack StackChan body + firmware lineage + MCP tool catalog
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── voice-pipeline.md        ← xiaozhi-esp32-server, FunASR, VAD, EdgeTTS, Piper
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>├── brain.md                 ← ZeroClaw architecture, Qwen3-30B-A3B, OpenRouter
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>├── multi-daemon-split.md    ← split voice + Discord across two ZeroClaw daemons
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>├── protocols.md             ← Xiaozhi WebSocket, MCP-over-WS, ACP JSON-RPC, emotion
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>├── interaction-map.md       ← every cross-layer signal: source, dest, protocol, notes
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>├── modes.md                 ← behavioural mode taxonomy + LED contract + transitions
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>├── latent-capabilities.md   ← upstream features we could wire up (cross-refs ROADMAP.md)
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>├── llm-backends.md          ← side-by-side comparison of LLM backend options
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>└── references.md            ← canonical URLs, licenses, model cards, spec docs
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── voice-pipeline.md        ← xiaozhi-esp32-server, FunASR/Whisper, VAD, Piper/EdgeTTS
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>├── tier1slim.md             ← two-tier voice LLM provider + escalation contract
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>├── brain.md                 ← model matrix (Tier1Slim + ZeroClaw), bridge, OpenRouter
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>├── multi-daemon-split.md    ← split voice + Discord across two ZeroClaw daemons
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>├── protocols.md             ← Xiaozhi WebSocket, MCP-over-WS, ACP JSON-RPC, emotion
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>├── interaction-map.md       ← every cross-layer signal: source, dest, protocol, notes
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>├── modes.md                 ← behavioural mode taxonomy + LED contract + transitions
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>├── latent-capabilities.md   ← upstream features we could wire up (cross-refs ROADMAP.md)
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>├── llm-backends.md          ← side-by-side comparison of LLM backend options
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>└── references.md            ← canonical URLs, licenses, model cards, spec docs
 </code></pre></div>
 <h2 id="conventions-these-docs-follow">Conventions these docs follow<a class="headerlink" href="#conventions-these-docs-follow" title="Permanent link">&para;</a></h2>
 <ul>
@@ -2426,7 +2431,7 @@ re-verify claims against the canonical specs rather than trusting our paraphrase
 </tbody>
 </table>
 <p>If you're reading this a year from now, treat the protocol + model claims as <em>starting points for re-verification</em>, not ground truth.</p>
-<p>Last verified: 2026-04-24.</p>
+<p>Last verified: 2026-05-17.</p>
 
 
 

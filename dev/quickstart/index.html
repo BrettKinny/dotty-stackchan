@@ -2395,7 +2395,20 @@ alternative configurations.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>cp<span class="w"> </span>.env.example<span class="w"> </span>.env
 </code></pre></div>
 <p>Edit <code>.env</code> and set <code>OPENROUTER_API_KEY=&lt;YOUR_API_KEY&gt;</code> (or any
-OpenAI-compatible key). Skip this if running fully local via Ollama.</p>
+OpenAI-compatible key). You can skip this if you're running fully local
+— either via Ollama (single binary, simple) or via llama-swap (Docker,
+supports multiple resident models). See
+<a href="../cookbook/run-fully-local/">cookbook/run-fully-local.md</a> and
+<a href="../cookbook/llama-swap-concurrent-models/">cookbook/llama-swap-concurrent-models.md</a>.</p>
+<p>The shipped <code>.config.yaml</code> selects <code>Tier1Slim</code> as the default LLM,
+which expects a llama-swap (or other OpenAI-compatible) endpoint at the
+URL pointed to by <code>LLM.Tier1Slim.url</code> (and a matching <code>api_key</code>). If
+that endpoint isn't reachable, either:
+- stand up llama-swap (cookbook above), or
+- switch <code>selected_module.LLM</code> to <code>OpenAICompat</code> and point it at any
+  cloud OpenAI-compatible API, or
+- switch to <code>ZeroClawLLM</code> and run the full ZeroClaw agent on a second
+  host (see <a href="../SETUP.md">SETUP.md</a>).</p>
 <h2 id="4-run-setup">4. Run setup<a class="headerlink" href="#4-run-setup" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>make<span class="w"> </span>setup
 </code></pre></div>
@@ -2688,11 +2701,11 @@ latency is roughly 5 seconds, dominated by the LLM round-trip.</p>
 <h3 id="changing-voice">Changing voice<a class="headerlink" href="#changing-voice" title="Permanent link">&para;</a></h3>
 <p>The default TTS is <code>LocalPiper</code> (offline, runs inside the container). To change the Piper voice, edit <code>TTS.LocalPiper.voice</code> and the corresponding <code>model_path</code> / <code>config_path</code> in <code>data/.config.yaml</code>. To switch to cloud EdgeTTS instead, set <code>selected_module.TTS: EdgeTTS</code> and edit <code>TTS.EdgeTTS.voice</code> (any Microsoft Edge Neural voice ID works, e.g. <code>en-US-AvaNeural</code>). Restart the container after changes.</p>
 <h3 id="changing-persona-the-robots-personality">Changing persona (the robot's personality)<a class="headerlink" href="#changing-persona-the-robots-personality" title="Permanent link">&para;</a></h3>
-<p>Primary source: ZeroClaw's own system prompt in <code>&lt;ZEROCLAW_CFG&gt;</code> on the ZeroClaw host. The <code>prompt:</code> key in <code>data/.config.yaml</code> is a secondary hint that the bridge passes to ZeroClaw as context, but ZeroClaw's own prompt wins.</p>
+<p>Where the persona lives depends on which LLM provider is active. With the shipped default (<code>selected_module.LLM: Tier1Slim</code>), edit <code>personas/dotty_voice.md</code> and <code>docker compose restart</code> — Tier1Slim deliberately ignores the top-level <code>prompt:</code> block because the 4 B chat template only honours one system message. With <code>selected_module.LLM: ZeroClawLLM</code>, the persona lives in <code>&lt;ZEROCLAW_CFG&gt;</code> plus the workspace files at <code>~/.zeroclaw/workspace/{SOUL,IDENTITY}.md</code> on the ZeroClaw host; the <code>prompt:</code> key in <code>data/.config.yaml</code> is then a secondary hint that the bridge passes to ZeroClaw as context. Full instructions: <a href="../cookbook/change-persona/">cookbook/change-persona.md</a>.</p>
 <h3 id="changing-vad-sensitivity">Changing VAD sensitivity<a class="headerlink" href="#changing-vad-sensitivity" title="Permanent link">&para;</a></h3>
 <p><code>VAD.SileroVAD.min_silence_duration_ms</code> in <code>data/.config.yaml</code>. Default: 700 ms. Lower = cuts off quicker. Higher = waits longer for slow speakers.</p>
 <h3 id="changing-the-llm-model">Changing the LLM model<a class="headerlink" href="#changing-the-llm-model" title="Permanent link">&para;</a></h3>
-<p><code>default_model</code> key near the top of <code>&lt;ZEROCLAW_CFG&gt;</code> on the ZeroClaw host (provider and encrypted api_key live next to it). ACP mode caches config in the long-running child, so restart the bridge (<code>sudo systemctl restart zeroclaw-bridge</code>) after editing. Confirm with <code>sudo &lt;ZEROCLAW_BIN&gt; status | grep Model</code>.</p>
+<p>For the <code>Tier1Slim</code> path (default): edit <code>LLM.Tier1Slim.model</code> (or repoint <code>url</code> / <code>api_key</code>) in <code>data/.config.yaml</code> and <code>docker compose restart</code>. Or for in-flight swaps, use the bridge's <code>/admin/smart-mode</code> toggle — it calls <code>/xiaozhi/admin/set-tier1slim-model</code> to hot-swap without a restart (see <a href="../tier1slim/">tier1slim.md</a>). For the legacy <code>ZeroClawLLM</code> path: edit <code>default_model</code> near the top of <code>&lt;ZEROCLAW_CFG&gt;</code> on the ZeroClaw host (provider and encrypted api_key live next to it). ACP mode caches config in the long-running child, so restart the bridge (<code>sudo systemctl restart zeroclaw-bridge</code>) after editing. Confirm with <code>sudo &lt;ZEROCLAW_BIN&gt; status | grep Model</code>.</p>
 <hr />
 <h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>make<span class="w"> </span>doctor<span class="w">          </span><span class="c1"># health checks</span>

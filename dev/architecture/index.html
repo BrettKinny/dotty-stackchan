@@ -2154,10 +2154,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#data-flow-single-utterance" class="md-nav__link">
+  <a href="#data-flow-single-utterance-tier1slim-path-plain-turn" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Data flow (single utterance)
+        Data flow (single utterance, Tier1Slim path — plain turn)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-flow-tier1slim-path-escalated-tool-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data flow (Tier1Slim path — escalated tool call)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-flow-legacy-zeroclawllm-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data flow (legacy ZeroClawLLM path)
       
     </span>
   </a>
@@ -2187,13 +2209,52 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bridge-admin-endpoints-admin" class="md-nav__link">
+  <a href="#admin-surface-two-services-two-prefixes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Bridge admin endpoints (/admin/*)
+        Admin surface (two services, two prefixes)
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Admin surface (two services, two prefixes)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#bridge-admin-zeroclaw-host-1270018080-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bridge /admin/* (ZeroClaw host, 127.0.0.1:8080 only)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#xiaozhi-server-xiaozhiadmin-docker-host-port-8003" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        xiaozhi-server /xiaozhi/admin/* (Docker host, port 8003)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#perception-event-bus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Perception event bus
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2255,8 +2316,11 @@
 <ul>
 <li>Three hosts: <strong>StackChan</strong> (the robot on your desk) → <strong>Docker host</strong> (runs xiaozhi-esp32-server) → <strong>ZeroClaw host</strong> (runs ZeroClaw + a FastAPI bridge).</li>
 <li>Audio goes device → Docker host → (text) → ZeroClaw host → (response text) → Docker host → (audio) → device. The ZeroClaw host never touches audio.</li>
-<li>Everything is LAN-local <strong>except</strong> the LLM call, which goes out to OpenRouter from the ZeroClaw host. EdgeTTS is cloud too when it's the selected TTS; Piper is fully local.</li>
-<li>The "xiaozhi ↔ brain" seam is HTTP + ACP-over-stdio, not a library call — so either side can be swapped independently.</li>
+<li><strong>Two voice paths coexist</strong>, selected by <code>selected_module.LLM</code> in <code>.config.yaml</code>:</li>
+<li><strong><code>Tier1Slim</code></strong> (current default) — a small/fast LLM (<code>qwen3.5:4b</code>) handles plain turns directly from xiaozhi-server against a local llama-swap, no bridge round-trip. Tool calls escalate to the bridge via <code>/api/voice/escalate</code>.</li>
+<li><strong><code>ZeroClawLLM</code></strong> (legacy single-tier) — every turn goes through the bridge → ZeroClaw → OpenRouter (Qwen3-30B).</li>
+<li>Everything is LAN-local <strong>except</strong> cloud-routed LLM calls (smart-mode, ZeroClawLLM, VLM, audio caption). EdgeTTS is cloud too when selected; Piper is fully local.</li>
+<li>The "xiaozhi ↔ brain" seam is HTTP + ACP-over-stdio, not a library call — either side can be swapped independently.</li>
 <li>The robot speaks the <strong>Xiaozhi WebSocket protocol</strong> (see <a href="../protocols/">protocols.md</a>). It has no hardcoded knowledge of ZeroClaw.</li>
 </ul>
 <h2 id="topology">Topology<a class="headerlink" href="#topology" title="Permanent link">&para;</a></h2>
@@ -2270,26 +2334,38 @@
         subgraph XZMods["voice pipeline"]
             VAD["SileroVAD"]
             ASR["FunASR&lt;br/&gt;SenseVoiceSmall"]
-            LLM["ZeroClawLLM&lt;br/&gt;(custom provider)"]
+            T1S["Tier1Slim&lt;br/&gt;(default LLM)"]
+            ZCL["ZeroClawLLM&lt;br/&gt;(legacy LLM)"]
             TTS["TTS&lt;br/&gt;(LocalPiper default,&lt;br/&gt;EdgeTTS available)"]
         end
+    end
+
+    subgraph Llama["llama-swap (Unraid)"]
+        SLIM["qwen3.5:4b&lt;br/&gt;(Tier1 inner loop)"]
+        THINK["qwen3.6:27b-think&lt;br/&gt;(think_hard target)"]
     end
 
     subgraph ZCHost["ZeroClaw host - &amp;lt;ZEROCLAW_HOST&amp;gt;"]
         Bridge["zeroclaw-bridge&lt;br/&gt;FastAPI :8080&lt;br/&gt;systemd unit"]
         ZC["ZeroClaw daemon&lt;br/&gt;(agent persona)"]
-        Cloud["(OpenRouter / GLM / ...)"]
     end
 
+    Cloud["OpenRouter&lt;br/&gt;(smart_mode, VLM,&lt;br/&gt;audio caption, legacy)"]
+
     SC --&gt;|"WebSocket&lt;br/&gt;Xiaozhi protocol"| XZ
-    XZ --- VAD &amp; ASR &amp; LLM &amp; TTS
-    LLM --&gt;|"HTTP POST&lt;br/&gt;/api/message/stream"| Bridge
+    XZ --- VAD &amp; ASR &amp; T1S &amp; ZCL &amp; TTS
+    T1S --&gt;|"plain turn (default)"| SLIM
+    T1S --&gt;|"tool_call escalation&lt;br/&gt;POST /api/voice/escalate"| Bridge
+    ZCL --&gt;|"HTTP POST&lt;br/&gt;/api/message"| Bridge
+    Bridge --&gt;|"think_hard"| THINK
     Bridge --&gt;|"JSON-RPC 2.0&lt;br/&gt;over stdio (ACP)"| ZC
     ZC -.-&gt;|"LLM API call"| Cloud
-    ZC --&gt;|"stdout JSON-RPC"| Bridge
-    Bridge --&gt;|"JSON response"| LLM
+    Bridge -.-&gt;|"VLM / audio caption"| Cloud
+    T1S -.-&gt;|"smart_mode ON"| Cloud
+    XZ --&gt;|"perception event&lt;br/&gt;POST /api/perception/event"| Bridge
     TTS --&gt;|"audio stream"| XZ
     XZ --&gt;|"WebSocket"| SC</code></pre>
+<p>Solid arrows are per-turn data flow; dotted arrows are cloud / conditional. The two voice paths share the same physical xiaozhi container — only one is active at a time via <code>selected_module.LLM</code>.</p>
 <h2 id="actors">Actors<a class="headerlink" href="#actors" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2310,19 +2386,31 @@
 <tr>
 <td><strong>xiaozhi-esp32-server</strong></td>
 <td>Docker host</td>
-<td>VAD → ASR → LLM (proxy) → TTS pipeline, emotion dispatch, OTA</td>
+<td>VAD → ASR → LLM (proxy) → TTS pipeline, emotion dispatch, OTA, admin surface</td>
 <td>Docker container</td>
+</tr>
+<tr>
+<td><strong>Tier1Slim custom provider</strong></td>
+<td>Docker host (inside container)</td>
+<td>Default LLM provider — talks directly to llama-swap for plain turns, posts to <code>/api/voice/escalate</code> for tool calls</td>
+<td>Python, mounted via volume</td>
 </tr>
 <tr>
 <td><strong>ZeroClawLLM custom provider</strong></td>
 <td>Docker host (inside container)</td>
-<td>Translates xiaozhi's LLM-provider interface to an HTTP POST</td>
+<td>Legacy single-tier LLM provider — translates xiaozhi's LLM-provider interface to an HTTP POST to the bridge</td>
 <td>Python, mounted via volume</td>
+</tr>
+<tr>
+<td><strong>llama-swap</strong></td>
+<td>Unraid (or any GPU host)</td>
+<td>Routes OpenAI-compatible requests to per-model llama-server children; co-loads <code>qwen3.5:4b</code> (voice inner loop) and <code>qwen3.6:27b-think</code> (<code>think_hard</code> target)</td>
+<td>Docker container (<code>ghcr.io/mostlygeek/llama-swap:cuda</code>)</td>
 </tr>
 <tr>
 <td><strong>zeroclaw-bridge</strong></td>
 <td>ZeroClaw host</td>
-<td>Accepts HTTP POSTs, spawns/holds a <code>zeroclaw acp</code> child, speaks ACP JSON-RPC to it</td>
+<td>Accepts HTTP POSTs from both voice paths + xiaozhi-server perception relay; spawns/holds a <code>zeroclaw acp</code> child; speaks ACP JSON-RPC to it</td>
 <td>FastAPI + uvicorn under systemd</td>
 </tr>
 <tr>
@@ -2334,37 +2422,64 @@
 <tr>
 <td><strong>OpenRouter</strong></td>
 <td>Cloud</td>
-<td>Routes LLM calls to Qwen3-30B-A3B-Instruct-2507</td>
+<td>Routes cloud LLM calls (smart_mode <code>claude-sonnet-4-6</code>, VLM <code>gemini-2.0-flash</code>, audio caption <code>gemini-2.5-flash</code>, and the legacy ZeroClaw path's Qwen3-30B)</td>
 <td>External</td>
 </tr>
 </tbody>
 </table>
-<h2 id="data-flow-single-utterance">Data flow (single utterance)<a class="headerlink" href="#data-flow-single-utterance" title="Permanent link">&para;</a></h2>
+<h2 id="data-flow-single-utterance-tier1slim-path-plain-turn">Data flow (single utterance, Tier1Slim path — plain turn)<a class="headerlink" href="#data-flow-single-utterance-tier1slim-path-plain-turn" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>sequenceDiagram
     autonumber
     participant User
     participant SC as StackChan
     participant XZ as xiaozhi-server&lt;br/&gt;(Docker host)
-    participant Br as zeroclaw-bridge&lt;br/&gt;(ZeroClaw host)
-    participant ZC as ZeroClaw&lt;br/&gt;(ZeroClaw host)
-    participant LLM as OpenRouter&lt;br/&gt;→ Qwen3
+    participant LS as llama-swap&lt;br/&gt;qwen3.5:4b
 
     User-&gt;&gt;SC: speaks
     SC-&gt;&gt;XZ: Opus audio frames (WebSocket)
     XZ-&gt;&gt;XZ: SileroVAD → speech end
-    XZ-&gt;&gt;XZ: FunASR SenseVoiceSmall → text
+    XZ-&gt;&gt;XZ: FunASR / Whisper → text
+    XZ-&gt;&gt;LS: chat/completions (tools=auto)
+    LS--&gt;&gt;XZ: "😊 The sky is blue!" (no tool_calls)
+    XZ-&gt;&gt;XZ: strip leading emoji → emotion frame
+    XZ-&gt;&gt;XZ: TTS (Piper / EdgeTTS) → Opus frames
+    XZ--&gt;&gt;SC: audio + emotion
+    SC--&gt;&gt;User: speaks + face animation</code></pre>
+<h2 id="data-flow-tier1slim-path-escalated-tool-call">Data flow (Tier1Slim path — escalated tool call)<a class="headerlink" href="#data-flow-tier1slim-path-escalated-tool-call" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>sequenceDiagram
+    autonumber
+    participant XZ as xiaozhi-server
+    participant LS as llama-swap&lt;br/&gt;qwen3.5:4b
+    participant Br as zeroclaw-bridge
+    participant ZC as ZeroClaw
+    participant THK as llama-swap&lt;br/&gt;qwen3.6:27b-think
+
+    XZ-&gt;&gt;LS: chat/completions (tools=auto)
+    LS--&gt;&gt;XZ: tool_calls=[think_hard(...)]
+    XZ--&gt;&gt;XZ: yield filler ("hmm, let me think…") to TTS
+    XZ-&gt;&gt;Br: POST /api/voice/escalate&lt;br/&gt;{"tool":"think_hard","args":...}
+    Br-&gt;&gt;THK: chat completion
+    THK--&gt;&gt;Br: reasoned answer
+    Br--&gt;&gt;XZ: {"result":"..."}
+    XZ-&gt;&gt;LS: chat/completions (tool result in context)
+    LS--&gt;&gt;XZ: streamed final answer
+    XZ-&gt;&gt;XZ: TTS → Opus frames</code></pre>
+<h2 id="data-flow-legacy-zeroclawllm-path">Data flow (legacy ZeroClawLLM path)<a class="headerlink" href="#data-flow-legacy-zeroclawllm-path" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>sequenceDiagram
+    autonumber
+    participant XZ as xiaozhi-server
+    participant Br as zeroclaw-bridge
+    participant ZC as ZeroClaw
+    participant LLM as OpenRouter&lt;br/&gt;→ Qwen3-30B
+
     XZ-&gt;&gt;Br: POST /api/message&lt;br/&gt;{"content":"...","channel":"stackchan"}
     Br-&gt;&gt;ZC: session/new + session/prompt&lt;br/&gt;(JSON-RPC over stdio)
     ZC-&gt;&gt;LLM: chat completion
-    LLM--&gt;&gt;ZC: "😊 Sure, the weather is..."
+    LLM--&gt;&gt;ZC: response
     ZC--&gt;&gt;Br: stdout JSON-RPC result
     Br-&gt;&gt;Br: ensure emoji prefix&lt;br/&gt;enforce English suffix
-    Br--&gt;&gt;XZ: {"response":"😊 Sure, the weather is..."}
-    XZ-&gt;&gt;XZ: strip leading emoji → emotion frame
-    XZ-&gt;&gt;XZ: EdgeTTS / Piper → Opus frames
-    XZ--&gt;&gt;SC: audio + emotion
-    SC--&gt;&gt;User: speaks + face animation</code></pre>
-<p>See <a href="../protocols/">protocols.md</a> for every wire format referenced above.</p>
+    Br--&gt;&gt;XZ: {"response":"😊 Sure, the weather is..."}</code></pre>
+<p>See <a href="../protocols/">protocols.md</a> for every wire format referenced above, and <a href="../tier1slim/">tier1slim.md</a> for the four-tool escalation catalogue.</p>
 <h2 id="why-this-shape">Why this shape<a class="headerlink" href="#why-this-shape" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Audio lives with the Docker host</strong> because the StackChan firmware already speaks the Xiaozhi WS protocol; xiaozhi-esp32-server is the matching server. Putting the brain next to the mic would require us to reimplement that protocol, and we'd still need a voice server.</li>
@@ -2387,8 +2502,10 @@
 - How to wrap turns that arrive with <code>channel="stackchan"</code> in the English+emoji sandwich
 - The OpenRouter API key lives in ZeroClaw's config, not in the bridge</p>
 <p><strong>ZeroClaw</strong> knows everything agent-side — provider keys, memory, tools, persona files. It does <strong>not</strong> know what host/channel the request came from beyond the <code>channel</code> string passed in.</p>
-<h2 id="bridge-admin-endpoints-admin">Bridge admin endpoints (<code>/admin/*</code>)<a class="headerlink" href="#bridge-admin-endpoints-admin" title="Permanent link">&para;</a></h2>
-<p>The bridge exposes a small localhost-only HTTP surface for runtime configuration mutations. Useful when an external operator (a script, a cron job, a separately-running ZeroClaw daemon on a more capable model) needs to flip behaviour without an interactive SSH session. Bound to <code>127.0.0.1</code> only — LAN callers get <code>403</code>.</p>
+<h2 id="admin-surface-two-services-two-prefixes">Admin surface (two services, two prefixes)<a class="headerlink" href="#admin-surface-two-services-two-prefixes" title="Permanent link">&para;</a></h2>
+<p>Admin routes are split across the two services and reached at different prefixes. Don't conflate them.</p>
+<h3 id="bridge-admin-zeroclaw-host-1270018080-only">Bridge <code>/admin/*</code> (ZeroClaw host, <code>127.0.0.1:8080</code> only)<a class="headerlink" href="#bridge-admin-zeroclaw-host-1270018080-only" title="Permanent link">&para;</a></h3>
+<p>Runtime mutations to ZeroClaw / the bridge process itself. Bound to localhost only — LAN callers get <code>403</code>.</p>
 <table>
 <thead>
 <tr>
@@ -2400,8 +2517,13 @@
 <tbody>
 <tr>
 <td><code>POST /admin/kid-mode</code> <code>{enabled: bool}</code></td>
-<td>Writes the kid-mode state file.</td>
-<td>bridge (delayed 2 s so the response flushes)</td>
+<td>Persists + hot-reloads kid-mode via <code>_apply_kid_mode()</code> (no daemon restart needed; module globals re-bind atomically). Pushes the kid pip via the xiaozhi admin relay.</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>POST /admin/smart-mode</code> <code>{enabled: bool, device_id?}</code></td>
+<td>Persists + pushes the smart pip. When <code>DOTTY_VOICE_PROVIDER=tier1slim</code>: hot-swaps Tier1Slim's model/url/api_key via <code>/xiaozhi/admin/set-tier1slim-model</code> (in-process; no restart). When <code>DOTTY_VOICE_PROVIDER=zeroclaw</code>: rewrites ZeroClaw's <code>config.toml</code> and restarts the voice daemon.</td>
+<td>conditional (see above)</td>
 </tr>
 <tr>
 <td><code>POST /admin/persona</code> <code>{file, content}</code></td>
@@ -2420,7 +2542,109 @@
 </tr>
 </tbody>
 </table>
-<p>Paths and systemd unit names are env-configurable (<code>ZEROCLAW_VOICE_CFG</code>, <code>ZEROCLAW_VOICE_UNIT</code>, <code>ZEROCLAW_DISCORD_CFG</code>, <code>ZEROCLAW_DISCORD_UNIT</code>, <code>ZEROCLAW_WORKSPACE</code>); defaults match the documented ZeroClaw-host layout. The endpoints are off-the-shelf — if you don't reach <code>127.0.0.1:8080/admin/*</code>, they don't fire.</p>
+<p>Paths and systemd unit names are env-configurable (<code>ZEROCLAW_VOICE_CFG</code>, <code>ZEROCLAW_VOICE_UNIT</code>, <code>ZEROCLAW_DISCORD_CFG</code>, <code>ZEROCLAW_DISCORD_UNIT</code>, <code>ZEROCLAW_WORKSPACE</code>); defaults match the documented ZeroClaw-host layout.</p>
+<h3 id="xiaozhi-server-xiaozhiadmin-docker-host-port-8003">xiaozhi-server <code>/xiaozhi/admin/*</code> (Docker host, port 8003)<a class="headerlink" href="#xiaozhi-server-xiaozhiadmin-docker-host-port-8003" title="Permanent link">&para;</a></h3>
+<p>Operations that need to touch a live device session — head servos, MCP dispatch, TTS injection, the live LLM provider's runtime config. Exposed by <code>custom-providers/xiaozhi-patches/http_server.py</code>. Bound to the xiaozhi container's listen address (not localhost-only); protect with network ACLs if the Docker host is reachable from untrusted networks.</p>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /xiaozhi/admin/inject-text</code></td>
+<td>Speak arbitrary text through TTS as if Dotty originated it. Used by face-greeter and proactive prompts.</td>
+</tr>
+<tr>
+<td><code>GET /xiaozhi/admin/devices</code></td>
+<td>List connected device-ids.</td>
+</tr>
+<tr>
+<td><code>POST /xiaozhi/admin/abort</code></td>
+<td>Abort an in-flight TTS turn (used by the face-lost aborter).</td>
+</tr>
+<tr>
+<td><code>POST /xiaozhi/admin/set-head-angles</code></td>
+<td>Move the head servos (used by sound-direction turn).</td>
+</tr>
+<tr>
+<td><code>POST /xiaozhi/admin/set-state</code></td>
+<td>Dispatch a <code>set_state</code> MCP call to firmware.</td>
+</tr>
+<tr>
+<td><code>POST /xiaozhi/admin/set-toggle</code></td>
+<td>Dispatch a <code>set_toggle</code> MCP call (kid/smart pip on the firmware ring).</td>
+</tr>
+<tr>
+<td><code>POST /xiaozhi/admin/set-face-identified</code></td>
+<td>Light the face-identified pixel for ~4 s.</td>
+</tr>
+<tr>
+<td><code>POST /xiaozhi/admin/take-photo</code></td>
+<td>Trigger a camera capture from the bridge (separate from the firmware MCP path).</td>
+</tr>
+<tr>
+<td><code>POST /xiaozhi/admin/set-tier1slim-model</code></td>
+<td>Hot-swap the live Tier1Slim provider's <code>model</code> / <code>url</code> / <code>api_key</code>. Driven by smart-mode flips.</td>
+</tr>
+<tr>
+<td><code>GET /xiaozhi/admin/songs</code></td>
+<td>List audio assets available to <code>play_song</code>.</td>
+</tr>
+<tr>
+<td><code>POST /xiaozhi/admin/play-asset</code></td>
+<td>Play a named audio asset through the speaker.</td>
+</tr>
+<tr>
+<td><code>POST /xiaozhi/admin/say</code></td>
+<td>Synthesise + play arbitrary text (lower-level than <code>inject-text</code>).</td>
+</tr>
+</tbody>
+</table>
+<h3 id="perception-event-bus">Perception event bus<a class="headerlink" href="#perception-event-bus" title="Permanent link">&para;</a></h3>
+<p>Firmware-resident producers emit JSON <code>event</code> frames over the xiaozhi WebSocket:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="s2">&quot;event&quot;</span><span class="p">,</span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="s2">&quot;face_detected&quot;</span><span class="p">,</span><span class="nt">&quot;data&quot;</span><span class="p">:{}}</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="s2">&quot;event&quot;</span><span class="p">,</span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="s2">&quot;face_lost&quot;</span><span class="p">,</span><span class="nt">&quot;data&quot;</span><span class="p">:{}}</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="s2">&quot;event&quot;</span><span class="p">,</span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="s2">&quot;sound_event&quot;</span><span class="p">,</span><span class="nt">&quot;data&quot;</span><span class="p">:{</span><span class="nt">&quot;direction&quot;</span><span class="p">:</span><span class="s2">&quot;left&quot;</span><span class="p">,</span><span class="nt">&quot;balance&quot;</span><span class="p">:</span><span class="mf">0.997</span><span class="p">,</span><span class="nt">&quot;energy&quot;</span><span class="p">:</span><span class="mi">1807933247</span><span class="p">}}</span>
+</code></pre></div>
+<p>The xiaozhi-server's <code>EventTextMessageHandler</code> (<code>custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py</code>) POSTs each frame to the bridge's <code>POST /api/perception/event</code>. The bridge maintains a pub/sub bus (<code>_perception_listeners</code>) and per-device state (<code>_perception_state[device_id]</code>), and runs six consumer tasks against it:</p>
+<table>
+<thead>
+<tr>
+<th>Consumer</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>_perception_face_greeter</code></td>
+<td>"Hi!" greeting (via <code>/xiaozhi/admin/inject-text</code>) on first face detection after a cooldown window.</td>
+</tr>
+<tr>
+<td><code>_perception_sound_turner</code></td>
+<td>Head-turn (via <code>/xiaozhi/admin/set-head-angles</code>) toward sound direction.</td>
+</tr>
+<tr>
+<td><code>_perception_face_lost_aborter</code></td>
+<td>Aborts an in-flight TTS turn (via <code>/xiaozhi/admin/abort</code>) when the audience walks away.</td>
+</tr>
+<tr>
+<td><code>_perception_wake_word_turner</code></td>
+<td>Head-turn toward the speaker on wake-word event.</td>
+</tr>
+<tr>
+<td><code>_perception_face_identified_refresher</code></td>
+<td>Re-asserts the face-identified pixel every ~3 s so the firmware's 4 s timeout doesn't drop it.</td>
+</tr>
+<tr>
+<td><code>_perception_purr_player</code></td>
+<td>Plays an idle purr asset when conditions match.</td>
+</tr>
+</tbody>
+</table>
+<p>WebSocket lifecycle gotcha: xiaozhi only opens the WS during a conversation. Firmware-side perception producers must call <code>OpenAudioChannel()</code> first, or events from idle silently drop.</p>
 <h2 id="threat-model-implications">Threat-model implications<a class="headerlink" href="#threat-model-implications" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Device compromise</strong> gives an attacker a WS session to xiaozhi-server and the ability to invoke any server-exposed MCP tool. It does <strong>not</strong> give them the LLM key, ZeroClaw's memory, or network access to OpenRouter beyond what proxied prompts can achieve.</li>
@@ -2502,11 +2726,12 @@
 <ul>
 <li><a href="../hardware/">hardware.md</a> — what the device actually is.</li>
 <li><a href="../voice-pipeline/">voice-pipeline.md</a> — what the Docker host runs.</li>
-<li><a href="../brain/">brain.md</a> — what the ZeroClaw host runs.</li>
-<li><a href="../protocols/">protocols.md</a> — what's on the wire.</li>
+<li><a href="../tier1slim/">tier1slim.md</a> — the default voice LLM and its escalation contract.</li>
+<li><a href="../brain/">brain.md</a> — model matrix + what the ZeroClaw host runs.</li>
+<li><a href="../protocols/">protocols.md</a> — what's on the wire (including <code>/api/voice/escalate</code> and <code>/api/perception/event</code>).</li>
 <li><a href="../quickstart/">quickstart.md</a> — deployment placeholders, volume mounts, common ops.</li>
 </ul>
-<p>Last verified: 2026-04-25.</p>
+<p>Last verified: 2026-05-17.</p>
 
 
 

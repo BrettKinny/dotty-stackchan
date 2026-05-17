@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Swap Dotty's personality by editing the persona prompt or switching persona files.">
+        <meta name="description" content="Swap Dotty's personality by editing the persona prompt or pointing the LLM provider at a different persona file.">
       
       
       
@@ -2121,10 +2121,32 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#switch-to-a-different-shipped-persona" class="md-nav__link">
+  <a href="#which-file-controls-the-persona" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Switch to a different shipped persona
+        Which file controls the persona?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#switch-to-a-different-shipped-persona-tier1slim-or-generic-providers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Switch to a different shipped persona (Tier1Slim or generic providers)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#edit-zeroclaws-persona" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Edit ZeroClaw's persona
       
     </span>
   </a>
@@ -2185,57 +2207,93 @@
 
 
 <h1 id="change-persona">Change Persona<a class="headerlink" href="#change-persona" title="Permanent link">&para;</a></h1>
-<p>Dotty's personality comes from a persona file loaded as the LLM system prompt.
-Three personas ship in <code>personas/</code>:</p>
+<p>Dotty's personality comes from a persona file loaded as the LLM system prompt. <strong>Where</strong> that file lives depends on which LLM provider is active.</p>
+<p>Three personas ship in <code>personas/</code>:</p>
 <table>
 <thead>
 <tr>
 <th>File</th>
 <th>Style</th>
+<th>Used by</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>default.md</code></td>
-<td>Cheerful, curious desktop robot (ships active)</td>
+<td>Cheerful, curious desktop robot. The general-purpose persona used by <code>ZeroClawLLM</code> and other generic providers.</td>
+<td><code>ZeroClawLLM</code>, <code>OpenAICompat</code></td>
 </tr>
 <tr>
-<td><code>assistant.md</code></td>
-<td>Straightforward general-purpose assistant</td>
+<td><code>dotty_voice.md</code></td>
+<td>Voice-tuned variant of <code>default.md</code> — same character but pruned for short replies, with the 4-tool catalogue and <code>[REMEMBER: ...]</code> markers baked in.</td>
+<td><code>Tier1Slim</code></td>
 </tr>
 <tr>
-<td><code>playful.md</code></td>
-<td>Extra silly, joke-heavy, kid-oriented</td>
+<td><code>smart.md</code></td>
+<td>More capable, allowed longer answers — for when <code>smart_mode</code> is on and the cloud model is doing the heavy lifting.</td>
+<td>optional override for either provider</td>
 </tr>
 </tbody>
 </table>
-<h2 id="switch-to-a-different-shipped-persona">Switch to a different shipped persona<a class="headerlink" href="#switch-to-a-different-shipped-persona" title="Permanent link">&para;</a></h2>
+<h2 id="which-file-controls-the-persona">Which file controls the persona?<a class="headerlink" href="#which-file-controls-the-persona" title="Permanent link">&para;</a></h2>
+<p>Check <code>selected_module.LLM</code> in <code>.config.yaml</code>, then read the matching block:</p>
+<table>
+<thead>
+<tr>
+<th>Provider</th>
+<th>Persona source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Tier1Slim</code> (current default)</td>
+<td><code>LLM.Tier1Slim.persona_file</code> in <code>.config.yaml</code>. Defaults to <code>personas/dotty_voice.md</code>.</td>
+</tr>
+<tr>
+<td><code>ZeroClawLLM</code></td>
+<td>ZeroClaw's own workspace files: <code>~/.zeroclaw/workspace/{SOUL,IDENTITY,MEMORY,AGENTS}.md</code> on the ZeroClaw host. <strong>The <code>persona_file</code> key is ignored</strong> — ZeroClaw doesn't read it.</td>
+</tr>
+<tr>
+<td><code>OpenAICompat</code> (and similar generic providers)</td>
+<td><code>LLM.OpenAICompat.persona_file</code> in <code>.config.yaml</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Setting <code>persona_file</code> for a <code>ZeroClawLLM</code> selection is a silent no-op — edit the workspace files instead, or switch the provider first.</p>
+<h2 id="switch-to-a-different-shipped-persona-tier1slim-or-generic-providers">Switch to a different shipped persona (Tier1Slim or generic providers)<a class="headerlink" href="#switch-to-a-different-shipped-persona-tier1slim-or-generic-providers" title="Permanent link">&para;</a></h2>
 <ol>
-<li>Open <code>.config.yaml</code> and change the <code>persona_file</code> value:</li>
+<li>Edit <code>.config.yaml</code>:</li>
 </ol>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">LLM</span><span class="p">:</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">OpenAICompat</span><span class="p">:</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">persona_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">personas/playful.md</span><span class="w">   </span><span class="c1"># was personas/default.md</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">Tier1Slim</span><span class="p">:</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">persona_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">personas/smart.md</span><span class="w">   </span><span class="c1"># was personas/dotty_voice.md</span>
 </code></pre></div>
 <ol>
-<li>Restart: <code>docker compose restart xiaozhi-server</code></li>
+<li>Restart: <code>docker compose restart xiaozhi-server</code>.</li>
+</ol>
+<h2 id="edit-zeroclaws-persona">Edit ZeroClaw's persona<a class="headerlink" href="#edit-zeroclaws-persona" title="Permanent link">&para;</a></h2>
+<ol>
+<li>SSH to the ZeroClaw host.</li>
+<li>Edit the relevant file under <code>~/.zeroclaw/workspace/</code>:</li>
+<li><code>SOUL.md</code> — voice, values, and role in the household.</li>
+<li><code>IDENTITY.md</code> — name, backstory, family context.</li>
+<li><code>USER.md</code> — per-user preferences (optional).</li>
+<li><code>MEMORY.md</code> — long-term facts; the agent also writes to this.</li>
+<li>No restart needed — ZeroClaw hot-reads these on each turn.</li>
 </ol>
 <h2 id="create-your-own-persona">Create your own persona<a class="headerlink" href="#create-your-own-persona" title="Permanent link">&para;</a></h2>
 <ol>
-<li>Copy an existing file: <code>cp personas/default.md personas/pirate.md</code></li>
-<li>Edit the new file. Keep the emoji instruction line -- the firmware
-   needs it to animate the face.</li>
-<li>Point <code>.config.yaml</code> at the new file and restart.</li>
+<li>Copy an existing file: <code>cp personas/dotty_voice.md personas/pirate.md</code>.</li>
+<li>Edit the new file. <strong>Keep the emoji instruction line</strong> — the firmware needs it to animate the face. See <a href="../../emoji-mapping/">emoji-mapping.md</a> for the allowlist (😊😆😢😮🤔😠😐😍😴).</li>
+<li>Point the active provider's <code>persona_file</code> at the new file in <code>.config.yaml</code>, then restart.</li>
 </ol>
 <h2 id="quick-inline-edit-no-file-swap">Quick inline edit (no file swap)<a class="headerlink" href="#quick-inline-edit-no-file-swap" title="Permanent link">&para;</a></h2>
-<p>Edit the top-level <code>prompt:</code> block in <code>.config.yaml</code> directly. This is
-the xiaozhi-server system prompt, injected alongside the persona file.</p>
+<p>Edit the top-level <code>prompt:</code> block in <code>.config.yaml</code> directly. This is the xiaozhi-server system prompt; it gets injected alongside the persona file for most providers. Note: <code>Tier1Slim</code> deliberately <strong>discards</strong> the top-level prompt when a <code>persona_file</code> is set (the 4 B chat template only honours one system message). For <code>Tier1Slim</code>, edit the persona file instead.</p>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
-<li>The ZeroClaw backend uses its own persona in <code>~/.zeroclaw/workspace/</code>
-  (<code>SOUL.md</code>, <code>IDENTITY.md</code>) instead of <code>persona_file</code>.</li>
-<li>Always keep the emoji instruction line -- removing it breaks face
-  animations. See <a href="../../protocols/">protocols.md</a> for the mapping.</li>
+<li>Always keep the emoji-leader rule in any persona — removing it breaks face animations and <code>_ensure_emoji_prefix</code> in the bridge will paper over it with 😐.</li>
+<li>See <a href="../../tier1slim/">tier1slim.md</a> for why Tier1Slim treats persona files differently from other providers.</li>
+<li>See <a href="../../protocols/">protocols.md</a> for the emoji → face frame mapping.</li>
 </ul>
 
 

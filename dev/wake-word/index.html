@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="How Dotty's wake word works today (ESP-SR WakeNet9 "Hi, Stack Chan"), how to switch to a prebuilt English wake word in five minutes, and the roadmap to a custom "Hey Dotty" model.">
+        <meta name="description" content="How Dotty's wake word works today (ESP-SR WakeNet9 "Hi, ESP"), how to switch to a different prebuilt English wake word, and the roadmap to a custom "Hey Dotty" model.">
       
       
       
@@ -2321,15 +2321,15 @@
 <p>Dotty listens passively for a fixed phrase and only opens the conversation pipeline once it hears one. This page is the canonical reference for <strong>what wake word fires today, how to change it, and the path to a branded "Hey Dotty"</strong>.</p>
 <h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Today:</strong> firmware ships with <code>SR_WN_WN9_HISTACKCHAN_TTS3</code> — phrase <strong>"Hi, Stack Chan"</strong> — running on ESP-SR's WakeNet9 + AFE on the ESP32-S3 (PSRAM model).</li>
-<li><strong>Five-minute English fix (Path A):</strong> flip <code>sdkconfig.defaults</code> to <code>SR_WN_WN9_HIESP=y</code> ("Hi, ESP") or <code>SR_WN_WN9_COMPUTER_TTS=y</code> ("Computer"). Reflash. No code change needed — the existing handler is wake-phrase-agnostic.</li>
+<li><strong>Today:</strong> firmware ships with <code>SR_WN_WN9_HIESP</code> — phrase <strong>"Hi, ESP"</strong> — running on ESP-SR's WakeNet9 + AFE on the ESP32-S3 (PSRAM model). <code>SR_WN_WN9_HISTACKCHAN_TTS3</code> ("Hi, Stack Chan") was the earlier default and is kept available as an opt-in alternative.</li>
+<li><strong>Five-minute alternate (Path A):</strong> flip <code>sdkconfig.defaults</code> to one of the other prebuilts — e.g. <code>SR_WN_WN9_COMPUTER_TTS=y</code> ("Computer") or <code>SR_WN_WN9_HISTACKCHAN_TTS3=y</code> ("Hi, Stack Chan"). Reflash. No code change needed — the handler is wake-phrase-agnostic.</li>
 <li><strong>Branded "Hey Dotty" (Path B, recommended long-term):</strong> train a microWakeWord (TFLite) model on ~50–100 positive samples + ~1,000 negatives, quantise INT8, ship as a wake-word partition. Firmware integration hook is documented in <code>firmware/main/stackchan/wake_word/microwakeword_setup.md</code> in the firmware repo.</li>
 <li><strong>Path C (custom WakeNet9):</strong> Espressif's first-party trainer. Smaller binary, more friction. Not recommended unless Path B blocks.</li>
 </ul>
 <h2 id="architecture-today">Architecture (today)<a class="headerlink" href="#architecture-today" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Mic PCM ──▶ AFE (AEC + NS + VAD) ──▶ WakeNet9 ──▶ &quot;wake event&quot; ──▶ Application::HandleWakeWordDetectedEvent
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>                                          │
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>                                          └── model: wn9_histackchan_tts3 (loaded from flash via esp_srmodel_init(&quot;model&quot;))
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>                                          └── model: wn9_hiesp (loaded from flash via esp_srmodel_init(&quot;model&quot;))
 </code></pre></div>
 <ul>
 <li>AFE = Audio Front End. Does acoustic-echo-cancel, noise-suppress, voice-activity-detect on the dual-mic input before the wake-net sees it. Mandatory on the S3 + PSRAM build.</li>
@@ -2353,8 +2353,8 @@
 </tr>
 <tr>
 <td>Active wake-word model</td>
-<td><code>firmware/sdkconfig.defaults:15</code></td>
-<td><code>CONFIG_SR_WN_WN9_HISTACKCHAN_TTS3=y</code> (the line to change).</td>
+<td><code>firmware/sdkconfig.defaults:20</code></td>
+<td><code>CONFIG_SR_WN_WN9_HIESP=y</code> (the line to change). The previous default (<code>CONFIG_SR_WN_WN9_HISTACKCHAN_TTS3</code>) is preserved one line below, commented out.</td>
 </tr>
 <tr>
 <td>AFE wrapper</td>
@@ -2392,7 +2392,7 @@
 <tbody>
 <tr>
 <td><code>SR_WN_WN9_HIESP</code></td>
-<td>"Hi, ESP"</td>
+<td>"Hi, ESP" <em>(default today)</em></td>
 </tr>
 <tr>
 <td><code>SR_WN_WN9_ALEXA</code></td>
@@ -2468,7 +2468,7 @@
 </tr>
 <tr>
 <td><code>SR_WN_WN9_HISTACKCHAN_TTS3</code></td>
-<td>"Hi, Stack Chan" <em>(default today)</em></td>
+<td>"Hi, Stack Chan" <em>(prior default; kept commented out in sdkconfig.defaults)</em></td>
 </tr>
 <tr>
 <td><code>SR_WN_WN9_HEYKIRA_TTS3</code></td>
@@ -2476,27 +2476,27 @@
 </tr>
 </tbody>
 </table>
-<p>There is no prebuilt "Hey Dotty" — that is what Path B is for. The closest single-syllable-after-"Hey" prebuilts are <strong>Hey Ily</strong>, <strong>Hey Ivy</strong>, and <strong>Hey Kira</strong>. The recommended interim phrase, if branding is flexible, is <strong>"Hi, ESP"</strong> (best-trained English model in the catalog) or <strong>"Computer"</strong> (zero-friction, generic, easy for kids).</p>
+<p>There is no prebuilt "Hey Dotty" — that is what Path B is for. The closest single-syllable-after-"Hey" prebuilts are <strong>Hey Ily</strong>, <strong>Hey Ivy</strong>, and <strong>Hey Kira</strong>. The current shipped default is <strong>"Hi, ESP"</strong> — best-trained English model in the catalog. <strong>"Computer"</strong> is the easiest zero-friction alternative for kids.</p>
 <h3 id="how-to-switch">How to switch<a class="headerlink" href="#how-to-switch" title="Permanent link">&para;</a></h3>
 <p>Two equivalent routes — pick one.</p>
 <p><strong>Route 1 — edit <code>sdkconfig.defaults</code> (recommended, version-controlled):</strong></p>
 <ol>
 <li>In the firmware repo, open <code>firmware/sdkconfig.defaults</code>.</li>
-<li>Replace line 15 <code>CONFIG_SR_WN_WN9_HISTACKCHAN_TTS3=y</code> with the desired key, e.g. <code>CONFIG_SR_WN_WN9_HIESP=y</code>.</li>
+<li>Comment out the active line <code>CONFIG_SR_WN_WN9_HIESP=y</code> (line 20) and uncomment / add the line for the desired key, e.g. <code>CONFIG_SR_WN_WN9_COMPUTER_TTS=y</code>. Only one <code>SR_WN_WN9_*</code> line should be active at a time.</li>
 <li>Delete <code>firmware/sdkconfig</code> and <code>firmware/build/</code> so the next build regenerates from defaults. (Otherwise the cached <code>sdkconfig</code> keeps the old value.)</li>
 <li><code>idf.py build flash monitor</code>.</li>
-<li>Verify: serial log should print <code>Model 0: wn9_hiesp</code> (or whichever) during <code>AfeWakeWord::Initialize</code>. Speak the new phrase — expect <code>Wake word detected: hiesp</code> in log.</li>
+<li>Verify: serial log should print <code>Model 0: wn9_&lt;key&gt;</code> during <code>AfeWakeWord::Initialize</code>. Speak the new phrase — expect <code>Wake word detected: &lt;key&gt;</code> in log.</li>
 </ol>
 <p><strong>Route 2 — <code>idf.py menuconfig</code> (interactive, one-off):</strong></p>
 <ol>
 <li><code>idf.py menuconfig</code>.</li>
 <li>Navigate: <code>Component config → ESP Speech Recognition → Load Multiple Wake Words (WakeNet9)</code>.</li>
-<li>Uncheck <code>Hi, Stack Chan (wn9_histackchan_tts3)</code>. Check the desired entry.</li>
+<li>Uncheck <code>Hi, ESP (wn9_hiesp)</code>. Check the desired entry.</li>
 <li>Save. <code>idf.py build flash monitor</code>.</li>
 <li>To make the change durable, run <code>idf.py save-defconfig</code> and commit the resulting <code>sdkconfig.defaults</code>.</li>
 </ol>
 <h3 id="revert">Revert<a class="headerlink" href="#revert" title="Permanent link">&para;</a></h3>
-<p>Restore <code>CONFIG_SR_WN_WN9_HISTACKCHAN_TTS3=y</code> on line 15 of <code>firmware/sdkconfig.defaults</code>, delete <code>firmware/sdkconfig</code> + <code>firmware/build/</code>, rebuild.</p>
+<p>Restore <code>CONFIG_SR_WN_WN9_HIESP=y</code> on line 20 of <code>firmware/sdkconfig.defaults</code>, delete <code>firmware/sdkconfig</code> + <code>firmware/build/</code>, rebuild.</p>
 <h2 id="path-b-microwakeword-hey-dotty-recommended-long-term">Path B — microWakeWord "Hey Dotty" (recommended long-term)<a class="headerlink" href="#path-b-microwakeword-hey-dotty-recommended-long-term" title="Permanent link">&para;</a></h2>
 <p><strong>Effort:</strong> ~2 weeks calendar (sample collection across distances/speakers/days), ~1 person-week of focused work. <strong>Risk:</strong> medium — first-time training pipeline; quantisation gotchas; requires wake-word partition table change.</p>
 <p><a href="https://github.com/kahrendt/microWakeWord">microWakeWord</a> (Kevin Ahrendt / Home Assistant project) is a TFLite-Micro-based wake-word framework specifically designed for ESP32-S3-class hardware. It is the same engine ESPHome's "Voice Assistant" uses. Outputs an <code>~80 KB</code> INT8 streaming-quantised model with detection latency under 100 ms.</p>
