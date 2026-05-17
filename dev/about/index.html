@@ -2236,7 +2236,7 @@
 <ul>
 <li><strong>Kid-safe by default.</strong> Kid Mode is on out of the box. Per-turn sandwich enforcement in the bridge layer keeps the LLM age-appropriate and on-topic. Disable it for a general-purpose assistant.</li>
 <li><strong>Fully swappable pipeline.</strong> Every component -- LLM, TTS, ASR, persona -- is a config-level choice. Bring your own models, your own agent framework, or your own personality.</li>
-<li><strong>Local speech recognition.</strong> FunASR SenseVoiceSmall runs on your Docker host. Audio never leaves your LAN.</li>
+<li><strong>Local speech recognition.</strong> FunASR SenseVoiceSmall runs on your server. Audio never leaves your LAN.</li>
 <li><strong>Pluggable LLM.</strong> The reference config uses Qwen via OpenRouter. Swap in any OpenAI-compatible API or Ollama for fully local inference.</li>
 <li><strong>Local TTS option.</strong> Piper TTS runs entirely on-host. EdgeTTS (Microsoft's cloud neural voices) is also supported as a low-friction alternative.</li>
 <li><strong>Emoji-driven facial expressions.</strong> The LLM's response starts with an emoji (smile, laugh, sad, surprise, thinking, angry, neutral, love, sleepy). The firmware parses it into a face animation on the robot's display. Three layers enforce this: the agent prompt, the server system prompt, and a bridge-level fallback.</li>
@@ -2259,7 +2259,7 @@
 </ul>
 <h2 id="whats-in-scope">What's in scope<a class="headerlink" href="#whats-in-scope" title="Permanent link">&para;</a></h2>
 <ul>
-<li>A working voice pipeline: device audio in, transcription, LLM response, speech out, facial expression.</li>
+<li>A working voice pipeline: robot audio in, transcription, LLM response, speech out, facial expression.</li>
 <li>Infrastructure-as-config: Docker Compose files, systemd units, custom provider code, config templates with placeholders.</li>
 <li>Documentation for the architecture, protocols, and deployment.</li>
 <li>A reference persona and agent configuration (ZeroClaw + Qwen).</li>

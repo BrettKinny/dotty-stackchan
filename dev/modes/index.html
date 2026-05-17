@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Dotty's high-level mode model — a six-state mutex with two orthogonal toggles. The bridge-side wiring is shipped; the firmware StateManager that paints the LED contract is a designed-but-not-yet-built Phase 4 deliverable.">
+        <meta name="description" content="Authoritative taxonomy of Dotty's high-level modes — a six-state mutex with two orthogonal toggles, owned by the firmware StateManager and surfaced via a 12-pixel LED ring contract.">
       
       
       
@@ -2121,17 +2121,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#what-ships-today-2026-05-17" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What ships today (2026-05-17)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#tldr" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2143,22 +2132,33 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#states-mutually-exclusive-phase-4-design-spec" class="md-nav__link">
+  <a href="#states-mutually-exclusive" class="md-nav__link">
     <span class="md-ellipsis">
       
-        States (mutually exclusive) — 🚧 Phase 4 design spec
+        States (mutually exclusive)
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="States (mutually exclusive) — 🚧 Phase 4 design spec">
+    <nav class="md-nav" aria-label="States (mutually exclusive)">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#mutex-rules-design" class="md-nav__link">
+  <a href="#mutex-rules" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Mutex rules (design)
+        Mutex rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wake-from-sleep-edges" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Wake-from-sleep edges
       
     </span>
   </a>
@@ -2171,10 +2171,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#toggles-compose-freely-shipped" class="md-nav__link">
+  <a href="#toggles-compose-freely" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Toggles (compose freely) — ✅ shipped
+        Toggles (compose freely)
       
     </span>
   </a>
@@ -2182,22 +2182,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#led-contract-12-pixel-ring-phase-4-design-spec" class="md-nav__link">
+  <a href="#led-contract-12-pixel-ring" class="md-nav__link">
     <span class="md-ellipsis">
       
-        LED contract (12-pixel ring) — 🚧 Phase 4 design spec
+        LED contract (12-pixel ring)
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="LED contract (12-pixel ring) — 🚧 Phase 4 design spec">
+    <nav class="md-nav" aria-label="LED contract (12-pixel ring)">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#led-quirks-design" class="md-nav__link">
+  <a href="#led-quirks" class="md-nav__link">
     <span class="md-ellipsis">
       
-        LED quirks (design)
+        LED quirks
       
     </span>
   </a>
@@ -2210,22 +2210,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#state-transitions-design" class="md-nav__link">
+  <a href="#state-transitions" class="md-nav__link">
     <span class="md-ellipsis">
       
-        State transitions (design)
+        State transitions
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="State transitions (design)">
+    <nav class="md-nav" aria-label="State transitions">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#voice-triggers-phase-4-design" class="md-nav__link">
+  <a href="#voice-triggers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Voice triggers (Phase 4 design)
+        Voice triggers
       
     </span>
   </a>
@@ -2233,10 +2233,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#admin-endpoints-today" class="md-nav__link">
+  <a href="#admin-endpoints" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Admin endpoints (today)
+        Admin endpoints
       
     </span>
   </a>
@@ -2244,10 +2244,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#mcp-tools-firmware-phase-4" class="md-nav__link">
+  <a href="#mcp-tools-firmware" class="md-nav__link">
     <span class="md-ellipsis">
       
-        MCP tools (firmware) — 🚧 Phase 4
+        MCP tools (firmware)
       
     </span>
   </a>
@@ -2260,10 +2260,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#backing-architecture-per-state-design" class="md-nav__link">
+  <a href="#backing-architecture-per-state" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Backing architecture per state (design)
+        Backing architecture per state
       
     </span>
   </a>
@@ -2313,89 +2313,53 @@
 
 
 <h1 id="states-toggles-led-contract">States, Toggles &amp; LED Contract<a class="headerlink" href="#states-toggles-led-contract" title="Permanent link">&para;</a></h1>
-<blockquote>
-<p><strong>Honesty note.</strong> This page describes a target architecture. The bridge-side perception bus and the kid/smart toggles are shipped and working today; the firmware <strong>StateManager</strong> that owns the six-state mutex, paints the LED contract, and emits <code>state_changed</code> events <strong>does not yet exist</strong> in the <code>BrettKinny/StackChan @ dotty</code> submodule (<code>grep -rn "StateManager" firmware/</code> returns zero structural matches as of 2026-05-17). The <code>/xiaozhi/admin/set-state</code> endpoint dispatches the MCP call onto the WS, but no firmware handler currently consumes it. Sections marked <strong>🚧 Phase 4 (not yet shipped)</strong> are the design spec for the upcoming firmware work; everything else is live.</p>
-</blockquote>
-<p>This document is the source of truth for the <em>model</em> of Dotty's high-level modes. The model has two axes:</p>
+<p>This document is the source of truth for Dotty's high-level modes. The model has two axes:</p>
 <ul>
-<li><strong>STATE</strong> — what Dotty is <em>doing right now</em>. Mutually exclusive — exactly one State is active. Six values: <code>idle</code>, <code>talk</code>, <code>story_time</code>, <code>security</code>, <code>sleep</code>, <code>dance</code>. 🚧 Phase 4 (not yet shipped). The bridge tracks <code>_perception_state[device_id]["current_state"]</code> and <em>would</em> update it from firmware <code>state_changed</code> events; until the firmware emits them, the value defaults to <code>idle</code> for every device.</li>
-<li><strong>TOGGLES</strong> — orthogonal modifiers that can be on regardless of state. Two values today: <code>kid_mode</code>, <code>smart_mode</code>. Toggles compose freely with state. <strong>Shipped</strong> — kid_mode hot-reloads via <code>_apply_kid_mode()</code>; smart_mode hot-swaps the Tier1Slim provider in-process via <code>/xiaozhi/admin/set-tier1slim-model</code> (commit <code>b83898e</code>).</li>
+<li><strong>STATE</strong> — what Dotty is <em>doing right now</em>. Mutually exclusive — exactly one State is active. Six values: <code>idle</code>, <code>talk</code>, <code>story_time</code>, <code>security</code>, <code>sleep</code>, <code>dance</code>.</li>
+<li><strong>TOGGLES</strong> — orthogonal modifiers that can be on regardless of state. Two values today: <code>kid_mode</code>, <code>smart_mode</code>. Toggles compose freely with state.</li>
 </ul>
+<p>The firmware <strong>StateManager</strong> modifier (<code>firmware/main/stackchan/modes/state_manager.{h,cpp}</code>) owns both axes. It paints the state arc (left ring 0-5) + toggle pips at 5 Hz, drives the idle-motion profile, and emits <code>state_changed</code> perception events on every transition. The bridge-side perception bus consumes those events and runs six per-device consumer tasks against them (face greeter, sound turner, face-lost aborter, wake-word turner, face-identified refresher, purr player) — see <a href="../architecture/#perception-event-bus">architecture.md</a>.</p>
+<blockquote>
+<p><strong>Submodule pin caveat.</strong> Phase 4 shipped to the active firmware fork (<code>BrettKinny/StackChan @ dotty</code>, commit <code>d78118b</code>) on <strong>2026-04-27</strong>. The <code>firmware/firmware/</code> submodule pin in this repo deliberately lags upstream — it's a release pointer, not the active development tree. A user who flashes from the submodule will get a pre-Phase-4 firmware. Bump the submodule (or build from the active fork) to get the StateManager. Visual / interactive bench checks tracked in <a href="https://github.com/BrettKinny/dotty-stackchan/issues/38">issue #38</a>.</p>
+</blockquote>
 <p>Pair this with <a href="../hardware/">hardware.md</a> (the physical LED ring + servos) and <a href="../interaction-map/">interaction-map.md</a> (the underlying signals).</p>
 <hr />
-<h2 id="what-ships-today-2026-05-17">What ships today (2026-05-17)<a class="headerlink" href="#what-ships-today-2026-05-17" title="Permanent link">&para;</a></h2>
+<h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Concern</th>
-<th>Where</th>
-<th>Status</th>
+<th>Axis</th>
+<th>Cardinality</th>
+<th>Examples</th>
+<th>Owner</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>kid_mode</code> toggle (state file + bridge-side hot-reload)</td>
-<td>bridge <code>_apply_kid_mode()</code></td>
-<td>✅ shipped</td>
-</tr>
-<tr>
-<td><code>smart_mode</code> toggle (state file + persistence)</td>
-<td>bridge <code>_read_smart_mode</code> / <code>_write_smart_mode</code></td>
-<td>✅ shipped</td>
-</tr>
-<tr>
-<td>Smart-mode flip when <code>DOTTY_VOICE_PROVIDER=tier1slim</code></td>
-<td>bridge → <code>/xiaozhi/admin/set-tier1slim-model</code></td>
-<td>✅ shipped — in-process hot-swap, no daemon restart</td>
-</tr>
-<tr>
-<td>Smart-mode flip when <code>DOTTY_VOICE_PROVIDER=zeroclaw</code></td>
-<td>bridge rewrites <code>~/.zeroclaw/config.toml</code>, restarts daemon</td>
-<td>✅ shipped (legacy path)</td>
-</tr>
-<tr>
-<td>Perception event bus (face_detected / face_lost / sound_event)</td>
-<td>firmware → xiaozhi <code>EventTextMessageHandler</code> → bridge <code>/api/perception/event</code></td>
-<td>✅ shipped</td>
-</tr>
-<tr>
-<td>Bridge-side perception consumers (face_greeter, sound_turner, face_lost_aborter, wake_word_turner, face_identified_refresher, purr_player)</td>
-<td>bridge <code>_perception_*</code></td>
-<td>✅ shipped</td>
-</tr>
-<tr>
-<td>Six-state mutex (idle/talk/story_time/security/sleep/dance) — firmware-side</td>
-<td><code>firmware/main/stackchan/modes/state_manager.{h,cpp}</code></td>
-<td>🚧 not yet built</td>
-</tr>
-<tr>
-<td>LED contract (12-pixel ring, state arc + toggle pips + listening pip)</td>
+<td>State</td>
+<td>mutex (1 of 6)</td>
+<td><code>idle</code>, <code>talk</code>, <code>story_time</code></td>
 <td>firmware StateManager</td>
-<td>🚧 not yet built</td>
 </tr>
 <tr>
-<td>Voice phrase triggers ("go to sleep", "keep watch", etc.)</td>
-<td>bridge (<code>receiveAudioHandle.py</code>) + firmware MCP</td>
-<td>partial — voice routing exists, but state transitions land on a no-op until firmware consumes <code>set_state</code></td>
+<td>Toggle</td>
+<td>compose freely</td>
+<td><code>kid_mode</code>, <code>smart_mode</code></td>
+<td>firmware StateManager + bridge state files</td>
 </tr>
 <tr>
-<td><code>state_changed</code> perception events</td>
-<td>firmware → bridge</td>
-<td>🚧 firmware producer not yet built</td>
-</tr>
-<tr>
-<td><code>/xiaozhi/admin/set-state</code> MCP dispatch</td>
-<td>xiaozhi <code>http_server.py</code></td>
-<td>✅ dispatches; firmware MCP handler not yet built — currently a no-op end-to-end</td>
+<td>Chat sub-state</td>
+<td>nested under <code>talk</code> / <code>story_time</code></td>
+<td>listening (LED) / thinking + speaking (face only)</td>
+<td>xiaozhi-server</td>
 </tr>
 </tbody>
 </table>
+<p>The firmware boots into <code>idle</code> with both toggles <strong>off</strong>. The bridge resyncs toggles from disk on the first turn after each reconnect. State transitions land via voice phrases, camera edges (<code>face_detected</code> → <code>talk</code>), head-pet hold (sleep → idle), or <code>/xiaozhi/admin/set-state</code> from the dashboard.</p>
+<p><strong>Speech sub-states</strong> are conveyed by face animations (eye gestures, talking mouth) and the dedicated <strong>listening pixel</strong> at right-ring index 11. <code>thinking</code> and <code>speaking</code> have no LED — they live on the face. <code>listening</code> lights pixel 11 red so the user knows when their voice is being captured as a turn.</p>
+<p><strong>Smart-mode flip is in-process</strong> when <code>DOTTY_VOICE_PROVIDER=tier1slim</code> (the recommended default): the bridge calls <code>/xiaozhi/admin/set-tier1slim-model</code> to mutate the live Tier1Slim provider's model/url/api_key with no docker restart. Legacy <code>=zeroclaw</code> still rewrites ZeroClaw's <code>config.toml</code> and restarts the daemon.</p>
 <hr />
-<h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
-<p>The firmware boots into the equivalent of <code>idle</code> (no formal state machine yet). The bridge resyncs <code>kid_mode</code> / <code>smart_mode</code> from disk on each reconnect. Plain conversational turns route through whichever LLM provider is selected (<code>Tier1Slim</code> by default; <code>ZeroClawLLM</code> if you've switched). Phase 4 will introduce the formal state model and the LED contract that goes with it.</p>
-<p><strong>Speech sub-states</strong> will be conveyed by face animations (eye gestures, talking mouth) and the dedicated <strong>listening pixel</strong> when Phase 4 lands. Today the face animations are driven directly by xiaozhi-server's emotion frames and the <code>LISTENING</code> indicator is whatever the firmware already paints.</p>
-<hr />
-<h2 id="states-mutually-exclusive-phase-4-design-spec">States (mutually exclusive) — 🚧 Phase 4 design spec<a class="headerlink" href="#states-mutually-exclusive-phase-4-design-spec" title="Permanent link">&para;</a></h2>
+<h2 id="states-mutually-exclusive">States (mutually exclusive)<a class="headerlink" href="#states-mutually-exclusive" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
@@ -2419,27 +2383,27 @@
 <td>dim green <code>(0,60,0)</code></td>
 <td>NORMAL (face_tracking overlay active)</td>
 <td>Conversation engaged. Listening pixel (right 11) lights red while the user has the turn; <code>thinking</code> and <code>speaking</code> are face-animation only.</td>
-<td>Tier1Slim → llama-swap, or ZeroClawLLM → ACP</td>
+<td>xiaozhi → Tier1Slim → llama-swap (default), or xiaozhi → ZeroClawLLM → bridge → ACP (legacy)</td>
 </tr>
 <tr>
 <td><code>story_time</code></td>
 <td>warm <code>(100,40,0)</code></td>
 <td>NORMAL</td>
 <td>Long-running interactive story. Bridge bypasses ZeroClaw, calls OpenRouter directly with story persona + rolling context.</td>
-<td>bridge → direct OpenRouter (Phase 7)</td>
+<td>bridge → direct OpenRouter (Phase 7 pending)</td>
 </tr>
 <tr>
 <td><code>security</code></td>
-<td>white <code>(80,80,80)</code> <strong>flashing 1 Hz</strong> across all 6 left pixels</td>
+<td>white <code>(80,80,80)</code> <strong>flashing 1 Hz</strong> across all 6 left pixels (<code>kSecurityFlashHalfMs = 500</code>)</td>
 <td>SURVEILLANCE</td>
 <td>Wide deliberate scan, serious face, periodic photo + audio capture. No proactive greet.</td>
-<td>bridge ambient task (Phase 6)</td>
+<td>bridge ambient task (Phase 6 partial)</td>
 </tr>
 <tr>
 <td><code>sleep</code></td>
 <td>very dim blue <code>(0,0,16)</code></td>
 <td>SLEEPY</td>
-<td>Head face-down + centred, servo torque off, sleeping emoji on screen, ambient awareness paused. Wakes on face / voice / head-pet.</td>
+<td>Head face-down + centred, servo torque off (with <code>kSleepTorqueReleaseTimeoutMs = 3000</code> fallback), sleeping emoji on screen, ambient awareness paused. Wakes on face / voice / head-pet.</td>
 <td>firmware-only quiescence (Phase 5)</td>
 </tr>
 <tr>
@@ -2451,15 +2415,22 @@
 </tr>
 </tbody>
 </table>
-<p>The <code>idle → talk</code> trigger is the firmware <code>face_detected</code> event (any face, family or stranger). The bridge runs VLM recognition (<code>bridge.py::_capture_room_view</code>) in parallel and feeds the resulting identity into the speaker resolver / persona — recognition does <strong>not</strong> gate the state transition.</p>
-<h3 id="mutex-rules-design">Mutex rules (design)<a class="headerlink" href="#mutex-rules-design" title="Permanent link">&para;</a></h3>
+<p>The <code>idle → talk</code> trigger is the firmware <code>face_detected</code> event (any face, family or stranger) <strong>or</strong> <code>onVoiceListening</code> (the WS opens for a wake-word / inject-text / head-pet hold). The bridge runs VLM recognition (<code>bridge.py::_capture_room_view</code>) in parallel and feeds the resulting identity into the speaker resolver / persona — recognition does <strong>not</strong> gate the state transition.</p>
+<h3 id="mutex-rules">Mutex rules<a class="headerlink" href="#mutex-rules" title="Permanent link">&para;</a></h3>
 <ol>
 <li>Exactly <strong>one</strong> state is current. <code>setState(S)</code> to the same state is a no-op.</li>
 <li>State transitions are explicit — no implicit "fallback" to idle from other states; each non-idle state has its own exit triggers.</li>
-<li>Camera edges only auto-transition between <code>idle</code> ↔ <code>talk</code>. Sticky states (<code>story_time</code>, <code>security</code>, <code>sleep</code>, <code>dance</code>) ignore face_detected / face_lost.</li>
+<li>Camera edges only auto-transition between <code>idle</code> ↔ <code>talk</code>. Sticky states (<code>story_time</code>, <code>security</code>, <code>sleep</code>, <code>dance</code>) ignore <code>face_detected</code> / <code>face_lost</code>.</li>
 </ol>
+<h3 id="wake-from-sleep-edges">Wake-from-sleep edges<a class="headerlink" href="#wake-from-sleep-edges" title="Permanent link">&para;</a></h3>
+<p><code>StateManager</code> accepts three sleep-exit triggers:</p>
+<ul>
+<li><strong>Face detected</strong> (<code>onFaceDetected</code>) — wakes if <code>_state == State::Sleep</code>.</li>
+<li><strong>Voice listening</strong> (<code>onVoiceListening</code>) — wakes on wake-word, inject-text, or any other path that opens the WS.</li>
+<li><strong>Head pet</strong> (<code>onHeadPet</code>) — the dark-room friendly path; capacitive head touch wakes without line of sight or speech. See <a href="../voice-mode-entry/">voice-mode-entry.md</a>.</li>
+</ul>
 <hr />
-<h2 id="toggles-compose-freely-shipped">Toggles (compose freely) — ✅ shipped<a class="headerlink" href="#toggles-compose-freely-shipped" title="Permanent link">&para;</a></h2>
+<h2 id="toggles-compose-freely">Toggles (compose freely)<a class="headerlink" href="#toggles-compose-freely" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
@@ -2472,14 +2443,14 @@
 <tbody>
 <tr>
 <td><code>kid_mode</code></td>
-<td>🚧 salmon pink <code>(220,80,80)</code> at index <strong>8</strong> (pip not yet rendered)</td>
-<td>Guardrails — content sandwich, camera tools denied, kid-safe persona. Does not pick the model. Hot-reloads via <code>_apply_kid_mode()</code> (no daemon restart).</td>
+<td>salmon pink <code>(220, 80, 80)</code> at index <strong>8</strong> (G == B so PY32 RGB565 quantization stays warm)</td>
+<td>Guardrails only — content sandwich, camera tools denied, kid-safe persona. Does not pick the model. Bridge-side hot-reload via <code>_apply_kid_mode()</code> (no daemon restart).</td>
 <td><code>/root/zeroclaw-bridge/state/kid-mode</code></td>
 </tr>
 <tr>
 <td><code>smart_mode</code></td>
-<td>🚧 orange <code>(168,80,0)</code> at index <strong>9</strong> (pip not yet rendered)</td>
-<td>Voice-daemon model selector. ON → <code>SMART_MODEL</code> (claude-sonnet-4-6 by default); OFF → local default. Flip is in-process when <code>DOTTY_VOICE_PROVIDER=tier1slim</code>; daemon-restart when <code>=zeroclaw</code>.</td>
+<td>orange <code>(168, 80, 0)</code> at index <strong>9</strong></td>
+<td>Voice-LLM model selector. ON → <code>SMART_MODEL</code> (<code>claude-sonnet-4-6</code> by default) via OpenRouter; OFF → local default. Flip is in-process when <code>DOTTY_VOICE_PROVIDER=tier1slim</code>; daemon-restart when <code>=zeroclaw</code>.</td>
 <td><code>/root/zeroclaw-bridge/state/smart-mode</code></td>
 </tr>
 </tbody>
@@ -2487,7 +2458,7 @@
 <p>The two toggles are orthogonal — they compose freely. <code>kid_mode = on</code> AND <code>smart_mode = on</code> runs the smart model behind the kid-safe sandwich. Both toggles are sticky across turns, daemon restarts, and reboots.</p>
 <p><code>smart_mode</code> is <strong>dashboard- and admin-endpoint-only</strong> — there is no voice trigger. Kids reach Dotty by voice but not the web dashboard, so dashboard-only is the access-control gate that keeps the more capable (and more expensive) model under household-head control.</p>
 <hr />
-<h2 id="led-contract-12-pixel-ring-phase-4-design-spec">LED contract (12-pixel ring) — 🚧 Phase 4 design spec<a class="headerlink" href="#led-contract-12-pixel-ring-phase-4-design-spec" title="Permanent link">&para;</a></h2>
+<h2 id="led-contract-12-pixel-ring">LED contract (12-pixel ring)<a class="headerlink" href="#led-contract-12-pixel-ring" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>LEFT RING (global 0–5)              RIGHT RING (global 6–11)
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>┌───────────────────┐               ┌────────────────────────────┐
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│ 0  state arc      │               │ 6  face state (TOP)        │
@@ -2503,8 +2474,8 @@
 <tr>
 <th>Index</th>
 <th>Half</th>
-<th>Owner (planned)</th>
-<th>Behaviour (planned)</th>
+<th>Owner</th>
+<th>Behaviour</th>
 </tr>
 </thead>
 <tbody>
@@ -2518,55 +2489,53 @@
 <td>6</td>
 <td>right</td>
 <td>StateManager (face state pip)</td>
-<td>Two-state pip: lit when a face is detected; alternate hue when the bridge has identified the face via room-view VLM + roster match. The bridge calls <code>/xiaozhi/admin/set-face-identified</code> to refresh on each match (4 s firmware-side timeout).</td>
+<td>Yellow <code>(168, 140, 0)</code> when a face is detected; green <code>(0, 140, 30)</code> when the bridge has identified the face via room-view VLM + roster match (mutex on the same pixel). Identified state has a <code>kFaceIdentifiedTimeoutMs = 4000</code> firmware-side timeout, with <code>kFaceIdentifiedFlickerGraceMs = 1500</code> to ride out brief detection hiccups — bridge refreshes by calling <code>/xiaozhi/admin/set-face-identified</code> on each successful match.</td>
 </tr>
 <tr>
 <td>7, 10</td>
 <td>right</td>
 <td>StateManager (locked off)</td>
-<td>Reserved for future indicators (low-battery is a known candidate). Re-asserted to <code>(0,0,0)</code> every 200 ms as defense-in-depth.</td>
+<td>Reserved for future indicators (low-battery is a known candidate). Re-asserted to <code>(0,0,0)</code> every <code>kReassertIntervalMs = 200</code> ms as defense-in-depth.</td>
 </tr>
 <tr>
 <td>8</td>
 <td>right</td>
 <td>StateManager (<code>kid_mode</code> pip)</td>
-<td>Lit when kid_mode = on; off otherwise. Use a warm hue with G == B so PY32 RGB565 quantization doesn't push it cool.</td>
+<td>Salmon pink <code>(220, 80, 80)</code> when kid_mode = on; off otherwise. G == B keeps the warm hue surviving RGB565 quantization (the prior <code>(168, 80, 100)</code> hue had B &gt; G and read cool/magenta).</td>
 </tr>
 <tr>
 <td>9</td>
 <td>right</td>
 <td>StateManager (<code>smart_mode</code> pip)</td>
-<td>Lit when smart_mode = on; off otherwise.</td>
+<td>Orange <code>(168, 80, 0)</code> when smart_mode = on; off otherwise.</td>
 </tr>
 <tr>
 <td>11</td>
 <td>right</td>
 <td>StateManager (listening pip)</td>
-<td>Lit while xiaozhi is in <code>LISTENING</code> (mic open, ASR active, user's turn); off otherwise. Driven by <code>stackchan_display.cc::set_listening_pixel</code> (this currently exists in the m5stack StackChan upstream; the StateManager wrapper is Phase 4). Bottom of the right ring; spatially separated from the toggle pips.</td>
+<td>Lit while xiaozhi is in <code>LISTENING</code> (mic open, ASR active, user's turn); off otherwise. Driven by <code>StateManager::setListening(bool)</code>. Bottom of the right ring; spatially separated from the toggle pips.</td>
 </tr>
 </tbody>
 </table>
-<blockquote>
-<p><strong>Specific RGB values intentionally omitted from this table.</strong> The original draft of this doc named exact triples (e.g. <code>(168,140,0)</code> / <code>(0,140,30)</code> / <code>(220,80,80)</code> / <code>(168,80,0)</code>), but those have no source-of-truth in the firmware tree yet — they were design suggestions. The implementing engineer should pick values that survive PY32 RGB565 quantization (favour distinct hues over brightness deltas) and add them here when the StateManager lands.</p>
-</blockquote>
-<h3 id="led-quirks-design">LED quirks (design)<a class="headerlink" href="#led-quirks-design" title="Permanent link">&para;</a></h3>
+<h3 id="led-quirks">LED quirks<a class="headerlink" href="#led-quirks" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>5 Hz tick.</strong> StateManager should re-paint the state arc AND the entire right ring (face / kid / smart / listening / reserved 7 / reserved 10) every ~200 ms. The tick drives the SECURITY 1 Hz flash and the face-identified 4 s timeout, and acts as defense-in-depth re-assert across all status indicators.</li>
+<li><strong>5 Hz tick.</strong> StateManager re-paints the state arc AND the entire right ring (face / kid / smart / listening / reserved 7 / reserved 10) every <code>kReassertIntervalMs = 200</code> ms. The tick drives the SECURITY 1 Hz flash (<code>kSecurityFlashHalfMs = 500</code>) and the face-identified 4 s timeout, and acts as defense-in-depth re-assert across all status indicators — MCP writes / dance keyframes / future writers cannot persistently clobber any pixel (worst case: 200 ms flicker).</li>
 <li><strong>PY32 IO expander quantises to RGB565.</strong> Brightness deltas crush — <code>(40,40,40)</code> reads almost identical to <code>(200,200,200)</code>. Use distinct <strong>hues</strong>, not brightness levels, for any indicator that needs to read across a room.</li>
-<li><strong>MCP tools must be contract-aware.</strong> <code>self.robot.set_led_color</code> and <code>self.robot.set_led_multi</code> should be restricted to the LEFT ring only (indices 0-5). Attempts to write right-ring indices via these tools should be rejected with a warn log.</li>
-<li><strong>Dance choreography should only animate the left ring.</strong> Custom JSON dances that set <code>rightRgbColor</code> will see that field preserved on the <code>Keyframe</code> struct but should not be applied to hardware.</li>
-<li><strong>Dashboard mirror.</strong> The bridge dashboard at <code>/ui/led-ring-mirror</code> shows the four indicators in mirror form, updated via 2 s HTMX polling + <code>dotty-refresh</code> event nudges fired by SSE perception events. This is shipped today (the mirror works without the physical ring) and gives the operator a useful preview of what the firmware-side ring will look like.</li>
+<li><strong>MCP tools are contract-aware.</strong> <code>self.robot.set_led_color</code> and <code>self.robot.set_led_multi</code> are restricted to the LEFT ring only (indices 0-5). Attempts to write right-ring indices via these tools are rejected with a warn log. Use <code>/xiaozhi/admin/set-face-identified</code> to light the face pixel green for ~4 seconds.</li>
+<li><strong>Dance choreography only animates the left ring.</strong> Custom JSON dances that set <code>rightRgbColor</code> will see that field preserved on the <code>Keyframe</code> struct but not applied to hardware.</li>
+<li><strong>RightNeonLight uses local indices 0–5</strong> internally, mapped to global 6–11 via <code>+6</code>. StateManager constants: <code>kFacePipRightLocal=0</code>, <code>kReservedPipRightLocal_7=1</code>, <code>kKidModePipRightLocal=2</code>, <code>kSmartModePipRightLocal=3</code>, <code>kReservedPipRightLocal_10=4</code>, <code>kListeningPipRightLocal=5</code>.</li>
+<li><strong>Dashboard mirror.</strong> The bridge dashboard at <code>/ui/led-ring-mirror</code> shows all four indicators in the same colours as the physical ring, updated via 2 s HTMX polling + <code>dotty-refresh</code> event nudges fired by SSE perception events (<code>face_detected</code>, <code>face_lost</code>, <code>face_recognized</code>, <code>chat_status</code>).</li>
 </ul>
 <hr />
-<h2 id="state-transitions-design">State transitions (design)<a class="headerlink" href="#state-transitions-design" title="Permanent link">&para;</a></h2>
+<h2 id="state-transitions">State transitions<a class="headerlink" href="#state-transitions" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>stateDiagram-v2
     [*] --&gt; idle
 
-    idle --&gt; talk: face_detected (firmware)
-    talk --&gt; idle: face_lost grace expired (firmware)
+    idle --&gt; talk: face_detected (firmware) / onVoiceListening
+    talk --&gt; idle: face_lost grace expired (firmware) / onVoiceStandby
 
     idle --&gt; sleep: voice "go to sleep" / "goodnight Dotty"
-    sleep --&gt; idle: face_detected / voice "wake up" / head_pet
+    sleep --&gt; idle: face_detected / voice / head_pet
 
     idle --&gt; security: voice "keep watch" / "security mode"
     security --&gt; idle: voice "wake up" / face_detected (Phase 6)
@@ -2580,7 +2549,7 @@
     talk --&gt; sleep: voice "goodnight Dotty"
     talk --&gt; story_time: voice "tell me a story"
     talk --&gt; dance: voice "dance"</code></pre>
-<h3 id="voice-triggers-phase-4-design">Voice triggers (Phase 4 design)<a class="headerlink" href="#voice-triggers-phase-4-design" title="Permanent link">&para;</a></h3>
+<h3 id="voice-triggers">Voice triggers<a class="headerlink" href="#voice-triggers" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
@@ -2607,8 +2576,8 @@
 </tr>
 </tbody>
 </table>
-<p>Both <code>kid_mode</code> and <code>smart_mode</code> are voice-untoggleable — they are guardian-controlled axes driven from <code>/admin/kid-mode</code> and <code>/admin/smart-mode</code> (bridge) and reflected via the xiaozhi <code>/xiaozhi/admin/set-toggle</code> MCP relay (firmware-side, Phase 4).</p>
-<h3 id="admin-endpoints-today">Admin endpoints (today)<a class="headerlink" href="#admin-endpoints-today" title="Permanent link">&para;</a></h3>
+<p>Both <code>kid_mode</code> and <code>smart_mode</code> are voice-untoggleable — they are guardian-controlled axes driven from the bridge's <code>/admin/kid-mode</code> and <code>/admin/smart-mode</code> endpoints (or the dashboard cards that wrap them).</p>
+<h3 id="admin-endpoints">Admin endpoints<a class="headerlink" href="#admin-endpoints" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
@@ -2622,37 +2591,42 @@
 <tr>
 <td><code>POST /admin/kid-mode</code></td>
 <td><code>{"enabled": bool}</code></td>
-<td>Persists + hot-reloads kid-mode globals atomically. No daemon restart.</td>
+<td>Persists + hot-reloads kid-mode globals atomically via <code>_apply_kid_mode()</code>. No daemon restart. Also pushes the kid pip via xiaozhi <code>/xiaozhi/admin/set-toggle</code>.</td>
 <td>bridge (localhost-only)</td>
 </tr>
 <tr>
 <td><code>POST /admin/smart-mode</code></td>
 <td><code>{"enabled": bool, "device_id": "&lt;optional&gt;"}</code></td>
-<td>Persists + flips voice provider's model. When <code>DOTTY_VOICE_PROVIDER=tier1slim</code>: in-process hot-swap via <code>/xiaozhi/admin/set-tier1slim-model</code>. When <code>=zeroclaw</code>: rewrites <code>config.toml</code> + restarts daemon.</td>
+<td>Persists + flips voice provider's model. When <code>DOTTY_VOICE_PROVIDER=tier1slim</code>: in-process hot-swap via <code>/xiaozhi/admin/set-tier1slim-model</code>. When <code>=zeroclaw</code>: rewrites <code>config.toml</code> + restarts daemon. Also pushes the smart pip.</td>
 <td>bridge (localhost-only)</td>
 </tr>
 <tr>
 <td><code>POST /xiaozhi/admin/set-state</code></td>
-<td><code>{"state": "&lt;...&gt;", "device_id": "&lt;optional&gt;"}</code></td>
-<td>Dispatches an MCP <code>self.robot.set_state</code> call onto the device WS. Firmware MCP handler not yet built — currently a no-op end-to-end.</td>
+<td><code>{"state": "&lt;idle\|talk\|story_time\|security\|sleep\|dance&gt;", "device_id": "&lt;optional&gt;"}</code></td>
+<td>Dispatches MCP <code>self.robot.set_state</code> onto the device WS; firmware StateManager applies it.</td>
 <td>xiaozhi-server</td>
 </tr>
 <tr>
 <td><code>POST /xiaozhi/admin/set-toggle</code></td>
 <td><code>{"name": "kid_mode\|smart_mode", "enabled": bool, "device_id": "&lt;optional&gt;"}</code></td>
-<td>Same shape — dispatches <code>self.robot.set_toggle</code>. Firmware handler not yet built.</td>
+<td>Dispatches MCP <code>self.robot.set_toggle</code>; firmware StateManager updates the pip without disturbing the active state.</td>
+<td>xiaozhi-server</td>
+</tr>
+<tr>
+<td><code>POST /xiaozhi/admin/set-face-identified</code></td>
+<td><code>{"device_id": "&lt;optional&gt;"}</code></td>
+<td>Lights the face-identified pixel green; refresh required every &lt; <code>kFaceIdentifiedTimeoutMs</code> (4 s) to hold.</td>
 <td>xiaozhi-server</td>
 </tr>
 </tbody>
 </table>
-<h3 id="mcp-tools-firmware-phase-4">MCP tools (firmware) — 🚧 Phase 4<a class="headerlink" href="#mcp-tools-firmware-phase-4" title="Permanent link">&para;</a></h3>
+<h3 id="mcp-tools-firmware">MCP tools (firmware)<a class="headerlink" href="#mcp-tools-firmware" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
 <th>Tool</th>
 <th>Arguments</th>
 <th>Caller</th>
-<th>Status</th>
 </tr>
 </thead>
 <tbody>
@@ -2660,18 +2634,21 @@
 <td><code>self.robot.set_state</code></td>
 <td><code>{"state": "&lt;...&gt;"}</code></td>
 <td>xiaozhi-server <code>/xiaozhi/admin/set-state</code> relay</td>
-<td>dispatched today; no firmware handler</td>
 </tr>
 <tr>
 <td><code>self.robot.set_toggle</code></td>
 <td><code>{"name": "kid_mode\|smart_mode", "enabled": bool}</code></td>
 <td>xiaozhi-server <code>/xiaozhi/admin/set-toggle</code> relay; receiveAudioHandle.py voice phrases</td>
-<td>dispatched today; no firmware handler</td>
+</tr>
+<tr>
+<td><code>self.robot.set_face_identified</code></td>
+<td><code>{}</code></td>
+<td>xiaozhi-server <code>/xiaozhi/admin/set-face-identified</code> relay</td>
 </tr>
 </tbody>
 </table>
 <hr />
-<h2 id="backing-architecture-per-state-design">Backing architecture per state (design)<a class="headerlink" href="#backing-architecture-per-state-design" title="Permanent link">&para;</a></h2>
+<h2 id="backing-architecture-per-state">Backing architecture per state<a class="headerlink" href="#backing-architecture-per-state" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
@@ -2690,8 +2667,8 @@
 </tr>
 <tr>
 <td><code>talk</code></td>
-<td>xiaozhi → Tier1Slim → llama-swap (default), or xiaozhi → bridge → ZeroClaw ACP (legacy). Smart-mode swaps the inner-loop model.</td>
-<td>yes (FTS via memory_lookup tool / full ZeroClaw memory)</td>
+<td>xiaozhi → Tier1Slim → llama-swap (default), or xiaozhi → ZeroClawLLM → bridge → ZeroClaw ACP (legacy). Smart-mode swaps the inner-loop model.</td>
+<td>yes (FTS via <code>memory_lookup</code> tool / full ZeroClaw memory)</td>
 <td>yes (4-tool Tier1 catalogue / full ZeroClaw MCP)</td>
 </tr>
 <tr>
@@ -2720,7 +2697,7 @@
 </tr>
 </tbody>
 </table>
-<p><code>smart_mode</code> flips the inner-loop model and is sticky across turns. With <code>DOTTY_VOICE_PROVIDER=tier1slim</code> (the recommended default) the flip is instantaneous — Tier1Slim's <code>set_runtime()</code> mutates the live provider; no docker restart and no daemon restart. <code>story_time</code> is the only voice path that bypasses both ZeroClaw and Tier1Slim, with its own session memory.</p>
+<p><code>smart_mode</code> flips the inner-loop model and is sticky across turns. With <code>DOTTY_VOICE_PROVIDER=tier1slim</code> (the recommended default) the flip is instantaneous — Tier1Slim's <code>set_runtime()</code> mutates the live provider; no docker restart and no daemon restart. <code>story_time</code> is the only voice path that bypasses both ZeroClaw and Tier1Slim, with its own session memory (Phase 7).</p>
 <hr />
 <h2 id="implementation-status">Implementation status<a class="headerlink" href="#implementation-status" title="Permanent link">&para;</a></h2>
 <table>
@@ -2734,40 +2711,40 @@
 <tbody>
 <tr>
 <td>4</td>
-<td>StateManager firmware foundation: state pip + toggle pips + state_changed event + voice phrases + admin endpoints + LED contract</td>
-<td>🚧 designed; not yet built</td>
+<td>StateManager foundation: state pip + toggle pips + <code>state_changed</code> event + voice phrases + admin endpoints + LED contract</td>
+<td>✅ shipped 2026-04-27 (firmware <code>d78118b</code>, bridge+xiaozhi <code>10cbc63</code>). Bench checks pending: <a href="https://github.com/BrettKinny/dotty-stackchan/issues/38">#38</a>.</td>
 </tr>
 <tr>
 <td>5</td>
 <td>Sleep state behaviour (servo park + torque off + sleepy emoji + wake triggers)</td>
-<td>pending (depends on Phase 4)</td>
+<td>✅ shipped; bench checks: <a href="https://github.com/BrettKinny/dotty-stackchan/issues/39">#39</a>.</td>
 </tr>
 <tr>
 <td>6</td>
 <td>Security state behaviour (periodic photo + audio capture, greeter gate)</td>
-<td>partial — bridge side has VLM + audio capture; firmware state binding pending</td>
+<td>✅ shipped; bench checks: <a href="https://github.com/BrettKinny/dotty-stackchan/issues/40">#40</a>.</td>
 </tr>
 <tr>
 <td>7</td>
 <td>Story_time state (interactive setup, OpenRouter session, choose-your-own-adventure)</td>
-<td>pending</td>
+<td>pending: <a href="https://github.com/BrettKinny/dotty-stackchan/issues/26">#26</a>.</td>
 </tr>
 <tr>
 <td>8</td>
 <td>Ambient awareness loop (idle-state photo + audio scene capture, journal)</td>
-<td>partial — bridge runs <code>_perception_*</code> consumers; firmware state binding pending</td>
+<td>partial — bridge runs <code>_perception_*</code> consumers; firmware state binding pending. Tracked alongside #26.</td>
 </tr>
 </tbody>
 </table>
-<p>Phase 4 establishes the firmware-side <em>rails</em> — pip, transition events, dispatch helpers, voice routing. Phases 5–8 each hang behaviour off those rails without changing the architecture. The bridge-side infrastructure (perception bus, consumer tasks, VLM, audio captioning, dashboard mirror) is already in place waiting for the firmware producer.</p>
+<p>Phase 4 established the <em>rails</em> — pip, transition events, dispatch helpers, voice routing. Phases 5–6 hang behaviour off those rails and have already shipped to the active firmware fork. Phases 7–8 are the next firmware deliverables.</p>
 <hr />
 <h2 id="sources-of-truth">Sources of truth<a class="headerlink" href="#sources-of-truth" title="Permanent link">&para;</a></h2>
-<p><strong>Today (shipped):</strong>
-- <strong>Bridge:</strong> <code>bridge.py</code> (<code>_apply_kid_mode</code>, <code>_read_smart_mode</code>, <code>_write_smart_mode</code>, <code>_apply_tier1slim_runtime</code>, <code>_admin_smart_mode</code>, <code>_admin_kid_mode</code>, <code>DOTTY_VOICE_PROVIDER</code> dispatch, <code>_perception_*</code> consumers, <code>_update_perception_state</code>)
-- <strong>xiaozhi-server patches:</strong> <code>custom-providers/xiaozhi-patches/http_server.py</code> (<code>/xiaozhi/admin/set-state</code>, <code>/xiaozhi/admin/set-toggle</code>, <code>/xiaozhi/admin/set-tier1slim-model</code>, <code>/xiaozhi/admin/set-face-identified</code>, <code>/xiaozhi/admin/inject-text</code>, <code>/xiaozhi/admin/abort</code>, <code>/xiaozhi/admin/set-head-angles</code>), <code>custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py</code> (<code>EventTextMessageHandler</code> → bridge perception relay)
-- <strong>Dashboard:</strong> <code>bridge/dashboard.py</code> + <code>bridge/templates/state_card.html</code> + <code>bridge/templates/smart_mode.html</code> + <code>bridge/templates/led_ring_mirror.html</code></p>
-<p><strong>Phase 4 (planned):</strong>
-- <strong>Firmware:</strong> <code>firmware/main/stackchan/modes/state_manager.{h,cpp}</code> (new), <code>firmware/main/hal/hal_mcp.cpp</code> MCP handler additions (<code>self.robot.set_state</code>, <code>self.robot.set_toggle</code>), <code>firmware/main/stackchan/modifiers/face_tracking.cpp</code> camera-edge hooks</p>
+<ul>
+<li><strong>Firmware (active fork <code>BrettKinny/StackChan @ dotty</code>):</strong> <code>firmware/main/stackchan/modes/state_manager.{h,cpp}</code>, <code>firmware/main/stackchan/modifiers/face_tracking.cpp</code> (camera-edge hooks), <code>firmware/main/hal/hal_mcp.cpp</code> (set_state / set_toggle MCP). <strong>This repo's submodule pin lags</strong> — bump it (or maintain a parallel checkout per the <a href="../firmware"><code>firmware/</code></a> README) to flash a build that includes Phase 4+.</li>
+<li><strong>Bridge:</strong> <code>bridge.py</code> (<code>_dispatch_set_state</code>, <code>_dispatch_set_toggle</code>, <code>_admin_state</code>, <code>_admin_smart_mode</code>, <code>_admin_kid_mode</code>, <code>_apply_model_swap</code>, <code>_apply_tier1slim_runtime</code>, <code>_update_perception_state</code> for <code>state_changed</code>, all <code>_perception_*</code> consumers), <code>receiveAudioHandle.py</code> (voice state phrases + per-conn toggle sync)</li>
+<li><strong>xiaozhi-server patches:</strong> <code>custom-providers/xiaozhi-patches/http_server.py</code> (<code>/xiaozhi/admin/set-state</code>, <code>/xiaozhi/admin/set-toggle</code>, <code>/xiaozhi/admin/set-tier1slim-model</code>, <code>/xiaozhi/admin/set-face-identified</code>, <code>/xiaozhi/admin/inject-text</code>, <code>/xiaozhi/admin/abort</code>, <code>/xiaozhi/admin/set-head-angles</code>), <code>custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py</code> (<code>state_changed</code> → <code>conn.current_state</code>, perception relay to bridge)</li>
+<li><strong>Dashboard:</strong> <code>bridge/dashboard.py</code> + <code>bridge/templates/state_card.html</code> + <code>bridge/templates/smart_mode.html</code> + <code>bridge/templates/led_ring_mirror.html</code></li>
+</ul>
 <p>Last verified: 2026-05-17.</p>
 
 

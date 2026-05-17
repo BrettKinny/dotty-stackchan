@@ -2423,7 +2423,7 @@ container.</p>
 <a href="../troubleshooting/">troubleshooting.md</a>.</p>
 <h2 id="5-connect-the-robot">5. Connect the robot<a class="headerlink" href="#5-connect-the-robot" title="Permanent link">&para;</a></h2>
 <ol>
-<li>Power on the StackChan (USB-C or battery).</li>
+<li>Power on the robot (USB-C or battery).</li>
 <li>On the device screen, navigate to <strong>Settings &gt; Advanced Options</strong>.</li>
 <li>Enter the OTA URL: <code>http://&lt;YOUR_SERVER_IP&gt;:8003/xiaozhi/ota/</code></li>
 <li>The robot connects via WebSocket and shows a face.</li>
@@ -2478,23 +2478,23 @@ latency is roughly 5 seconds, dominated by the LLM round-trip.</p>
 <tbody>
 <tr>
 <td><code>&lt;XIAOZHI_HOST&gt;</code></td>
-<td>LAN IP of the Docker host running xiaozhi-server. StackChan reaches this on WiFi, so it must be a LAN IP, not a Tailscale/VPN IP.</td>
+<td>LAN IP of the server running xiaozhi-server. The robot reaches this on WiFi, so it must be a LAN IP, not a Tailscale/VPN IP.</td>
 </tr>
 <tr>
 <td><code>&lt;XIAOZHI_USER&gt;</code></td>
-<td>SSH user for the Docker host (whatever your distro defaults to: <code>root</code>, <code>ubuntu</code>, <code>dietpi</code>, etc.).</td>
+<td>SSH user for the server (whatever your distro defaults to: <code>root</code>, <code>ubuntu</code>, <code>dietpi</code>, etc.).</td>
 </tr>
 <tr>
 <td><code>&lt;XIAOZHI_HOSTNAME&gt;</code></td>
-<td>Hostname or Tailscale name of the Docker host (optional, IP works for everything).</td>
+<td>Hostname or Tailscale name of the server (optional, IP works for everything).</td>
 </tr>
 <tr>
 <td><code>&lt;XIAOZHI_PATH&gt;</code></td>
-<td>Path on the Docker host where you clone/install xiaozhi-server (e.g. <code>/opt/xiaozhi-server/</code> or <code>/srv/xiaozhi-server/</code>).</td>
+<td>Path on the server where you clone/install xiaozhi-server (e.g. <code>/opt/xiaozhi-server/</code> or <code>/srv/xiaozhi-server/</code>).</td>
 </tr>
 <tr>
 <td><code>&lt;ZEROCLAW_HOST&gt;</code></td>
-<td>LAN IP of the host running ZeroClaw + the bridge. Anything that runs the <code>zeroclaw</code> binary works (a small Linux box, your existing home server, or the same Docker host as xiaozhi-server).</td>
+<td>LAN IP of the host running ZeroClaw + the bridge. Anything that runs the <code>zeroclaw</code> binary works (a small Linux box, your existing home server, or the same server as xiaozhi-server).</td>
 </tr>
 <tr>
 <td><code>&lt;ZEROCLAW_USER&gt;</code></td>
@@ -2536,7 +2536,7 @@ latency is roughly 5 seconds, dominated by the LLM round-trip.</p>
 <hr />
 <h2 id="deployment-layout">Deployment layout<a class="headerlink" href="#deployment-layout" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>flowchart TB
-    subgraph DockerHost_fs["Docker host filesystem - &amp;lt;XIAOZHI_PATH&amp;gt;"]
+    subgraph DockerHost_fs["Server filesystem - &amp;lt;XIAOZHI_PATH&amp;gt;"]
         direction TB
         UA1["data/.config.yaml&lt;br/&gt;(override - voice, persona, endpoints)"]
         UA2["models/SenseVoiceSmall/&lt;br/&gt;(model.pt + configs)"]
@@ -2625,12 +2625,12 @@ latency is roughly 5 seconds, dominated by the LLM round-trip.</p>
 <tr>
 <td>OTA (enter into StackChan settings)</td>
 <td><code>http://&lt;XIAOZHI_HOST&gt;:8003/xiaozhi/ota/</code></td>
-<td>StackChan device on boot</td>
+<td>The robot on boot</td>
 </tr>
 <tr>
 <td>WebSocket</td>
 <td><code>ws://&lt;XIAOZHI_HOST&gt;:8000/xiaozhi/v1/</code></td>
-<td>StackChan device after OTA handshake</td>
+<td>The robot after OTA handshake</td>
 </tr>
 <tr>
 <td>Bridge (chat)</td>
@@ -2666,7 +2666,7 @@ latency is roughly 5 seconds, dominated by the LLM round-trip.</p>
 </thead>
 <tbody>
 <tr>
-<td>Docker host</td>
+<td>Server</td>
 <td>Container <code>restart: unless-stopped</code> in <code>docker-compose.yml</code> + ensure dockerd starts at boot on your distro.</td>
 </tr>
 <tr>

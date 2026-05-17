@@ -2360,7 +2360,7 @@
 <p><strong>What we use:</strong> SileroVAD + FunASR (patched) + custom ZeroClawLLM + LocalPiper (or EdgeTTS on rollback). Every other row is unused.</p>
 <h2 id="our-deployed-stages">Our deployed stages<a class="headerlink" href="#our-deployed-stages" title="Permanent link">&para;</a></h2>
 <h3 id="vad-silerovad">VAD — SileroVAD<a class="headerlink" href="#vad-silerovad" title="Permanent link">&para;</a></h3>
-<p>SileroVAD v6.x, JIT model ~2 MB, runs on the Docker host CPU, &lt;1 ms per chunk in practice. 8 kHz or 16 kHz sample rates supported; xiaozhi-server uses 16 kHz to match the device Opus stream.</p>
+<p>SileroVAD v6.x, JIT model ~2 MB, runs on the server CPU, &lt;1 ms per chunk in practice. 8 kHz or 16 kHz sample rates supported; xiaozhi-server uses 16 kHz to match the device Opus stream.</p>
 <p>Tunables live under <code>VAD.SileroVAD.*</code> in <code>data/.config.yaml</code>:</p>
 <table>
 <thead>

@@ -2256,7 +2256,7 @@
 <h3 id="is-it-fully-offline">Is it fully offline?<a class="headerlink" href="#is-it-fully-offline" title="Permanent link">&para;</a></h3>
 <p>Almost, and it can be with two swaps:</p>
 <ul>
-<li><strong>ASR</strong> (speech recognition): already fully local. FunASR runs on your Docker host.</li>
+<li><strong>ASR</strong> (speech recognition): already fully local. FunASR runs on your server.</li>
 <li><strong>TTS</strong> (speech synthesis): local if you use Piper TTS. EdgeTTS requires internet (it hits Microsoft's servers).</li>
 <li><strong>LLM</strong>: cloud by default (OpenRouter). Swap in Ollama pointing at a local model for fully offline inference.</li>
 </ul>
@@ -2291,7 +2291,7 @@
 <li><code>~/.zeroclaw/workspace/IDENTITY.md</code> — name, backstory, role.</li>
 </ul>
 <p>These are hot-read by ZeroClaw — edit them and the next conversation turn picks up the changes, no restart needed.</p>
-<p>There's also a secondary <code>prompt:</code> key in <code>data/.config.yaml</code> on the Docker host that gets injected as a system message. ZeroClaw's own persona files take precedence, but this is a useful place for voice-pipeline-level hints.</p>
+<p>There's also a secondary <code>prompt:</code> key in <code>data/.config.yaml</code> on the server that gets injected as a system message. ZeroClaw's own persona files take precedence, but this is a useful place for voice-pipeline-level hints.</p>
 <hr />
 <h3 id="what-voices-are-available">What voices are available?<a class="headerlink" href="#what-voices-are-available" title="Permanent link">&para;</a></h3>
 <p>Depends on which TTS provider you use:</p>

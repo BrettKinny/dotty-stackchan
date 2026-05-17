@@ -2559,7 +2559,7 @@
 <li><strong>Edit <code>~/.zeroclaw/config.toml</code>:</strong> set <code>[channels.discord].enabled = false</code> defensively.</li>
 <li><strong>Drop in the systemd unit</strong> at <code>/etc/systemd/system/zeroclaw-discord.service</code> (template above).</li>
 <li><strong>Reload + enable + start.</strong> <code>sudo systemctl daemon-reload &amp;&amp; sudo systemctl enable --now zeroclaw-discord.service</code>.</li>
-<li><strong>Verify.</strong> Voice turn end-to-end (smoke test from the StackChan or a <code>curl</code> to the bridge), then a Discord DM from an <code>allowed_users</code> ID — they should hit different models. Tail both journals (see below) to confirm.</li>
+<li><strong>Verify.</strong> Voice turn end-to-end (smoke test from the robot or a <code>curl</code> to the bridge), then a Discord DM from an <code>allowed_users</code> ID — they should hit different models. Tail both journals (see below) to confirm.</li>
 </ol>
 <h2 id="what-to-check-when-it-breaks">What to check when it breaks<a class="headerlink" href="#what-to-check-when-it-breaks" title="Permanent link">&para;</a></h2>
 <table>
