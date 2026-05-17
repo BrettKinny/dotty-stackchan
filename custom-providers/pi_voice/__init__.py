@@ -15,4 +15,4 @@ from .pi_client import (  # noqa: F401
     local_exec_subprocess_factory,
     make_default_pi_client,
 )
-from .pi_voice import LLMProvider  # noqa: F401
+from .pi_voice import LLMProvider, _wrap_with_sandwich  # noqa: F401
