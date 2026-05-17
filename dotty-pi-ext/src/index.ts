@@ -16,6 +16,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(memoryLookupTool);
   pi.registerTool(thinkHardTool);
   pi.registerTool(playSongTool);
-  // take_photo (blocked on perception-cache rehoming) and set_led
-  // (not yet in bridge.py — per #36 carryover) land later.
+  // take_photo lands later (blocked on perception-cache rehoming).
+  // set_led is intentionally absent: the LED ring is reserved for
+  // mode/state indication, not voice-driven; see README.md "Not a tool".
 }
