@@ -47,6 +47,34 @@ First-time appdata layout:
     └── dotty-pi-ext/        # voice-tool extension (../dotty-pi-ext/)
 ```
 
+## Model selection — DO NOT use `qwen3.6:27b` here
+
+llama-swap (`/mnt/user/appdata/llama-swap/config.yaml`) groups models
+into matrix sets — `voice` (resident: `qwen3.5:4b` + `qwen3.6:27b-think`)
+and `coding` (resident: `qwen3.6:27b` alone). Requesting the coding-set
+model evicts both voice models; reloading either is a 30–50 s cold hit.
+
+The cutover model split (validated 2026-05-17 end-to-end):
+
+| Loop | Model | Why |
+|---|---|---|
+| Outer agent (`pi --model …`) | `qwen3.5:4b` | Fast, in voice set, drives tool-routing reliably enough for Dotty's flat tool surface. |
+| `think_hard` escalation | `qwen3.6:27b-think` | The 8K-context 27B, in voice set, resident alongside 4B. Direct llama-swap POST inside the extension; no agent overhead. |
+
+**Never** call `pi --model qwen3.6:27b` from this container — it evicts
+`qwen3.6:27b-think` and the next `think_hard` call times out at 30 s
+waiting for the cold reload. The integration test on 2026-05-17 caught
+this exact failure (returned `"(I'm slow today, try again in a moment)"`
+twice before the fix).
+
+Measured wall-clock for the 4B + 27B-think split:
+
+- `memory_lookup` (no LLM escalation): ~5.8 s total (4B turn + tool + reply)
+- `think_hard` ("reply with `pong`"): ~45 s total warm (4B turn + tool fires inner 27B-think call + reply)
+
+The `models.json` shipped here registers all three aliases but the agent
+loop should always target `qwen3.5:4b`.
+
 ## Versioning
 
 | Tag | Pi version | Notes |

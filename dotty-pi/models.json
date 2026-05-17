@@ -10,8 +10,26 @@
       },
       "models": [
         {
+          "id": "qwen3.5:4b",
+          "name": "Qwen3.5 4B (Unraid llama.cpp, voice set)",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 4096,
+          "maxTokens": 2048,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
+          "id": "qwen3.6:27b-think",
+          "name": "Qwen3.6 27B think (Unraid llama.cpp, voice set, 8K)",
+          "reasoning": true,
+          "input": ["text"],
+          "contextWindow": 8192,
+          "maxTokens": 4096,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
           "id": "qwen3.6:27b",
-          "name": "Qwen3.6 27B (Unraid llama.cpp)",
+          "name": "Qwen3.6 27B (Unraid llama.cpp, coding set, 96K — EVICTS VOICE)",
           "reasoning": true,
           "input": ["text"],
           "contextWindow": 32768,
