@@ -10,7 +10,7 @@
 >
 > **Known rough edges:** face emoji rendering is missing visual differentiation for 4 of 9 emotions (sad / surprise / love / laughing); sound-direction localizer has a hardware-AEC-related left-bias on M5Stack CoreS3 (energy detection works, direction is unreliable); kid-voice ASR accuracy on SenseVoice has a kid-speech gap that whisper.cpp will close in a follow-up.
 
-Dotty is a fully self-hosted voice stack for the M5Stack StackChan desktop robot. Open-source firmware on the device, [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) for voice I/O, and a small FastAPI bridge to whatever LLM agent you want as the brain. ASR, TTS, and session state all run on your own hardware. The LLM is pluggable — the shipped default is a two-tier path (a small fast model handles plain chat; tool calls escalate to a more capable model), with [llama-swap](./docs/cookbook/llama-swap-concurrent-models.md) as the recommended local backend. Swap in [Ollama](./docs/cookbook/run-fully-local.md) for the simpler single-binary option, or point at OpenRouter / any OpenAI-compatible API if you'd rather use the cloud.
+Dotty is a fully self-hosted voice stack for the M5Stack StackChan desktop robot. Open-source firmware on the robot, [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) for voice I/O, and a small FastAPI bridge to whatever LLM agent you want as the brain. ASR, TTS, and session state all run on your own hardware. The LLM is pluggable — the shipped default is a two-tier path (a small fast model handles plain chat; tool calls escalate to a more capable model), with [llama-swap](./docs/cookbook/llama-swap-concurrent-models.md) as the recommended local backend. Swap in [Ollama](./docs/cookbook/run-fully-local.md) for the simpler single-binary option, or point at OpenRouter / any OpenAI-compatible API if you'd rather use the cloud.
 
 Out of the box, Dotty ships in **Kid Mode** — age-appropriate language, safety guardrails, and content filtering are on by default. Disable Kid Mode for a general-purpose assistant.
 
@@ -29,7 +29,7 @@ So Dotty is the version that passes: every component runs on hardware I own, eve
 - **Emoji expressions** — every response starts with an emoji that the firmware maps to a face animation (smile, laugh, sad, surprise, thinking, angry, love, sleepy, neutral).
 - **MCP tools** — ZeroClaw exposes tools (web search, memory, etc.) to the LLM via the Model Context Protocol.
 - **States, toggles & LEDs** — `kid_mode` and `smart_mode` toggles are shipped and persist across reboots; smart-mode flips hot-swap the inner-loop LLM in-process (no daemon restart). The six-state mutex (`idle / talk / story_time / security / sleep / dance`) + 12-pixel LED ring are designed and partially wired bridge-side; the firmware `StateManager` that paints the ring is a Phase 4 work item not yet built. See "States, Toggles & LEDs" below and [`docs/modes.md`](./docs/modes.md).
-- **Vision (camera)** — the StackChan's built-in camera can capture images for multimodal LLM queries.
+- **Vision (camera)** — the robot's built-in camera can capture images for multimodal LLM queries.
 - **Calendar context** — optional calendar integration feeds upcoming events into the conversation context.
 - **Hackable** — every seam is swappable: LLM, TTS, ASR, agent framework. Fork it, rip out what you don't want, wire in your own.
 
@@ -75,7 +75,7 @@ The bridge serves a web dashboard at `http://<ZEROCLAW_HOST>:8080/ui` — host s
 | Component | Host | Notes |
 |---|---|---|
 | StackChan (device) | ESP32-S3 on the desk | Firmware built from `m5stack/StackChan` (see `SETUP.md`) |
-| xiaozhi-esp32-server | Docker host (`<XIAOZHI_HOST>`) | Docker, ports 8000 + 8003 |
+| xiaozhi-esp32-server | server (`<XIAOZHI_HOST>`) | Docker, ports 8000 + 8003 |
 | zeroclaw-bridge | ZeroClaw host (`<ZEROCLAW_HOST>`) | FastAPI on port 8080, systemd |
 | ZeroClaw daemon | ZeroClaw host (`<ZEROCLAW_HOST>`) | `<ZEROCLAW_BIN>` |
 | Admin workstation | any LAN box | Development / `ssh` only |

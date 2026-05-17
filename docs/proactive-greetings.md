@@ -70,7 +70,7 @@ while this one targets `face_recognized` (Layer 4 output).
 7. **Kid-safety sandwich.** Same surface as voice turns; the
    greeting is also constrained directly in the prompt.
 8. **TTS push.** `push_greeting_audio()` → existing `inject-text`
-   admin route → xiaozhi-server TTS → device speaker.
+   admin route → xiaozhi-server TTS → robot speaker.
 
 ## Configuration
 

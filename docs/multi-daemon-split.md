@@ -191,7 +191,7 @@ Assumes you have a working single-daemon (voice) setup already.
 7. **Edit `~/.zeroclaw/config.toml`:** set `[channels.discord].enabled = false` defensively.
 8. **Drop in the systemd unit** at `/etc/systemd/system/zeroclaw-discord.service` (template above).
 9. **Reload + enable + start.** `sudo systemctl daemon-reload && sudo systemctl enable --now zeroclaw-discord.service`.
-10. **Verify.** Voice turn end-to-end (smoke test from the StackChan or a `curl` to the bridge), then a Discord DM from an `allowed_users` ID — they should hit different models. Tail both journals (see below) to confirm.
+10. **Verify.** Voice turn end-to-end (smoke test from the robot or a `curl` to the bridge), then a Discord DM from an `allowed_users` ID — they should hit different models. Tail both journals (see below) to confirm.
 
 ## What to check when it breaks
 

@@ -30,7 +30,7 @@ The reference config uses Qwen3-30B-A3B via OpenRouter. Any model that handles E
 
 Almost, and it can be with two swaps:
 
-- **ASR** (speech recognition): already fully local. FunASR runs on your Docker host.
+- **ASR** (speech recognition): already fully local. FunASR runs on your server.
 - **TTS** (speech synthesis): local if you use Piper TTS. EdgeTTS requires internet (it hits Microsoft's servers).
 - **LLM**: cloud by default (OpenRouter). Swap in Ollama pointing at a local model for fully offline inference.
 
@@ -79,7 +79,7 @@ Yes. The persona is defined in Markdown files on the ZeroClaw host:
 
 These are hot-read by ZeroClaw — edit them and the next conversation turn picks up the changes, no restart needed.
 
-There's also a secondary `prompt:` key in `data/.config.yaml` on the Docker host that gets injected as a system message. ZeroClaw's own persona files take precedence, but this is a useful place for voice-pipeline-level hints.
+There's also a secondary `prompt:` key in `data/.config.yaml` on the server that gets injected as a system message. ZeroClaw's own persona files take precedence, but this is a useful place for voice-pipeline-level hints.
 
 ---
 

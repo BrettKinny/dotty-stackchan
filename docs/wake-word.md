@@ -119,7 +119,7 @@ The robot will mostly hear a kid's voice. Models trained only on adult voices mi
 - 10 whisper / 10 shouted — energy-range coverage.
 - Mix distances: 0.5 m, 1.5 m, 3 m. Mix angles: facing, side-on, behind.
 - Mix backgrounds: quiet room, TV on low, dishwasher running, music on.
-- Record at the device's mic format (16 kHz mono, 16-bit PCM) using the device itself if possible (a `record_dump` MCP tool can be added to the firmware), otherwise a phone mic in the same room.
+- Record at the device's mic format (16 kHz mono, 16-bit PCM) using the robot itself if possible (a `record_dump` MCP tool can be added to the firmware), otherwise a phone mic in the same room.
 
 **Negative set — ~1,500 clips:**
 - ~500 random household audio clips (kid yelling, parent talking, TV chatter, music).

@@ -14,7 +14,7 @@ and the matching block under `LLM:` in `.config.yaml`.
 | | OpenAI-compatible API | llama-swap (local, multi-model) | Tier1Slim (two-tier voice) | ZeroClaw (single-tier agent) |
 |---|---|---|---|---|
 | **Provider key** | `OpenAICompat` | `OpenAICompat` | `Tier1Slim` | `ZeroClawLLM` |
-| **Runs where** | Cloud (OpenRouter, OpenAI, etc.) | Local GPU host (Docker, llama.cpp) | Inner loop on llama-swap; escalations through the bridge | ZeroClaw host or Docker host |
+| **Runs where** | Cloud (OpenRouter, OpenAI, etc.) | Local GPU host (Docker, llama.cpp) | Inner loop on llama-swap; escalations through the bridge | ZeroClaw host or server |
 | **Latency** | 300-800 ms (network-bound) | 200-600 ms (GPU-bound; `qwen3.5:4b` warm <500 ms) | <500 ms plain chat; +bridge round-trip on tool calls | 500-1500 ms (full agent overhead on every turn) |
 | **Cost** | Pay-per-token | Free (electricity + hardware) | Free for inner loop; pay-per-token in smart mode | Free (electricity + hardware) |
 | **Privacy** | Tokens sent to cloud provider | Fully local, nothing leaves LAN | Fully local for plain turns; cloud only when smart_mode is on | Fully local (if local LLM backend) |

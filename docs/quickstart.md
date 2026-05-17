@@ -91,7 +91,7 @@ All checks should pass (green). If any fail, see
 
 ## 5. Connect the robot
 
-1. Power on the StackChan (USB-C or battery).
+1. Power on the robot (USB-C or battery).
 2. On the device screen, navigate to **Settings > Advanced Options**.
 3. Enter the OTA URL: `http://<YOUR_SERVER_IP>:8003/xiaozhi/ota/`
 4. The robot connects via WebSocket and shows a face.
@@ -129,11 +129,11 @@ This repo uses placeholders in place of real IPs, usernames, and filesystem path
 
 | Placeholder | Meaning |
 |---|---|
-| `<XIAOZHI_HOST>` | LAN IP of the Docker host running xiaozhi-server. StackChan reaches this on WiFi, so it must be a LAN IP, not a Tailscale/VPN IP. |
-| `<XIAOZHI_USER>` | SSH user for the Docker host (whatever your distro defaults to: `root`, `ubuntu`, `dietpi`, etc.). |
-| `<XIAOZHI_HOSTNAME>` | Hostname or Tailscale name of the Docker host (optional, IP works for everything). |
-| `<XIAOZHI_PATH>` | Path on the Docker host where you clone/install xiaozhi-server (e.g. `/opt/xiaozhi-server/` or `/srv/xiaozhi-server/`). |
-| `<ZEROCLAW_HOST>` | LAN IP of the host running ZeroClaw + the bridge. Anything that runs the `zeroclaw` binary works (a small Linux box, your existing home server, or the same Docker host as xiaozhi-server). |
+| `<XIAOZHI_HOST>` | LAN IP of the server running xiaozhi-server. The robot reaches this on WiFi, so it must be a LAN IP, not a Tailscale/VPN IP. |
+| `<XIAOZHI_USER>` | SSH user for the server (whatever your distro defaults to: `root`, `ubuntu`, `dietpi`, etc.). |
+| `<XIAOZHI_HOSTNAME>` | Hostname or Tailscale name of the server (optional, IP works for everything). |
+| `<XIAOZHI_PATH>` | Path on the server where you clone/install xiaozhi-server (e.g. `/opt/xiaozhi-server/` or `/srv/xiaozhi-server/`). |
+| `<ZEROCLAW_HOST>` | LAN IP of the host running ZeroClaw + the bridge. Anything that runs the `zeroclaw` binary works (a small Linux box, your existing home server, or the same server as xiaozhi-server). |
 | `<ZEROCLAW_USER>` | SSH user on the ZeroClaw host (whatever your distro defaults to). |
 | `<ZEROCLAW_HOME>` | Home directory on the ZeroClaw host for the user that owns the bridge (e.g. `/root/` or `/home/<user>/`). |
 | `<BRIDGE_PATH>` | Full path to the zeroclaw-bridge working directory (e.g. `/root/zeroclaw-bridge/`). |
@@ -156,7 +156,7 @@ Files you will definitely need to edit before first run:
 
 ```mermaid
 flowchart TB
-    subgraph DockerHost_fs["Docker host filesystem - &lt;XIAOZHI_PATH&gt;"]
+    subgraph DockerHost_fs["Server filesystem - &lt;XIAOZHI_PATH&gt;"]
         direction TB
         UA1["data/.config.yaml<br/>(override - voice, persona, endpoints)"]
         UA2["models/SenseVoiceSmall/<br/>(model.pt + configs)"]
@@ -201,8 +201,8 @@ The full file inventory (with `/etc/systemd/system/` paths and the bare-metal ve
 
 | What | URL | Who calls it |
 |---|---|---|
-| OTA (enter into StackChan settings) | `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/` | StackChan device on boot |
-| WebSocket | `ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/` | StackChan device after OTA handshake |
+| OTA (enter into StackChan settings) | `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/` | The robot on boot |
+| WebSocket | `ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/` | The robot after OTA handshake |
 | Bridge (chat) | `http://<ZEROCLAW_HOST>:8080/api/message` | xiaozhi-server's ZeroClawLLM |
 | Bridge (health) | `http://<ZEROCLAW_HOST>:8080/health` | Humans, monitoring |
 | Bridge (dashboard) | `http://<ZEROCLAW_HOST>:8080/ui` | Humans (LAN-only HTMX UI) |
@@ -216,7 +216,7 @@ Both services restart themselves without manual intervention:
 
 | Host | Mechanism |
 |---|---|
-| Docker host | Container `restart: unless-stopped` in `docker-compose.yml` + ensure dockerd starts at boot on your distro. |
+| Server | Container `restart: unless-stopped` in `docker-compose.yml` + ensure dockerd starts at boot on your distro. |
 | ZeroClaw host | `zeroclaw-bridge.service` is `enabled`, `Restart=on-failure`. |
 
 Caveat: if you run `docker compose down`, the container is marked stopped and won't come back on reboot. Use `docker compose restart` or `docker restart xiaozhi-esp32-server` for transient restarts instead.

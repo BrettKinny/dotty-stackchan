@@ -15,7 +15,7 @@ Every component in the pipeline is swappable: the LLM, the TTS engine, the ASR p
 
 - **Kid-safe by default.** Kid Mode is on out of the box. Per-turn sandwich enforcement in the bridge layer keeps the LLM age-appropriate and on-topic. Disable it for a general-purpose assistant.
 - **Fully swappable pipeline.** Every component -- LLM, TTS, ASR, persona -- is a config-level choice. Bring your own models, your own agent framework, or your own personality.
-- **Local speech recognition.** FunASR SenseVoiceSmall runs on your Docker host. Audio never leaves your LAN.
+- **Local speech recognition.** FunASR SenseVoiceSmall runs on your server. Audio never leaves your LAN.
 - **Pluggable LLM.** The reference config uses Qwen via OpenRouter. Swap in any OpenAI-compatible API or Ollama for fully local inference.
 - **Local TTS option.** Piper TTS runs entirely on-host. EdgeTTS (Microsoft's cloud neural voices) is also supported as a low-friction alternative.
 - **Emoji-driven facial expressions.** The LLM's response starts with an emoji (smile, laugh, sad, surprise, thinking, angry, neutral, love, sleepy). The firmware parses it into a face animation on the robot's display. Three layers enforce this: the agent prompt, the server system prompt, and a bridge-level fallback.
@@ -39,7 +39,7 @@ This is a hackable starting point, not a product. There are no releases, no inst
 
 ## What's in scope
 
-- A working voice pipeline: device audio in, transcription, LLM response, speech out, facial expression.
+- A working voice pipeline: robot audio in, transcription, LLM response, speech out, facial expression.
 - Infrastructure-as-config: Docker Compose files, systemd units, custom provider code, config templates with placeholders.
 - Documentation for the architecture, protocols, and deployment.
 - A reference persona and agent configuration (ZeroClaw + Qwen).

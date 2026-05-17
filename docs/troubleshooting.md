@@ -43,22 +43,22 @@ Symptom-first lookup table covering common and obscure failure modes. Pair with 
 
 **Possible causes:**
 
-- **WiFi signal.** The StackChan's ESP32-S3 is 2.4 GHz only. Check RSSI — anything below -70 dBm will cause packet loss on the WebSocket stream. Move the robot closer to the access point, or reduce 2.4 GHz interference.
+- **WiFi signal.** The robot's ESP32-S3 is 2.4 GHz only. Check RSSI — anything below -70 dBm will cause packet loss on the WebSocket stream. Move the robot closer to the access point, or reduce 2.4 GHz interference.
 - **WebSocket abnormal close.** Check xiaozhi-server logs for WS disconnect/reconnect events. The device will silently reconnect, but audio in flight is lost.
-- **TTS chunk timing.** If using EdgeTTS (cloud), network jitter between the Docker host and Microsoft's edge servers can cause uneven audio delivery. Switching to Piper (local) eliminates this variable entirely.
-- **Docker host CPU contention.** If other containers are competing for CPU during the ASR or TTS stages, audio processing can stall. Check `docker stats` on the Docker host.
+- **TTS chunk timing.** If using EdgeTTS (cloud), network jitter between the server and Microsoft's edge servers can cause uneven audio delivery. Switching to Piper (local) eliminates this variable entirely.
+- **Server CPU contention.** If other containers are competing for CPU during the ASR or TTS stages, audio processing can stall. Check `docker stats` on the server.
 
 ---
 
 ## Robot not responding after OTA / firmware update
 
-**Symptom:** The StackChan boots and connects to WiFi, but never responds to voice. May show a face but no indication of listening.
+**Symptom:** The robot boots and connects to WiFi, but never responds to voice. May show a face but no indication of listening.
 
 **Fix:**
 1. Check the bridge health endpoint: `curl http://<ZEROCLAW_HOST>:8080/health`. If the bridge is down, restart it.
-2. Check xiaozhi-server logs: `docker logs -f xiaozhi-esp32-server` on the Docker host. Look for connection attempts from the device.
-3. Verify the device's OTA URL hasn't changed. After a firmware update, re-enter the OTA URL (`http://<XIAOZHI_HOST>:8003/xiaozhi/ota/`) in the device's Advanced Options if needed.
-4. Open the browser test page (`repo/main/xiaozhi-server/test/test_page.html`) and point it at `ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/`. If the browser page works but the device doesn't, it's a device-side configuration issue.
+2. Check xiaozhi-server logs: `docker logs -f xiaozhi-esp32-server` on the server. Look for connection attempts from the robot.
+3. Verify the robot's OTA URL hasn't changed. After a firmware update, re-enter the OTA URL (`http://<XIAOZHI_HOST>:8003/xiaozhi/ota/`) in the robot's Advanced Options if needed.
+4. Open the browser test page (`repo/main/xiaozhi-server/test/test_page.html`) and point it at `ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/`. If the browser page works but the robot doesn't, it's a robot-side configuration issue.
 
 ---
 

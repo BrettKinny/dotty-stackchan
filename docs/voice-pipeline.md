@@ -37,7 +37,7 @@ From the `xinnan-tech/xiaozhi-esp32-server` README (see [references.md](./refere
 
 ### VAD — SileroVAD
 
-SileroVAD v6.x, JIT model ~2 MB, runs on the Docker host CPU, <1 ms per chunk in practice. 8 kHz or 16 kHz sample rates supported; xiaozhi-server uses 16 kHz to match the device Opus stream.
+SileroVAD v6.x, JIT model ~2 MB, runs on the server CPU, <1 ms per chunk in practice. 8 kHz or 16 kHz sample rates supported; xiaozhi-server uses 16 kHz to match the device Opus stream.
 
 Tunables live under `VAD.SileroVAD.*` in `data/.config.yaml`:
 

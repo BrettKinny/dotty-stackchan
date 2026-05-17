@@ -7,8 +7,8 @@ description: Three-host architecture and message flow for the self-hosted voice 
 
 ## TL;DR
 
-- Three hosts: **StackChan** (the robot on your desk) → **Docker host** (runs xiaozhi-esp32-server) → **ZeroClaw host** (runs ZeroClaw + a FastAPI bridge).
-- Audio goes device → Docker host → (text) → ZeroClaw host → (response text) → Docker host → (audio) → device. The ZeroClaw host never touches audio.
+- Three hosts: **robot** (StackChan on your desk) → **server** (runs xiaozhi-esp32-server) → **ZeroClaw host** (runs ZeroClaw + a FastAPI bridge).
+- Audio goes robot → server → (text) → ZeroClaw host → (response text) → server → (audio) → robot. The ZeroClaw host never touches audio.
 - **Two voice paths coexist**, selected by `selected_module.LLM` in `.config.yaml`:
   - **`Tier1Slim`** (current default) — a small/fast LLM (`qwen3.5:4b`) handles plain turns directly from xiaozhi-server against a local llama-swap, no bridge round-trip. Tool calls escalate to the bridge via `/api/voice/escalate`.
   - **`ZeroClawLLM`** (legacy single-tier) — every turn goes through the bridge → ZeroClaw → OpenRouter (Qwen3-30B).
@@ -24,7 +24,7 @@ flowchart LR
         SC["M5Stack StackChan<br/>ESP32-S3"]
     end
 
-    subgraph DockerHost["Docker host - &lt;XIAOZHI_HOST&gt;"]
+    subgraph DockerHost["Server - &lt;XIAOZHI_HOST&gt;"]
         XZ["xiaozhi-esp32-server<br/>(Docker)<br/>:8000 WS + :8003 HTTP"]
         subgraph XZMods["voice pipeline"]
             VAD["SileroVAD"]
@@ -69,9 +69,9 @@ Solid arrows are per-turn data flow; dotted arrows are cloud / conditional. The 
 | Actor | Host | Role | Process |
 |---|---|---|---|
 | **StackChan** | Desk | Captures audio, plays audio, renders face, runs MCP tools for head/LED/camera | ESP32-S3 firmware built from `m5stack/StackChan` |
-| **xiaozhi-esp32-server** | Docker host | VAD → ASR → LLM (proxy) → TTS pipeline, emotion dispatch, OTA, admin surface | Docker container |
-| **Tier1Slim custom provider** | Docker host (inside container) | Default LLM provider — talks directly to llama-swap for plain turns, posts to `/api/voice/escalate` for tool calls | Python, mounted via volume |
-| **ZeroClawLLM custom provider** | Docker host (inside container) | Legacy single-tier LLM provider — translates xiaozhi's LLM-provider interface to an HTTP POST to the bridge | Python, mounted via volume |
+| **xiaozhi-esp32-server** | Server | VAD → ASR → LLM (proxy) → TTS pipeline, emotion dispatch, OTA, admin surface | Docker container |
+| **Tier1Slim custom provider** | Server (inside container) | Default LLM provider — talks directly to llama-swap for plain turns, posts to `/api/voice/escalate` for tool calls | Python, mounted via volume |
+| **ZeroClawLLM custom provider** | Server (inside container) | Legacy single-tier LLM provider — translates xiaozhi's LLM-provider interface to an HTTP POST to the bridge | Python, mounted via volume |
 | **llama-swap** | Unraid (or any GPU host) | Routes OpenAI-compatible requests to per-model llama-server children; co-loads `qwen3.5:4b` (voice inner loop) and `qwen3.6:27b-think` (`think_hard` target) | Docker container (`ghcr.io/mostlygeek/llama-swap:cuda`) |
 | **zeroclaw-bridge** | ZeroClaw host | Accepts HTTP POSTs from both voice paths + xiaozhi-server perception relay; spawns/holds a `zeroclaw acp` child; speaks ACP JSON-RPC to it | FastAPI + uvicorn under systemd |
 | **ZeroClaw daemon** | ZeroClaw host | The configured persona — runs the agent loop, calls the LLM, consults `SOUL.md`/`IDENTITY.md`/`MEMORY.md` | Rust binary (`zeroclaw acp`) |
@@ -84,7 +84,7 @@ sequenceDiagram
     autonumber
     participant User
     participant SC as StackChan
-    participant XZ as xiaozhi-server<br/>(Docker host)
+    participant XZ as xiaozhi-server<br/>(server)
     participant LS as llama-swap<br/>qwen3.5:4b
 
     User->>SC: speaks
@@ -145,20 +145,20 @@ See [protocols.md](./protocols.md) for every wire format referenced above, and [
 
 ## Why this shape
 
-- **Audio lives with the Docker host** because the StackChan firmware already speaks the Xiaozhi WS protocol; xiaozhi-esp32-server is the matching server. Putting the brain next to the mic would require us to reimplement that protocol, and we'd still need a voice server.
-- **The brain lives with ZeroClaw** because ZeroClaw already has memory, tools, persona, channels, LLM routing wired up. The StackChan is just another channel into the same agent.
+- **Audio lives with the server** because the StackChan firmware already speaks the Xiaozhi WS protocol; xiaozhi-esp32-server is the matching server. Putting the brain next to the mic would require us to reimplement that protocol, and we'd still need a voice server.
+- **The brain lives with ZeroClaw** because ZeroClaw already has memory, tools, persona, channels, LLM routing wired up. The robot is just another channel into the same agent.
 - **A bridge lives between them** because ZeroClaw's HTTP API is observational; to *prompt* a running agent you have to use ACP (JSON-RPC 2.0 over stdio) against a `zeroclaw acp` child. The bridge is a tiny FastAPI adapter that does exactly that.
 - **The seam is a custom xiaozhi LLM provider** (`zeroclaw.py`, mounted into the container). xiaozhi-server thinks it's calling a local Python LLM class; the class just does an HTTP POST to `<ZEROCLAW_HOST>:8080/api/message`. That means we could swap ZeroClaw for anything HTTP-serviceable without touching xiaozhi.
 
 ## What each host sees
 
-**StackChan device** knows only:
+**Robot** knows only:
 - An OTA HTTP URL (`http://<XIAOZHI_HOST>:8003/xiaozhi/ota/`)
 - A WS URL (provided by OTA response, typically `ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/`)
 
 It does **not** know about the ZeroClaw host, ZeroClaw itself, or any LLM.
 
-**Docker host / xiaozhi-server** knows:
+**Server / xiaozhi-server** knows:
 - Its own device-facing WS + OTA ports
 - A handful of pluggable providers selected via `data/.config.yaml` `selected_module:`
 - The LLM provider's `base_url: http://<ZEROCLAW_HOST>:8080` to reach the bridge
@@ -190,9 +190,9 @@ Runtime mutations to ZeroClaw / the bridge process itself. Bound to localhost on
 
 Paths and systemd unit names are env-configurable (`ZEROCLAW_VOICE_CFG`, `ZEROCLAW_VOICE_UNIT`, `ZEROCLAW_DISCORD_CFG`, `ZEROCLAW_DISCORD_UNIT`, `ZEROCLAW_WORKSPACE`); defaults match the documented ZeroClaw-host layout.
 
-### xiaozhi-server `/xiaozhi/admin/*` (Docker host, port 8003)
+### xiaozhi-server `/xiaozhi/admin/*` (server, port 8003)
 
-Operations that need to touch a live device session — head servos, MCP dispatch, TTS injection, the live LLM provider's runtime config. Exposed by `custom-providers/xiaozhi-patches/http_server.py`. Bound to the xiaozhi container's listen address (not localhost-only); protect with network ACLs if the Docker host is reachable from untrusted networks.
+Operations that need to touch a live device session — head servos, MCP dispatch, TTS injection, the live LLM provider's runtime config. Exposed by `custom-providers/xiaozhi-patches/http_server.py`. Bound to the xiaozhi container's listen address (not localhost-only); protect with network ACLs if the server is reachable from untrusted networks.
 
 | Endpoint | Purpose |
 |---|---|
@@ -235,7 +235,7 @@ WebSocket lifecycle gotcha: xiaozhi only opens the WS during a conversation. Fir
 ## Threat-model implications
 
 - **Device compromise** gives an attacker a WS session to xiaozhi-server and the ability to invoke any server-exposed MCP tool. It does **not** give them the LLM key, ZeroClaw's memory, or network access to OpenRouter beyond what proxied prompts can achieve.
-- **Docker host compromise** gives them access to the bridge over HTTP (no auth currently). Anything the bridge can ask ZeroClaw, the attacker can ask it. The `/admin/*` mutation endpoints are unreachable (they're `127.0.0.1`-only).
+- **Server compromise** gives them access to the bridge over HTTP (no auth currently). Anything the bridge can ask ZeroClaw, the attacker can ask it. The `/admin/*` mutation endpoints are unreachable (they're `127.0.0.1`-only).
 - **ZeroClaw host compromise** gives them everything — LLM keys, memory DB, workspace persona files.
 - **OpenRouter compromise** gives them log access to every prompt sent. Treat prompts as non-confidential.
 
@@ -250,21 +250,21 @@ The canonical working copies live in this repo. The deployed copies on each host
 | `bridge.py` | ZeroClaw host `<BRIDGE_PATH>/bridge.py` | FastAPI HTTP→ZeroClaw translator (ACP over stdio) |
 | `bridge/requirements.txt` | bare-metal venv | Pinned Python deps for the bridge (fastapi, uvicorn, pydantic) |
 | `zeroclaw-bridge.service` | ZeroClaw host `/etc/systemd/system/` | systemd unit for bridge |
-| `custom-providers/zeroclaw/zeroclaw.py` | Docker host `core/providers/llm/zeroclaw/zeroclaw.py` | xiaozhi LLM provider, proxies to the ZeroClaw bridge |
-| `custom-providers/zeroclaw/__init__.py` | Docker host `core/providers/llm/zeroclaw/__init__.py` | Python package marker |
-| `custom-providers/edge_stream/edge_stream.py` | Docker host `core/providers/tts/edge_stream.py` | Streaming EdgeTTS provider |
-| `custom-providers/piper_local/piper_local.py` | Docker host `core/providers/tts/piper_local.py` | Local Piper TTS provider (offline alternative to EdgeTTS) |
-| `custom-providers/asr/fun_local.py` | Docker host `core/providers/asr/fun_local.py` | Patched FunASR provider (adds `language` config key) |
-| `.config.yaml` | Docker host `data/.config.yaml` | xiaozhi-server config override |
+| `custom-providers/zeroclaw/zeroclaw.py` | Server `core/providers/llm/zeroclaw/zeroclaw.py` | xiaozhi LLM provider, proxies to the ZeroClaw bridge |
+| `custom-providers/zeroclaw/__init__.py` | Server `core/providers/llm/zeroclaw/__init__.py` | Python package marker |
+| `custom-providers/edge_stream/edge_stream.py` | Server `core/providers/tts/edge_stream.py` | Streaming EdgeTTS provider |
+| `custom-providers/piper_local/piper_local.py` | Server `core/providers/tts/piper_local.py` | Local Piper TTS provider (offline alternative to EdgeTTS) |
+| `custom-providers/asr/fun_local.py` | Server `core/providers/asr/fun_local.py` | Patched FunASR provider (adds `language` config key) |
+| `.config.yaml` | Server `data/.config.yaml` | xiaozhi-server config override |
 | `.env.example` | reference only | Documented environment variables with defaults |
-| `docker-compose.yml` | Docker host `<XIAOZHI_PATH>` | Container definition |
+| `docker-compose.yml` | Server `<XIAOZHI_PATH>` | Container definition |
 
-Volume mounts (Docker host) are listed in [quickstart.md](./quickstart.md#deployment-layout).
+Volume mounts (server) are listed in [quickstart.md](./quickstart.md#deployment-layout).
 
 ## See also
 
-- [hardware.md](./hardware.md) — what the device actually is.
-- [voice-pipeline.md](./voice-pipeline.md) — what the Docker host runs.
+- [hardware.md](./hardware.md) — what the robot actually is.
+- [voice-pipeline.md](./voice-pipeline.md) — what the server runs.
 - [tier1slim.md](./tier1slim.md) — the default voice LLM and its escalation contract.
 - [brain.md](./brain.md) — model matrix + what the ZeroClaw host runs.
 - [protocols.md](./protocols.md) — what's on the wire (including `/api/voice/escalate` and `/api/perception/event`).

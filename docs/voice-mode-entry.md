@@ -15,7 +15,7 @@ The default phrase is **"Hi, ESP"** (firmware shipped this as the default in a r
 
 > **"Hi, ESP" (default), "Hi, Stack Chan", "Computer", or any of the prebuilt WakeNet9 phrases.**
 
-The classic path. The mic is always sampling at low cost (AFE + WakeNet9 INT8 on the ESP32-S3). When the wake-net spots the phrase, `Application::HandleWakeWordDetectedEvent` opens the WebSocket and the device transitions to listening. Works with no line of sight, no touch, no LAN. **Requires the user to speak.**
+The classic path. The mic is always sampling at low cost (AFE + WakeNet9 INT8 on the ESP32-S3). When the wake-net spots the phrase, `Application::HandleWakeWordDetectedEvent` opens the WebSocket and the robot transitions to listening. Works with no line of sight, no touch, no LAN. **Requires the user to speak.**
 
 Cross-link: [wake-word.md](./wake-word.md) covers the whole stack — current model, the five-minute switch to a different prebuilt, and the long-term branded "Hey Dotty" microWakeWord roadmap.
 

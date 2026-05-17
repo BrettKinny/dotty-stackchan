@@ -56,7 +56,7 @@ The ZeroClaw agent's own persona prompt sets the baseline: stay cheerful,
 age-appropriate, begin every reply with an emoji. This is the "inner" system
 prompt that the LLM sees at the top of its context.
 
-### Layer 2 -- xiaozhi-server System Prompt (Docker host)
+### Layer 2 -- xiaozhi-server System Prompt (server)
 
 The `prompt:` block in `.config.yaml` is injected by xiaozhi-server as a
 system message. It reinforces the emoji rule and the short-sentence,
