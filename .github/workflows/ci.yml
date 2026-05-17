@@ -11,7 +11,7 @@ jobs:
     name: YAML Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: pip install yamllint
       - name: Lint YAML files
         run: |
@@ -32,7 +32,7 @@ jobs:
     name: Compose Validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Validate docker-compose.yml
         run: docker compose -f docker-compose.yml config > /dev/null
       - name: Validate compose.all-in-one.yml
@@ -42,7 +42,7 @@ jobs:
     name: Config Parse
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Parse .config.yaml
         run: python3 -c "import yaml; yaml.safe_load(open('.config.yaml'))"
 
@@ -50,7 +50,7 @@ jobs:
     name: Python Syntax
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Check Python syntax
         run: |
           for f in bridge.py receiveAudioHandle.py $(find custom-providers -name '*.py'); do
@@ -62,8 +62,8 @@ jobs:
     name: Python Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install test dependencies
@@ -87,7 +87,7 @@ jobs:
     name: Frontmatter Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Verify YAML frontmatter in docs
         run: |
           fail=0
@@ -103,7 +103,7 @@ jobs:
     name: Docs Link Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Check links
         uses: lycheeverse/lychee-action@v2
         with:
