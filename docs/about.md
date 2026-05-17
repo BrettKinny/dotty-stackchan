@@ -64,4 +64,4 @@ All audio processing (VAD, ASR) happens on your LAN. The LLM call is the only co
 - [hardware-support.md](./hardware-support.md) — what hardware you need.
 - [faq.md](./faq.md) — common questions.
 
-Last verified: 2026-04-25.
+Last verified: 2026-05-17.

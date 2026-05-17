@@ -19,7 +19,8 @@ re-verify claims against the canonical specs rather than trusting our paraphrase
 | Understand the overall shape | [architecture.md](./architecture.md) |
 | Know what the physical robot can do | [hardware.md](./hardware.md) |
 | Understand the voice pipeline (ASR/TTS/VAD) | [voice-pipeline.md](./voice-pipeline.md) |
-| Understand the brain (ZeroClaw + LLM) | [brain.md](./brain.md) |
+| Understand the default voice LLM (Tier1Slim + escalation) | [tier1slim.md](./tier1slim.md) |
+| Understand the brain (model matrix + ZeroClaw) | [brain.md](./brain.md) |
 | Run different models on voice vs. Discord | [multi-daemon-split.md](./multi-daemon-split.md) |
 | Know what's on the wire between components | [protocols.md](./protocols.md) |
 | See every cross-layer signal at a glance | [interaction-map.md](./interaction-map.md) |
@@ -35,8 +36,9 @@ docs/
 ├── README.md                ← you are here (index)
 ├── architecture.md          ← high-level data flow, actor responsibilities
 ├── hardware.md              ← M5Stack StackChan body + firmware lineage + MCP tool catalog
-├── voice-pipeline.md        ← xiaozhi-esp32-server, FunASR, VAD, EdgeTTS, Piper
-├── brain.md                 ← ZeroClaw architecture, Qwen3-30B-A3B, OpenRouter
+├── voice-pipeline.md        ← xiaozhi-esp32-server, FunASR/Whisper, VAD, Piper/EdgeTTS
+├── tier1slim.md             ← two-tier voice LLM provider + escalation contract
+├── brain.md                 ← model matrix (Tier1Slim + ZeroClaw), bridge, OpenRouter
 ├── multi-daemon-split.md    ← split voice + Discord across two ZeroClaw daemons
 ├── protocols.md             ← Xiaozhi WebSocket, MCP-over-WS, ACP JSON-RPC, emotion
 ├── interaction-map.md       ← every cross-layer signal: source, dest, protocol, notes
@@ -76,4 +78,4 @@ Each sub-file has a `Last verified:` date. Freshness decays roughly as follows:
 
 If you're reading this a year from now, treat the protocol + model claims as *starting points for re-verification*, not ground truth.
 
-Last verified: 2026-04-24.
+Last verified: 2026-05-17.

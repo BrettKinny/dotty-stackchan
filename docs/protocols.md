@@ -10,6 +10,7 @@ description: Xiaozhi WebSocket protocol, ACP JSON-RPC, and the emotion frame for
 - **Xiaozhi WebSocket protocol** — between device and xiaozhi-server. Opus audio + JSON control frames. Supports MCP over JSON-RPC 2.0 in-band. Canonical spec: `github.com/78/xiaozhi-esp32/blob/main/docs/websocket.md`.
 - **Emotion channel** — 21 upstream emotion identifiers; the server picks one from the LLM's leading emoji and emits a separate `llm`-type frame. This stack uses a 9-emoji subset.
 - **MCP over WS** — the device acts as an MCP server; xiaozhi-server calls `tools/list` and `tools/call` against it. Tool names use dotted namespaces like `self.audio_speaker.set_volume`.
+- **Bridge HTTP API** — `POST /api/message` (legacy `ZeroClawLLM` path), `POST /api/voice/escalate` + `POST /api/voice/remember` + `POST /api/voice/memory_log` (Tier1Slim), `POST /api/perception/event` (xiaozhi → bridge perception relay).
 - **Agent Client Protocol (ACP)** — JSON-RPC 2.0 over stdio between the FastAPI bridge and `zeroclaw acp`. Zed-originated spec, maintained at `agentclientprotocol.com`.
 
 ## Xiaozhi WebSocket
@@ -227,6 +228,99 @@ Device signals MCP support in `hello.features.mcp = true`. Server then queries t
 
 See [hardware.md](./hardware.md#on-device-mcp-tools) for the default 11-tool MCP surface.
 
+<a id="bridge-http"></a>
+## Bridge HTTP API
+
+The FastAPI bridge (`bridge.py`) listens on port 8080 (LAN-reachable, no auth currently). All payloads are JSON unless noted.
+
+### `POST /api/message` — legacy `ZeroClawLLM` path
+
+Used by the `ZeroClawLLM` provider on every voice turn.
+
+Request:
+
+```json
+{"content": "<user text>", "channel": "stackchan", "session_id": "<optional>"}
+```
+
+Response:
+
+```json
+{"response": "😊 Sure, the weather is..."}
+```
+
+The bridge wraps `channel == "stackchan"` content in the English+emoji sandwich and re-enforces the emoji prefix on the response.
+
+### `POST /api/voice/escalate` — Tier1Slim tool dispatch
+
+Used by `Tier1Slim` when the small inner-loop model emits a `tool_call`. Blocks until the result returns (or the per-tool timeout fires).
+
+Request:
+
+```json
+{
+  "tool": "<memory_lookup|think_hard|take_photo|play_song>",
+  "args": {"query": "..."},
+  "session_id": "<xiaozhi session id>"
+}
+```
+
+Response:
+
+```json
+{"result": "<short string, truncated to 1000 chars>"}
+```
+
+Timeouts: `memory_lookup` 5 s, `think_hard` 30 s, others 5 s (env-overridable via `BRIDGE_TIMEOUT_SHORT` / `BRIDGE_TIMEOUT_LONG`).
+
+### `POST /api/voice/remember` — Tier1Slim fact-stash (fire-and-forget)
+
+Triggered when the model embeds a `[REMEMBER: ...]` marker in the reply.
+
+Request:
+
+```json
+{"fact": "user's favourite colour is blue", "session_id": "..."}
+```
+
+Response: `{"ok": true}` (Tier1Slim doesn't wait for it; 2 s timeout client-side).
+
+### `POST /api/voice/memory_log` — Tier1Slim turn log (fire-and-forget)
+
+Posted at end-of-turn so ZeroClaw can index the conversation for future `memory_lookup`.
+
+Request:
+
+```json
+{"user": "what colour is the sky", "assistant": "😊 the sky is blue!", "session_id": "..."}
+```
+
+### `POST /api/perception/event` — xiaozhi → bridge perception relay
+
+Used by `EventTextMessageHandler` in `custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py` to forward firmware `event` frames.
+
+Request mirrors the firmware frame:
+
+```json
+{
+  "name": "<face_detected|face_lost|sound_event|state_changed|dance_started|dance_ended|chat_status|...>",
+  "data": {"...": "..."},
+  "device_id": "<xiaozhi device-id>",
+  "session_id": "<xiaozhi session id>",
+  "ts": 1715000000.0
+}
+```
+
+Response: `{"ok": true}`. The bridge broadcasts the event to all `_perception_listeners` and updates `_perception_state[device_id]` accordingly. Consumer tasks (face_greeter, sound_turner, face_lost_aborter, wake_word_turner, face_identified_refresher, purr_player) each subscribe to the bus and react. See [architecture.md](./architecture.md#perception-event-bus).
+
+### `GET /health`
+
+Liveness probe. Returns `{"ok": true}` when the bridge is up and the ACP child is reachable.
+
+### `POST /admin/*` (localhost-only)
+
+Administrative mutations — see [architecture.md](./architecture.md#bridge-adminadmin-zeroclaw-host-127001-only).
+
 <a id="acp"></a>
 ## ACP — Agent Client Protocol
 
@@ -270,7 +364,9 @@ Both are JSON-RPC 2.0. The device's MCP exchanges ride the Xiaozhi WS; the bridg
 
 - [hardware.md](./hardware.md) — what emits the device-side frames.
 - [voice-pipeline.md](./voice-pipeline.md) — what xiaozhi-server does between frames.
+- [tier1slim.md](./tier1slim.md) — the Tier1Slim provider that drives `/api/voice/escalate`.
 - [brain.md](./brain.md) — what the bridge does with the ACP results.
+- [architecture.md](./architecture.md#perception-event-bus) — the perception bus consumers.
 - [references.md](./references.md#protocols) — all protocol spec links.
 
-Last verified: 2026-04-24.
+Last verified: 2026-05-17.

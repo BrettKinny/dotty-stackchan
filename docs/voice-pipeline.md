@@ -8,7 +8,8 @@ description: xiaozhi-esp32-server pipeline stages -- VAD, ASR, LLM proxy, and TT
 ## TL;DR
 
 - **Server** is `xinnan-tech/xiaozhi-esp32-server` running in Docker on a Linux host. Plugin-based: each of VAD, ASR, LLM, TTS, Memory, Intent is a swappable provider picked via `data/.config.yaml`'s `selected_module:` block.
-- Our live pipeline: **SileroVAD** (speech-end detection) → **FunASR SenseVoiceSmall** (ASR, pinned to English via `fun_local.py` patch) → **ZeroClawLLM** custom provider (HTTP POST to ZeroClaw host bridge) → **LocalPiper** en_GB-cori-medium (TTS, rolled out 2026-04-24; EdgeTTS rollback path intact).
+- Our live pipeline: **SileroVAD** (speech-end) → **FunASR SenseVoiceSmall** or **WhisperLocal** (ASR, pinned to English) → **Tier1Slim** custom provider (current default — talks directly to llama-swap, escalates tool calls to the bridge) or **ZeroClawLLM** (legacy — HTTP POST to bridge for every turn) → **LocalPiper** en_US-kristin-medium (TTS; EdgeTTS / StreamingEdgeTTS as alternates).
+- The xiaozhi container also runs a perception relay (`EventTextMessageHandler`) that forwards firmware `face_detected` / `face_lost` / `sound_event` / `state_changed` frames to the bridge's `/api/perception/event`.
 - **Emotion** is not a pipeline stage — it's extracted post-hoc from the LLM's emoji prefix and emitted as a separate WS frame. See [protocols.md](./protocols.md#emotion-protocol).
 - Custom providers are mounted into the container via Docker volumes at `/opt/xiaozhi-esp32-server/core/providers/{asr,tts,llm}/…`. They override the baked-in files at module-import time.
 - **Lots of upstream features are unused** — voiceprint speaker-ID, VLLM vision, knowledge-base RAG, PowerMem, multi-user routing. See [latent-capabilities.md](./latent-capabilities.md#voice-pipeline-unused).
@@ -62,11 +63,29 @@ Model: `FunAudioLLM/SenseVoiceSmall` on HuggingFace. From the model card:
 
 Deployment: mounted as a file-level override at `/opt/xiaozhi-esp32-server/core/providers/asr/fun_local.py`.
 
-### LLM — custom ZeroClawLLM provider
+### LLM — two providers; one selected at a time
 
-Not really an LLM — it's a proxy. `zeroclaw.py` (mounted at `/opt/xiaozhi-esp32-server/core/providers/llm/zeroclaw/`) implements xiaozhi's LLM provider contract but the `response()` method is a thin HTTP POST to `http://<ZEROCLAW_HOST>:8080/api/message`.
+Pick one via `selected_module.LLM` in `.config.yaml`.
 
-The actual inference happens on the Pi, in ZeroClaw, calling OpenRouter. See [brain.md](./brain.md).
+#### `Tier1Slim` (current default)
+
+Custom provider at `custom-providers/tier1_slim/tier1_slim.py` (mounted into `/opt/xiaozhi-esp32-server/core/providers/llm/tier1_slim/`). Talks directly to a local llama-swap endpoint with a ~500-token system prompt and a four-tool catalogue (`memory_lookup`, `think_hard`, `take_photo`, `play_song`). Plain conversational turns are answered by the small inner-loop model (`qwen3.5:4b` by default) in well under 1 s warm — **no bridge round-trip**.
+
+When the model emits structured `tool_calls`, the provider:
+
+1. Yields an immediate filler phrase to TTS so the user hears something within ~500 ms.
+2. POSTs each tool call to the bridge's `/api/voice/escalate` endpoint, which dispatches to ZeroClaw memory (`memory_lookup`), the 27 B thinker on the same llama-swap (`think_hard`), the VLM (`take_photo`), or `/xiaozhi/admin/play-asset` (`play_song`), then returns the result.
+3. Makes a second streaming chat call with the tool result in context and streams the final answer to TTS.
+
+Tier1Slim also exposes `set_runtime(model, url, api_key)` for the bridge to hot-swap the live provider's backend without a docker restart — this is how smart-mode flips land instantly. See [tier1slim.md](./tier1slim.md) for the full wire format and configuration.
+
+#### `ZeroClawLLM` (legacy single-tier path)
+
+Custom provider at `custom-providers/zeroclaw/zeroclaw.py`. Not really an LLM — it's a proxy. The `response()` method is a thin HTTP POST to `http://<ZEROCLAW_HOST>:8080/api/message`. Every turn round-trips through the bridge to ZeroClaw to OpenRouter, with full agent memory and tooling on every call. See [brain.md](./brain.md).
+
+### Perception relay (xiaozhi → bridge)
+
+`custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py` adds an `EventTextMessageHandler` that intercepts firmware `event` frames over the WS and POSTs each one to the bridge's `/api/perception/event`. This is what feeds the bridge-side `_perception_*` consumers — see [architecture.md](./architecture.md#perception-event-bus).
 
 ### TTS — LocalPiper (active) / EdgeTTS (rollback)
 
@@ -112,9 +131,10 @@ The TTS provider receives text **with the emoji already stripped**. The device r
 
 ## See also
 
-- [protocols.md](./protocols.md#xiaozhi-websocket) — how audio gets in and out.
-- [brain.md](./brain.md) — what the custom LLM provider actually talks to.
+- [protocols.md](./protocols.md#xiaozhi-websocket) — how audio gets in and out (and the `/api/voice/escalate` / `/api/perception/event` wire formats).
+- [tier1slim.md](./tier1slim.md) — the default LLM provider in detail.
+- [brain.md](./brain.md) — the model matrix and the legacy ZeroClawLLM path.
 - [latent-capabilities.md](./latent-capabilities.md#voice-pipeline-unused) — unused upstream features.
 - [references.md](./references.md#voice) — all upstream voice-stack links.
 
-Last verified: 2026-04-24.
+Last verified: 2026-05-17.

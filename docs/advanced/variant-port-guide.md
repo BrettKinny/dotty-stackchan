@@ -198,4 +198,4 @@ Once the device connects, run through:
 - [`78/xiaozhi-esp32 boards/`](https://github.com/78/xiaozhi-esp32/tree/main/boards) — upstream board definitions.
 - [`m5stack/StackChan`](https://github.com/m5stack/StackChan) — the firmware we vendor and build from.
 
-Last verified: 2026-04-25.
+Last verified: 2026-05-17.

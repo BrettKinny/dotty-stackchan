@@ -53,7 +53,21 @@ cp .env.example .env
 ```
 
 Edit `.env` and set `OPENROUTER_API_KEY=<YOUR_API_KEY>` (or any
-OpenAI-compatible key). Skip this if running fully local via Ollama.
+OpenAI-compatible key). You can skip this if you're running fully local
+— either via Ollama (single binary, simple) or via llama-swap (Docker,
+supports multiple resident models). See
+[cookbook/run-fully-local.md](cookbook/run-fully-local.md) and
+[cookbook/llama-swap-concurrent-models.md](cookbook/llama-swap-concurrent-models.md).
+
+The shipped `.config.yaml` selects `Tier1Slim` as the default LLM,
+which expects a llama-swap (or other OpenAI-compatible) endpoint at the
+URL pointed to by `LLM.Tier1Slim.url` (and a matching `api_key`). If
+that endpoint isn't reachable, either:
+- stand up llama-swap (cookbook above), or
+- switch `selected_module.LLM` to `OpenAICompat` and point it at any
+  cloud OpenAI-compatible API, or
+- switch to `ZeroClawLLM` and run the full ZeroClaw agent on a second
+  host (see [SETUP.md](../SETUP.md)).
 
 ## 4. Run setup
 
@@ -237,13 +251,13 @@ curl http://<ZEROCLAW_HOST>:8080/health
 The default TTS is `LocalPiper` (offline, runs inside the container). To change the Piper voice, edit `TTS.LocalPiper.voice` and the corresponding `model_path` / `config_path` in `data/.config.yaml`. To switch to cloud EdgeTTS instead, set `selected_module.TTS: EdgeTTS` and edit `TTS.EdgeTTS.voice` (any Microsoft Edge Neural voice ID works, e.g. `en-US-AvaNeural`). Restart the container after changes.
 
 ### Changing persona (the robot's personality)
-Primary source: ZeroClaw's own system prompt in `<ZEROCLAW_CFG>` on the ZeroClaw host. The `prompt:` key in `data/.config.yaml` is a secondary hint that the bridge passes to ZeroClaw as context, but ZeroClaw's own prompt wins.
+Where the persona lives depends on which LLM provider is active. With the shipped default (`selected_module.LLM: Tier1Slim`), edit `personas/dotty_voice.md` and `docker compose restart` — Tier1Slim deliberately ignores the top-level `prompt:` block because the 4 B chat template only honours one system message. With `selected_module.LLM: ZeroClawLLM`, the persona lives in `<ZEROCLAW_CFG>` plus the workspace files at `~/.zeroclaw/workspace/{SOUL,IDENTITY}.md` on the ZeroClaw host; the `prompt:` key in `data/.config.yaml` is then a secondary hint that the bridge passes to ZeroClaw as context. Full instructions: [cookbook/change-persona.md](cookbook/change-persona.md).
 
 ### Changing VAD sensitivity
 `VAD.SileroVAD.min_silence_duration_ms` in `data/.config.yaml`. Default: 700 ms. Lower = cuts off quicker. Higher = waits longer for slow speakers.
 
 ### Changing the LLM model
-`default_model` key near the top of `<ZEROCLAW_CFG>` on the ZeroClaw host (provider and encrypted api_key live next to it). ACP mode caches config in the long-running child, so restart the bridge (`sudo systemctl restart zeroclaw-bridge`) after editing. Confirm with `sudo <ZEROCLAW_BIN> status | grep Model`.
+For the `Tier1Slim` path (default): edit `LLM.Tier1Slim.model` (or repoint `url` / `api_key`) in `data/.config.yaml` and `docker compose restart`. Or for in-flight swaps, use the bridge's `/admin/smart-mode` toggle — it calls `/xiaozhi/admin/set-tier1slim-model` to hot-swap without a restart (see [tier1slim.md](tier1slim.md)). For the legacy `ZeroClawLLM` path: edit `default_model` near the top of `<ZEROCLAW_CFG>` on the ZeroClaw host (provider and encrypted api_key live next to it). ACP mode caches config in the long-running child, so restart the bridge (`sudo systemctl restart zeroclaw-bridge`) after editing. Confirm with `sudo <ZEROCLAW_BIN> status | grep Model`.
 
 ---
 

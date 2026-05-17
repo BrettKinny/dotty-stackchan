@@ -149,4 +149,4 @@ Symptom-first lookup table covering common and obscure failure modes. Pair with 
 - [protocols.md](./protocols.md) — WebSocket and ACP wire format for debugging.
 - [hardware.md](./hardware.md) — hardware specs and safety notes.
 
-Last verified: 2026-04-24.
+Last verified: 2026-05-17.

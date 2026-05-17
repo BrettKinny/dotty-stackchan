@@ -225,4 +225,4 @@ Until then, keep the split.
 - [llm-backends.md](./llm-backends.md) — picking models per daemon (latency vs. capability tradeoff).
 - [kid-mode.md](./kid-mode.md) — what the voice-only safety wrapper actually enforces.
 
-Last verified: 2026-04-25.
+Last verified: 2026-05-17.

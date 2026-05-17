@@ -10,7 +10,7 @@
 >
 > **Known rough edges:** face emoji rendering is missing visual differentiation for 4 of 9 emotions (sad / surprise / love / laughing); sound-direction localizer has a hardware-AEC-related left-bias on M5Stack CoreS3 (energy detection works, direction is unreliable); kid-voice ASR accuracy on SenseVoice has a kid-speech gap that whisper.cpp will close in a follow-up.
 
-Dotty is a fully self-hosted voice stack for the M5Stack StackChan desktop robot. Open-source firmware on the device, [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) for voice I/O, and a small FastAPI bridge to whatever LLM agent you want as the brain. ASR, TTS, and session state all run on your own hardware. The LLM is pluggable — the reference config uses OpenRouter, but swap in Ollama for fully offline operation with no code changes.
+Dotty is a fully self-hosted voice stack for the M5Stack StackChan desktop robot. Open-source firmware on the device, [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) for voice I/O, and a small FastAPI bridge to whatever LLM agent you want as the brain. ASR, TTS, and session state all run on your own hardware. The LLM is pluggable — the shipped default is a two-tier path (a small fast model handles plain chat; tool calls escalate to a more capable model), with [llama-swap](./docs/cookbook/llama-swap-concurrent-models.md) as the recommended local backend. Swap in [Ollama](./docs/cookbook/run-fully-local.md) for the simpler single-binary option, or point at OpenRouter / any OpenAI-compatible API if you'd rather use the cloud.
 
 Out of the box, Dotty ships in **Kid Mode** — age-appropriate language, safety guardrails, and content filtering are on by default. Disable Kid Mode for a general-purpose assistant.
 
@@ -28,16 +28,18 @@ So Dotty is the version that passes: every component runs on hardware I own, eve
 - **Streaming responses** — the bridge streams LLM output to the voice pipeline for lower perceived latency.
 - **Emoji expressions** — every response starts with an emoji that the firmware maps to a face animation (smile, laugh, sad, surprise, thinking, angry, love, sleepy, neutral).
 - **MCP tools** — ZeroClaw exposes tools (web search, memory, etc.) to the LLM via the Model Context Protocol.
-- **States, toggles & LEDs** — a six-state mutex (`idle / talk / story_time / security / sleep / dance`) plus orthogonal toggles (`kid_mode`, `smart_mode`) drive both behaviour and the 12-pixel LED ring. See "States, Toggles & LEDs" below.
+- **States, toggles & LEDs** — `kid_mode` and `smart_mode` toggles are shipped and persist across reboots; smart-mode flips hot-swap the inner-loop LLM in-process (no daemon restart). The six-state mutex (`idle / talk / story_time / security / sleep / dance`) + 12-pixel LED ring are designed and partially wired bridge-side; the firmware `StateManager` that paints the ring is a Phase 4 work item not yet built. See "States, Toggles & LEDs" below and [`docs/modes.md`](./docs/modes.md).
 - **Vision (camera)** — the StackChan's built-in camera can capture images for multimodal LLM queries.
 - **Calendar context** — optional calendar integration feeds upcoming events into the conversation context.
 - **Hackable** — every seam is swappable: LLM, TTS, ASR, agent framework. Fork it, rip out what you don't want, wire in your own.
 
 ## States, Toggles & LEDs
 
-Behaviour is a **six-state mutex** (`idle / talk / story_time / security / sleep / dance`) plus two orthogonal toggles (`kid_mode`, `smart_mode`), all owned by the firmware StateManager. Voice phrases, camera edges, and dashboard controls all flow through it.
+> Honesty note: the bridge-side machinery for the six-state model — perception bus, dashboard mirror, voice-phrase routing, `kid_mode` / `smart_mode` toggles — is shipped and working. The firmware `StateManager` that owns the on-device LED contract and emits `state_changed` events is a designed-but-not-yet-built Phase 4 deliverable. The table below describes the target model; see [`docs/modes.md`](./docs/modes.md) for which parts ship today.
 
-The 12-pixel LED ring shows the current state at a glance. **Left ring 0-5 is the state arc** — all six pixels paint the state colour, matching the dashboard's state buttons:
+Behaviour is modelled as a **six-state mutex** (`idle / talk / story_time / security / sleep / dance`) plus two orthogonal toggles (`kid_mode`, `smart_mode`). Voice phrases, camera edges, and dashboard controls all flow through it.
+
+The 12-pixel LED ring will show the current state at a glance once Phase 4 ships. **Left ring 0-5 is the state arc** — all six pixels paint the state colour, matching the dashboard's state buttons:
 
 |   | State |
 |---|---|
@@ -65,7 +67,7 @@ The bridge serves a web dashboard at `http://<ZEROCLAW_HOST>:8080/ui` — host s
 ## Reference deployment
 
 - **Hardware**: M5Stack StackChan (CoreS3 + servo kit), firmware built from `m5stack/StackChan`.
-- **Brain**: [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) on any host that can run it (a small Linux box, your existing home server, or even the same Docker host), with Mistral Small 3.2 via OpenRouter as the default LLM (Qwen3-30B, Claude, and others are drop-in alternates).
+- **Brain**: a two-tier voice path — `qwen3.5:4b` on local [llama-swap](./docs/cookbook/llama-swap-concurrent-models.md) handles plain conversational turns directly; tool calls escalate to `qwen3.6:27b-think` (also on llama-swap) for hard reasoning or to [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) for memory lookups. The legacy single-tier path (ZeroClaw + Qwen3-30B via OpenRouter on every turn) is still supported via `selected_module.LLM: ZeroClawLLM`. See [`docs/tier1slim.md`](./docs/tier1slim.md) and [`docs/brain.md`](./docs/brain.md).
 - **Voice I/O**: xiaozhi-esp32-server on Docker (any Linux Docker host; single-host works too).
 
 ## What runs where
@@ -87,12 +89,13 @@ The bridge serves a web dashboard at `http://<ZEROCLAW_HOST>:8080/ui` — host s
 
 For what the stack *is* underneath — hardware specs, protocol docs, model facts, and features we aren't using — see [`docs/`](./docs/README.md):
 
-- [docs/architecture.md](./docs/architecture.md) — end-to-end data flow, topology, deployment files, threat model.
+- [docs/architecture.md](./docs/architecture.md) — end-to-end data flow, topology, deployment files, admin surface, perception bus, threat model.
 - [docs/hardware.md](./docs/hardware.md) — M5Stack StackChan body + firmware lineage + on-device MCP tool catalog.
 - [docs/voice-pipeline.md](./docs/voice-pipeline.md) — xiaozhi-esp32-server internals, FunASR/SenseVoice, VAD, TTS.
-- [docs/brain.md](./docs/brain.md) — ZeroClaw architecture, LLM model details, OpenRouter role.
-- [docs/protocols.md](./docs/protocols.md) — Xiaozhi WS framing, MCP-over-WS, ACP JSON-RPC, emotion channel.
-- [docs/modes.md](./docs/modes.md) — behavioural mode taxonomy + LED contract + transition diagram.
+- [docs/tier1slim.md](./docs/tier1slim.md) — the default two-tier voice LLM provider, escalation contract, hot-swap.
+- [docs/brain.md](./docs/brain.md) — model matrix, ZeroClaw architecture, the FastAPI bridge.
+- [docs/protocols.md](./docs/protocols.md) — Xiaozhi WS framing, MCP-over-WS, ACP JSON-RPC, bridge HTTP API, emotion channel.
+- [docs/modes.md](./docs/modes.md) — behavioural mode taxonomy + LED contract + transition diagram (with shipped-vs-planned breakdown).
 - [docs/latent-capabilities.md](./docs/latent-capabilities.md) — features upstream supports that we aren't using yet.
 - [docs/references.md](./docs/references.md) — canonical upstream URLs, model cards, licenses.
 

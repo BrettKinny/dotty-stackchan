@@ -110,4 +110,4 @@ TTS:
 
 Then `docker compose restart xiaozhi-server`.
 
-Last verified: 2026-04-25.
+Last verified: 2026-05-17.

@@ -20,6 +20,10 @@ Post-v0.1 work — code shipped to `main` but not yet deployed live or tagged.
 - **Dashboard auto-refresh stabilised** (`ae54e93`).
 
 ### Changed — server (2026-04-26 → 2026-05-15)
+- **`DOTTY_VOICE_PROVIDER` hot-swap landed** (`e2930ce`, `bridge.py`) — smart-mode flips now pick their dispatch path based on the env var. `=tier1slim` → in-process hot-swap via `/xiaozhi/admin/set-tier1slim-model` (no docker restart, no daemon restart, instant). `=zeroclaw` (default) → legacy `~/.zeroclaw/config.toml` rewrite + `systemctl restart zeroclaw-bridge`. Same commit retargeted `think_hard` to `qwen3.6:27b-think` on llama-swap.
+- **`/xiaozhi/admin/set-tier1slim-model` endpoint** (`b83898e`, `custom-providers/xiaozhi-patches/http_server.py`) — the receiving side of the hot-swap. Mutates the live Tier1Slim provider's `model` / `url` / `api_key` via `set_runtime()`. Refuses to blank a non-empty `api_key` so a half-configured OFF→ON flip fails fast instead of 401-looping.
+- **VLM fallback hardened** (`aa2d8ba`, `bridge.py`) — missing VLM API key now surfaces a clear no-vision message instead of letting the model confabulate a description with no image input.
+- **llama-swap concurrent-models recipe shipped** (`968949a`, `docs/cookbook/llama-swap-concurrent-models.md`) — documented `voice` matrix set (`qwen3.5:4b` + `qwen3.6:27b-think` co-resident) and `coding` matrix set (`qwen3.6:27b` solo) for the `pi` CLI. Avoids evicting the voice pair on coding sessions; cold-reload cost paid on next voice turn after a `pi` run.
 - **Voice local backend migrated Ollama → llama.cpp / llama-swap** (`34552e3`, `zeroclaw-bridge.service`) — `VOICE_LOCAL_PROFILE_KEY` bumped from `:11434` → `:8080`. 2.15× generation speedup (8 → 18 tok/s on dual RTX 3060), eliminates 2.7 GB of CPU offload, fits the model fully on GPU. Cold load ~20 s (was 70 s).
 - **Bridge `VOICE_THINKER_TIMEOUT=90`** added to systemd unit template (`452bbd7`) — keeps long `think_hard` escalations from being killed by the default request timeout.
 - **Top-level reboot button removed from dashboard header** (`3198b8e`) — too easy to misclick; functionality remains accessible via Admin card.
@@ -36,10 +40,8 @@ Post-v0.1 work — code shipped to `main` but not yet deployed live or tagged.
 - **V4L2 ioctl EINVAL fixed** (`37e92d6`) — restored Linux `_IOR` encoding after lwip clobbered it. Camera streams cleanly again.
 - **HEADMOVE writer instrumentation** (`1e30a05`) — every head-write site (idle_motion, mcp_set_head_angles, keyframe_servo, head_pet, state_manager) now tags its writes for trace logging. Diagnostic-only.
 
-### Pending wiring (still not yet shipped — uncommitted work-in-progress)
-- **`DOTTY_VOICE_PROVIDER=tier1slim` hot-swap path in `bridge.py`** — smart-mode flips become a sub-second mutation of the live Tier1Slim provider via `/xiaozhi/admin/set-tier1slim-model` instead of a `~/.zeroclaw/config.toml` rewrite + `systemctl restart zeroclaw-bridge`. Default remains `DOTTY_VOICE_PROVIDER=zeroclaw` (legacy path) so a deploy without setting the env var is no-op.
-- **`play_song` voice tool wired to `/xiaozhi/admin/play-asset`** — was a stub; now resolves a free-form name against `/xiaozhi/admin/songs` (60 s in-process cache) and dispatches the asset.
-- **`set_led` voice tool removed from Tier1Slim** — persona updated to tell kids "my lights show how I'm feeling" rather than expose direct LED control.
+### Pending wiring (work-in-progress)
+- **Firmware StateManager (Phase 4)** — `firmware/main/stackchan/modes/state_manager.{h,cpp}` plus MCP handlers (`self.robot.set_state`, `self.robot.set_toggle`). Bridge-side wiring exists (perception bus, dashboard mirror, `/xiaozhi/admin/set-state` dispatch); firmware side not yet built. The dispatch reaches the device WS today but no MCP handler consumes it. Honest status tracked in `docs/modes.md`.
 
 ### Removed — server (2026-04-25 sprint)
 - **dlib biometric face recognition** — `bridge/face_db.py`, `bridge/face_recognizer.py`, the `face-recognition` requirement, the `/api/face/{enroll,recognize,forget,list,last-action}` endpoints, the per-channel `_voice_identity_pending` / `_identity_state` machinery, and the voice-driven enrollment / list / forget intents in `receiveAudioHandle.py`. The description-based identity path (Layer 4 v1.5 — VLM returns a description plus a roster name match against `household.yaml`'s `appearance:` field) is now the sole identity feed. The biometric path was opt-in v2 only, never reached production (dlib won't build on Python 3.13 / DietPi), and conflicted with the project's no-storage identity posture. Firmware-side `FaceRecognizer` + `ParentalGate` + the inert call at `face_detector.cpp:273` will be removed in a follow-up firmware-only PR.

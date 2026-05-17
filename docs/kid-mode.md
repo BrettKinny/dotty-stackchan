@@ -27,6 +27,12 @@ When disabled, Dotty still enforces English-only replies, emoji prefix, and
 the TTS length rule (default 1-2 short sentences, up to 6 for open-ended
 asks). Only the child-specific rules (4-9) are removed.
 
+### Hot-reload (no daemon restart)
+
+Both the bridge's `POST /admin/kid-mode` endpoint and the dashboard toggle persist the new value and call `_apply_kid_mode(enabled)`, which atomically re-binds every kid-mode-derived module global (`KID_MODE`, `VISION_SYSTEM_PROMPT`, `MCP_TOOL_DENYLIST`, `VOICE_TURN_SUFFIX`, `VOICE_TURN_SUFFIX_SHORT`) in a single store-global pass. Readers see either the old or new value, never a torn intermediate, and the cost per turn is unchanged. **No daemon restart is required** to flip kid-mode at runtime.
+
+The xiaozhi-server side of kid-mode lives in the active LLM provider's persona / suffix. For `Tier1Slim`, `KID_MODE` is read at module import and baked into `_TURN_SUFFIX`; a flip there does currently require a container restart to take effect on Tier1Slim's side (the bridge side rebinds instantly, but the suffix already loaded into the live `Tier1Slim` instance is unchanged). For `ZeroClawLLM`, the suffix is generated per-turn by the bridge so the flip lands on the very next turn with no restart at all.
+
 ## Guardrail details
 
 This is an honest accounting: it describes what is enforced today, where the
@@ -39,6 +45,10 @@ enforcement code lives, and what gaps remain.
 Every voice turn passes through three independent layers before reaching the
 speaker. Each layer reinforces the same rules so that a failure in one layer
 is caught by the next.
+
+> **Provider-dependent layering.** The exact layering depends on which LLM provider is active:
+> - **`Tier1Slim`** (current default) — Layer 1 is `personas/dotty_voice.md`; Layer 2 is **skipped** (Tier1Slim deliberately discards xiaozhi's top-level `prompt:` because the 4 B chat template only honours one system message); Layer 3 is `_TURN_SUFFIX` appended per-turn by Tier1Slim itself (read from `build_turn_suffix(KID_MODE)` at module import). Layer 3b/3c only apply to escalated tool calls that pass through the bridge.
+> - **`ZeroClawLLM`** (legacy) — all three layers fire on every turn as described below.
 
 ### Layer 1 -- ZeroClaw Agent Prompt (ZeroClaw host)
 

@@ -285,4 +285,4 @@ Common failure modes:
 - [voice-pipeline.md](./voice-pipeline.md) — what runs on port 8000 after the device connects.
 - [hardware.md](./hardware.md) — the StackChan device that initiates the OTA handshake.
 
-Last verified: 2026-04-25.
+Last verified: 2026-05-17.

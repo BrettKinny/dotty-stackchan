@@ -23,7 +23,17 @@ v0.1 is the first tagged release — early-feedback alpha. Everything in this li
 - **`make setup` wizard** -- interactive first-run: name your robot, fetch models, validate config
 - **MkDocs Material docs site** -- architecture, protocols, quickstart, troubleshooting, FAQ
 - **Kid Mode channel routing** -- voice channels are kid-safe by default; the bridge's kid-mode sandwich (English-pin, emoji prefix, topic blocklist, jailbreak resistance) only applies when the inbound `channel` is in `VOICE_CHANNELS`, so messaging-platform channels (Discord, Telegram, etc.) skip it automatically. Pair with a separate ZeroClaw daemon on a more capable model for an unrestricted chat surface
-- **Bridge `/admin/*` endpoints** -- localhost-only HTTP API for runtime config mutation: toggle kid-mode (`/admin/kid-mode`), overwrite persona files (`/admin/persona`), swap a daemon's `default_model` in its `config.toml` (`/admin/model`), and amend the MCP tool allowlist (`/admin/safety`, py_compile-validated). Paths and systemd unit names are env-configurable
+- **Bridge `/admin/*` endpoints** -- localhost-only HTTP API for runtime config mutation: toggle kid-mode (`/admin/kid-mode`), flip smart-mode (`/admin/smart-mode`), overwrite persona files (`/admin/persona`), swap a daemon's `default_model` in its `config.toml` (`/admin/model`), and amend the MCP tool allowlist (`/admin/safety`, py_compile-validated). Paths and systemd unit names are env-configurable
+- **`/xiaozhi/admin/*` endpoints** -- live-session control surface on xiaozhi-server: `set-state`, `set-toggle`, `set-tier1slim-model`, `set-face-identified`, `set-head-angles`, `inject-text`, `abort`, `take-photo`, `play-asset`, `songs`, `say`, `devices`. See [`docs/architecture.md`](./docs/architecture.md#admin-surface-two-services-two-prefixes)
+- **Two-tier voice LLM (Tier1Slim)** -- `qwen3.5:4b` on local llama-swap handles plain conversational turns directly; tool calls (`memory_lookup`, `think_hard`, `take_photo`, `play_song`) escalate to the bridge via `/api/voice/escalate`. Default LLM since commit `b73f583`. See [`docs/tier1slim.md`](./docs/tier1slim.md)
+- **Smart-mode hot-swap** -- when `DOTTY_VOICE_PROVIDER=tier1slim`, smart-mode flips call `/xiaozhi/admin/set-tier1slim-model` to mutate the live provider's `model` / `url` / `api_key` in place — no docker restart, no daemon restart, instant. Legacy `=zeroclaw` path still rewrites `config.toml` and restarts the daemon
+- **llama-swap voice/coding matrix** -- `qwen3.5:4b` (voice inner loop) + `qwen3.6:27b-think` (think_hard target) co-resident under the `voice` matrix set; `qwen3.6:27b` for `pi` CLI runs alone under `coding`. See [`docs/cookbook/llama-swap-concurrent-models.md`](./docs/cookbook/llama-swap-concurrent-models.md)
+- **Perception event bus** -- firmware `face_detected` / `face_lost` / `sound_event` / `state_changed` frames relay through xiaozhi's `EventTextMessageHandler` to the bridge's `/api/perception/event`, fanned out to six consumer tasks (face_greeter, sound_turner, face_lost_aborter, wake_word_turner, face_identified_refresher, purr_player)
+- **Fully-local backend support** -- `compose.local.override.yml` for Ollama (single binary, simple) plus llama-swap recipe for concurrent multi-model serving. Both shipped; choose based on whether you need multiple models resident at once
+- **Voice catalog + install helper** -- `docs/voice-catalog.md` (12 Piper + 6 EdgeTTS) + `make voice-install` -- shipped
+- **Versioned docs via `mike`** -- `/latest/`, `/v0.1/`, `/dev/` URL structure shipped
+- **Observability hooks** -- Prometheus `/metrics` + Grafana dashboard at `monitoring/grafana-dashboard.json` -- shipped
+- **Head-pet hold-to-listen wake** -- firmware fires `WakeWordInvoke("head_pet_hold")` after 2 s touch; works in the dark. Also emits `head_pet_started`/`_ended` perception events for purr consumer
 
 ## Known issues (as of v0.1)
 
@@ -39,27 +49,20 @@ The 30+ planning docs accumulated during the v0.1 prep sprint surfaced these. No
 
 Actively being worked on or partially complete. **Big push 2026-04-25 evening:** ~26 commits scaffolding much of what was previously "Planned" — see [CHANGELOG.md](CHANGELOG.md) `[Unreleased]` for the full inventory. Most items below have code on `main` but are not yet deployed live or fully wired.
 
-- **Fully-local Ollama profile** -- `compose.local.override.yml` with NVIDIA GPU passthrough (compose file shipped, needs model pull + testing with dual RTX 3060s)
+- **Phase 4 firmware StateManager** -- the on-device side of the six-state mutex (`idle / talk / story_time / security / sleep / dance`) and the 12-pixel LED contract. Bridge-side wiring exists (perception bus, dashboard mirror, `/xiaozhi/admin/set-state` dispatch); firmware `state_manager.{h,cpp}` + MCP `self.robot.set_state` / `set_toggle` handlers not yet built. Honest tracking in [`docs/modes.md`](./docs/modes.md)
 - **CI pipeline** -- YAML lint, compose validation, config parse check, firmware dry-build, docs link check
 - **Firmware release workflow** -- GitHub Actions building `.bin` artifacts on tag push
 - **Quickstart improvements** -- linear "flash, clone, configure, talk" path assuming published firmware releases
-- **First-audio latency reduction** -- p50 1.9s with Mistral 3.2 (down from 5s with Qwen3-30B); next lever is self-hosted Ollama on local GPU.
-- **ASR accuracy for children's speech** -- post-ASR corrections live; Whisper Phase 1 scaffold landed at v0.1; A/B verification pending.
-- **Face detection + tracking** -- shipped firmware-side; smoother+faster tuning queued (EMA 0.5, speed 500, deadband, MSR thr 0.40). Flash + bench-test pending.
-- **Layer 4 identity (description-based)** -- shipped + deployed. VLM (Gemini 2.0 Flash) returns a free-form description plus a roster name match against `~/.zeroclaw/household.yaml`'s `appearance:` field. No biometrics, no persistent identifiers. The earlier dlib biometric scaffold (`bridge/face_db.py` + `face_recognizer.py` + on-device `FaceRecognizer` + `ParentalGate` + 4 MCP tools) was removed — description-based covers the use case and biometrics conflicted with the no-storage identity posture.
-- **Layer 6 proactive greetings** -- `bridge/proactive_greeter.py` + lifespan wiring shipped. Cooldown + time-of-day windowing + kid-safe sandwich + calendar-aware prompt + template fallback. Depends on Layer 4 for named greetings; works today with `face_detected` (unknown identity) for generic.
-- **Layer 1 privacy-indicator LEDs** -- firmware scaffold drives mic/camera state via RAII peripheral guards. Camera `VIDIOC_STREAMOFF` wiring deferred (closes the always-streaming hole; queued).
-- **Hybrid smart-mode LED** -- both halves shipped (firmware `set_led_multi` MCP tool + bridge `_send_led_multi` helper). Holds purple pixel during smart-mode turns. Re-asserts on color changes since firmware bypasses animation.
-- **Head-pet hold-to-listen wake** -- firmware scaffold (`WakeWordInvoke("head_pet_hold")` after 2s touch). Works in the dark. Also emits `head_pet_started`/`_ended` perception events for purr consumer.
-- **Wake word "Hey Dotty"** -- interim shipped: firmware default switched Chinese → English "Hi, ESP". Custom "Hey Dotty" microWakeWord roadmap documented (`docs/wake-word.md`); needs sample collection + Colab training (~2 weeks calendar).
-- **Purr-on-head-pet** -- server consumer shipped (`_perception_purr_player`); fires on `head_pet_started`. Asset path `bridge/assets/purr.opus` is a drop-in (asset itself not committed).
-- **Servo speed caps** -- already capped at 100-1000 in firmware; spring-physics damping handles smoothness. No further work planned.
-- **Abort race condition** -- fixed at v0.1 via kill-and-respawn ACP child on barge-in.
-- **Dancing mode** -- shipped at v0.1; karaoke + LLM-initiated dance + Phase 2 vocal singing remain.
-- **Voice catalog + install helper** -- `docs/voice-catalog.md` (12 Piper + 6 EdgeTTS) + `make voice-install`.
-- **Versioned docs via mike** -- `/latest/`, `/v0.1/`, `/dev/` URL structure scaffolded; first deploy run pending.
-- **Observability hooks** -- Prometheus `/metrics` + Grafana dashboard scaffold shipped. Deploy on ZeroClaw host pending.
-- **Reproducible + signed firmware builds** -- SBOM + signed-releases scaffolds shipped. Maintainer GPG key + IDF Dockerfile SHA256 pin pending.
+- **First-audio latency reduction** -- two-tier path lands inner-loop turns under 1 s warm; further improvements queued (escalation parallelism, llama.cpp MTP PR #22673 for ~1.5-2× on think_hard)
+- **ASR accuracy for children's speech** -- post-ASR corrections live; Whisper Phase 1 scaffold landed at v0.1; A/B verification pending
+- **Face detection + tracking** -- shipped firmware-side; smoother+faster tuning queued (EMA 0.5, speed 500, deadband, MSR thr 0.40). Flash + bench-test pending
+- **Layer 4 identity (description-based)** -- shipped + deployed. VLM (Gemini 2.0 Flash) returns a free-form description plus a roster name match against `~/.zeroclaw/household.yaml`'s `appearance:` field. No biometrics, no persistent identifiers. The earlier dlib biometric scaffold (`bridge/face_db.py` + `face_recognizer.py` + on-device `FaceRecognizer` + `ParentalGate` + 4 MCP tools) was removed — description-based covers the use case and biometrics conflicted with the no-storage identity posture
+- **Layer 6 proactive greetings** -- `bridge/proactive_greeter.py` + lifespan wiring shipped. Cooldown + time-of-day windowing + kid-safe sandwich + calendar-aware prompt + template fallback. Depends on Layer 4 for named greetings; works today with `face_detected` (unknown identity) for generic
+- **Layer 1 privacy-indicator LEDs** -- firmware scaffold drives mic/camera state via RAII peripheral guards. Camera `VIDIOC_STREAMOFF` wiring deferred (closes the always-streaming hole; queued)
+- **Wake word "Hey Dotty"** -- interim shipped: firmware default switched Chinese → English "Hi, ESP". Custom "Hey Dotty" microWakeWord roadmap documented (`docs/wake-word.md`); needs sample collection + Colab training (~2 weeks calendar)
+- **Purr-on-head-pet** -- server consumer shipped (`_perception_purr_player`); fires on `head_pet_started`. Asset path `bridge/assets/purr.opus` is a drop-in (asset itself not committed)
+- **Dancing mode** -- shipped at v0.1; karaoke + LLM-initiated dance + Phase 2 vocal singing remain
+- **Reproducible + signed firmware builds** -- SBOM + signed-releases scaffolds shipped. Maintainer GPG key + IDF Dockerfile SHA256 pin pending
 
 ## Planned
 

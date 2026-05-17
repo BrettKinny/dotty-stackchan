@@ -102,4 +102,4 @@ These are all feeders for the **`ROADMAP.md`** "Map the ZeroClaw ↔ xiaozhi-ser
 - [brain.md](./brain.md) — what ZeroClaw/Qwen/OpenRouter expose.
 - [references.md](./references.md) — upstream source for every capability claim.
 
-Last verified: 2026-04-24.
+Last verified: 2026-05-17.

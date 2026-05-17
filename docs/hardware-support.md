@@ -75,4 +75,4 @@ These are explicitly not supported and are unlikely to work without significant 
 - [references.md](./references.md#hardware) — upstream hardware links.
 - [m5stack/StackChan](https://github.com/m5stack/StackChan) — hardware BOM, chassis STLs, firmware source.
 
-Last verified: 2026-04-24.
+Last verified: 2026-05-17.

@@ -8,6 +8,21 @@ description: Run the entire stack with zero cloud dependencies using Ollama.
 ASR and TTS are already local. Adding Ollama closes the last cloud
 dependency (the LLM call).
 
+This is the **simple single-binary path** — pick Ollama when you only
+need one model resident at a time and want the easiest setup. If you
+need to run multiple models concurrently (e.g. the Tier1Slim two-tier
+default where `qwen3.5:4b` and `qwen3.6:27b-think` share VRAM), use
+[llama-swap](./llama-swap-concurrent-models.md) instead — it solves the
+multi-model serving problem Ollama doesn't.
+
+## When to use which compose file
+
+- `compose.all-in-one.yml` — single-host bundle that runs xiaozhi-server,
+  the bridge, and (with the override) Ollama on the same machine. Good for
+  laptops, single-host home servers, and demos.
+- `compose.local.override.yml` — applied on top of either compose file to
+  add the Ollama container with NVIDIA GPU passthrough.
+
 ## Prerequisites
 
 - NVIDIA GPU (8B model needs ~5 GB VRAM, 30B needs ~18 GB).

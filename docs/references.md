@@ -89,4 +89,4 @@ Always verify licensing on the upstream page before redistribution — this tabl
 
 - [README.md](./README.md) — docs index.
 
-Last verified: 2026-04-24.
+Last verified: 2026-05-17.

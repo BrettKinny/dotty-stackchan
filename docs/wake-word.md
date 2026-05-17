@@ -1,6 +1,6 @@
 ---
 title: Wake Word
-description: How Dotty's wake word works today (ESP-SR WakeNet9 "Hi, Stack Chan"), how to switch to a prebuilt English wake word in five minutes, and the roadmap to a custom "Hey Dotty" model.
+description: How Dotty's wake word works today (ESP-SR WakeNet9 "Hi, ESP"), how to switch to a different prebuilt English wake word, and the roadmap to a custom "Hey Dotty" model.
 ---
 
 # Wake word
@@ -9,8 +9,8 @@ Dotty listens passively for a fixed phrase and only opens the conversation pipel
 
 ## TL;DR
 
-- **Today:** firmware ships with `SR_WN_WN9_HISTACKCHAN_TTS3` — phrase **"Hi, Stack Chan"** — running on ESP-SR's WakeNet9 + AFE on the ESP32-S3 (PSRAM model).
-- **Five-minute English fix (Path A):** flip `sdkconfig.defaults` to `SR_WN_WN9_HIESP=y` ("Hi, ESP") or `SR_WN_WN9_COMPUTER_TTS=y` ("Computer"). Reflash. No code change needed — the existing handler is wake-phrase-agnostic.
+- **Today:** firmware ships with `SR_WN_WN9_HIESP` — phrase **"Hi, ESP"** — running on ESP-SR's WakeNet9 + AFE on the ESP32-S3 (PSRAM model). `SR_WN_WN9_HISTACKCHAN_TTS3` ("Hi, Stack Chan") was the earlier default and is kept available as an opt-in alternative.
+- **Five-minute alternate (Path A):** flip `sdkconfig.defaults` to one of the other prebuilts — e.g. `SR_WN_WN9_COMPUTER_TTS=y` ("Computer") or `SR_WN_WN9_HISTACKCHAN_TTS3=y` ("Hi, Stack Chan"). Reflash. No code change needed — the handler is wake-phrase-agnostic.
 - **Branded "Hey Dotty" (Path B, recommended long-term):** train a microWakeWord (TFLite) model on ~50–100 positive samples + ~1,000 negatives, quantise INT8, ship as a wake-word partition. Firmware integration hook is documented in `firmware/main/stackchan/wake_word/microwakeword_setup.md` in the firmware repo.
 - **Path C (custom WakeNet9):** Espressif's first-party trainer. Smaller binary, more friction. Not recommended unless Path B blocks.
 
@@ -19,7 +19,7 @@ Dotty listens passively for a fixed phrase and only opens the conversation pipel
 ```
 Mic PCM ──▶ AFE (AEC + NS + VAD) ──▶ WakeNet9 ──▶ "wake event" ──▶ Application::HandleWakeWordDetectedEvent
                                           │
-                                          └── model: wn9_histackchan_tts3 (loaded from flash via esp_srmodel_init("model"))
+                                          └── model: wn9_hiesp (loaded from flash via esp_srmodel_init("model"))
 ```
 
 - AFE = Audio Front End. Does acoustic-echo-cancel, noise-suppress, voice-activity-detect on the dual-mic input before the wake-net sees it. Mandatory on the S3 + PSRAM build.
@@ -31,7 +31,7 @@ Mic PCM ──▶ AFE (AEC + NS + VAD) ──▶ WakeNet9 ──▶ "wake event"
 | Concern | Path | Notes |
 |---|---|---|
 | Wake-word type selection (Kconfig) | `firmware/xiaozhi-esp32/main/Kconfig.projbuild:674` | `WAKE_WORD_TYPE` choice — AFE / ESP / Custom / Disabled. |
-| Active wake-word model | `firmware/sdkconfig.defaults:15` | `CONFIG_SR_WN_WN9_HISTACKCHAN_TTS3=y` (the line to change). |
+| Active wake-word model | `firmware/sdkconfig.defaults:20` | `CONFIG_SR_WN_WN9_HIESP=y` (the line to change). The previous default (`CONFIG_SR_WN_WN9_HISTACKCHAN_TTS3`) is preserved one line below, commented out. |
 | AFE wrapper | `firmware/xiaozhi-esp32/main/audio/wake_words/afe_wake_word.cc` | Loads model, runs detection, emits callback. |
 | Custom multi-net path | `firmware/xiaozhi-esp32/main/audio/wake_words/custom_wake_word.cc` | Pinyin-string-based — for Chinese custom wake. Not the right hook for "Hey Dotty". |
 | State machine | `firmware/xiaozhi-esp32/main/application.cc:872` | `HandleStateChangedEvent` re-arms wake detection on idle/listening/speaking transitions. |
@@ -47,7 +47,7 @@ All entries below are options under `Component config → ESP Speech Recognition
 
 | sdkconfig key | Phrase |
 |---|---|
-| `SR_WN_WN9_HIESP` | "Hi, ESP" |
+| `SR_WN_WN9_HIESP` | "Hi, ESP" *(default today)* |
 | `SR_WN_WN9_ALEXA` | "Alexa" |
 | `SR_WN_WN9_JARVIS_TTS` | "Jarvis" |
 | `SR_WN_WN9_COMPUTER_TTS` | "Computer" |
@@ -66,10 +66,10 @@ All entries below are options under `Component config → ESP Speech Recognition
 | `SR_WN_WN9_BLUECHIP_TTS2` | "Blue Chip" |
 | `SR_WN_WN9_HIANDY_TTS2` | "Hi, Andy" |
 | `SR_WN_WN9_HEYIVY_TTS2` | "Hey, Ivy" |
-| `SR_WN_WN9_HISTACKCHAN_TTS3` | "Hi, Stack Chan" *(default today)* |
+| `SR_WN_WN9_HISTACKCHAN_TTS3` | "Hi, Stack Chan" *(prior default; kept commented out in sdkconfig.defaults)* |
 | `SR_WN_WN9_HEYKIRA_TTS3` | "Hey, Kira" |
 
-There is no prebuilt "Hey Dotty" — that is what Path B is for. The closest single-syllable-after-"Hey" prebuilts are **Hey Ily**, **Hey Ivy**, and **Hey Kira**. The recommended interim phrase, if branding is flexible, is **"Hi, ESP"** (best-trained English model in the catalog) or **"Computer"** (zero-friction, generic, easy for kids).
+There is no prebuilt "Hey Dotty" — that is what Path B is for. The closest single-syllable-after-"Hey" prebuilts are **Hey Ily**, **Hey Ivy**, and **Hey Kira**. The current shipped default is **"Hi, ESP"** — best-trained English model in the catalog. **"Computer"** is the easiest zero-friction alternative for kids.
 
 ### How to switch
 
@@ -78,22 +78,22 @@ Two equivalent routes — pick one.
 **Route 1 — edit `sdkconfig.defaults` (recommended, version-controlled):**
 
 1. In the firmware repo, open `firmware/sdkconfig.defaults`.
-2. Replace line 15 `CONFIG_SR_WN_WN9_HISTACKCHAN_TTS3=y` with the desired key, e.g. `CONFIG_SR_WN_WN9_HIESP=y`.
+2. Comment out the active line `CONFIG_SR_WN_WN9_HIESP=y` (line 20) and uncomment / add the line for the desired key, e.g. `CONFIG_SR_WN_WN9_COMPUTER_TTS=y`. Only one `SR_WN_WN9_*` line should be active at a time.
 3. Delete `firmware/sdkconfig` and `firmware/build/` so the next build regenerates from defaults. (Otherwise the cached `sdkconfig` keeps the old value.)
 4. `idf.py build flash monitor`.
-5. Verify: serial log should print `Model 0: wn9_hiesp` (or whichever) during `AfeWakeWord::Initialize`. Speak the new phrase — expect `Wake word detected: hiesp` in log.
+5. Verify: serial log should print `Model 0: wn9_<key>` during `AfeWakeWord::Initialize`. Speak the new phrase — expect `Wake word detected: <key>` in log.
 
 **Route 2 — `idf.py menuconfig` (interactive, one-off):**
 
 1. `idf.py menuconfig`.
 2. Navigate: `Component config → ESP Speech Recognition → Load Multiple Wake Words (WakeNet9)`.
-3. Uncheck `Hi, Stack Chan (wn9_histackchan_tts3)`. Check the desired entry.
+3. Uncheck `Hi, ESP (wn9_hiesp)`. Check the desired entry.
 4. Save. `idf.py build flash monitor`.
 5. To make the change durable, run `idf.py save-defconfig` and commit the resulting `sdkconfig.defaults`.
 
 ### Revert
 
-Restore `CONFIG_SR_WN_WN9_HISTACKCHAN_TTS3=y` on line 15 of `firmware/sdkconfig.defaults`, delete `firmware/sdkconfig` + `firmware/build/`, rebuild.
+Restore `CONFIG_SR_WN_WN9_HIESP=y` on line 20 of `firmware/sdkconfig.defaults`, delete `firmware/sdkconfig` + `firmware/build/`, rebuild.
 
 ## Path B — microWakeWord "Hey Dotty" (recommended long-term)
 

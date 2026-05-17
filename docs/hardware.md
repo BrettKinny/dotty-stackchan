@@ -118,4 +118,4 @@ These are real hardware features with no documented MCP tool in the default firm
 - [latent-capabilities.md](./latent-capabilities.md#hardware-unused) — what to do with the unused peripherals.
 - [references.md](./references.md#hardware) — all upstream hardware links.
 
-Last verified: 2026-04-24.
+Last verified: 2026-05-17.

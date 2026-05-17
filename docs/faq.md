@@ -113,4 +113,4 @@ See [hardware-support.md](./hardware-support.md) for the full support matrix.
 - [troubleshooting.md](./troubleshooting.md) — symptom-based debugging guide.
 - [README.md](../README.md) — deployment guide.
 
-Last verified: 2026-04-24.
+Last verified: 2026-05-17.
