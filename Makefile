@@ -64,7 +64,7 @@ help: ## Show this help
 # ─────────────────────────────────────────────────────────────────────
 test: ## Run Python unit tests with coverage gate
 	pytest tests/ custom-providers/pi_voice/tests/ \
-		--cov --cov-report=term --cov-fail-under=47
+		--cov --cov-report=term --cov-fail-under=55
 
 lint: ## Run ruff lint over the repo
 	ruff check .
