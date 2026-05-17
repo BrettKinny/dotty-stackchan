@@ -11,6 +11,7 @@
 //   /root/.pi/memory/brain.db
 // (env-overridable via DOTTY_BRAIN_DB).
 
+import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 
 export interface MemoryRow {
@@ -25,6 +26,8 @@ const DEFAULT_PATH = process.env.DOTTY_BRAIN_DB ?? "/root/.pi/memory/brain.db";
 
 let cachedDb: Database.Database | null = null;
 let cachedPath: string | null = null;
+let cachedWriteDb: Database.Database | null = null;
+let cachedWritePath: string | null = null;
 
 function openReadOnly(path: string): Database.Database {
   // Reuse the handle across calls — SQLite read-only opens are cheap but
@@ -34,6 +37,18 @@ function openReadOnly(path: string): Database.Database {
   cachedDb = new Database(path, { readonly: true, fileMustExist: true });
   cachedPath = path;
   return cachedDb;
+}
+
+function openWritable(path: string): Database.Database {
+  // Separate handle from the readonly one. SQLite (WAL mode) supports
+  // concurrent readers + a single writer; both bridge.py and ZeroClaw
+  // already write to this file, so contention is expected. Match
+  // bridge.py's 5 s timeout to keep behaviour parity under contention.
+  if (cachedWriteDb && cachedWritePath === path) return cachedWriteDb;
+  if (cachedWriteDb) cachedWriteDb.close();
+  cachedWriteDb = new Database(path, { fileMustExist: true, timeout: 5000 });
+  cachedWritePath = path;
+  return cachedWriteDb;
 }
 
 export interface SearchOptions {
@@ -81,9 +96,73 @@ export function searchMemories(
   }
 }
 
-/** Test-only helper: close the cached handle. */
+export interface StoreOptions {
+  content: string;
+  /** Defaults to "core" (long-retention fact, mirrors bridge.py /remember). */
+  category?: string;
+  /** Always "voice" today; parameterised for symmetry with bridge.py. */
+  namespace?: string;
+  /** 0.0–1.0; bridge.py uses 0.3 for conversation, 0.7 for fact. */
+  importance?: number;
+  sessionId?: string | null;
+  dbPath?: string;
+  /** Test seam — overrides the ISO timestamp + UUID for deterministic asserts. */
+  _now?: string;
+  _id?: string;
+}
+
+/**
+ * Mirrors bridge.py:_voice_memory_store_blocking. Returns true on insert,
+ * false on empty content / missing db / sqlite error. Never throws — the
+ * voice path must degrade gracefully when memory is unavailable.
+ *
+ * Schema (frozen — managed by ZeroClaw):
+ *   memories(id, key, content, category, namespace, importance,
+ *            created_at, updated_at, session_id, ...)
+ * FTS5 triggers maintain the index on insert.
+ */
+export function storeMemory(opts: StoreOptions): boolean {
+  const trimmed = (opts.content ?? "").trim();
+  if (!trimmed) return false;
+  const category = opts.category ?? "core";
+  const namespace = opts.namespace ?? "voice";
+  const importance = opts.importance ?? 0.7;
+  const sessionId = opts.sessionId ?? null;
+  const path = opts.dbPath ?? DEFAULT_PATH;
+  // bridge.py: datetime.now(ZoneInfo("UTC")).isoformat() — yields
+  // `2026-05-18T00:43:00.123456+00:00`. JS's toISOString() yields
+  // `2026-05-18T00:43:00.123Z` (Z suffix, ms precision). Both are valid
+  // ISO 8601 and SQLite stores them as TEXT; the schema doesn't compare
+  // them. Match JS-native format here rather than fake microsecond
+  // precision — the column is opaque text downstream.
+  const now = opts._now ?? new Date().toISOString();
+  const id = opts._id ?? randomUUID();
+  // bridge.py key format: f"voice_{category}_{now}_{mem_id[:8]}"
+  const key = `voice_${category}_${now}_${id.slice(0, 8)}`;
+
+  try {
+    const db = openWritable(path);
+    db.prepare(`
+      INSERT INTO memories
+        (id, key, content, category, namespace,
+         importance, created_at, updated_at, session_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, key, trimmed, category, namespace, importance, now, now, sessionId);
+    return true;
+  } catch (err) {
+    process.stderr.write(
+      `[brain_db] store failed (category=${category}): ${err}\n`,
+    );
+    return false;
+  }
+}
+
+/** Test-only helper: close the cached handles. */
 export function _resetForTests(): void {
   if (cachedDb) cachedDb.close();
   cachedDb = null;
   cachedPath = null;
+  if (cachedWriteDb) cachedWriteDb.close();
+  cachedWriteDb = null;
+  cachedWritePath = null;
 }

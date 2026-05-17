@@ -10,10 +10,12 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { memoryLookupTool } from "./tools/memory_lookup.ts";
 import { playSongTool } from "./tools/play_song.ts";
+import { rememberTool } from "./tools/remember.ts";
 import { thinkHardTool } from "./tools/think_hard.ts";
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool(memoryLookupTool);
+  pi.registerTool(rememberTool);
   pi.registerTool(thinkHardTool);
   pi.registerTool(playSongTool);
   // take_photo lands later (blocked on perception-cache rehoming).
