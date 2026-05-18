@@ -10,6 +10,13 @@ Wants=network-online.target
 Type=simple
 User=root
 WorkingDirectory=/root/zeroclaw-bridge
+# Vision/LLM API keys (issue #15). Put OPENROUTER_API_KEY / VISION_API_KEY /
+# VLM_API_KEY here so they're loaded into the bridge process; without them
+# the bridge logs an ERROR and refuses to confabulate descriptions on
+# `take_photo` intents. Leading `-` makes the file optional (won't fail
+# startup if absent — the bridge will surface the missing-key ERROR
+# loudly on the first photo call instead).
+EnvironmentFile=-/root/zeroclaw-bridge/.env
 Environment=ZEROCLAW_BIN=/root/.cargo/bin/zeroclaw
 # Voice-daemon LLM tier identities. Bridge uses these in multi-profile mode
 # (set via VOICE_LOCAL_PROFILE_KEY / VOICE_CLOUD_PROFILE_KEY below) to flip

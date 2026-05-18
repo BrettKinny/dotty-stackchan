@@ -6,7 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-_Nothing yet — `server-v0.1.0` was tagged on 2026-05-17._
+### Added
+- **Bridge systemd unit loads API keys from `${BRIDGE_DIR}/.env`** (#15) — `zeroclaw-bridge.service.template` and `scripts/install-bridge.sh` now emit `EnvironmentFile=-${BRIDGE_DIR}/.env`. `install-bridge.sh` creates a mode-0600 stub `.env` containing `OPENROUTER_API_KEY=` (and commented `VISION_API_KEY` / `VLM_API_KEY` placeholders) when one isn't already present, so the missing-vision-key failure surfaces as the bridge's existing ERROR ("camera offline") instead of a silent confabulation. Existing `.env` files are preserved.
 
 ## [server-v0.1.0] - 2026-05-17
 
