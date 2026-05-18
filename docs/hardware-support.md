@@ -31,7 +31,8 @@ The only hardware this stack has been tested end-to-end on.
 | **Wi-Fi** | 2.4 GHz only (no 5 GHz) |
 | **Body kit** | M5Stack StackChan servo kit |
 | **Servos** | 2x SG90-class feedback servos (pan: 360 deg yaw, tilt: 90 deg pitch) |
-| **Additional** | 12x RGB LEDs, 3-zone touch panel, NFC, IR tx/rx, 700 mAh supplementary battery |
+| **Additional** | 12x WS2812C RGB LEDs, 3-zone touch panel (Si12T), NFC (ST25R3916), IR tx/rx (IRM56384), 550 mAh supplementary battery, PY32L020 IO expander, INA226 battery monitor, in-box IR remote |
+| **Assembled dimensions** | 54.0 × 70.5 × 61.5 mm, 187.2 g |
 | **Firmware** | Built from [`m5stack/StackChan`](https://github.com/m5stack/StackChan) (Arduino C++) |
 
 This is the configuration described throughout the rest of the docs. The servo kit provides the head-pan and head-tilt movement that makes StackChan look like a robot rather than a screen on a desk.
@@ -75,4 +76,4 @@ These are explicitly not supported and are unlikely to work without significant 
 - [references.md](./references.md#hardware) — upstream hardware links.
 - [m5stack/StackChan](https://github.com/m5stack/StackChan) — hardware BOM, chassis STLs, firmware source.
 
-Last verified: 2026-05-17.
+Last verified: 2026-05-18.

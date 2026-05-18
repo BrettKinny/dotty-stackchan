@@ -27,6 +27,8 @@ Underlying peripherals on the M5Stack CoreS3 / StackChan kit that the firmware d
 | **microSD slot** | Offline sound packs, local fallback voices, recorded memories | Medium | Partially overlaps `ROADMAP.md` → "Create backup script" |
 | **3-zone touch panel** | Multi-zone gesture controls (head-pat as a discrete event) | Low | **New-task candidate** |
 | **Camera beyond `take_photo`** | On-device VLM preprocessing; streaming to a local vision server | Medium | Cross-refs `ROADMAP.md` → "Lock down for child-safe operation" (camera exposure) |
+| **ESP-NOW radio** (Wi-Fi-band, no AP) | Peer-to-peer link to the in-box M5Stack remote, or a second StackChan, without traversing the LAN | Low | **New-task candidate** |
+| **In-box IR remote** | M5Stack ships an IR remote with the kit; could drive states/toggles without voice (good when ASR is wrong tier) | Low | **New-task candidate** |
 | **Hardware-enforced privacy LEDs** | LED state wired to the peripheral-enable signal, not a software hint | **High / safety** | `ROADMAP.md` → "Hardwire privacy-indicator LEDs in firmware" |
 | **Servo velocity/acceleration caps** | Calmer, safer, less-startling head motion | **High / safety** | `ROADMAP.md` → "Tame violent servo motion" |
 
@@ -102,4 +104,4 @@ These are all feeders for the **`ROADMAP.md`** "Map the ZeroClaw ↔ xiaozhi-ser
 - [brain.md](./brain.md) — what ZeroClaw/Qwen/OpenRouter expose.
 - [references.md](./references.md) — upstream source for every capability claim.
 
-Last verified: 2026-05-17.
+Last verified: 2026-05-18.

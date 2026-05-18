@@ -9,9 +9,10 @@ description: M5Stack StackChan hardware specs, CoreS3 ESP32-S3 SoC, and servo ch
 
 - The robot body is the **M5Stack StackChan** kit: an M5Stack **CoreS3** (ESP32-S3) head on a 2-servo chassis.
 - The CoreS3 supplies the SoC, display, camera, mic array, speaker, IMU, proximity, microSD, NFC, IR — all integrated.
-- The *StackChan kit* adds the head-yaw servo, head-pitch servo, 12 RGB LEDs, 3-zone touch panel, 700 mAh supplementary battery, USB-C, and the 3D-printed body.
+- The *StackChan kit* adds the head-yaw servo, head-pitch servo, 12 RGB LEDs, 3-zone touch panel, 550 mAh supplementary battery, USB-C, an IR tx/rx pair, an IO expander, a dedicated battery monitor, and the 3D-printed body. A separate IR remote ships in the same box.
 - Firmware on the device is built from [`m5stack/StackChan`](https://github.com/m5stack/StackChan) — an Arduino C++ codebase that bundles the **XiaoZhi AI agent** client. It is **not** the same codebase as `meganetaaan/stack-chan` (the original Moddable/JS project) or `78/xiaozhi-esp32` (generic voice-assistant firmware).
 - The device advertises itself over the Xiaozhi WebSocket protocol and exposes **on-device tools via MCP** (see [protocols.md](./protocols.md)).
+- Canonical hardware reference: [`docs.m5stack.com/en/StackChan`](https://docs.m5stack.com/en/StackChan) (kit-level) and [`docs.m5stack.com/en/core/CoreS3`](https://docs.m5stack.com/en/core/CoreS3) (head unit). See [references.md](./references.md#hardware).
 
 ## The SoC and board: M5Stack CoreS3
 
@@ -33,28 +34,44 @@ All values from [`docs.m5stack.com/en/core/CoreS3`](https://docs.m5stack.com/en/
 | Battery (internal) | 500 mAh Li-ion |
 | RTC | BM8563 |
 | microSD | Supported, up to 16 GB |
-| Wi-Fi | 2.4 GHz only |
-| BLE | Yes |
-| USB | USB-C (device + power) |
-| Dimensions | 54.0 × 54.0 × 15.5 mm (unit only) |
-| Weight | 72.7 g (unit only) |
+| Wi-Fi | 2.4 GHz, IEEE 802.11 b/g/n |
+| BLE | Bluetooth 5 LE |
+| USB | USB-C (USB CDC + full-speed OTG, power + data) |
+| Touch (display) | FT6336U capacitive multi-touch (over the 320×240 panel) |
+| Dimensions | 54.0 × 54.0 × 15.5 mm (CoreS3 unit only) |
+| Weight | 72.7 g (CoreS3 unit only) |
 
 ## What the StackChan kit adds on top
 
-Values from [`m5stack/StackChan` README](https://github.com/m5stack/StackChan) (see [references.md](./references.md#hardware)):
+Values from the [M5Stack StackChan product docs](https://docs.m5stack.com/en/StackChan) and the [`m5stack/StackChan` firmware README](https://github.com/m5stack/StackChan) (see [references.md](./references.md#hardware)):
 
 | Component | Spec |
 |---|---|
-| Head-yaw servo | Feedback servo, 360° horizontal rotation |
-| Head-pitch servo | Feedback servo, 90° vertical movement |
-| Front-panel LEDs | 12 × RGB, arranged in two rows |
-| Touch panel | 3-zone (beyond the display's own touch) |
-| NFC | Yes, reader + writer |
-| IR | Transmitter + receiver |
-| Supplementary battery | 700 mAh |
+| Head-yaw servo (X axis) | Feedback servo, 360° continuous horizontal rotation |
+| Head-pitch servo (Y axis) | SCS0009 feedback servo, 90° vertical movement — **recommended operating range 5°–85°** |
+| Front-panel LEDs | 12 × WS2812C RGB, arranged in two rows |
+| 3-zone touch panel | Si12T driver (separate from the CoreS3 display's FT6336U) |
+| NFC | ST25R3916 reader/writer (I2C `0x50`) |
+| IR | IRM56384 transmitter + receiver pair |
+| Battery monitor | INA226AIDGSR coulomb counter (I2C `0x41`) |
+| IO expander | PY32L020 (I2C `0x6F` or `0x71`; drives IO1, IO14, VM_EN, RGB power) |
+| Supplementary battery | 550 mAh (per M5Stack product docs) |
+| USB | USB-C (power + data) |
+| Buttons | Power, reset; power-indicator LED |
+| Wireless extras | ESP-NOW supported; pairs with the M5Stack-supplied IR/RF remote and the **StackChan World** mobile app |
 | Chassis | 3D-printed body, base, feet (STL published) |
+| Dimensions (assembled) | 54.0 × 70.5 × 61.5 mm, **187.2 g** |
+| Remote controller | Ships in-box, 37.6 g |
 
-**Note on battery size.** The CoreS3's internal battery is 500 mAh; the StackChan kit documents 700 mAh. The StackChan kit appears to bundle an external cell that supersedes or supplements the CoreS3 internal one. Check the physical kit to confirm before quoting battery life numbers.
+**Pin map (CoreS3 → body):**
+
+| Function | Pin(s) |
+|---|---|
+| Servo bus (UART) | G6 TX, G7 RX |
+| IR | G5 transmit, G10 receive |
+| I2C (NFC, touch, battery monitor, IO expander) | G11 SCL, G12 SDA |
+
+**Note on battery size.** The CoreS3's internal cell is 500 mAh; the canonical M5Stack StackChan product page documents a **550 mAh** supplementary cell in the body (earlier internal notes had this as 700 mAh — corrected against `docs.m5stack.com/en/StackChan`). Either way, total runtime depends on which cell is in circuit at a given moment — bench-measure before quoting runtime numbers.
 
 ## Firmware lineage
 
@@ -110,7 +127,9 @@ These are real hardware features with no documented MCP tool in the default firm
 
 - **Mic is I2S via ES7210.** Hot whenever the firmware chooses — there is no hardware mic-mute. The privacy-indicator LED item in [`ROADMAP.md`](ROADMAP.md) exists because of this.
 - **Servos can move fast.** Feedback servos in a kids' environment can startle. The StackChan kit uses the M5Stack Avatar library's ease functions; the velocity cap is a firmware-side choice, not a hardware limit. See the "Servo speed caps" item in [`ROADMAP.md`](ROADMAP.md).
+- **Y-axis (pitch) servo angle limit: 5°–85°.** M5Stack's product page explicitly recommends keeping the vertical servo inside this range. Commanding 0° or 90° risks mechanical bind / gear damage on the SCS0009. Any firmware path that parks the head (sleep state's "face-down + centred" included — see [modes.md](./modes.md)) must clamp to this window.
 - **Camera has no shutter.** Software-only enable. The `take_photo` MCP tool should always co-activate a distinct LED state (see child-safety task).
+- **Default stock wake word is "Hi, StackChan".** Our deployment overrides ASR + wake-word handling via xiaozhi-esp32-server, so this only matters if a unit boots stock firmware (e.g. before first flash).
 
 ## See also
 
@@ -118,4 +137,4 @@ These are real hardware features with no documented MCP tool in the default firm
 - [latent-capabilities.md](./latent-capabilities.md#hardware-unused) — what to do with the unused peripherals.
 - [references.md](./references.md#hardware) — all upstream hardware links.
 
-Last verified: 2026-05-17.
+Last verified: 2026-05-18 (against `docs.m5stack.com/en/StackChan`).
