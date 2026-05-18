@@ -22,8 +22,8 @@ jobs:
             truthy: disable
           EOF
           yamllint \
-            .config.yaml \
-            docker-compose.yml \
+            .config.yaml.template \
+            docker-compose.yml.template \
             compose.all-in-one.yml \
             compose.local.override.yml \
             mkdocs.yml
@@ -33,8 +33,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Validate docker-compose.yml
-        run: docker compose -f docker-compose.yml config > /dev/null
+      - name: Validate docker-compose.yml.template
+        # Template still contains <TZ_VALUE> etc. — compose accepts them as
+        # string values; only schema correctness is checked here.
+        run: docker compose -f docker-compose.yml.template config > /dev/null
       - name: Validate compose.all-in-one.yml
         run: docker compose -f compose.all-in-one.yml config > /dev/null
 
@@ -43,8 +45,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Parse .config.yaml
-        run: python3 -c "import yaml; yaml.safe_load(open('.config.yaml'))"
+      - name: Parse .config.yaml.template
+        run: python3 -c "import yaml; yaml.safe_load(open('.config.yaml.template'))"
 
   lint:
     name: Ruff Lint
