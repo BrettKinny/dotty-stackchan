@@ -197,6 +197,10 @@ Wants=network.target
 Type=simple
 User=root
 WorkingDirectory=${BRIDGE_DIR}
+# Vision/LLM API keys (issue #15) — leading '-' makes the file optional;
+# without it the bridge logs a clear ERROR on photo intents instead of
+# confabulating a description from an empty VLM response.
+EnvironmentFile=-${BRIDGE_DIR}/.env
 Environment=ZEROCLAW_BIN=${ZEROCLAW_BIN}
 Environment=PORT=${PORT}
 Environment=DOTTY_KID_MODE=true
@@ -208,6 +212,33 @@ StandardError=journal
 
 [Install]
 WantedBy=multi-user.target"
+
+# ---------- create stub .env if absent (issue #15) ----------
+# Make the API-key drop-in obvious. systemd already EnvironmentFile=-'s it.
+ENV_FILE="${BRIDGE_DIR}/.env"
+ENV_STUB="# zeroclaw-bridge runtime env (issue #15). Loaded by systemd via
+# EnvironmentFile= in /etc/systemd/system/${SERVICE_NAME}.service. Fill in
+# at least OPENROUTER_API_KEY or photo (VLM) intents will fail with an
+# explicit 'camera offline' message instead of confabulating descriptions.
+# Mode 0600 — contains secrets. After editing:
+#     sudo systemctl restart ${SERVICE_NAME}
+
+OPENROUTER_API_KEY=
+# Optional split if you use separate keys for the vision model:
+#VISION_API_KEY=
+#VLM_API_KEY=
+"
+if [[ -f "${ENV_FILE}" ]]; then
+    info "Existing ${ENV_FILE} preserved (not overwriting)"
+else
+    if $DRY_RUN; then
+        info "[dry-run] Would create stub ${ENV_FILE} (mode 0600) with OPENROUTER_API_KEY placeholder"
+    else
+        printf '%s' "${ENV_STUB}" > "${ENV_FILE}"
+        chmod 600 "${ENV_FILE}"
+        info "Created stub ${ENV_FILE} (mode 0600) — fill in OPENROUTER_API_KEY before photo intents will work"
+    fi
+fi
 
 if $DRY_RUN; then
     info "[dry-run] Would write ${SERVICE_FILE}:"
