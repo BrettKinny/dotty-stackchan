@@ -208,6 +208,34 @@ class PerceptionState:
     def current_device_state(self, device_id: str) -> str:
         return self.state.get(device_id, {}).get("current_state", "idle")
 
+    def get_fresh_face_id(
+        self,
+        device_id: str,
+        *,
+        ttl_sec: float,
+        now: float | None = None,
+    ) -> str | None:
+        """Return the most-recent identified face for ``device_id`` if
+        the identity is younger than ``ttl_sec``.
+
+        Single source of truth for "is this person still identified?"
+        across the dashboard chip, talk-turn perception snapshot, and
+        the face-identified LED refresh loop. Replaces the "pop on
+        face_lost" approach which collapsed identity within ~1 s of
+        detector flicker.
+        """
+        state = self.state.get(device_id) or {}
+        identity = (state.get("last_face_id") or "").strip()
+        if not identity or identity == "unknown":
+            return None
+        last_t = state.get("last_face_recognized_t") or 0.0
+        if not last_t:
+            return None
+        wall_now = now if now is not None else time.time()
+        if (wall_now - last_t) > ttl_sec:
+            return None
+        return identity
+
     def annotate_for_introspection(
         self, devices: Iterable[str] | None = None, *, now: float | None = None
     ) -> dict[str, dict[str, Any]]:
