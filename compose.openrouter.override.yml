@@ -1,0 +1,135 @@
+# compose.openrouter.override.yml — cloud LLM via OpenRouter
+#
+# Use with compose.all-in-one.yml to route the LLM call through any
+# OpenAI-compatible cloud API (OpenRouter / OpenAI / Anthropic / etc.)
+# instead of ZeroClaw or Tier1Slim. ASR (FunASR) and TTS (Piper) remain
+# fully local — only the LLM call leaves the LAN.
+#
+#   docker compose --env-file .env \
+#     -f compose.all-in-one.yml \
+#     -f compose.openrouter.override.yml \
+#     up -d
+#
+# Pairs naturally with the cookbook recipe at
+# docs/cookbook/openrouter-cloud-llm.md and the Pi 5 deployment plan at
+# docs/plans/2026-05-18-001-feat-pi5-openrouter-deployment-plan.md.
+#
+# ─── What this override changes ─────────────────────────────────────────
+#
+#   1. xiaozhi-server gets the openai_compat LLM provider mounted in plus
+#      the project-custom textUtils.py, the personas/ directory, and the
+#      four xiaozhi-patches files that deliver the /xiaozhi/admin/* admin
+#      routes and the perception-event relay. The base compose.all-in-one
+#      only ships the zeroclaw provider + ota_handler patch.
+#
+#   2. Three env vars on xiaozhi-server:
+#        OPENROUTER_API_KEY — passed through from the host .env file
+#        BRIDGE_URL / VISION_BRIDGE_URL — where the EventTextMessageHandler
+#          POSTs perception events. The all-in-one's docker DNS resolves
+#          `bridge` to the bridge container.
+#
+#   3. Bridge gets DOTTY_VOICE_PROVIDER=tier1slim so it skips the ZeroClaw
+#      code paths (model swaps, tool routing). DOTTY_KID_MODE=true makes
+#      the kid-mode default explicit. XIAOZHI_HOST lets the bridge POST
+#      to /xiaozhi/admin/inject-text and set-head-angles for the
+#      face-detected greeter and sound-direction turn consumers.
+#
+# ─── Prerequisites ──────────────────────────────────────────────────────
+#
+#   1. A .env file at the repo root (the same directory as this compose
+#      file) containing:
+#
+#        OPENROUTER_API_KEY=sk-or-v1-...your-key-here...
+#
+#      Get a key at https://openrouter.ai/keys.
+#
+#   2. data/.config.yaml configured with the OpenAICompat provider block.
+#      See docs/cookbook/openrouter-cloud-llm.md for the exact shape.
+#      Key settings:
+#
+#        selected_module:
+#          LLM: OpenAICompat
+#        LLM:
+#          OpenAICompat:
+#            url: https://openrouter.ai/api/v1
+#            api_key: ${OPENROUTER_API_KEY}
+#            model: openrouter/free   # or anthropic/claude-haiku-4.5, etc.
+#
+#   3. The zeroclaw bind-mounts that compose.all-in-one.yml requires
+#      (/root/.cargo/bin/zeroclaw and /root/.zeroclaw/) must exist on the
+#      host so Docker can start the bridge container. If you don't want
+#      to install ZeroClaw natively, a no-op stub satisfies the mount:
+#
+#        sudo mkdir -p /root/.cargo/bin /root/.zeroclaw
+#        sudo tee /root/.cargo/bin/zeroclaw <<'EOF'
+#        #!/bin/bash
+#        # Stub — bypassed via DOTTY_VOICE_PROVIDER=tier1slim and OpenAICompat
+#        exec sleep infinity
+#        EOF
+#        sudo chmod +x /root/.cargo/bin/zeroclaw
+#
+#      The bridge's ACP subprocess spawns the stub at startup and times
+#      out after ZEROCLAW_INIT_TIMEOUT (10s default) — bridge logs
+#      "Initial ACP spawn failed — will retry on first request" and
+#      continues. With selected_module.LLM=OpenAICompat the LLM path
+#      bypasses the bridge entirely, so ACP is never actually invoked.
+
+services:
+
+  # ── xiaozhi-server ───────────────────────────────────────────────────
+  xiaozhi-server:
+    environment:
+      # OpenRouter API key — read by openai_compat's `api_key: ${OPENROUTER_API_KEY}`
+      # interpolation in data/.config.yaml.
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # Bridge endpoint that xiaozhi-server's EventTextMessageHandler POSTs
+      # perception events to (face_detected, face_lost, sound_event,
+      # state_changed). Multi-host deployments use the bridge's LAN IP;
+      # in the all-in-one, the docker compose service DNS name `bridge`
+      # resolves on the shared `dotty` network.
+      - BRIDGE_URL=http://bridge:8080
+      - VISION_BRIDGE_URL=http://bridge:8080
+    volumes:
+      # OpenAICompat LLM provider — base compose.all-in-one only mounts
+      # the zeroclaw provider, so without this the container can't import
+      # `openai_compat` when selected_module.LLM=OpenAICompat resolves.
+      - ./custom-providers/openai_compat:/opt/xiaozhi-esp32-server/core/providers/llm/openai_compat
+      # Project-custom textUtils.py — openai_compat.py imports
+      # ALLOWED_EMOJIS / FALLBACK_EMOJI / build_turn_suffix from here.
+      # Not present in the upstream image's core/utils/textUtils.py.
+      - ./custom-providers/textUtils.py:/opt/xiaozhi-esp32-server/core/utils/textUtils.py:ro
+      # Persona directory — OpenAICompat's `persona_file: personas/default.md`
+      # loads from /opt/xiaozhi-esp32-server/personas/ inside the container.
+      - ./personas:/opt/xiaozhi-esp32-server/personas:ro
+      # xiaozhi-server patches — these deliver:
+      #   - /xiaozhi/admin/* routes (toggle, kid-mode, smart-mode, play-asset,
+      #     songs, inject-text, set-head-angles, set-tier1slim-model)
+      #   - EventTextMessageHandler that POSTs firmware perception event
+      #     frames (face_detected, face_lost, sound_event, state_changed)
+      #     to the bridge at /api/perception/event
+      #   - shared_llm singleton that lets admin routes mutate the running
+      #     LLM provider's runtime config
+      # Base compose.all-in-one only mounts ota_handler.py from this dir.
+      - ./custom-providers/xiaozhi-patches/portal_bridge.py:/opt/xiaozhi-esp32-server/core/portal_bridge.py:ro
+      - ./custom-providers/xiaozhi-patches/websocket_server.py:/opt/xiaozhi-esp32-server/core/websocket_server.py:ro
+      - ./custom-providers/xiaozhi-patches/http_server.py:/opt/xiaozhi-esp32-server/core/http_server.py:ro
+      - ./custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py:/opt/xiaozhi-esp32-server/core/handle/textMessageHandlerRegistry.py:ro
+
+  # ── zeroclaw-bridge ──────────────────────────────────────────────────
+  bridge:
+    environment:
+      # Skip ZeroClaw code paths (model swaps, voice-tool routing).
+      # The bridge keeps running for the dashboard, perception consumers,
+      # and brain.db memory; the LLM path goes through xiaozhi-server →
+      # openai_compat directly.
+      - DOTTY_VOICE_PROVIDER=tier1slim
+      # Make the kid-mode default explicit. Python default in bridge.py
+      # is already "true", but a stale state file at
+      # /root/zeroclaw-bridge/state/kid-mode could otherwise flip it.
+      - DOTTY_KID_MODE=true
+      # xiaozhi-server endpoint that bridge POSTs to for
+      # /xiaozhi/admin/inject-text (face-detected greeting) and
+      # /xiaozhi/admin/set-head-angles (sound-direction turn). Multi-host
+      # systemd reads this from Environment=; in the all-in-one, docker
+      # service DNS resolves `xiaozhi-server` on the shared network.
+      - XIAOZHI_HOST=xiaozhi-server
