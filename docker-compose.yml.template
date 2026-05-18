@@ -6,9 +6,9 @@ services:
     image: xiaozhi-esp32-server-piper:local
     container_name: xiaozhi-esp32-server
     restart: unless-stopped
+    # --- BEGIN CUDA BLOCK (removed by `make setup` if no NVIDIA runtime) ---
     # GPU access for WhisperLocal ASR (faster-whisper float16 needs CUDA).
-    # Requires nvidia-container-toolkit on the host. Falls back to CPU if the
-    # toolkit is missing — the WhisperLocal config will detect and degrade.
+    # Requires nvidia-container-toolkit on the host.
     runtime: nvidia
     deploy:
       resources:
@@ -17,11 +17,13 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    # --- END CUDA BLOCK ---
     environment:
+      # --- BEGIN CUDA ENV (removed by `make setup` if no NVIDIA runtime) ---
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      # EDIT: set to your local timezone
-      - TZ=Australia/Brisbane
+      # --- END CUDA ENV ---
+      - TZ=<TZ_VALUE>
       # EDIT: set to the ZeroClaw bridge URL for vision intent handling
       - VISION_BRIDGE_URL=http://<ZEROCLAW_HOST>:8080
       # Active persona file under ./personas/ (loaded by ZeroClawLLM provider).

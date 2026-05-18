@@ -41,3 +41,16 @@ htmlcov/
 # to regenerate bridge/static/tailwind.min.css.
 node_modules/
 package-lock.json
+
+# `make setup` artifacts — rendered from *.template files. Sources live in
+# git (.config.yaml.template, docker-compose.yml.template,
+# zeroclaw-bridge.service.template); rendered copies are per-deployment.
+/.config.yaml
+/data/.config.yaml
+/docker-compose.yml
+/zeroclaw-bridge.service
+/.wizard.env
+
+# Downloaded ASR/TTS model weights (fetched by `make fetch-models`). Big
+# binaries, easy to regenerate; not part of the repo.
+/models/

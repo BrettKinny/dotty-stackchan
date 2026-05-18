@@ -52,6 +52,43 @@ LLM:
 - `persona_file` is loaded as the system prompt.
 - No memory between sessions — each request is stateless.
 
+### Anthropic API directly (without OpenRouter)
+
+Anthropic ships an OpenAI-SDK-compatible shim at `https://api.anthropic.com/v1/`
+that maps Chat Completions calls onto the underlying Messages API. The
+`OpenAICompat` provider works against it out of the box:
+
+```yaml
+selected_module:
+  LLM: OpenAICompat
+
+LLM:
+  OpenAICompat:
+    type: openai_compat
+    url: https://api.anthropic.com/v1
+    api_key: sk-ant-api03-xxxxxxxxxxxxxxxxxxxx     # Anthropic console key
+    model: claude-haiku-4-5                         # or claude-sonnet-4-6, etc.
+    persona_file: personas/default.md
+    max_tokens: 256
+    temperature: 0.7
+    timeout: 60
+```
+
+Caveats when running Anthropic-only (no OpenRouter):
+
+- **Vision intents** (`take_photo`) go through the bridge's `_call_vision_api`,
+  which reads `VLM_API_KEY` → `VISION_API_KEY` → `OPENROUTER_API_KEY` in turn
+  and defaults to OpenRouter for the upload. Point those env vars at your
+  Anthropic key and set the bridge's VLM model+URL env to Anthropic's
+  endpoint to keep vision working without OpenRouter.
+- **Smart-mode escalation** defaults to `anthropic/claude-sonnet-4-6` via
+  OpenRouter — flip `SMART_MODEL` in `zeroclaw-bridge.service` to a bare
+  Anthropic model id and `VOICE_CLOUD_PROFILE_KEY` to
+  `custom:https://api.anthropic.com/v1` to route smart-mode there too.
+- The compat shim doesn't support every OpenAI option (streaming and tools
+  work; `logprobs`, `seed`, etc. don't). Tier1Slim's `think_hard` /
+  `memory_lookup` tool calls go through the bridge, so they're unaffected.
+
 ## 2. llama-swap (local, multi-model)
 
 `OpenAICompat` provider pointed at a local llama-swap instance. llama-swap fronts upstream llama.cpp and routes per-model requests to per-alias `llama-server` children, with declarative co-residency (the `voice` matrix set keeps `qwen3.5:4b` and `qwen3.6:27b-think` both warm) and on-demand swap to other sets (e.g. `coding` for `qwen3.6:27b@96K`). Recommended local backend when you want to run more than one model at a time without paying repeated cold-load costs.

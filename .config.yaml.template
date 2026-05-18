@@ -13,8 +13,7 @@ delete_audio: true
 
 selected_module:
   VAD: SileroVAD
-  ASR: WhisperLocal
-  # ASR: FunASR           # <-- swap back to FunASR (CPU, lower recall on kid speech)
+  ASR: <ASR_MODULE>       # WhisperLocal (CUDA) or FunASR (CPU fallback)
   LLM: Tier1Slim
   # LLM: ZeroClawLLM       # <-- legacy: voice via ZeroClaw ACP (24K-token tax per turn)
   # LLM: OpenAICompat      # <-- switch to direct OpenAI-compatible LLM
@@ -75,11 +74,10 @@ ASR:
     language: en
     # Fallback model id when model_dir is empty (faster-whisper auto-fetch).
     model_size: small.en
-    # GPU-resident: container has `runtime: nvidia` + device reservations.
-    # ~250 MB VRAM at float16, fast enough for live voice. Falls back gracefully
-    # to CPU if CUDA isn't available — flip both lines to revert.
-    device: cuda
-    compute_type: float16
+    # GPU-resident on CUDA hosts; `make setup` flips these to cpu/int8 when
+    # the NVIDIA Docker runtime isn't available.
+    device: <ASR_DEVICE>
+    compute_type: <ASR_COMPUTE_TYPE>
     beam_size: 1
     cpu_threads: 0
     # Optional decoder bias — short list of canonical phrases improves

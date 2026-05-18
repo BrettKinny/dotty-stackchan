@@ -77,9 +77,12 @@ def _find_config(hint: Optional[str] = None) -> Optional[Path]:
         p = Path(hint).expanduser()
         return p if p.exists() else None
     for candidate in [Path.cwd(), *Path.cwd().parents]:
-        p = candidate / ".config.yaml"
-        if p.exists():
-            return p
+        # New: setup wizard renders to data/.config.yaml (matches the
+        # docker-compose bind mount). Legacy: pre-template root copy.
+        for rel in ("data/.config.yaml", ".config.yaml"):
+            p = candidate / rel
+            if p.exists():
+                return p
     return None
 
 

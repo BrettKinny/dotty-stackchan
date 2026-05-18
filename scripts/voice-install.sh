@@ -30,7 +30,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CATALOG_FILE="${SCRIPT_DIR}/voice-catalog.txt"
 PIPER_DIR="${REPO_DIR}/models/piper"
-CONFIG_FILE="${REPO_DIR}/.config.yaml"
+# Prefer the rendered config (matches the docker-compose bind mount);
+# fall back to the legacy root location for pre-template checkouts.
+if [[ -f "${REPO_DIR}/data/.config.yaml" ]]; then
+  CONFIG_FILE="${REPO_DIR}/data/.config.yaml"
+else
+  CONFIG_FILE="${REPO_DIR}/.config.yaml"
+fi
 HF_BASE="https://huggingface.co/rhasspy/piper-voices/resolve/main"
 
 # ---------- colors ----------
