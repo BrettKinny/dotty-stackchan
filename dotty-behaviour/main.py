@@ -23,11 +23,12 @@ from consumers import (
     SoundTurner,
     WakeWordTurner,
 )
-from dispatch import NarrativeLLMClient, XiaozhiAdminClient
+from dispatch import NarrativeLLMClient, VLMClient, XiaozhiAdminClient
 from logs import NdjsonWriter
 from perception import PerceptionState
 from routes import health as health_routes
 from routes import perception as perception_routes
+from routes import vision as vision_routes
 
 
 # Configure root logger early — uvicorn replaces handlers, this is just
@@ -58,15 +59,26 @@ async def lifespan(app: FastAPI):
     app.state.perception = state
 
     # Singleton dispatch clients — outbound HTTP to xiaozhi-server's
-    # /xiaozhi/admin/* surface and the llama-swap narrative LLM.
+    # /xiaozhi/admin/* surface, the llama-swap narrative LLM, and the
+    # OpenRouter VLM.
     xiaozhi = XiaozhiAdminClient(config.XIAOZHI_HOST, config.XIAOZHI_HTTP_PORT)
     narrative = NarrativeLLMClient(
         config.NARRATIVE_LLM_URL,
         config.NARRATIVE_MODEL,
         timeout_s=config.NARRATIVE_TIMEOUT_SEC,
     )
+    vlm = VLMClient(
+        config.VLM_API_URL,
+        config.VLM_MODEL,
+        api_key=config.VLM_API_KEY,
+        timeout_s=config.VISION_TIMEOUT_SEC,
+    )
     app.state.xiaozhi = xiaozhi
     app.state.narrative = narrative
+    app.state.vlm = vlm
+    # kid-mode default — flipped by the dashboard's kid-mode toggle
+    # (deferred slice). vision_explain reads this via get_kid_mode().
+    app.state.kid_mode = False
 
     # Filesystem prep — best-effort; missing bind mounts are an
     # operator error but the daemon should not crash before logging it.
@@ -177,3 +189,4 @@ app = FastAPI(
 )
 app.include_router(health_routes.router)
 app.include_router(perception_routes.router)
+app.include_router(vision_routes.router)

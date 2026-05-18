@@ -20,6 +20,17 @@ preempts neither voice model (both are in the `voice` matrix set).
 """
 
 from .llm import NarrativeLLMClient
+from .vlm import (
+    VLM_NETWORK_ERROR_SENTINEL,
+    VLM_OFFLINE_SENTINEL,
+    VLMClient,
+)
 from .xiaozhi import XiaozhiAdminClient
 
-__all__ = ["NarrativeLLMClient", "XiaozhiAdminClient"]
+__all__ = [
+    "NarrativeLLMClient",
+    "VLM_NETWORK_ERROR_SENTINEL",
+    "VLM_OFFLINE_SENTINEL",
+    "VLMClient",
+    "XiaozhiAdminClient",
+]

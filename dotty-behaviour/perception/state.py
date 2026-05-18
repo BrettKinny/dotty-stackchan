@@ -79,6 +79,15 @@ class PerceptionState:
         # writes it). Kept on the state object so the snapshot/dashboard
         # surface remains identical to bridge.py.
         self.last_user_line: dict[str, dict[str, Any]] = {}
+        # Per-device list of waiters polling /api/vision/latest. The
+        # /api/vision/explain handler signals every waiter for the
+        # device after the cache updates so concurrent callers (room-
+        # view + voice "what do you see") both wake.
+        self._vision_waiters: dict[str, list[asyncio.Event]] = {}
+        # Same shape for /api/audio/latest (when ported in a later
+        # slice — included now so the audio explain route can share
+        # the pattern).
+        self._audio_waiters: dict[str, list[asyncio.Event]] = {}
 
     # ------------------------------------------------------------------
     # Bus
@@ -235,6 +244,58 @@ class PerceptionState:
         if (wall_now - last_t) > ttl_sec:
             return None
         return identity
+
+    # ------------------------------------------------------------------
+    # Vision/audio explain waiter map — fan-out signal from the explain
+    # POST to every listener polling the latest endpoint for the same
+    # device. Concurrent callers (room-view + voice "what do you see")
+    # both wake; bridge.py's single-event pattern lost the first waiter
+    # when the second overwrote the entry.
+    # ------------------------------------------------------------------
+
+    def register_vision_waiter(self, device_id: str) -> asyncio.Event:
+        event = asyncio.Event()
+        self._vision_waiters.setdefault(device_id, []).append(event)
+        return event
+
+    def unregister_vision_waiter(
+        self, device_id: str, event: asyncio.Event
+    ) -> None:
+        waiters = self._vision_waiters.get(device_id)
+        if not waiters:
+            return
+        try:
+            waiters.remove(event)
+        except ValueError:
+            pass
+        if not waiters:
+            self._vision_waiters.pop(device_id, None)
+
+    def signal_vision_waiters(self, device_id: str) -> None:
+        for ev in self._vision_waiters.get(device_id, ()):
+            ev.set()
+
+    def register_audio_waiter(self, device_id: str) -> asyncio.Event:
+        event = asyncio.Event()
+        self._audio_waiters.setdefault(device_id, []).append(event)
+        return event
+
+    def unregister_audio_waiter(
+        self, device_id: str, event: asyncio.Event
+    ) -> None:
+        waiters = self._audio_waiters.get(device_id)
+        if not waiters:
+            return
+        try:
+            waiters.remove(event)
+        except ValueError:
+            pass
+        if not waiters:
+            self._audio_waiters.pop(device_id, None)
+
+    def signal_audio_waiters(self, device_id: str) -> None:
+        for ev in self._audio_waiters.get(device_id, ()):
+            ev.set()
 
     def annotate_for_introspection(
         self, devices: Iterable[str] | None = None, *, now: float | None = None

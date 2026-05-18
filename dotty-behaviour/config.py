@@ -162,3 +162,64 @@ DREAM_INSPIRATIONS: tuple[str, ...] = (
     "Slaughterhouse-Five",
     "Cat's Cradle",
 )
+
+# ---------------------------------------------------------------------------
+# Vision / VLM — OpenRouter-compatible chat completion that accepts an
+# image_url content block. Defaults mirror bridge.py so an existing
+# OpenRouter key continues to work.
+# ---------------------------------------------------------------------------
+VISION_MODEL: str = os.environ.get("VISION_MODEL", "google/gemini-2.0-flash-001")
+VISION_API_URL: str = os.environ.get(
+    "VISION_API_URL", "https://openrouter.ai/api/v1/chat/completions"
+)
+VISION_API_KEY: str = os.environ.get(
+    "VISION_API_KEY", os.environ.get("OPENROUTER_API_KEY", "")
+)
+VISION_TIMEOUT_SEC: float = _env_float("VISION_TIMEOUT", 15.0)
+
+# Optional split — point the VLM at a local model (e.g. Ollama
+# Qwen2.5-VL) while VISION_API_URL still serves the cloud-routed
+# narrative LLM. Defaults to the legacy VISION_* values.
+VLM_MODEL: str = os.environ.get("VLM_MODEL", VISION_MODEL)
+VLM_API_KEY: str = os.environ.get("VLM_API_KEY", VISION_API_KEY)
+VLM_API_URL: str = os.environ.get("VLM_API_URL", VISION_API_URL)
+
+# How long an idle-photo room_view cache entry is fresh enough that
+# subsequent triggers within the window skip the VLM call.
+DOTTY_IDLE_VISION_COOLDOWN_SEC: float = _env_float(
+    "DOTTY_IDLE_VISION_COOLDOWN_SEC", 120.0
+)
+# Grace window inside a fresh `talk` state transition during which a
+# room_view photo is still allowed (kickoff capture). Subsequent
+# face_detected events inside the same turn arrive >grace seconds
+# after the transition and stay gated.
+ROOM_VIEW_TALK_KICKOFF_GRACE_SEC: float = _env_float(
+    "ROOM_VIEW_TALK_KICKOFF_GRACE_SEC", 5.0
+)
+
+
+def build_vision_system_prompt(kid: bool) -> str:
+    """Vision system prompt — toggle on kid_mode for child-safe phrasing.
+
+    Identical wording to bridge.py's `_build_vision_system_prompt` so a
+    photo described pre- vs post-cutover comes out the same.
+    """
+    return (
+        "You are describing a photo taken by a small robot's camera "
+        "(low resolution). "
+        + (
+            "Describe what you see in simple, clear language suitable "
+            "for a young child. "
+            "Focus on objects, colors, and actions. Do NOT identify or "
+            "name specific people. "
+            "If the image contains anything inappropriate for young "
+            "children, say only 'I see something I am not sure about' "
+            "without further detail. "
+            if kid
+            else
+            "Describe what you see clearly and concisely. "
+            "Focus on objects, people, colors, and actions. "
+        )
+        + "If the image is blurry or unclear, describe what you can "
+        "make out. Keep your description to 2-3 sentences."
+    )
