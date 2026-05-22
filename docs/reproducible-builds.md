@@ -73,7 +73,8 @@ The `firmware-release.yml` workflow fires on `fw-v*` tags and:
 1. Checks out with `submodules: recursive`
 2. Fetches upstream dependencies via `fetch_repos.py`
 3. Builds with `idf.py build` inside `espressif/idf:v5.5.4`
-4. Generates `SHA256SUMS.txt` over the three release binaries
+4. Stages the bootloader, partition table, and face-detect model next to
+   the flat binaries, then generates `SHA256SUMS.txt` over all six
 5. Attaches binaries + checksums to the GitHub Release
 
 GPG signing of release artifacts is scaffolded (see `docs/signed-releases.md`)
