@@ -14,6 +14,7 @@ source-of-truth for re-verification.
 
 | Resource | URL | What's there |
 |---|---|---|
+| M5Stack StackChan product page | https://docs.m5stack.com/en/StackChan | Canonical kit-level reference. Part numbers, I2C addresses, pin map, servo angle limits, battery (550 mAh), assembled dims, in-box remote. |
 | M5Stack StackChan README | https://github.com/m5stack/StackChan | Our firmware codebase. Body spec (servos, LEDs, NFC, IR, touch, battery). |
 | M5Stack CoreS3 datasheet | https://docs.m5stack.com/en/core/CoreS3 | SoC, memory, display, camera, IMU, PMU, audio codec part numbers. |
 | meganetaaan/stack-chan (original) | https://github.com/meganetaaan/stack-chan | TypeScript/Moddable JS origin project — **we don't run this**, but it's the lineage. |
@@ -89,4 +90,4 @@ Always verify licensing on the upstream page before redistribution — this tabl
 
 - [README.md](./README.md) — docs index.
 
-Last verified: 2026-05-17.
+Last verified: 2026-05-18.

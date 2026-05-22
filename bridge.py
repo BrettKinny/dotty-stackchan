@@ -1704,6 +1704,44 @@ _PERCEPTION_STALE_THRESHOLD_S: float = 30.0  # idle > 30 s → stale
 _PERCEPTION_RECENT_MAX: int = 20
 _perception_recent_events: dict[str, "collections.deque[dict]"] = {}
 
+# #69 — rolling sound-localizer `balance` samples for the dashboard State
+# tile sparkline. sound_event fires ~1 Hz while there's sound; 90 samples
+# comfortably spans the 60 s window the sparkline renders.
+_SOUND_BALANCE_WINDOW_SEC: float = 60.0
+_sound_balance_history: "collections.deque[tuple[float, float]]" = (
+    collections.deque(maxlen=90)
+)
+
+
+def _sound_balance_series() -> list[float]:
+    """Sound-localizer `balance` samples from the last
+    `_SOUND_BALANCE_WINDOW_SEC`, oldest→newest — the dashboard sparkline
+    source (#69). Empty when no sound_event has landed recently."""
+    cutoff = time.time() - _SOUND_BALANCE_WINDOW_SEC
+    return [bal for ts, bal in _sound_balance_history if ts >= cutoff]
+
+
+# #74 — vision-capture failures for the dashboard aggregator. (ts, kind)
+# tuples; the getter windows to the last hour and counts by error kind.
+_vision_failures: "collections.deque[tuple[float, str]]" = collections.deque(
+    maxlen=200
+)
+
+
+def _vision_failure_record(kind: str) -> None:
+    """Record a vision-capture failure for the dashboard aggregator (#74)."""
+    _vision_failures.append((time.time(), str(kind or "unknown")))
+
+
+def _vision_failures_last_hour() -> dict[str, int]:
+    """Vision-capture failures in the last hour, counted by error kind."""
+    cutoff = time.time() - 3600.0
+    counts: dict[str, int] = {}
+    for ts, kind in _vision_failures:
+        if ts >= cutoff:
+            counts[kind] = counts.get(kind, 0) + 1
+    return counts
+
 
 def _perception_subscribe() -> asyncio.Queue:
     q: asyncio.Queue = asyncio.Queue(maxsize=200)
@@ -1799,6 +1837,9 @@ def _update_perception_state(device_id: str, name: str,
         state["last_sound_dir"] = data.get("direction")
         state["last_sound_t"] = ts
         state["last_sound_energy"] = data.get("energy")
+        bal = data.get("balance")
+        if isinstance(bal, (int, float)):
+            _sound_balance_history.append((time.time(), float(bal)))
     elif name == "state_changed":
         # Phase 4 — track the firmware's high-level State so consumers can gate
         # behaviour on it (e.g. greeter skips during security; ambient awareness
@@ -3239,6 +3280,21 @@ def _call_narrative_llm(
         return None
 
 
+# `_call_vision_api` never raises — it swallows request/timeout errors and
+# returns one of these sentinel strings, so the upstream LLM receives an
+# explicit "vision is unavailable" instruction instead of confabulating a
+# description. The sentinels double as the dashboard failure-aggregator's
+# classification keys — see `_classify_vision_result` (#74).
+_VISION_ERR_NO_KEY = (
+    "ERROR: my camera is offline right now. Tell the user the vision "
+    "system is unavailable and do not guess at what the photo shows."
+)
+_VISION_ERR_API = (
+    "ERROR: the vision service didn't respond. Tell the user you "
+    "couldn't process the photo and do not guess at what it shows."
+)
+
+
 def _call_vision_api(
     b64_image: str, question: str, *,
     system_prompt: str = VISION_SYSTEM_PROMPT,
@@ -3254,10 +3310,7 @@ def _call_vision_api(
             "VLM call aborted — VLM_API_KEY/VISION_API_KEY/OPENROUTER_API_KEY "
             "all unset; set one in zeroclaw-bridge.service Environment="
         )
-        return (
-            "ERROR: my camera is offline right now. Tell the user the vision "
-            "system is unavailable and do not guess at what the photo shows."
-        )
+        return _VISION_ERR_NO_KEY
     payload = {
         "model": VLM_MODEL,
         "messages": [
@@ -3290,10 +3343,24 @@ def _call_vision_api(
         return resp.json()["choices"][0]["message"]["content"].strip()
     except Exception:
         log.exception("vision API call failed")
-        return (
-            "ERROR: the vision service didn't respond. Tell the user you "
-            "couldn't process the photo and do not guess at what it shows."
-        )
+        return _VISION_ERR_API
+
+
+def _classify_vision_result(text: str | None) -> str | None:
+    """Map a `_call_vision_api` return value to a dashboard failure kind
+    (#74), or None when the call succeeded.
+
+    `_call_vision_api` swallows its own request/timeout exceptions and
+    returns an `ERROR:` sentinel *string* rather than raising — so a dead
+    or unconfigured vision service reaches `vision_explain` as an ordinary
+    return. Without this the aggregator would only ever see the rare
+    `err_kind="exception"` and miss the most common real failure mode:
+    the VLM endpoint not responding."""
+    if text == _VISION_ERR_NO_KEY:
+        return "camera_offline"   # VLM API key unset — a config error
+    if text == _VISION_ERR_API:
+        return "vision_api"       # request failed / non-2xx / bad body
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -3594,12 +3661,19 @@ async def vision_explain(
         for k in [k for k, v in _vision_cache.items() if now - v["timestamp"] > VISION_CACHE_TTL_SEC]:
             _vision_cache.pop(k, None)
 
+        # A failed VLM call returns an `ERROR:` sentinel string rather
+        # than raising (see `_call_vision_api`), so classify the final
+        # description for the dashboard failure aggregator (#74) —
+        # otherwise the most common failure mode never reaches the count.
+        err_kind = _classify_vision_result(description)
         log.info("vision result device=%s desc=%s", device_id, description[:120])
         return {"description": description}
     except Exception:
         err_kind = "exception"
         raise
     finally:
+        if err_kind:
+            _vision_failure_record(err_kind)
         if _METRICS_AVAILABLE:
             _safe_metric(
                 dotty_request_duration_seconds.labels(
@@ -5359,6 +5433,8 @@ if _configure_dashboard is not None:
         memory_redact=_dashboard_memory_redact,
         identity_display_name=_identity_display_name,
         last_user_line_getter=_get_last_user_line,
+        sound_balance_getter=_sound_balance_series,
+        vision_failures_getter=_vision_failures_last_hour,
     )
 
 
