@@ -4242,11 +4242,35 @@ async def _voice_tool_play_song(args: dict, session_id: str) -> str:
     return f"(couldn't play {match}: {err})"
 
 
+async def _voice_tool_remember_person(args: dict, session_id: str) -> str:
+    """#53 escalate handler — store a durable fact about a named household
+    member. `args` carries the 4B's `name` + `fact`. The household-registry
+    id is the person's name lowercased (the `person:<id>` namespace
+    convention), so `name` is used directly as the person_id. Returns the
+    same confirmation strings as the pi-runtime `remember_person` tool so
+    the second model call can phrase the spoken reply consistently."""
+    name = (args.get("name") or args.get("person_id") or "").strip()
+    if not name:
+        return "(no person specified)"
+    if not (args.get("fact") or "").strip():
+        return "(empty fact)"
+    valid, stored, needs_review = await _person_memory_store(
+        name, args.get("fact") or "", session_id or None,
+    )
+    if not valid or not stored:
+        return "(remember failed)"
+    return (
+        "(saved — a grown-up will check that)" if needs_review
+        else f"(remembered about {name})"
+    )
+
+
 _VOICE_TOOLS = {
     "memory_lookup": _voice_tool_memory_lookup,
     "think_hard": _voice_tool_think_hard,
     "take_photo": _voice_tool_take_photo,
     "play_song": _voice_tool_play_song,
+    "remember_person": _voice_tool_remember_person,
 }
 
 
@@ -4362,6 +4386,39 @@ def _person_memory_needs_review(person_id: str) -> bool:
     return (person.relation or "").strip().lower() not in _ADULT_RELATIONS
 
 
+async def _person_memory_store(
+    person_id: str, fact: str, session_id: str | None,
+) -> tuple[bool, bool, bool]:
+    """#53 gate + store for a declared per-person fact. Runs the kid-safety
+    gate (`_person_memory_needs_review`), writes to `person:<id>` or the
+    `person_pending:<id>` review queue accordingly, and returns
+    `(valid, stored, needs_review)`. `valid` is False when `person_id` or
+    `fact` is empty after normalisation. Shared by the
+    `/api/voice/remember_person` endpoint and the tier1slim escalate tool
+    handler so both write paths apply an identical gate decision."""
+    pid = (person_id or "").strip().lower()
+    fact = (fact or "").strip()[:300]
+    if not pid or not fact:
+        return False, False, False
+    needs_review = _person_memory_needs_review(pid)
+    namespace = (
+        f"person_pending:{pid}" if needs_review else f"person:{pid}"
+    )
+    stored = await asyncio.to_thread(
+        _voice_memory_store_blocking,
+        content=fact, category="core", namespace=namespace,
+        importance=0.7, session_id=session_id,
+    )
+    if stored:
+        log.info(
+            "person memory %s person=%s review=%s",
+            "queued" if needs_review else "stored", pid, needs_review,
+        )
+    else:
+        log.warning("person memory store failed person=%s", pid)
+    return True, stored, needs_review
+
+
 @app.post("/api/voice/remember_person")
 async def voice_remember_person(payload: VoiceRememberPersonIn):
     """Store a declared fact about a specific household member (#53).
@@ -4373,27 +4430,11 @@ async def voice_remember_person(payload: VoiceRememberPersonIn):
     so the voice layer can phrase its confirmation ("I'll remember
     that" vs "I'll check with a grown-up first"). Facts routed to
     review are never loaded into a prompt until approved."""
-    person_id = (payload.person_id or "").strip().lower()
-    fact = (payload.fact or "").strip()[:300]
-    if not person_id or not fact:
+    valid, stored, needs_review = await _person_memory_store(
+        payload.person_id, payload.fact, payload.session_id,
+    )
+    if not valid:
         return {"ok": False, "pending_review": False, "error": "empty"}
-    needs_review = _person_memory_needs_review(person_id)
-    namespace = (
-        f"person_pending:{person_id}" if needs_review
-        else f"person:{person_id}"
-    )
-    stored = await asyncio.to_thread(
-        _voice_memory_store_blocking,
-        content=fact, category="core", namespace=namespace,
-        importance=0.7, session_id=payload.session_id,
-    )
-    if stored:
-        log.info(
-            "person memory %s person=%s review=%s",
-            "queued" if needs_review else "stored", person_id, needs_review,
-        )
-    else:
-        log.warning("person memory store failed person=%s", person_id)
     return {"ok": stored, "pending_review": needs_review}
 
 

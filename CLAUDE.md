@@ -27,7 +27,7 @@ Two voice-LLM paths coexist (selected via `selected_module.LLM` in `data/.config
                                                   │                ▼
                                   JSON-RPC 2.0 / ACP over stdio    POST /api/voice/escalate → zeroclaw-bridge
                                                   ▼                       │
-                                  ZeroClaw (the brain)  ◄─────────────────┘  (think_hard / memory_lookup / take_photo / play_song)
+                                  ZeroClaw (the brain)  ◄─────────────────┘  (think_hard / memory_lookup / take_photo / play_song / remember_person)
 ```
 
 Smart-mode flips the backend model: legacy path rewrites `~/.zeroclaw/config.toml` and restarts the bridge daemon; Tier1Slim path hot-swaps the live provider via `/xiaozhi/admin/set-tier1slim-model`.
@@ -66,7 +66,7 @@ This repo uses placeholders (`<XIAOZHI_HOST>`, `<ZEROCLAW_HOST>`, `<ZEROCLAW_USE
 
 - `.config.yaml` (repo root; deployed to the Docker host as `data/.config.yaml`) — the xiaozhi-server override config. Never overwrite wholesale on upgrades; merge keys.
 - `custom-providers/zeroclaw/zeroclaw.py` — custom LLM provider that proxies xiaozhi calls to the ZeroClaw agent on the bridge host. The legacy primary voice path; still selected when `selected_module.LLM = ZeroClawLLM`.
-- `custom-providers/tier1_slim/tier1_slim.py` — **two-tier voice LLM provider** (added in `b73f583`). Runs a small/fast model (`qwen3.5:4b` against llama-swap by default) for inner-loop chitchat and escalates tool calls (`memory_lookup`, `think_hard`, `take_photo`, `play_song`) to the bridge via `POST /api/voice/escalate`. Skips the bridge for plain text turns, so chitchat latency drops well under 1 s. `set_runtime()` lets the bridge hot-swap the model/url/api_key in flight (no daemon restart) — driven by `/xiaozhi/admin/set-tier1slim-model` for smart-mode flips. Selected when `selected_module.LLM = Tier1Slim`.
+- `custom-providers/tier1_slim/tier1_slim.py` — **two-tier voice LLM provider** (added in `b73f583`). Runs a small/fast model (`qwen3.5:4b` against llama-swap by default) for inner-loop chitchat and escalates tool calls (`memory_lookup`, `think_hard`, `take_photo`, `play_song`, `remember_person`) to the bridge via `POST /api/voice/escalate`. Skips the bridge for plain text turns, so chitchat latency drops well under 1 s. `set_runtime()` lets the bridge hot-swap the model/url/api_key in flight (no daemon restart) — driven by `/xiaozhi/admin/set-tier1slim-model` for smart-mode flips. Selected when `selected_module.LLM = Tier1Slim`.
 - `custom-providers/edge_stream/edge_stream.py` — custom streaming TTS provider. Mounted similarly.
 - `custom-providers/openai_compat/openai_compat.py` — OpenAI-compatible LLM provider (alternative to ZeroClaw / Tier1Slim).
 - `custom-providers/piper_local/piper_local.py` — local Piper TTS provider (offline alternative to EdgeTTS).

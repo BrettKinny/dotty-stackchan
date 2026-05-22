@@ -110,6 +110,27 @@ TOOLS = [
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "remember_person",
+            "description": (
+                "Save a durable fact about a specific NAMED person — a "
+                "preference, relationship, or lasting detail. Use when the "
+                "user tells you something worth keeping about a particular "
+                "person. For a general fact not tied to one named person, "
+                "do NOT use this — reply normally with a [REMEMBER: ...] marker."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "The person the fact is about."},
+                    "fact": {"type": "string", "description": "The fact to remember, as one short sentence."},
+                },
+                "required": ["name", "fact"],
+            },
+        },
+    },
 ]
 
 # Per-tool filler phrases. Spoken via the TTS pipeline while the tool runs.
@@ -120,6 +141,7 @@ TOOL_FILLERS = {
     "think_hard": None,
     "take_photo": "😮 Let me have a look.",
     "play_song": None,
+    "remember_person": None,
 }
 
 
