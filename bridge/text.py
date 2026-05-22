@@ -15,6 +15,8 @@ import logging
 import os
 import re
 import sys
+import time
+from collections import deque
 from pathlib import Path
 
 # Defensive sibling-import shim so this module is standalone-importable
@@ -122,6 +124,21 @@ _CF_TIERS: list[tuple[re.Pattern, str, int]] = [
     (_CF_TIER_REDIRECT_RE, "redirect", logging.WARNING),
 ]
 
+# #72 — in-memory ring of recent content-filter hits, surfaced at
+# /ui/safety/recent. In-memory ONLY: the ring is lost on restart and is
+# never written to disk. The matched term recorded here is no more
+# exposed than the `content-filter-hit` log line content_filter() already
+# emits.
+_CF_RECENT_MAX = 20
+_cf_recent: "deque[dict]" = deque(maxlen=_CF_RECENT_MAX)
+
+
+def recent_content_filter_hits() -> list[dict]:
+    """Recent content-filter hits, newest first — the /ui/safety/recent
+    dashboard source (#72). Each entry has: ts, tier, rule (the matched
+    term), prefix (first 8 chars of the filtered text)."""
+    return list(reversed(_cf_recent))
+
 
 def content_filter(text: str) -> str | None:
     """Return a safe replacement if blocked content is found, else None.
@@ -139,6 +156,12 @@ def content_filter(text: str) -> str | None:
                 "content-filter-hit tier=%s pattern=%r pos=%d len=%d",
                 tier, match.group(), match.start(), len(text),
             )
+            _cf_recent.append({
+                "ts": time.time(),
+                "tier": tier,
+                "rule": match.group(),
+                "prefix": text[:8],
+            })
             if dotty_content_filter_hits_total is not None:
                 try:
                     dotty_content_filter_hits_total.labels(tier=tier).inc()
