@@ -12,8 +12,9 @@
 # dashboard's host-status probes work without DNS gymnastics.
 #
 # Port 8090 (not the bridge's 8080) — llama-swap owns 8080 on Unraid.
-# xiaozhi-server's VISION_BRIDGE_URL must move from
-# http://<ZEROCLAW_HOST>:8080 → http://localhost:8090 at cutover.
+# xiaozhi-server's VISION_BRIDGE_URL must point to
+# http://<XIAOZHI_HOST>:8090 (the Unraid LAN IP — loopback works only
+# if xiaozhi-server is also on host networking).
 
 services:
   dotty-behaviour:

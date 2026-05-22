@@ -27,10 +27,10 @@ modifications — please open an issue first to discuss the approach.
   deployment.
 
 - **Check for leaked placeholders or real values:**
-  - Files in this repo must use placeholders (`<XIAOZHI_HOST>`, `<ZEROCLAW_HOST>`,
-    `<ZEROCLAW_USER>`, `<ROBOT_NAME>`, etc.) everywhere a real IP, hostname,
-    username, or filesystem path would appear. See the "Configuring for your
-    environment" table in `README.md` for the full list.
+  - Files in this repo must use placeholders (`<XIAOZHI_HOST>`, `<XIAOZHI_USER>`,
+    `<ROBOT_NAME>`, etc.) everywhere a real IP, hostname, username, or filesystem
+    path would appear. See the "Configuring for your environment" table in
+    `README.md` for the full list.
   - **Never commit real IPs, hostnames, usernames, API keys, or filesystem
     paths.** If your diff introduces a literal IP address or path that isn't
     a well-known default (like `127.0.0.1` or a standard port number), it
@@ -46,8 +46,9 @@ Changes tend to fall into one of these areas:
 
 | Area | Files | Notes |
 |---|---|---|
-| **Voice pipeline (xiaozhi-server)** | `docker-compose.yml`, `.config.yaml`, custom providers (`zeroclaw.py`, `edge_stream.py`, `fun_local.py`, `piper_local.py`) | These run inside the xiaozhi-server Docker container on whatever Linux Docker host you've chosen. |
-| **Bridge** | `bridge.py`, `zeroclaw-bridge.service`, `bridge/` | Runs on the ZeroClaw host. The `bridge/` directory contains the Dockerfile, compose file, and deployment docs. |
+| **Voice pipeline (xiaozhi-server)** | `docker-compose.yml`, `.config.yaml`, custom providers (`pi_voice/`, `tier1_slim/`, `edge_stream.py`, `fun_local.py`, `piper_local.py`) | These run inside the xiaozhi-server Docker container on the Docker host. |
+| **Brain / behaviour** | `dotty-pi/`, `dotty-pi-ext/`, `dotty-behaviour/` | Docker containers on the same host as xiaozhi-server. `dotty-pi` is the pi agent (voice brain); `dotty-behaviour` is the perception/greeter service. |
+| **Admin dashboard** | `bridge.py`, `bridge/` | FastAPI service on port 8080, running as a container on the Docker host. |
 | **Documentation** | `README.md`, `SETUP.md`, `docs/`, `session-prompt.md` | Docs under `docs/` follow conventions listed in `docs/README.md` (TL;DR at top, tables over prose, freshness footer). |
 | **CI** | `.github/workflows/` | Currently just the bridge Docker image build. |
 
@@ -67,8 +68,7 @@ forked and configured per-deployment. Every value that varies between
 deployments must use a placeholder:
 
 - `<XIAOZHI_HOST>`, `<XIAOZHI_USER>`, `<XIAOZHI_HOSTNAME>`, `<XIAOZHI_PATH>`
-- `<ZEROCLAW_HOST>`, `<ZEROCLAW_USER>`, `<ZEROCLAW_HOME>`, `<BRIDGE_PATH>`
-- `<ZEROCLAW_BIN>`, `<ZEROCLAW_CFG>`
+- `<UNRAID_HOST>`
 - `<YOUR_NAME>`, `<ROBOT_NAME>`
 
 Port numbers (`8000`, `8003`, `8080`, `18789`, `42617`) are product-generic
@@ -90,11 +90,11 @@ only relevant for a future version, note that in the PR description.
 
 ## Safety-related changes
 
-The child-safety enforcement layer (prompt sandwich in `bridge.py`, audience
-framing in `.config.yaml`) is load-bearing. If your change touches the system
-prompt, turn suffix, or emoji enforcement logic, please describe your
-red-team testing in the PR description. See the commit history for examples
-of the red-team battery format.
+The child-safety enforcement layer (persona prompt sandwich, audience framing
+in `.config.yaml`) is load-bearing. If your change touches the system prompt,
+turn suffix, or emoji enforcement logic, please describe your red-team testing
+in the PR description. See the commit history for examples of the red-team
+battery format.
 
 ## Where to ask questions
 

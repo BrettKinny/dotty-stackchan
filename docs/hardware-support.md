@@ -55,7 +55,7 @@ What will likely **not** work without board-specific adaptation:
 - LED patterns (hardcoded to the kit's 12-LED layout).
 - MCP tools that touch kit-specific peripherals (head yaw/pitch, LED color, NFC, IR).
 
-If you want to run this stack on a different ESP32-S3 board, you are signing up for firmware-level porting work. The server-side infrastructure (xiaozhi-esp32-server, bridge, ZeroClaw) doesn't care what board is on the other end of the WebSocket.
+If you want to run this stack on a different ESP32-S3 board, you are signing up for firmware-level porting work. The server-side infrastructure (xiaozhi-esp32-server, bridge, dotty-pi, dotty-behaviour) doesn't care what board is on the other end of the WebSocket.
 
 ### Out of scope
 

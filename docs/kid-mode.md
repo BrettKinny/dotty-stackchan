@@ -31,7 +31,7 @@ asks). Only the child-specific rules (4-9) are removed.
 
 Both the bridge's `POST /admin/kid-mode` endpoint and the dashboard toggle persist the new value and call `_apply_kid_mode(enabled)`, which atomically re-binds every kid-mode-derived module global (`KID_MODE`, `VISION_SYSTEM_PROMPT`, `MCP_TOOL_DENYLIST`, `VOICE_TURN_SUFFIX`, `VOICE_TURN_SUFFIX_SHORT`) in a single store-global pass. Readers see either the old or new value, never a torn intermediate, and the cost per turn is unchanged. **No daemon restart is required** to flip kid-mode at runtime.
 
-The xiaozhi-server side of kid-mode lives in the active LLM provider's persona / suffix. For `Tier1Slim`, `KID_MODE` is read at module import and baked into `_TURN_SUFFIX`; a flip there does currently require a container restart to take effect on Tier1Slim's side (the bridge side rebinds instantly, but the suffix already loaded into the live `Tier1Slim` instance is unchanged). For `ZeroClawLLM`, the suffix is generated per-turn by the bridge so the flip lands on the very next turn with no restart at all.
+The xiaozhi-server side of kid-mode lives in the active LLM provider's persona / suffix. For `Tier1Slim`, `KID_MODE` is read at module import and baked into `_TURN_SUFFIX`; a flip there does currently require a container restart to take effect on Tier1Slim's side (the bridge side rebinds instantly, but the suffix already loaded into the live `Tier1Slim` instance is unchanged). For `PiVoiceLLM`, the persona is loaded per-session by the `dotty-pi` agent, so the flip lands on the very next turn with no restart at all.
 
 ## Guardrail details
 
@@ -47,12 +47,12 @@ speaker. Each layer reinforces the same rules so that a failure in one layer
 is caught by the next.
 
 > **Provider-dependent layering.** The exact layering depends on which LLM provider is active:
-> - **`Tier1Slim`** (current default) — Layer 1 is `personas/dotty_voice.md`; Layer 2 is **skipped** (Tier1Slim deliberately discards xiaozhi's top-level `prompt:` because the 4 B chat template only honours one system message); Layer 3 is `_TURN_SUFFIX` appended per-turn by Tier1Slim itself (read from `build_turn_suffix(KID_MODE)` at module import). Layer 3b/3c only apply to escalated tool calls that pass through the bridge.
-> - **`ZeroClawLLM`** (legacy) — all three layers fire on every turn as described below.
+> - **`PiVoiceLLM`** (current default) — Layer 1 is `personas/dotty_voice.md` (loaded by the `dotty-pi` agent); Layer 2 is the `prompt:` block in `.config.yaml` injected by xiaozhi-server; Layer 3 enforcement (suffix sandwich, emoji fallback, content filter) was part of the retired ZeroClaw bridge and is not present on the `PiVoiceLLM` path — Layers 1 and 2 are load-bearing.
+> - **`Tier1Slim`** (alternate) — Layer 1 is `personas/dotty_voice.md`; Layer 2 is **skipped** (Tier1Slim deliberately discards xiaozhi's top-level `prompt:` because the 4 B chat template only honours one system message); Layer 3 is `_TURN_SUFFIX` appended per-turn by Tier1Slim itself (read from `build_turn_suffix(KID_MODE)` at module import). Layer 3b/3c only apply to escalated tool calls that pass through the bridge.
 
-### Layer 1 -- ZeroClaw Agent Prompt (ZeroClaw host)
+### Layer 1 -- Agent Persona Prompt (dotty-pi container)
 
-The ZeroClaw agent's own persona prompt sets the baseline: stay cheerful,
+The `dotty-pi` agent's persona prompt (`personas/dotty_voice.md`) sets the baseline: stay cheerful,
 age-appropriate, begin every reply with an emoji. This is the "inner" system
 prompt that the LLM sees at the top of its context.
 
@@ -73,10 +73,11 @@ prompt: |
     markdown, no code blocks.
 ```
 
-### Layer 3 -- Bridge Prefix + Suffix Sandwich (ZeroClaw host, `bridge.py`)
+### Layer 3 -- Bridge Prefix + Suffix Sandwich (`bridge.py` / `Tier1Slim`)
 
-This is the strongest enforcement layer. Every turn on the `stackchan`
-channel is wrapped in a prefix and a suffix before being sent to the LLM:
+> **Note:** This layer applied to the retired `ZeroClawLLM` path and the `Tier1Slim` alternate provider. On the current default `PiVoiceLLM` path, Layers 1 and 2 are the active enforcement layers.
+
+On the `Tier1Slim` path, every turn is wrapped in a prefix and a suffix before being sent to the LLM:
 
 ```
 VOICE_TURN_PREFIX + context + user_message + suffix
@@ -88,16 +89,12 @@ constraints in the suffix are the last thing the model reads before
 generating its reply, making them the hardest to override.
 
 **Per-session suffix caching.** The full ~600-token suffix
-(`VOICE_TURN_SUFFIX`) is sent on the first turn of each ACP session.
+(`VOICE_TURN_SUFFIX`) is sent on the first turn of each session.
 Subsequent turns receive a shorter reminder
 (`VOICE_TURN_SUFFIX_SHORT`) that explicitly restates the English-only,
 emoji-leader, and child-safe constraints.
 This saves ~550 tokens per turn while the full rules remain in the LLM's
-conversation history from turn 0. Sessions rotate on idle timeout (5 min),
-turn count (50), or wall-clock age (30 min), at which point the full suffix
-is re-sent. The suffix choice is made inside `app_lock` (via a `prepare`
-callback on `ACPClient.prompt()`) to avoid a TOCTOU race where session
-rotation could send a short suffix on a fresh session's first turn.
+conversation history from turn 0.
 
 **Why a suffix, not just a system prompt?** System prompts are seen once and
 can be diluted by long conversations. The suffix is re-injected on every
@@ -236,12 +233,10 @@ The emoji that begins each reply is not decorative -- the StackChan firmware
 parses it into a facial expression on the robot's screen. If the emoji is
 missing, the face stays blank. Three layers enforce it:
 
-1. **ZeroClaw agent prompt** -- tells the model to begin with an emoji.
+1. **Agent persona prompt** (`personas/dotty_voice.md`, loaded by `dotty-pi`) -- tells the model to begin with an emoji.
 2. **xiaozhi-server system prompt** (`.config.yaml` `prompt:` block) --
    repeats the rule with the exact emoji set.
-3. **`_ensure_emoji_prefix` in `bridge.py`** -- programmatic fallback. If
-   the first non-whitespace character is not one of the nine allowed emojis,
-   the neutral face `😐` is prepended.
+3. **`_ensure_emoji_prefix` in `bridge.py`** -- programmatic fallback available on the `Tier1Slim` path. On the default `PiVoiceLLM` path, Layers 1 and 2 are load-bearing.
 
 Allowed emojis and their face mappings:
 
@@ -271,7 +266,7 @@ than exposing raw error text or going silent:
 | Failure mode | Response |
 |---|---|
 | LLM timeout | `😐 I'm thinking too slowly right now, try again.` |
-| ZeroClaw binary missing | `😐 My AI brain is offline.` |
+| dotty-pi container unavailable | `😐 My AI brain is offline.` |
 | Any other exception | `😐 Something went wrong, please try again.` |
 | Empty LLM response | `😐 (no response)` |
 
@@ -310,7 +305,7 @@ inappropriate content through).
 | Fail-safe error responses | `bridge.py` | Exception handlers in both endpoint handlers |
 | Allowed emoji list | `bridge.py` | `ALLOWED_EMOJIS`, `FALLBACK_EMOJI` |
 | xiaozhi system prompt | `.config.yaml` | Top-level `prompt:` block |
-| LLM provider system prompt | `.config.yaml` | `LLM.ZeroClawLLM.system_prompt` |
+| LLM provider system prompt | `personas/dotty_voice.md` | loaded by `dotty-pi` agent |
 
 ---
 
@@ -345,7 +340,7 @@ refuse+redirect, refuse+log, and refuse+alert.
 
 The current system uses the same LLM for all channels. A planned improvement
 is to route the `stackchan` channel to a model with stronger built-in safety
-(e.g., Claude Haiku) via ZeroClaw's model routing, as an additional layer.
+(e.g., Claude Haiku), as an additional layer.
 
 ---
 
@@ -353,13 +348,7 @@ is to route the `stackchan` channel to a model with stronger built-in safety
 
 ### Modifying the Topic Blocklist
 
-Edit `VOICE_TURN_SUFFIX` in `bridge.py` (lines 25-46). The blocked
-topics are in rule 5, as a bulleted list. Add or remove entries, then
-restart the bridge service:
-
-```bash
-systemctl restart zeroclaw-bridge
-```
+Edit `VOICE_TURN_SUFFIX` in `bridge.py` (lines 25-46) for the `Tier1Slim` path, or edit rule 5 in `personas/dotty_voice.md` for the `PiVoiceLLM` path. After editing, restart the relevant container.
 
 ### Changing the Self-Harm Response
 

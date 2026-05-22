@@ -1,10 +1,10 @@
 # Claude Code Session Prompt — StackChan Infrastructure Setup
 
-> Historical bootstrap prompt. Kept for reference — describes how this
-> infra was originally stood up across two remote machines. Not all of it
-> matches the current implementation (see `README.md` and `SETUP.md` for
-> current truth), and the firmware-provisioning steps in particular now
-> require the build-from-source flow in `SETUP.md`.
+> Historical bootstrap prompt. Describes how this infra was originally stood
+> up. Updated after the 2026-05-19 cutover (#36) which retired the separate
+> ZeroClaw/RPi host and consolidated all services onto a single Docker host.
+> The firmware-provisioning steps still require the build-from-source flow in
+> `SETUP.md`.
 
 Paste this into your terminal:
 
@@ -16,75 +16,85 @@ claude --prompt-file ./session-prompt.md
 
 ## Prompt content (save as `session-prompt.md`):
 
-I need you to set up infrastructure across two remote machines for an M5Stack StackChan robot. You'll be SSHing from this workstation to both targets via Tailscale. Read the CLAUDE.md in this directory first for full architecture context.
+I need you to set up infrastructure on a single Linux Docker host for an M5Stack StackChan robot. You'll be SSHing from this workstation to the target via Tailscale. Read the CLAUDE.md in this directory first for full architecture context.
 
 ## What you're building
 
-A self-hosted voice pipeline that routes StackChan's audio through a xiaozhi-esp32-server (ASR + TTS) running on a Linux Docker host, with all AI processing forwarded to a ZeroClaw instance running on a separate host.
+A self-hosted voice pipeline with four Docker containers on one host:
+
+1. **xiaozhi-esp32-server** — ASR (FunASR SenseVoiceSmall) + TTS (Piper/EdgeTTS) + WebSocket voice gateway for StackChan.
+2. **dotty-pi** — the pi coding agent: the voice-tool brain. Runs `qwen3.5:4b` on a local llama-swap instance; invoked via `docker exec -i` by the `PiVoiceLLM` provider. See `dotty-pi/README.md`.
+3. **dotty-behaviour** — perception event bus, ambient consumers, greeter, calendar. FastAPI on `:8090`. See `dotty-behaviour/README.md` and `scripts/deploy-behaviour.sh`.
+4. **bridge.py** (admin dashboard) — HTMX admin UI on `:8080`. Runs as a container on the same host.
+
+All four containers run on the same machine (the Docker host). There is no separate brain host or RPi.
 
 ## Discovery steps (do these first)
 
-1. Run `tailscale status` (if you use Tailscale) to find the hostnames and IPs for both the Docker host and the ZeroClaw host. Identify which is which from the OS/hostname.
-2. SSH into the Docker host. Find its LAN IP (not Tailscale IP) — StackChan will need this because it's on WiFi, not Tailnet. Check `ip addr` or `hostname -I`. Also confirm Docker is available and pick a directory for the xiaozhi-server install (e.g. `/opt/xiaozhi-server/` or `/srv/xiaozhi-server/`).
-3. SSH into the ZeroClaw host. Find its LAN IP similarly. Confirm ZeroClaw is running — check `zeroclaw status` or look for the gateway process on port 18789. Note the exact port and any API endpoints it exposes. Also check what Python version is available and whether pip/fastapi are already installed.
-4. Test basic connectivity: from the Docker host, can you reach the ZeroClaw host's LAN IP? You may need to test this from inside a throwaway container (`docker run --rm alpine ping ZEROCLAW_LAN_IP`).
+1. Run `tailscale status` (if you use Tailscale) to find the hostname and IP for the Docker host.
+2. SSH into the Docker host. Find its LAN IP (not Tailscale IP) — StackChan will need this because it's on WiFi, not Tailnet. Check `ip addr` or `hostname -I`. Also confirm Docker is available and pick a directory for the install (e.g. `/opt/xiaozhi-server/` or `/srv/xiaozhi-server/`).
+3. Check whether a local model backend is already running — llama-swap at `:8080/health` (or Ollama at `:11434/api/tags`). If not, set up Ollama as the simpler single-binary option (see `cookbook/run-fully-local.md`) or llama-swap if you need concurrent voice+coding model sets.
 
 ## Docker host setup (xiaozhi-esp32-server)
 
 On the Docker host:
 
 1. Create the directory structure at your chosen install path (e.g. `/opt/xiaozhi-server/`) with subdirs: `data/`, `models/SenseVoiceSmall/`, `tmp/`.
-2. Clone `https://github.com/xinnan-tech/xiaozhi-esp32-server.git` into a `repo/` subdir.
-3. Download the SenseVoiceSmall ASR model (`model.pt`, ~250MB) into `models/SenseVoiceSmall/`. Try ModelScope first: `https://www.modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt`. If that's slow, use HuggingFace: `https://huggingface.co/FunAudioLLM/SenseVoiceSmall/resolve/main/model.pt`. Verify the file is >200MB after download.
-4. Create the custom ZeroClaw LLM provider at `repo/main/xiaozhi-server/core/providers/llm/zeroclaw/zeroclaw.py` plus `__init__.py`. The provider:
-   - Extends `LLMProviderBase` from `core.providers.llm.base`
-   - Sends HTTP POST to the ZeroClaw bridge on the ZeroClaw host
-   - Passes the user's transcribed text plus a system prompt that enforces emoji-first responses for StackChan face animations
-   - Handles connection errors gracefully with emoji-prefixed fallback messages
-   - Implements both `response()` and `response_stream()` (stream can just yield the non-stream result for now)
-   - Returns `False` from `function_call_supported()` — ZeroClaw handles its own tools
-5. Create `data/.config.yaml` with:
+2. Clone this repo (`dotty-stackchan`) into the install path or copy the relevant files. The `make setup` wizard handles most substitution.
+3. Download the SenseVoiceSmall ASR model (`model.pt`, ~250 MB) into `models/SenseVoiceSmall/`. Try ModelScope first: `https://www.modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt`. If that's slow, use HuggingFace: `https://huggingface.co/FunAudioLLM/SenseVoiceSmall/resolve/main/model.pt`. Verify the file is >200 MB after download.
+4. Create `data/.config.yaml` with:
    - `selected_module.ASR: FunASRLocal`
-   - `selected_module.LLM: ZeroClawLLM`
-   - `selected_module.TTS: EdgeTTS`
+   - `selected_module.LLM: PiVoiceLLM`
+   - `selected_module.TTS: LocalPiper` (or `EdgeTTS` if you don't want offline TTS)
    - `selected_module.VAD: SileroVAD`
-   - EdgeTTS voice: `en-AU-WilliamNeural`
-   - ZeroClaw URL pointing to the ZeroClaw host's LAN IP, port 8080
+   - PiVoiceLLM container name: `dotty-pi` (the `docker exec` target)
    - A system prompt that identifies as a desktop robot assistant. Enforce emoji-first responses. Keep TTS-friendly (short sentences).
-   - VAD silence duration 700ms (so it doesn't cut off slow speakers)
-   - Use the actual LAN IPs you discovered, not placeholders.
-6. Create `docker-compose.yml` that:
-   - Uses `ghcr.io/xinnan-tech/xiaozhi-esp32-server:server_latest`
-   - Exposes ports 8000 (WebSocket) and 8003 (OTA/HTTP)
-   - Mounts `data/.config.yaml`, `models/`, `tmp/`, and the custom ZeroClaw provider directory
-   - Sets TZ to Australia/Brisbane
-   - Pip installs `aiohttp` on startup (the base image may not have it)
-   - **Important**: Check the actual container's internal directory structure first before writing the volume mounts. Run `docker run --rm ghcr.io/xinnan-tech/xiaozhi-esp32-server:server_latest ls /opt/xiaozhi-server/` (or wherever the app lives) to find the correct internal paths. The mount targets must match where the app actually loads providers from.
-7. Start the container, tail the logs, and confirm you see the WebSocket and OTA addresses in the output.
+   - VAD silence duration 700 ms (so it doesn't cut off slow speakers)
+   - Use the actual LAN IP for `<XIAOZHI_HOST>`, not a placeholder.
+5. Bring up the xiaozhi-esp32-server container via `docker compose up -d` (from `docker-compose.yml.template` after `make setup` substitutes your placeholders).
+6. Check the container's internal directory structure before writing volume mounts. Run `docker run --rm ghcr.io/xinnan-tech/xiaozhi-esp32-server:server_latest ls /opt/xiaozhi-server/` (or wherever the app lives) to confirm internal paths. The mount targets must match where the app actually loads providers from.
+7. Tail the logs and confirm you see the WebSocket and OTA addresses in the output.
 
-## ZeroClaw host setup (ZeroClaw HTTP bridge)
+## Bring up dotty-pi (brain container)
 
-On the ZeroClaw host:
+Follow `dotty-pi/README.md` for build and run instructions. Key points:
 
-1. First, understand how ZeroClaw actually accepts messages. Check the running config, look at the gateway's API, examine any webchat or REST endpoints. The bridge needs to translate a simple HTTP POST into whatever ZeroClaw actually expects. Don't assume the API shape — discover it.
-2. Create `~/zeroclaw-bridge/bridge.py` — a FastAPI app that:
-   - Listens on 0.0.0.0:8080
-   - Accepts POST `/api/message` with `{"content": "...", "channel": "stackchan", "session_id": "...", "metadata": {...}}`
-   - Forwards to ZeroClaw's actual API/gateway
-   - Returns `{"response": "emoji-prefixed text"}`
-   - Has a GET `/health` endpoint
-3. Install deps (fastapi, uvicorn, whatever HTTP client is needed).
-4. Create a systemd user service for it so it persists across reboots.
-5. Start it and verify the health endpoint responds.
+- The container idles via `sleep infinity`; voice turns invoke pi on demand via `docker exec -i`.
+- Model target for the outer agent loop: `qwen3.5:4b` (in the llama-swap `voice` matrix set). Do **not** use `qwen3.6:27b` here — it evicts the voice model set and causes cold-reload latency on every `think_hard` escalation.
+- Mount `persona/`, `memory/brain.db`, and the `dotty-pi-ext` extension directory as documented in `dotty-pi/README.md`.
+
+## Bring up dotty-behaviour (perception + dashboard backend)
+
+Follow `dotty-behaviour/README.md` for build and run instructions. The `scripts/deploy-behaviour.sh` helper handles the deploy step. Key points:
+
+- Runs in `network_mode: host` on port `:8090`.
+- xiaozhi-server talks to it on `http://<XIAOZHI_HOST>:8090` (the LAN IP, not loopback — xiaozhi-server is on bridge networking so its loopback resolves to itself).
+- Set `VISION_BRIDGE_URL` env var in the xiaozhi-server compose to `http://<XIAOZHI_HOST>:8090`.
+
+## Bring up the admin dashboard (bridge.py)
+
+The bridge.py dashboard container starts as part of the main compose stack. It serves the HTMX admin UI on `:8080/ui` and a health endpoint at `:8080/health`. No separate deployment step beyond `docker compose up -d`.
 
 ## Testing
 
-After both sides are up:
+After all containers are up:
 
-1. Curl the bridge health endpoint from the Docker host (from inside a Docker container to simulate the xiaozhi-server's network perspective).
-2. Send a test message through the bridge and confirm you get an emoji-prefixed response back.
-3. Check xiaozhi-server logs to confirm the WebSocket endpoint is listening and the OTA endpoint reports healthy.
-4. If the repo includes a test HTML page (usually at `repo/main/xiaozhi-server/test/test_page.html`), note its location so I can open it in a browser for audio testing.
+1. Check the OTA endpoint from a LAN machine:
+   ```bash
+   curl -s http://<XIAOZHI_HOST>:8003/xiaozhi/ota/
+   # Expect: OTA接口运行正常...
+   ```
+2. Check the dashboard health:
+   ```bash
+   curl -s http://<XIAOZHI_HOST>:8080/health
+   # Expect: {"status":"ok", ...}
+   ```
+3. Check dotty-behaviour health:
+   ```bash
+   curl -s http://<XIAOZHI_HOST>:8090/health
+   # Expect: {"status":"ok", ...}
+   ```
+4. Tail the xiaozhi-server logs to confirm the WebSocket endpoint is listening.
 
 ## Final output
 
@@ -99,12 +109,11 @@ OTA URL (enter this in StackChan's Advanced Settings):
 WebSocket endpoint:
   ws://X.X.X.X:8000/xiaozhi/v1/
 
-ZeroClaw bridge:
-  http://X.X.X.X:8080/api/message
+Admin dashboard:
+  http://X.X.X.X:8080/ui
 
-Test page for browser audio testing:
-  file:///path/to/test_page.html
-  (point it at the WebSocket endpoint above)
+dotty-behaviour (perception bus):
+  http://X.X.X.X:8090/health
 
 When StackChan arrives:
   1. Flash open firmware built from https://github.com/m5stack/StackChan
@@ -118,7 +127,8 @@ When StackChan arrives:
 ## Important constraints
 
 - Use `micro` if you need to interactively edit files (not nano, not vim).
-- Don't install anything on the local workstation — everything happens via SSH to the remote machines.
+- Don't install anything on the local workstation — everything happens via SSH to the remote machine.
 - All IPs in config files must be real LAN IPs discovered at runtime, not Tailscale IPs (StackChan isn't on the Tailnet).
 - If any step fails, diagnose from the logs before retrying. Don't just re-run blindly.
 - The xiaozhi-esp32-server Docker image's internal directory structure may differ from the repo layout. Inspect the container before writing volume mounts.
+- Be conservative about commands not documented in the component READMEs — link to `dotty-pi/README.md` and `dotty-behaviour/README.md` rather than inventing invocations.

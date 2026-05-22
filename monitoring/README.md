@@ -1,6 +1,6 @@
 # monitoring/
 
-Operational artifacts for observing the zeroclaw-bridge.
+Operational artifacts for observing the `bridge.py` dashboard service.
 
 - `grafana-dashboard.json` — starter Grafana dashboard for the
   Prometheus metrics exposed by `bridge.py` at `/metrics`. Import it

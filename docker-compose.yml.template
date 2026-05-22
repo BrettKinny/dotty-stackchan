@@ -24,9 +24,11 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       # --- END CUDA ENV ---
       - TZ=<TZ_VALUE>
-      # EDIT: set to the ZeroClaw bridge URL for vision intent handling
-      - VISION_BRIDGE_URL=http://<ZEROCLAW_HOST>:8080
-      # Active persona file under ./personas/ (loaded by ZeroClawLLM provider).
+      # EDIT: set to the dotty-behaviour service URL for vision intent handling.
+      # dotty-behaviour runs on the same host; use the host LAN IP, not loopback
+      # (this container is on a bridge network, so 127.0.0.1 resolves to itself).
+      - VISION_BRIDGE_URL=http://<XIAOZHI_HOST>:8090
+      # Active persona file under ./personas/ (loaded by the LLM provider).
       # Currently fixed to "default" — smart.md exists for manual swap when you
       # want an adult-framed persona on the smart-mode cloud path.
       - PERSONA=default
@@ -37,7 +39,6 @@ services:
       - ./data/.config.yaml:/opt/xiaozhi-esp32-server/data/.config.yaml:ro
       - ./models/SenseVoiceSmall:/opt/xiaozhi-esp32-server/models/SenseVoiceSmall
       - ./tmp:/opt/xiaozhi-esp32-server/tmp
-      - ./custom-providers/zeroclaw:/opt/xiaozhi-esp32-server/core/providers/llm/zeroclaw
       - ./custom-providers/openai_compat:/opt/xiaozhi-esp32-server/core/providers/llm/openai_compat
       - ./custom-providers/tier1_slim:/opt/xiaozhi-esp32-server/core/providers/llm/tier1_slim
       - ./custom-providers/pi_voice:/opt/xiaozhi-esp32-server/core/providers/llm/pi_voice
@@ -47,7 +48,7 @@ services:
       # effective root on the docker host (it can `docker run --privileged
       # anything`). Acceptable for a single-purpose self-hosted appliance;
       # do not enable on a multi-tenant host. Required for `selected_module.LLM:
-      # PiVoiceLLM` — comment both lines out if running Tier1Slim / ZeroClawLLM.
+      # PiVoiceLLM` — comment both lines out if running Tier1Slim / OpenAICompat.
       - /var/run/docker.sock:/var/run/docker.sock
       - /usr/bin/docker:/usr/bin/docker:ro
       - ./personas:/opt/xiaozhi-esp32-server/personas:ro
@@ -70,7 +71,7 @@ services:
       # DOTTY OTA: patched ota_handler that composes the firmware download URL
       # directly from local_ip+http_port instead of doing a string-replace on
       # `vision_explain` (which only worked when vision lived at the canonical
-      # `/mcp/vision/explain` path; our setup points it at the ZeroClaw host bridge).
+      # `/mcp/vision/explain` path; our setup points it at the dotty-behaviour service).
       - ./custom-providers/xiaozhi-patches/ota_handler.py:/opt/xiaozhi-esp32-server/core/api/ota_handler.py:ro
       # OTA artifact directory — drop m5stack-stack-chan_<version>.bin here
       # and the device polls + self-flashes on next boot. See docs/ota-verification.md.

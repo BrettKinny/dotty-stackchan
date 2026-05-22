@@ -2,54 +2,56 @@
 
 ## What This Is
 
-Your self-hosted StackChan robot assistant. A fully self-hosted voice stack for the M5Stack **StackChan** desktop robot. The default persona is "Dotty" (customizable via `make setup`). Voice I/O routes through a self-hosted xiaozhi-esp32-server; brain is ZeroClaw on whatever Linux host you've chosen for it. No cloud AI services — fully self-hosted except for the LLM call (replaceable with local Ollama).
+Your self-hosted StackChan robot assistant. A fully self-hosted voice stack for the M5Stack **StackChan** desktop robot. The default persona is "Dotty" (customizable via `make setup`). Voice I/O routes through a self-hosted xiaozhi-esp32-server; the brain is a **pi** coding agent running in the `dotty-pi` container. No cloud AI services — fully self-hosted except for the LLM call (replaceable with local Ollama).
 
 ## Architecture
 
-Two voice-LLM paths coexist (selected via `selected_module.LLM` in `data/.config.yaml`):
+The voice path runs through a single LLM provider — `PiVoiceLLM`, selected via `selected_module.LLM` in `data/.config.yaml`. Two alternate providers ship for fallback (`Tier1Slim`, `OpenAICompat`).
 
 ```
-                     StackChan hardware → configured persona
-                       │  ESP32-S3, xiaozhi firmware (built from m5stack/StackChan source)
-                       │  WiFi / WebSocket (Xiaozhi protocol)
-                       ▼
-                     xiaozhi-esp32-server (Docker on a Linux host)
-                       ├─ ASR: FunASR SenseVoiceSmall (local)
-                       ├─ TTS: LocalPiper (en_US-kristin-medium); EdgeTTS / StreamingEdgeTTS alternates
-                       └─ LLM: ZeroClawLLM ──────┐                ┌────── Tier1Slim
-                                                  │                │
-       Legacy single-tier path (DOTTY_VOICE_PROVIDER=zeroclaw):    Two-tier path (DOTTY_VOICE_PROVIDER=tier1slim):
-                                                  │                │
-                                  HTTP POST /api/message           inner-loop chat hits llama-swap directly
-                                                  ▼                (qwen3.5:4b, ~sub-second)
-                                  zeroclaw-bridge (FastAPI)        │
-                                  on the bridge host               │  tool calls only
-                                                  │                ▼
-                                  JSON-RPC 2.0 / ACP over stdio    POST /api/voice/escalate → zeroclaw-bridge
-                                                  ▼                       │
-                                  ZeroClaw (the brain)  ◄─────────────────┘  (think_hard / memory_lookup / take_photo / play_song)
+                 StackChan hardware → configured persona
+                   │  ESP32-S3, xiaozhi firmware (built from m5stack/StackChan source)
+                   │  WiFi / WebSocket (Xiaozhi protocol)
+                   ▼
+                 xiaozhi-esp32-server (Docker)
+                   ├─ ASR: FunASR SenseVoiceSmall / WhisperLocal (local)
+                   ├─ TTS: LocalPiper; EdgeTTS / StreamingEdgeTTS alternates
+                   └─ LLM: PiVoiceLLM
+                        │  PiClient → `docker exec -i dotty-pi pi --mode rpc …`  (JSONL over stdio)
+                        ▼
+                 dotty-pi container — the pi coding agent (the brain)
+                   ├─ outer loop: qwen3.5:4b on llama-swap
+                   └─ dotty-pi-ext extension → 5 voice tools:
+                        memory_lookup · remember · think_hard (→ qwen3.6:27b-think) · take_photo · play_song
+                   only TTS-bound text streams back to xiaozhi-server
+
+  Perception + ambient behaviour:  firmware `event` frames → xiaozhi relay → dotty-behaviour (FastAPI, :8090)
+  Admin dashboard:                 bridge.py (FastAPI, :8080, served at /ui)
 ```
 
-Smart-mode flips the backend model: legacy path rewrites `~/.zeroclaw/config.toml` and restarts the bridge daemon; Tier1Slim path hot-swaps the live provider via `/xiaozhi/admin/set-tier1slim-model`.
+All four server-side services — xiaozhi-server, `dotty-pi`, `dotty-behaviour`, and the `bridge.py` dashboard — run as Docker containers on a single Docker host.
+
+Smart-mode currently flips behaviour but **not** the backend model — the model-swap path was dropped in the #36 cutover and is v2 scope (see `docs/cutover-behaviour.md`).
+
+> **Cutover note:** until the #36 cutover (executed 2026-05-19) the brain was **ZeroClaw**, a Rust AI-agent fronted by a FastAPI bridge on a separate Raspberry Pi. That path — ZeroClaw, the ACP protocol, the `ZeroClawLLM` provider, and the RPi host — has been retired. `bridge.py` survived as the dashboard service; its voice and perception roles moved to `dotty-pi` and `dotty-behaviour`. Historical record: `docs/cutover-behaviour.md`.
 
 See `README.md` for the full visual architecture and message-flow diagrams.
 
 ## Network
 
 - **Admin workstation** (this machine): Development/admin workstation. Runs Claude Code sessions.
-- **Docker host**: runs xiaozhi-esp32-server. Any Linux box with Docker works. Reachable on the LAN (and optionally Tailscale).
-- **ZeroClaw host**: Runs ZeroClaw + the HTTP bridge (any Linux host with a working `zeroclaw` install). Reachable on the LAN (and optionally Tailscale).
+- **Docker host**: runs xiaozhi-esp32-server, `dotty-pi`, `dotty-behaviour`, and the `bridge.py` dashboard — all as containers. Any Linux box with Docker works. Reachable on the LAN (and optionally Tailscale).
 - **StackChan**: On LAN WiFi only (not on Tailnet). Needs LAN IPs for OTA and WebSocket.
 
 SSH access is via Tailscale hostnames. Discover actual Tailscale hostnames at runtime with `tailscale status`.
 
-This repo uses placeholders (`<XIAOZHI_HOST>`, `<ZEROCLAW_HOST>`, `<ZEROCLAW_USER>`, `<XIAOZHI_PATH>`, etc.) everywhere real values would normally appear — see the "Configuring for your environment" section of `README.md` for the full list.
+This repo uses placeholders (`<XIAOZHI_HOST>`, `<XIAOZHI_USER>`, `<XIAOZHI_PATH>`, etc.) everywhere real values would normally appear — see the "Configuring for your environment" section of `README.md` for the full list.
 
 ## Key Paths
 
 - **xiaozhi-server install dir** (on the Docker host): `<XIAOZHI_PATH>` (e.g. `/opt/xiaozhi-server/`)
-- **Custom LLM provider** (on the Docker host): mounted into container at `/opt/xiaozhi-server/core/providers/llm/zeroclaw/`
-- **ZeroClaw bridge install dir**: `<BRIDGE_PATH>` (e.g. `~/zeroclaw-bridge/`)
+- **Custom LLM provider** (on the Docker host): mounted into the xiaozhi container at `/opt/xiaozhi-server/core/providers/llm/pi_voice/`
+- **dotty-pi / dotty-behaviour / bridge.py**: each deployed as its own container on the Docker host (see their respective `README.md` files and `scripts/deploy-behaviour.sh`)
 - **This project dir**: wherever you cloned `dotty-stackchan`
 
 ## Ports
@@ -58,21 +60,23 @@ This repo uses placeholders (`<XIAOZHI_HOST>`, `<ZEROCLAW_HOST>`, `<ZEROCLAW_USE
 |---------|------|------|----------|
 | xiaozhi WebSocket | Docker host LAN IP | 8000 | ws:// |
 | xiaozhi OTA/HTTP | Docker host LAN IP | 8003 | http:// |
-| ZeroClaw bridge | ZeroClaw host LAN IP | 8080 | http:// |
-| ZeroClaw gateway (ws) | ZeroClaw host localhost | 18789 | ws:// |
-| ZeroClaw gateway (web UI) | ZeroClaw host localhost | 42617 | http:// |
+| dashboard service (`bridge.py`) | Docker host LAN IP | 8080 | http:// (`/ui`) |
+| dotty-behaviour (perception, vision, greeter) | Docker host LAN IP | 8090 | http:// |
 
 ## Config Files to Know
 
 - `.config.yaml` (repo root; deployed to the Docker host as `data/.config.yaml`) — the xiaozhi-server override config. Never overwrite wholesale on upgrades; merge keys.
-- `custom-providers/zeroclaw/zeroclaw.py` — custom LLM provider that proxies xiaozhi calls to the ZeroClaw agent on the bridge host. The legacy primary voice path; still selected when `selected_module.LLM = ZeroClawLLM`.
-- `custom-providers/tier1_slim/tier1_slim.py` — **two-tier voice LLM provider** (added in `b73f583`). Runs a small/fast model (`qwen3.5:4b` against llama-swap by default) for inner-loop chitchat and escalates tool calls (`memory_lookup`, `think_hard`, `take_photo`, `play_song`) to the bridge via `POST /api/voice/escalate`. Skips the bridge for plain text turns, so chitchat latency drops well under 1 s. `set_runtime()` lets the bridge hot-swap the model/url/api_key in flight (no daemon restart) — driven by `/xiaozhi/admin/set-tier1slim-model` for smart-mode flips. Selected when `selected_module.LLM = Tier1Slim`.
+- `custom-providers/pi_voice/` — the **`PiVoiceLLM` provider** + `PiClient`, the default voice path. xiaozhi-server's LLM call is translated into a pi RPC request and run inside the `dotty-pi` container via `docker exec -i dotty-pi pi --mode rpc …`; pi owns the agent loop and tools, and only TTS-bound text streams back. Selected when `selected_module.LLM = PiVoiceLLM`. Requires the host docker socket bind-mounted into the xiaozhi container — see `custom-providers/pi_voice/README.md`.
+- `custom-providers/tier1_slim/tier1_slim.py` — **Tier1Slim**, a two-tier voice LLM provider and the pre-`PiVoiceLLM` default (added in `b73f583`). Runs a small/fast model (`qwen3.5:4b` against llama-swap) for inner-loop chitchat and escalates tool calls via `POST /api/voice/escalate`. That escalation endpoint was served by the ZeroClaw bridge, so post-#36 escalation is non-functional — Tier1Slim is now a chitchat-only rollback path. Selected when `selected_module.LLM = Tier1Slim`.
 - `custom-providers/edge_stream/edge_stream.py` — custom streaming TTS provider. Mounted similarly.
-- `custom-providers/openai_compat/openai_compat.py` — OpenAI-compatible LLM provider (alternative to ZeroClaw / Tier1Slim).
+- `custom-providers/openai_compat/openai_compat.py` — OpenAI-compatible LLM provider (alternative to PiVoiceLLM / Tier1Slim).
 - `custom-providers/piper_local/piper_local.py` — local Piper TTS provider (offline alternative to EdgeTTS).
 - `custom-providers/asr/fun_local.py` — patched FunASR provider. Adds a `language` config key (upstream hardcodes `"auto"`, which mis-detects Korean/Japanese on unclear English). Mounted as a file-level override over the upstream provider.
 - `custom-providers/xiaozhi-patches/{http_server,websocket_server,portal_bridge}.py` — drop-in overrides against upstream xiaozhi-server. Add the `/xiaozhi/admin/*` admin routes (toggle, kid-mode, smart-mode, set-tier1slim-model, play-asset, songs catalogue, inject-text/tts) and the `shared_llm` singleton that lets admin routes mutate the running LLM provider's runtime config.
-- `bridge.py` on the ZeroClaw host — the HTTP↔ZeroClaw translator (ACP-over-stdio client).
+- `bridge.py` — the **admin dashboard** service (FastAPI, port 8080, served at `/ui`); runs as a container on the Docker host. Its former voice and perception-bus roles were retired in #36 — the dashboard port to `dotty-behaviour` is still pending. Supporting modules live under `bridge/`.
+- `dotty-pi/` — Docker image + compose for the pi agent container (the brain). See `dotty-pi/README.md`.
+- `dotty-pi-ext/` — pi extension providing the five voice tools (`memory_lookup`, `remember`, `think_hard`, `take_photo`, `play_song`), loaded into the `dotty-pi` agent.
+- `dotty-behaviour/` — FastAPI service (port 8090): the perception event bus, ambient consumers, vision/audio explain endpoints, the proactive greeter, and calendar context. Successor to the bridge's perception role. See `dotty-behaviour/README.md`.
 - `personas/default.md` — default robot persona prompt (swappable).
 - `session-prompt.md` — Claude Code session prompt for infrastructure setup.
 
@@ -81,15 +85,17 @@ This repo uses placeholders (`<XIAOZHI_HOST>`, `<ZEROCLAW_HOST>`, `<ZEROCLAW_USE
 The LLM response MUST start with an emoji. The xiaozhi firmware parses it into a face animation:
 😊=smile 😆=laugh 😢=sad 😮=surprise 🤔=thinking 😠=angry 😐=neutral 😍=love 😴=sleepy
 
-Three layers enforce this:
-1. **ZeroClaw's own agent prompt** (the configured persona) — primary source
-2. **xiaozhi-server top-level `prompt:`** in `data/.config.yaml` — gets injected as system message
-3. **Bridge fallback** (`_ensure_emoji_prefix` in `bridge.py`) — if the first non-whitespace char isn't a non-ASCII symbol, prepends 😐 before returning.
+Two layers enforce this on the live `PiVoiceLLM` path:
+1. **The pi agent's persona prompt** (the configured persona) — primary source.
+2. **xiaozhi-server top-level `prompt:`** in `data/.config.yaml` — injected as a system message.
+
+The old third layer — a `_ensure_emoji_prefix` fallback in `bridge.py` — only ran on the retired ZeroClaw voice path; `PiVoiceLLM` has no equivalent, so the persona prompts are load-bearing.
 
 ## Key Directories
 
 - `custom-providers/` — all custom ASR/LLM/TTS providers (mounted into the xiaozhi container)
-- `bridge/` — bridge Python dependencies (`requirements.txt`)
+- `bridge/` — supporting modules for the `bridge.py` dashboard service (dashboard UI, templates, static assets, CSRF, metrics)
+- `dotty-pi/`, `dotty-pi-ext/`, `dotty-behaviour/` — the pi agent container, its voice-tool extension, and the perception/greeter service (see Config Files above)
 - `firmware/` — StackChan firmware patches, remote config, and server-side OTA assets
 - `personas/` — swappable robot persona prompts
 - `docs/` — deep technical reference (architecture, hardware, protocols, brain, latent capabilities)
@@ -109,8 +115,8 @@ Run `make help` for the full list. Key targets:
 - **Change system prompt**: Edit `data/.config.yaml` on the Docker host, top-level `prompt:` block. Restart container.
 - **Check logs**: `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs -f xiaozhi-esp32-server'`
 - **Restart pipeline**: `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'cd <XIAOZHI_PATH> && docker compose restart'`
-- **Test bridge**: `curl http://<ZEROCLAW_HOST>:8080/health`
-- **Test full round-trip**: `curl -X POST http://<ZEROCLAW_HOST>:8080/api/message -H 'Content-Type: application/json' -d '{"content":"hello"}'`
+- **Test the dashboard service**: `curl http://<XIAOZHI_HOST>:8080/health`
+- **Test dotty-behaviour**: `curl http://<XIAOZHI_HOST>:8090/health`
 
 ## Firmware iteration
 
@@ -144,7 +150,7 @@ Gotchas hit in real sessions:
 
 ## Ambient perception layer (Phase 1)
 
-Forward-looking modes (face-detected greeting, sound-direction head-turn, future curiosity / boredom mode) all subscribe to a single perception event bus on the bridge. Producers are firmware-resident and emit JSON `event` frames over the WS:
+Forward-looking modes (face-detected greeting, sound-direction head-turn, future curiosity / boredom mode) all subscribe to a single perception event bus in `dotty-behaviour`. Producers are firmware-resident and emit JSON `event` frames over the WS:
 
 ```json
 {"type":"event","name":"face_detected","data":{}}
@@ -155,17 +161,17 @@ Forward-looking modes (face-detected greeting, sound-direction head-turn, future
 Plumbing:
 
 - **Firmware emit**: `Application::SendEvent(name, data_json)` in upstream `application.cc` (lazy-opens the WS via `OpenAudioChannel()` because xiaozhi WS is otherwise session-scoped — without lazy-open, perception events from idle silently drop).
-- **xiaozhi-server relay**: custom override at `custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py` adds an `EventTextMessageHandler` that POSTs each event frame to the bridge's `/api/perception/event`.
-- **Bridge bus**: `_perception_listeners` pub/sub + `_perception_state[device_id]` per-device state in `bridge.py`, mirrored on the existing `_dashboard_event_listeners` pattern.
-- **Consumers** (also bridge-side): `_perception_face_greeter` (Hi! greeting via `/xiaozhi/admin/inject-text`), `_perception_sound_turner` (head-turn via `/xiaozhi/admin/set-head-angles`), `_perception_face_lost_aborter` (TTS abort when audience walks away).
+- **xiaozhi-server relay**: custom override at `custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py` adds an `EventTextMessageHandler` that POSTs each event frame to `dotty-behaviour`'s `/api/perception/event`.
+- **dotty-behaviour bus**: the perception event bus + per-device state live in `dotty-behaviour` (`perception/state.py`, `perception/snapshot.py`).
+- **Consumers** (`dotty-behaviour/consumers/`): `face_greeter` (Hi! greeting via `/xiaozhi/admin/inject-text`), `sound_turner` (head-turn via `/xiaozhi/admin/set-head-angles`), `face_lost_aborter` (TTS abort when audience walks away), and six more — see `dotty-behaviour/README.md`.
 
 WS lifecycle is the structural fact most easily forgotten: **xiaozhi only opens the WS during a conversation**, not persistently. Anything that needs to fire a server-bound event from idle has to either (a) trigger `OpenAudioChannel()` first or (b) accept that events are session-only. Producer A and B both assume (a) — done in `SendEvent`.
 
-The Phase 4 firmware **StateManager** (`firmware/main/stackchan/modes/state_manager.{h,cpp}`) is a producer too — it emits `state_changed` on every mutex-state transition (`idle / talk / story_time / security / sleep / dance`) so bridge consumers can gate behaviour on state. The bridge tracks `_perception_state[device_id]["current_state"]` from those events.
+The Phase 4 firmware **StateManager** (`firmware/main/stackchan/modes/state_manager.{h,cpp}`) is a producer too — it emits `state_changed` on every mutex-state transition (`idle / talk / story_time / security / sleep / dance`) so `dotty-behaviour` consumers can gate behaviour on state. `dotty-behaviour` tracks per-device `current_state` from those events.
 
 ## States, toggles & LEDs
 
-`docs/modes.md` is the **authoritative source** for the six-state mutex (`idle / talk / story_time / security / sleep / dance`), the orthogonal toggles (`kid_mode`, `smart_mode`), the LED contract (state arc on left ring 0-5; face-state / kid / smart / listening indicators on right ring 6 / 8 / 9 / 11 with reserved pixels at 7 / 10 — all six right-ring pixels owned by StateManager and re-asserted at 5 Hz), the voice-phrase triggers, and the per-state backing-architecture (which states use ZeroClaw vs direct OpenRouter). When adding behaviour that responds to or changes Dotty's mode, read modes.md first — don't reinvent.
+`docs/modes.md` is the **authoritative source** for the six-state mutex (`idle / talk / story_time / security / sleep / dance`), the orthogonal toggles (`kid_mode`, `smart_mode`), the LED contract (state arc on left ring 0-5; face-state / kid / smart / listening indicators on right ring 6 / 8 / 9 / 11 with reserved pixels at 7 / 10 — all six right-ring pixels owned by StateManager and re-asserted at 5 Hz), the voice-phrase triggers, and the per-state backing-architecture (which states use the pi agent vs direct OpenRouter). When adding behaviour that responds to or changes Dotty's mode, read modes.md first — don't reinvent.
 
 ## Deeper reference
 
@@ -175,6 +181,5 @@ For hardware specs, protocol details, model internals, latent capabilities, and 
 
 - xiaozhi-esp32-server: https://github.com/xinnan-tech/xiaozhi-esp32-server
 - xiaozhi-esp32 firmware (upstream): https://github.com/78/xiaozhi-esp32
-- ZeroClaw: https://github.com/zeroclaw-labs/zeroclaw
 - StackChan (hardware + firmware patches): https://github.com/m5stack/StackChan
 - Emotion protocol: https://xiaozhi.dev/en/docs/development/emotion/

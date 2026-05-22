@@ -10,7 +10,7 @@
 >
 > **Known rough edges:** face emoji rendering is missing visual differentiation for 4 of 9 emotions (sad / surprise / love / laughing); sound-direction localizer has a hardware-AEC-related left-bias on M5Stack CoreS3 (energy detection works, direction is unreliable); kid-voice ASR accuracy on SenseVoice has a kid-speech gap that whisper.cpp will close in a follow-up.
 
-Dotty is a fully self-hosted voice stack for the M5Stack StackChan desktop robot. Open-source firmware on the robot, [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) for voice I/O, and a small FastAPI bridge to whatever LLM agent you want as the brain. ASR, TTS, and session state all run on your own hardware. The LLM is pluggable — the shipped default is a two-tier path (a small fast model handles plain chat; tool calls escalate to a more capable model), with [llama-swap](./docs/cookbook/llama-swap-concurrent-models.md) as the recommended local backend. Swap in [Ollama](./docs/cookbook/run-fully-local.md) for the simpler single-binary option, or point at OpenRouter / any OpenAI-compatible API if you'd rather use the cloud.
+Dotty is a fully self-hosted voice stack for the M5Stack StackChan desktop robot. Open-source firmware on the robot, [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) for voice I/O, and a local **pi** coding agent as the brain. ASR, TTS, and session state all run on your own hardware. The LLM is pluggable — the shipped default runs a small fast model for plain conversation and escalates hard questions to a more capable model, with [llama-swap](./docs/cookbook/llama-swap-concurrent-models.md) as the recommended local backend. Swap in [Ollama](./docs/cookbook/run-fully-local.md) for the simpler single-binary option, or point at OpenRouter / any OpenAI-compatible API if you'd rather use the cloud.
 
 Out of the box, Dotty ships in **Kid Mode** — age-appropriate language, safety guardrails, and content filtering are on by default. Disable Kid Mode for a general-purpose assistant.
 
@@ -27,7 +27,7 @@ So Dotty is the version that passes: every component runs on hardware I own, eve
 - **Local or cloud TTS** — Piper (offline) or EdgeTTS (cloud). Swap with a config change.
 - **Streaming responses** — the bridge streams LLM output to the voice pipeline for lower perceived latency.
 - **Emoji expressions** — every response starts with an emoji that the firmware maps to a face animation (smile, laugh, sad, surprise, thinking, angry, love, sleepy, neutral).
-- **MCP tools** — ZeroClaw exposes tools (web search, memory, etc.) to the LLM via the Model Context Protocol.
+- **Voice tools** — the pi agent can search its memory, escalate hard questions to a bigger model, take a photo, and play songs, all mid-conversation.
 - **States, toggles & LEDs** — a six-state mutex (`idle / talk / story_time / security / sleep / dance`) plus two orthogonal toggles (`kid_mode`, `smart_mode`), all owned by the firmware StateManager and surfaced on the 12-pixel LED ring. Shipped on the active firmware fork (commit `d78118b`, 2026-04-27); the `firmware/firmware/` submodule pin in this repo lags, so flash from the active fork to get it. See "States, Toggles & LEDs" below and [`docs/modes.md`](./docs/modes.md).
 - **Vision (camera)** — the robot's built-in camera can capture images for multimodal LLM queries.
 - **Calendar context** — optional calendar integration feeds upcoming events into the conversation context.
@@ -56,7 +56,7 @@ Full state taxonomy, colour palette, transition diagram, and per-state backing a
 
 ## Web dashboard (locally hosted)
 
-The bridge serves a web dashboard at `http://<ZEROCLAW_HOST>:8080/ui` — host status, mode toggles (Kid Mode / Smart Mode), state switcher, perception card (face / identity), emoji presets, and a live event log (turns, perception events, errors). Light and dark themes follow the system preference. It's served from the same FastAPI process as the bridge, so there's nothing extra to deploy and no external service ever sees your data.
+The dashboard service serves a web dashboard at `http://<XIAOZHI_HOST>:8080/ui` — host status, mode toggles (Kid Mode / Smart Mode), state switcher, perception card (face / identity), emoji presets, and a live event log (turns, perception events, errors). Light and dark themes follow the system preference. It runs as a small FastAPI service (`bridge.py`) on your own hardware — no external service ever sees your data.
 
 <p align="center">
   <img src="docs/assets/dashboard-light.png" alt="Dotty dashboard — light theme" width="48%">
@@ -67,29 +67,23 @@ The bridge serves a web dashboard at `http://<ZEROCLAW_HOST>:8080/ui` — host s
 ## Reference deployment
 
 - **Hardware**: M5Stack StackChan (CoreS3 + servo kit), firmware built from `m5stack/StackChan`.
-- **Brain**: a two-tier voice path — `qwen3.5:4b` on local [llama-swap](./docs/cookbook/llama-swap-concurrent-models.md) handles plain conversational turns directly; tool calls escalate to `qwen3.6:27b-think` (also on llama-swap) for hard reasoning or to [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) for memory lookups. The legacy single-tier path (ZeroClaw + Qwen3-30B via OpenRouter on every turn) is still supported via `selected_module.LLM: ZeroClawLLM`. See [`docs/tier1slim.md`](./docs/tier1slim.md) and [`docs/brain.md`](./docs/brain.md).
-- **Voice I/O**: xiaozhi-esp32-server on Docker (any Linux Docker host; single-host works too).
+- **Brain**: a **pi** coding agent running in the `dotty-pi` container. It runs `qwen3.5:4b` on local [llama-swap](./docs/cookbook/llama-swap-concurrent-models.md) for the conversation loop and escalates hard questions to `qwen3.6:27b-think` (also on llama-swap) via its `think_hard` tool. xiaozhi-server's `PiVoiceLLM` provider hands each voice turn to the agent. See [`docs/brain.md`](./docs/brain.md).
+- **Voice I/O**: xiaozhi-esp32-server on Docker (any Linux Docker host).
 
 ## What runs where
 
 | Component | Host | Notes |
 |---|---|---|
 | StackChan (device) | ESP32-S3 on the desk | Firmware built from `m5stack/StackChan` (see `SETUP.md`) |
-| xiaozhi-esp32-server | server (`<XIAOZHI_HOST>`) | Docker, ports 8000 + 8003 |
-| zeroclaw-bridge | ZeroClaw host (`<ZEROCLAW_HOST>`) | FastAPI on port 8080, systemd |
-| ZeroClaw daemon | ZeroClaw host (`<ZEROCLAW_HOST>`) | `<ZEROCLAW_BIN>` |
+| xiaozhi-esp32-server | server (`<XIAOZHI_HOST>`) | Docker — voice I/O, ports 8000 + 8003 |
+| dotty-pi | server (`<XIAOZHI_HOST>`) | Docker — the pi agent, Dotty's voice brain |
+| dotty-behaviour | server (`<XIAOZHI_HOST>`) | Docker — FastAPI: perception bus, ambient consumers, vision, greeter; port 8090 |
+| dashboard service | server (`<XIAOZHI_HOST>`) | Docker — FastAPI admin dashboard (`bridge.py`); port 8080 |
 | Admin workstation | any LAN box | Development / `ssh` only |
 
 ## Get it running
 
-The stack is three moving pieces — the device, xiaozhi-server (voice I/O), and zeroclaw-bridge (the FastAPI gateway in front of the LLM/ZeroClaw). You have a choice about how to host the two server pieces:
-
-| Shape | What you run | When to pick it |
-|---|---|---|
-| **Single-host** | One Docker compose file ([`compose.all-in-one.yml`](./compose.all-in-one.yml)) brings up xiaozhi-server **and** the bridge as containers on the same host. | Easiest first install. Recommended unless you already have a reason to split. |
-| **Multi-host** | xiaozhi-server runs from [`docker-compose.yml`](./docker-compose.yml) on a Docker host; the bridge is installed natively (systemd) on a different machine via [`scripts/install-bridge.sh`](./scripts/install-bridge.sh). | You want the bridge on a low-power always-on box (e.g. a Raspberry Pi) and the GPU/Docker host on a beefier machine. The reference deployment runs this way. |
-
-Want fully offline? Add [`compose.local.override.yml`](./compose.local.override.yml) to either shape — it layers in an Ollama container so the LLM call no longer leaves the LAN.
+The stack is the device plus four server-side pieces — xiaozhi-server (voice I/O), `dotty-pi` (the pi agent brain), `dotty-behaviour` (perception, ambient behaviour, and the proactive greeter), and the admin dashboard service. The four server pieces run as Docker containers on a single Docker host, alongside a local model backend ([llama-swap](./docs/cookbook/llama-swap-concurrent-models.md), or [Ollama](./docs/cookbook/run-fully-local.md) for the simpler single-binary option).
 
 Then:
 
@@ -103,9 +97,9 @@ For what the stack *is* underneath — hardware specs, protocol docs, model fact
 - [docs/architecture.md](./docs/architecture.md) — end-to-end data flow, topology, deployment files, admin surface, perception bus, threat model.
 - [docs/hardware.md](./docs/hardware.md) — M5Stack StackChan body + firmware lineage + on-device MCP tool catalog.
 - [docs/voice-pipeline.md](./docs/voice-pipeline.md) — xiaozhi-esp32-server internals, FunASR/SenseVoice, VAD, TTS.
-- [docs/tier1slim.md](./docs/tier1slim.md) — the default two-tier voice LLM provider, escalation contract, hot-swap.
-- [docs/brain.md](./docs/brain.md) — model matrix, ZeroClaw architecture, the FastAPI bridge.
-- [docs/protocols.md](./docs/protocols.md) — Xiaozhi WS framing, MCP-over-WS, ACP JSON-RPC, bridge HTTP API, emotion channel.
+- [docs/tier1slim.md](./docs/tier1slim.md) — the Tier1Slim two-tier voice LLM provider (an alternate backend), escalation contract, hot-swap.
+- [docs/brain.md](./docs/brain.md) — model matrix, the pi agent runtime, and how voice turns reach it.
+- [docs/protocols.md](./docs/protocols.md) — Xiaozhi WS framing, MCP-over-WS, pi RPC, the dashboard HTTP API, emotion channel.
 - [docs/modes.md](./docs/modes.md) — behavioural mode taxonomy + LED contract + transition diagram (with shipped-vs-planned breakdown).
 - [docs/latent-capabilities.md](./docs/latent-capabilities.md) — features upstream supports that we aren't using yet.
 - [docs/references.md](./docs/references.md) — canonical upstream URLs, model cards, licenses.
@@ -114,6 +108,5 @@ For what the stack *is* underneath — hardware specs, protocol docs, model fact
 
 - xiaozhi-esp32-server: https://github.com/xinnan-tech/xiaozhi-esp32-server
 - xiaozhi-esp32 firmware (upstream): https://github.com/78/xiaozhi-esp32
-- ZeroClaw: https://github.com/zeroclaw-labs/zeroclaw
 - StackChan (hardware + open firmware): https://github.com/m5stack/StackChan
 - Emotion protocol: https://xiaozhi.dev/en/docs/development/emotion/

@@ -16,7 +16,7 @@ Set the environment variable (in `.env` or the shell environment):
 DOTTY_KID_MODE=false
 ```
 
-Restart the bridge: `systemctl restart zeroclaw-bridge`
+Restart the bridge container: `docker compose restart bridge`
 
 ## What changes (removed)
 

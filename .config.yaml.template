@@ -3,7 +3,7 @@ server:
   port: 8000
   http_port: 8003
   websocket: ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/
-  vision_explain: http://<ZEROCLAW_HOST>:8080/api/vision/explain
+  vision_explain: http://<XIAOZHI_HOST>:8090/api/vision/explain
   timezone_offset: +10
 
 log:
@@ -14,10 +14,9 @@ delete_audio: true
 selected_module:
   VAD: SileroVAD
   ASR: <ASR_MODULE>       # WhisperLocal (CUDA) or FunASR (CPU fallback)
-  LLM: PiVoiceLLM         # post-cutover default: agent loop hosted in dotty-pi container (requires sibling dotty-pi service)
-  # LLM: Tier1Slim         # <-- previous default: small/fast LLM with tool escalation to bridge
-  # LLM: ZeroClawLLM       # <-- legacy: voice via ZeroClaw ACP — bridge retired 2026-05-19, no longer routable
-  # LLM: OpenAICompat      # <-- switch to direct OpenAI-compatible LLM
+  LLM: PiVoiceLLM         # default: agent loop hosted in the dotty-pi container (requires the sibling dotty-pi service)
+  # LLM: Tier1Slim         # <-- alternate: small/fast LLM, direct to llama-swap (rollback path; tool escalation degraded — see docs/tier1slim.md)
+  # LLM: OpenAICompat      # <-- alternate: direct OpenAI-compatible LLM
   TTS: LocalPiper
   Memory: nomem
   Intent: nointent
@@ -39,7 +38,7 @@ prompt: |
 
   Voice and persona:
   - Warm, competent, a little bit playful.
-  - Your brain runs on ZeroClaw on the ZeroClaw host; voice I/O runs on xiaozhi-server on a Docker host.
+  - Your brain runs as a pi agent in the dotty-pi container; voice I/O runs on xiaozhi-server. Both live on the same Docker host.
 
 VAD:
   SileroVAD:
@@ -114,11 +113,12 @@ LLM:
     container_name: dotty-pi
 
   # Tier 1 slim — direct to llama-swap or any OpenAI-compatible endpoint with
-  # OpenAI function-calling-style tool escalation. Calls bridge.py
-  # /api/voice/escalate when the model emits tool_calls (memory_lookup,
-  # think_hard, take_photo, play_song, set_led). See
-  # custom-providers/tier1_slim/tier1_slim.py and personas/dotty_voice.md.
-  # Voice memory writes go to bridge /api/voice/{memory_log,remember}.
+  # OpenAI function-calling-style tool escalation. A rollback path from
+  # PiVoiceLLM: plain conversational turns work directly against llama-swap.
+  # Tool escalation POSTs to BRIDGE_URL /api/voice/escalate — but that path
+  # ultimately depended on ZeroClaw, retired 2026-05-19, so tool calls are
+  # currently non-functional on this provider. See docs/tier1slim.md and
+  # custom-providers/tier1_slim/tier1_slim.py.
   Tier1Slim:
     type: tier1_slim
     url: <LLAMA_SWAP_URL>      # e.g. http://192.168.1.67:8080/v1
@@ -128,17 +128,6 @@ LLM:
     timeout: 60
     max_tokens: 256
     temperature: 0.7
-
-  # Legacy: full ZeroClaw ACP path (memory, agent tools, autonomy) — pays
-  # ~24K tokens of system prompt + tool schemas every turn. Tier1Slim
-  # introduced 2026-05-1x to skip that cost on the voice critical path.
-  ZeroClawLLM:
-    type: zeroclaw
-    url: http://<ZEROCLAW_HOST>:8080/api/message/stream
-    channel: dotty
-    timeout: 90
-    system_prompt: |
-      You are <ROBOT_NAME>, a desktop robot (StackChan body). Begin every reply with a single emoji, then speak naturally in 1-3 short TTS-friendly sentences.
 
   # Generic OpenAI-compatible provider — works with OpenAI, OpenRouter,
   # Ollama (http://host:11434/v1), LM Studio, vLLM, etc.

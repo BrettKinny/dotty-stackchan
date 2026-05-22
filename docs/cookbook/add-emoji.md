@@ -38,8 +38,8 @@ See [protocols.md](../protocols.md) and the upstream
 ## 4. Restart
 
 ```bash
-systemctl restart zeroclaw-bridge          # ZeroClaw host
-docker compose restart xiaozhi-server      # Docker host (if config changed)
+docker compose restart bridge              # bridge container (if bridge.py changed)
+docker compose restart xiaozhi-server      # xiaozhi container (if config changed)
 ```
 
 Current set: 😊 smile, 😆 laugh, 😢 sad, 😮 surprise, 🤔 thinking,

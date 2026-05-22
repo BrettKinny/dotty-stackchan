@@ -4,10 +4,7 @@ xiaozhi-server custom LLM provider that routes voice turns through the
 [`dotty-pi`](../../dotty-pi/) container instead of bridge.py. The
 RPi-replacement path per [#36](https://github.com/BrettKinny/dotty-stackchan/issues/36).
 
-**Status: skeleton with working PiClient + LLMProvider, 6/6 unit tests
-passing.** Not yet wired into xiaozhi-server's `selected_module:` config.
-The legacy provider (`zeroclaw`) and the Tier1Slim provider (`tier1_slim`)
-remain the production paths until this is soaked.
+**Status: production.** Wired into xiaozhi-server via `selected_module.LLM: PiVoiceLLM`. Tier1Slim (`tier1_slim`) is the documented rollback path. 6/6 unit tests pass.
 
 What works:
 - `pi_client.py` — long-lived `pi --mode rpc` client; spawns once,
@@ -123,10 +120,9 @@ about them. The container default is `qwen3.5:4b` outer + `qwen3.6:27b-think`
 escalation per `dotty-pi/README.md` — using `qwen3.6:27b` here would evict
 the voice matrix set, see that README's "Model selection" section.
 
-Existing `DOTTY_VOICE_PROVIDER=pi` env-var contract on the bridge will
-become the soak-toggle: when the xiaozhi-server side is on `PiVoiceLLM`
-and the bridge is still up, the bridge becomes a no-op pass-through;
-once soaked, bridge.py goes away entirely.
+The `bridge.py` admin dashboard service continues to run independently;
+it is no longer in the voice path. Its former `/api/voice/*` and
+`/api/message` routes were retired in #36.
 
 ### Recovery: known-good rollback
 
@@ -157,15 +153,15 @@ mount above is harmless when running other LLM providers.
   sandwich into the pi extension's system prompt. Latter is cleaner
   but means kid-mode toggles need to push a system-prompt swap into
   the container.
-- **Memory write-back.** Tier1Slim posts every turn to
-  `bridge.py:/api/voice/memory_log` + `/api/voice/remember`. Once
-  bridge.py retires, those need new homes — likely a small write
-  inside the pi extension (sqlite_brain_db.write) triggered by a
+- **Memory write-back.** Tier1Slim posted every turn to
+  `bridge.py:/api/voice/memory_log` + `/api/voice/remember` — those
+  endpoints are retired. Memory write-back now belongs in the pi
+  extension: a small write (sqlite_brain_db.write) triggered by a
   `[REMEMBER: …]` marker in the final assistant text, plus a per-turn
-  log row. Belongs in the pi extension, not here.
-- **Persona file location.** Tier1Slim reads from a path on the bridge;
-  the pi extension will need its own path under
-  `/mnt/user/appdata/dotty-pi/persona/`. Wiring TBD.
+  log row.
+- **Persona file location.** The pi extension reads from
+  `/mnt/user/appdata/dotty-pi/persona/` (bind-mounted into the container).
+  Wiring is stable; runtime persona-swap mechanism TBD.
 
 ## See also
 

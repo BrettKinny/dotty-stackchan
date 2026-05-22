@@ -1,14 +1,16 @@
 ---
-title: Tier1Slim — Two-Tier Voice LLM
-description: How the Tier1Slim provider runs a small/fast model for inner-loop chat and escalates tool calls to ZeroClaw via the bridge.
+title: Tier1Slim — Two-Tier Voice LLM (alternate)
+description: How the Tier1Slim alternate provider runs a small/fast model for inner-loop chat and escalates tool calls via the bridge escalation endpoint (non-functional post-cutover).
 ---
 
-# Tier1Slim — Two-Tier Voice LLM
+# Tier1Slim — Two-Tier Voice LLM (alternate)
 
-Tier1Slim is one of two LLM providers Dotty can use for the voice path; the other is `ZeroClawLLM` (full agent runtime, single tier). Tier1Slim splits the work in two:
+Tier1Slim is an **alternate** voice LLM backend. The default is `PiVoiceLLM` (see [llm-backends.md](./llm-backends.md)). Tier1Slim splits the work in two:
 
 - **Inner loop** — every plain conversational turn goes directly to a small, fast model (default: `qwen3.5:4b` against a local llama-swap endpoint), no bridge round-trip. Warm latency is well under 1 s.
-- **Escalation** — when the small model emits a structured `tool_call`, Tier1Slim POSTs the call to the bridge's `/api/voice/escalate` endpoint, which dispatches to ZeroClaw memory, the 27 B thinker, or a firmware MCP tool, then streams the final answer back through TTS.
+- **Escalation** — when the small model emits a structured `tool_call`, Tier1Slim POSTs the call to `POST /api/voice/escalate` on bridge.py.
+
+**Post-cutover status (2026-05-19, issue #36):** `POST /api/voice/escalate` was served by the ZeroClaw bridge voice path, which was retired in #36. The escalation endpoint is non-functional in the current stack. Tier1Slim is therefore a **chitchat-only rollback path** — plain conversational turns work, but tool calls (`memory_lookup`, `think_hard`, `take_photo`, `play_song`) do not reach a live backend. Use `PiVoiceLLM` for full tool support.
 
 The provider is selected with `selected_module.LLM: Tier1Slim` in `.config.yaml`. Source: `custom-providers/tier1_slim/tier1_slim.py`.
 
@@ -16,32 +18,29 @@ The provider is selected with `selected_module.LLM: Tier1Slim` in `.config.yaml`
 
 | You want | Use |
 |---|---|
-| Snappy chitchat ("what colour is the sky?") under 1 s | **Tier1Slim** |
-| Every voice turn to go through a full agent loop (memory, multi-step reasoning, tool chains) | `ZeroClawLLM` |
-| Voice path that can hot-swap between local and cloud backends with no daemon restart | **Tier1Slim** |
+| Snappy plain chitchat ("what colour is the sky?") under 1 s, no tool calls needed | **Tier1Slim** (chitchat-only rollback) |
+| Every voice turn to go through a full agent loop (memory, multi-step reasoning, tool chains) | `PiVoiceLLM` (default) |
+| Voice path that can hot-swap between local and cloud backends with no daemon restart | **Tier1Slim** (inner loop only; smart-mode flip still works) |
 
-Bridge code reads `DOTTY_VOICE_PROVIDER` to know which path is live. `"zeroclaw"` (default) means smart-mode flips rewrite ZeroClaw's TOML and restart the daemon; `"tier1slim"` means smart-mode flips call `/xiaozhi/admin/set-tier1slim-model` to hot-swap the live provider in xiaozhi-server.
+Note: tool escalation (`memory_lookup`, `think_hard`, `take_photo`, `play_song`) via `POST /api/voice/escalate` is non-functional post-cutover. If the small model emits a `tool_call`, the escalation POST will fail. Tier1Slim is best used as a lightweight chitchat fallback when the dotty-pi agent is unavailable.
 
 ## Models and routing
 
 ```
-                    selected_module.LLM = Tier1Slim
-                                │
-                                ▼
-                Tier1Slim (custom-providers/tier1_slim/)
-                                │
-            ┌───────────────────┴────────────────────┐
-            │                                        │
-   No tool_calls emitted                  tool_calls emitted
-            │                                        │
-            ▼                                        ▼
-   llama-swap (default)                  POST /api/voice/escalate
-   qwen3.5:4b @ :8080/v1                 ──→ bridge.py
-   ~500 ms warm                                      │
-                                  ┌─────────────────┼─────────────────┬─────────────┐
-                                  ▼                 ▼                 ▼             ▼
-                          memory_lookup       think_hard          play_song    take_photo
-                          (ZeroClaw FTS)      (qwen3.6:27b-think) (firmware)   (VLM via bridge)
+                selected_module.LLM = Tier1Slim
+                            │
+                            ▼
+            Tier1Slim (custom-providers/tier1_slim/)
+                            │
+        ┌───────────────────┴────────────────────┐
+        │                                        │
+No tool_calls emitted                  tool_calls emitted
+        │                                        │
+        ▼                                        ▼
+llama-swap (default)          POST /api/voice/escalate → bridge.py
+qwen3.5:4b @ :8080/v1         (non-functional post-cutover; endpoint
+~500 ms warm                   was served by the retired ZeroClaw
+                               voice path)
 ```
 
 Smart-mode flips the inner-loop target between local and cloud:
@@ -55,16 +54,16 @@ The flip is in-process and instant — the next turn lands on the new backend wi
 
 ## The four escalation tools
 
-The catalogue is intentionally small to stay reliable on a 4 B model. Defined in `tier1_slim.py:TOOLS`.
+These tools are defined in `tier1_slim.py:TOOLS` and sent to `POST /api/voice/escalate`. **They are non-functional in the current stack** — the escalation endpoint was served by the retired ZeroClaw voice path. Documented here for reference; use `PiVoiceLLM` for equivalent functionality.
 
-| Tool | Purpose | Bridge dispatch | Filler phrase |
+| Tool | Purpose | Escalation target (pre-cutover) | Filler phrase |
 |---|---|---|---|
-| `memory_lookup` | Recall a fact from a past conversation. Use when the user says "do you remember…" or refers to a past topic by name. | ZeroClaw memory (FTS). Short timeout (`BRIDGE_TIMEOUT_SHORT`, default 5 s). | none (lands fast) |
-| `think_hard` | Delegate a hard question (multi-step planning, 3+ digit arithmetic). | `qwen3.6:27b-think` via llama-swap. Long timeout (`BRIDGE_TIMEOUT_LONG`, default 30 s). | none |
-| `play_song` | Play a song through the speaker. | Bridge → xiaozhi `/xiaozhi/admin/play-asset`. | none (fire-and-forget) |
-| `take_photo` | Look through Dotty's camera and describe what's visible. | Bridge → VLM (`VLM_MODEL`, default `google/gemini-2.0-flash-001`). | "😮 Let me have a look." |
+| `memory_lookup` | Recall a fact from a past conversation. Use when the user says "do you remember…" or refers to a past topic by name. | bridge `/api/voice/escalate` (short timeout, 5 s) | none (lands fast) |
+| `think_hard` | Delegate a hard question (multi-step planning, 3+ digit arithmetic). | bridge `/api/voice/escalate` → `qwen3.6:27b-think` via llama-swap (long timeout, 30 s) | none |
+| `play_song` | Play a song through the speaker. | bridge → xiaozhi `/xiaozhi/admin/play-asset` (fire-and-forget) | none |
+| `take_photo` | Look through Dotty's camera and describe what's visible. | bridge → VLM (`VLM_MODEL`, default `google/gemini-2.0-flash-001`) | "😮 Let me have a look." |
 
-Per-tool filler phrases (`tier1_slim.py:TOOL_FILLERS`) give TTS something to say while a slow tool runs. `None` means silent — used where the action lands instantly or would make a filler misleading.
+Per-tool filler phrases (`tier1_slim.py:TOOL_FILLERS`) give TTS something to say while a slow tool runs. `None` means silent.
 
 ## Wire format
 
@@ -73,6 +72,8 @@ Per-tool filler phrases (`tier1_slim.py:TOOL_FILLERS`) give TTS something to say
 Plain OpenAI-compatible chat completion with `tools=auto`. The slim 4 B model decides whether to answer directly or emit a `tool_calls` array.
 
 ### Escalation call (Tier1Slim → bridge)
+
+Defined in the source for reference; non-functional in the current stack.
 
 ```http
 POST {BRIDGE_URL}/api/voice/escalate
@@ -91,14 +92,12 @@ Response:
 {"result": "<short string, truncated to 1000 chars>"}
 ```
 
-`memory_lookup` and `think_hard` block until the result arrives. `play_song` and `take_photo` block too but the bridge returns quickly because the side effect is dispatched downstream.
-
 ### Memory side channel
 
-Two fire-and-forget POSTs run alongside escalation:
+Two fire-and-forget POSTs are defined alongside escalation (also non-functional post-cutover):
 
 - `POST /api/voice/remember` — `{"fact": "...", "session_id": "..."}`. Triggered when the model emits a `[REMEMBER: ...]` marker inside the final reply. The marker is stripped before TTS.
-- `POST /api/voice/memory_log` — `{"user": "...", "assistant": "...", "session_id": "..."}`. Logs the turn so ZeroClaw can index it for future `memory_lookup` calls. Posted at end-of-turn.
+- `POST /api/voice/memory_log` — `{"user": "...", "assistant": "...", "session_id": "..."}`. Logs the turn for future `memory_lookup` calls. Posted at end-of-turn.
 
 Both have 2 s timeouts and never raise — failures log and continue.
 
@@ -122,11 +121,11 @@ LLM:
     persona_file: personas/dotty_voice.md
 ```
 
-Environment variables (read by the bridge for smart-mode flips):
+Environment variables (read by bridge.py for smart-mode flips):
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `DOTTY_VOICE_PROVIDER` | `zeroclaw` | Set to `tier1slim` to enable the hot-swap path. |
+| `DOTTY_VOICE_PROVIDER` | `tier1slim` | Set to `tier1slim` to enable the Tier1Slim hot-swap path. |
 | `TIER1SLIM_LOCAL_URL` | `http://localhost:8080/v1` | Inner-loop endpoint when smart_mode is OFF. |
 | `TIER1SLIM_LOCAL_MODEL` | `qwen3.5:4b` | Model name on the local endpoint. |
 | `TIER1SLIM_LOCAL_API_KEY` | `dotty-voice` | Sent as `Authorization: Bearer …`. llama-swap ignores. |
@@ -139,15 +138,16 @@ Environment variables (read by the bridge for smart-mode flips):
 
 ## Persona handling
 
-Tier1Slim uses a single small system prompt (`personas/dotty_voice.md` by default) and discards xiaozhi-server's top-level `prompt:` block. The 4 B chat template only honours one system message, and xiaozhi's default prompt is sized for the ZeroClawLLM agentic path — concatenating both starves the small model's attention. If no `persona_file` is set, Tier1Slim falls back to merging the dialogue's system messages.
+Tier1Slim uses a single small system prompt (`personas/dotty_voice.md` by default) and discards xiaozhi-server's top-level `prompt:` block. The 4 B chat template only honours one system message, and xiaozhi's default prompt is sized for full agentic paths — concatenating both starves the small model's attention. If no `persona_file` is set, Tier1Slim falls back to merging the dialogue's system messages.
 
 The emoji + English rules are appended per turn via `build_turn_suffix(KID_MODE)` (`custom-providers/textUtils.py`). Same set as elsewhere: 😊😆😢😮🤔😠😐😍😴. Fallback prefix is 😐.
 
 ## See also
 
+- [llm-backends.md](./llm-backends.md) — choosing between PiVoiceLLM (default), Tier1Slim, and OpenAICompat.
 - [voice-pipeline.md](./voice-pipeline.md) — where Tier1Slim sits in the ASR → LLM → TTS chain.
-- [brain.md](./brain.md) — the ZeroClaw agent that Tier1Slim escalates to.
-- [protocols.md](./protocols.md) — `/api/voice/escalate`, `/api/voice/remember`, `/api/voice/memory_log` wire formats.
-- [llm-backends.md](./llm-backends.md) — choosing between Tier1Slim, ZeroClawLLM, OpenAICompat.
+- [brain.md](./brain.md) — the dotty-pi agent (the active brain) and its tool set.
+- [protocols.md](./protocols.md) — `/api/voice/escalate` wire format and its post-cutover status.
 - [modes.md](./modes.md) — how smart_mode swaps the inner-loop backend.
-- [cookbook/llama-swap-concurrent-models.md](./cookbook/llama-swap-concurrent-models.md) — running `qwen3.5:4b` + `qwen3.6:27b-think` concurrently on one GPU pair so Tier1Slim's escalation tools don't evict the inner-loop model.
+- [cutover-behaviour.md](./cutover-behaviour.md) — historical runbook for the ZeroClaw→PiVoiceLLM cutover.
+- [cookbook/llama-swap-concurrent-models.md](./cookbook/llama-swap-concurrent-models.md) — running `qwen3.5:4b` + `qwen3.6:27b-think` concurrently on one GPU pair.

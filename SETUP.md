@@ -1,8 +1,8 @@
 # First-Boot Setup — Bringing Up Your StackChan
 
 Step-by-step for taking a fresh M5Stack StackChan from the box to a working,
-fully-self-hosted voice robot. The backend (xiaozhi-server on a Docker host,
-ZeroClaw bridge on a separate host) is assumed to already be deployed — if you're
+fully-self-hosted voice robot. The backend (all four Docker containers on a
+single Docker host) is assumed to already be deployed — if you're
 starting fresh, skim `README.md` first.
 
 > This guide assumes you've already substituted the placeholders from
@@ -20,19 +20,19 @@ second or two:
 curl -s http://<XIAOZHI_HOST>:8003/xiaozhi/ota/
 # Expect:  OTA接口运行正常，向设备发送的websocket地址是：ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/
 
-curl -s http://<ZEROCLAW_HOST>:8080/health
-# Expect:  {"status":"ok","service":"zeroclaw-bridge","acp_running":true}
+curl -s http://<XIAOZHI_HOST>:8080/health
+# Expect:  {"status":"ok", ...}
 
-curl -s -X POST http://<ZEROCLAW_HOST>:8080/api/message \
-  -H 'content-type: application/json' \
-  -d '{"content":"hi"}' | jq .
-# Expect:  {"response":"<emoji> <short reply>","session_id":"..."}
+curl -s http://<XIAOZHI_HOST>:8090/health
+# Expect:  {"status":"ok", ...}
 ```
 
 If any fails, fix the backend before dealing with the robot:
 
 - OTA down → `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs --tail 40 xiaozhi-esp32-server'`
-- Bridge down → `ssh <ZEROCLAW_USER>@<ZEROCLAW_HOST> 'sudo journalctl -u zeroclaw-bridge -n 40 --no-pager'`
+- Dashboard/bridge down → `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs --tail 40 bridge'`
+- dotty-behaviour down → `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs --tail 40 dotty-behaviour'`
+- dotty-pi down → `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs --tail 40 dotty-pi'`
 
 ---
 
@@ -176,22 +176,21 @@ If the device isn't on the list after 60s:
    also support a press-to-talk button on the side.
 3. Watch the logs — you should see:
    - An ASR line with transcribed text
-   - A `ZeroClawLLM` call (hits the bridge)
+   - A `PiVoiceLLM` call (routes to the dotty-pi brain container)
    - A TTS line with the response text
    - Face animation changes to match the leading emoji
 4. The robot speaks. If you hear audio but no face change, check that the
    response starts with one of: 😊 😆 😢 😮 🤔 😠 😐 😍 😴.
 
-Expected first-audio latency: **~2–4s** after you stop speaking. If it's
-way slower, check `http://<ZEROCLAW_HOST>:8080/health` for `acp_running:true`
-(a dead ACP child means the bridge is re-spawning on every request).
+Expected first-audio latency: **~5–8s** after you stop speaking (the pi agent
+cold-start on first turn). Subsequent turns are faster once the model is warm.
 
 ---
 
 ## 6. Tune if needed
 
 All of these are edits to `data/.config.yaml` on the Docker host followed by
-`docker compose restart`, except the LLM model (lives on the ZeroClaw host).
+`docker compose restart`.
 
 | Complaint | Edit | File |
 |---|---|---|
@@ -199,7 +198,7 @@ All of these are edits to `data/.config.yaml` on the Docker host followed by
 | "It waits forever after I stop talking" | lower `min_silence_duration_ms` to 400 | same |
 | "I don't like the voice" | change `voice:` to any Edge Neural voice | `data/.config.yaml` → TTS.EdgeTTS / StreamingEdgeTTS |
 | "Responses are too long" | add "Keep replies under 20 words." to the persona | `data/.config.yaml` → `prompt:` block |
-| "Too slow to reply" | switch LLM model | `<ZEROCLAW_CFG>` on ZeroClaw host → `default_model` |
+| "Too slow to reply" | switch LLM model | see [dotty-pi/README.md](../dotty-pi/README.md) for model selection rules |
 | "No facial expression change" | check response actually starts with a supported emoji (tail logs) | — |
 
 ---
@@ -240,9 +239,7 @@ It just isn't what M5Stack ships today.
 ## 9. When it's working: bookmark these
 
 - **Tail voice pipeline**: `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs -f xiaozhi-esp32-server'`
-- **Tail bridge**: `ssh <ZEROCLAW_USER>@<ZEROCLAW_HOST> 'sudo journalctl -u zeroclaw-bridge -f'`
-- **Smoke test end-to-end**: `curl -X POST http://<ZEROCLAW_HOST>:8080/api/message -H 'content-type: application/json' -d '{"content":"test"}'`
-- **ZeroClaw's web UI** (for tweaking the agent persona directly):
-  `ssh -L 42617:127.0.0.1:42617 <ZEROCLAW_USER>@<ZEROCLAW_HOST>` then open
-  http://localhost:42617 in a browser — pair with the code printed by
-  `sudo <ZEROCLAW_BIN> gateway get-paircode`.
+- **Tail brain container**: `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs -f dotty-pi'`
+- **Tail perception/behaviour**: `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs -f dotty-behaviour'`
+- **Admin dashboard**: open `http://<XIAOZHI_HOST>:8080/ui` in a browser.
+- **Dashboard health**: `curl http://<XIAOZHI_HOST>:8080/health`

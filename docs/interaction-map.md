@@ -1,6 +1,6 @@
 ---
 title: Cross-Layer Interaction Map
-description: Signal flow between StackChan firmware, xiaozhi-server, and zeroclaw-bridge.
+description: Signal flow between StackChan firmware, xiaozhi-server, and the dotty-pi agent.
 ---
 
 # Cross-Layer Interaction Map
@@ -11,7 +11,7 @@ One-page reference for every cross-layer signal in the Dotty stack.
 
 1. **StackChan firmware** -- ESP32-S3 (m5stack/StackChan). The physical robot.
 2. **xiaozhi-esp32-server** -- Docker on a Linux host. Voice I/O pipeline (ASR, TTS, VAD, emotion parsing).
-3. **zeroclaw-bridge** -- FastAPI on ZeroClaw host. LLM brain interface (HTTP to ZeroClaw ACP-over-stdio).
+3. **dotty-pi** -- the pi coding agent (Docker container on the same host). The LLM brain; reached by xiaozhi-server's `PiVoiceLLM` provider via `docker exec` pi RPC. (Ambient perception runs in a sibling `dotty-behaviour` container — see [architecture.md](./architecture.md).)
 
 ---
 
@@ -29,17 +29,17 @@ One-page reference for every cross-layer signal in the Dotty stack.
 
 | Signal | Source | Destination | Protocol | Notes |
 |---|---|---|---|---|
-| LLM request | xiaozhi (ZeroClawLLM provider) | bridge | HTTP POST `/api/message/stream` | Carries the user text; bridge wraps it in ACP JSON-RPC to ZeroClaw |
-| LLM response | bridge | xiaozhi | NDJSON streaming (HTTP chunked) | Each chunk is one partial sentence; bridge enforces emoji prefix |
+| LLM request | xiaozhi (PiVoiceLLM provider) | dotty-pi | `docker exec` pi RPC (JSONL over stdio) | Carries the user text; pi runs the agent loop and tools inside the container |
+| LLM response | dotty-pi | xiaozhi | JSONL text chunks over stdio | Only TTS-bound text streams back; tool dispatch stays inside the agent |
 | Sentence chunks | xiaozhi | TTS then StackChan | Internal then WebSocket Opus | xiaozhi splits response into sentences, synthesizes each, streams audio back |
 
 ## Emotion & Expression
 
 | Signal | Source | Destination | Protocol | Notes |
 |---|---|---|---|---|
-| Emoji in LLM text | bridge (LLM output) | xiaozhi | First char of NDJSON response text | Three-layer enforcement: ZeroClaw prompt, xiaozhi system prompt, `_ensure_emoji_prefix` fallback |
+| Emoji in LLM text | dotty-pi (agent output) | xiaozhi | First char of the response text | Two-layer enforcement: the pi agent persona prompt + the xiaozhi system prompt |
 | Emotion frame | xiaozhi | StackChan | WebSocket JSON `{"type":"llm","text":"emoji","emotion":"name"}` | Mapped from leading emoji (e.g. `😊`=smile, `🤔`=thinking); 9-emoji subset used |
-| Thinking emotion | bridge | xiaozhi (forwarded to StackChan) | Emitted before LLM call starts | Shows thinking face while waiting for first token |
+| Thinking emotion | xiaozhi-server | StackChan | Emitted before the LLM call starts | Shows thinking face while waiting for first token |
 | Face animation | StackChan firmware (local) | Avatar renderer (local) | Internal | Firmware maps emotion string to animated face expression |
 
 ## MCP Tools

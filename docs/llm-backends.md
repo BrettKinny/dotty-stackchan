@@ -1,6 +1,6 @@
 ---
 title: Choose Your LLM Backend
-description: Side-by-side comparison of LLM backend options for Dotty.
+description: Side-by-side comparison of LLM backend options for Dotty — PiVoiceLLM (default), Tier1Slim, OpenAICompat, and llama-swap.
 ---
 
 # Choose Your LLM Backend
@@ -11,17 +11,17 @@ and the matching block under `LLM:` in `.config.yaml`.
 
 ## Comparison
 
-| | OpenAI-compatible API | llama-swap (local, multi-model) | Tier1Slim (two-tier voice) | ZeroClaw (single-tier agent) |
+| | OpenAI-compatible API | llama-swap (local, multi-model) | Tier1Slim (two-tier voice) | PiVoiceLLM (pi agent — default) |
 |---|---|---|---|---|
-| **Provider key** | `OpenAICompat` | `OpenAICompat` | `Tier1Slim` | `ZeroClawLLM` |
-| **Runs where** | Cloud (OpenRouter, OpenAI, etc.) | Local GPU host (Docker, llama.cpp) | Inner loop on llama-swap; escalations through the bridge | ZeroClaw host or server |
-| **Latency** | 300-800 ms (network-bound) | 200-600 ms (GPU-bound; `qwen3.5:4b` warm <500 ms) | <500 ms plain chat; +bridge round-trip on tool calls | 500-1500 ms (full agent overhead on every turn) |
+| **Provider key** | `OpenAICompat` | `OpenAICompat` | `Tier1Slim` | `PiVoiceLLM` |
+| **Runs where** | Cloud (OpenRouter, OpenAI, etc.) | Local GPU host (Docker, llama.cpp) | Inner loop on llama-swap; tool escalation via bridge | dotty-pi container on the Docker host |
+| **Latency** | 300-800 ms (network-bound) | 200-600 ms (GPU-bound; `qwen3.5:4b` warm <500 ms) | <500 ms plain chat; +bridge round-trip on tool calls | 500-1500 ms (pi agent turn overhead) |
 | **Cost** | Pay-per-token | Free (electricity + hardware) | Free for inner loop; pay-per-token in smart mode | Free (electricity + hardware) |
-| **Privacy** | Tokens sent to cloud provider | Fully local, nothing leaves LAN | Fully local for plain turns; cloud only when smart_mode is on | Fully local (if local LLM backend) |
-| **Setup complexity** | Low — API key + model name | Medium — GPU, Docker, GGUF download | Medium — llama-swap + Tier1Slim block; bridge for escalations | High — ZeroClaw install, bridge, systemd |
-| **Memory / tools** | None | None | `memory_lookup` / `think_hard` / `take_photo` / `play_song` via escalation | Yes — persistent memory, 70+ tools, MCP |
-| **Hot-swappable** | Restart container | Restart container | **Yes** — `set_runtime()` mutates the live provider; smart-mode flip is instant | No — daemon restart on model swap |
-| **Best for** | Quick start, best-in-class models | Privacy + concurrent multi-model serving | Default for snappy voice; agent features only when needed | Always-on agentic features, deep tool use |
+| **Privacy** | Tokens sent to cloud provider | Fully local, nothing leaves LAN | Fully local for plain turns; cloud only when smart_mode is on | Fully local |
+| **Setup complexity** | Low — API key + model name | Medium — GPU, Docker, GGUF download | Medium — llama-swap + Tier1Slim block | Medium — dotty-pi container + llama-swap |
+| **Memory / tools** | None | None | Chitchat-only post-cutover (escalation endpoint non-functional) | Yes — memory_lookup, remember, think_hard, take_photo, play_song |
+| **Hot-swappable** | Restart container | Restart container | **Yes** — `set_runtime()` mutates the live provider; smart-mode flip is instant | Restart container |
+| **Best for** | Quick start, best-in-class models | Privacy + concurrent multi-model serving | Chitchat-only fallback; no tool calls | **Default — snappy voice with full tool support** |
 
 ## 1. OpenAI-compatible API
 
@@ -76,18 +76,11 @@ LLM:
 
 Caveats when running Anthropic-only (no OpenRouter):
 
-- **Vision intents** (`take_photo`) go through the bridge's `_call_vision_api`,
-  which reads `VLM_API_KEY` → `VISION_API_KEY` → `OPENROUTER_API_KEY` in turn
-  and defaults to OpenRouter for the upload. Point those env vars at your
-  Anthropic key and set the bridge's VLM model+URL env to Anthropic's
-  endpoint to keep vision working without OpenRouter.
-- **Smart-mode escalation** defaults to `anthropic/claude-sonnet-4-6` via
-  OpenRouter — flip `SMART_MODEL` in `zeroclaw-bridge.service` to a bare
-  Anthropic model id and `VOICE_CLOUD_PROFILE_KEY` to
-  `custom:https://api.anthropic.com/v1` to route smart-mode there too.
+- **Vision intents** (`take_photo`) rely on the VLM call path. Point the
+  bridge's VLM env vars (`VLM_API_KEY`, `VLM_MODEL`, `VLM_URL`) at your
+  Anthropic key and endpoint to keep vision working without OpenRouter.
 - The compat shim doesn't support every OpenAI option (streaming and tools
-  work; `logprobs`, `seed`, etc. don't). Tier1Slim's `think_hard` /
-  `memory_lookup` tool calls go through the bridge, so they're unaffected.
+  work; `logprobs`, `seed`, etc. don't).
 
 ## 2. llama-swap (local, multi-model)
 
@@ -135,11 +128,13 @@ LLM:
 - No memory between sessions — stateless like the cloud option.
 - If you don't need concurrent multi-model serving, Ollama is the simpler single-binary alternative.
 
-## 3. Tier1Slim (two-tier voice — current default)
+## 3. Tier1Slim (two-tier voice — alternate)
 
-The default in the shipped `.config.yaml`. A small, fast model (`qwen3.5:4b` against llama-swap) handles every plain conversational turn without involving the bridge. When the model emits a structured `tool_call`, the provider escalates to `POST /api/voice/escalate` and the bridge dispatches the tool (ZeroClaw memory for `memory_lookup`, `qwen3.6:27b-think` for `think_hard`, the VLM for `take_photo`, or `/xiaozhi/admin/play-asset` for `play_song`).
+An alternate voice backend. A small, fast model (`qwen3.5:4b` against llama-swap) handles every plain conversational turn without involving the bridge. When the model emits a structured `tool_call`, the provider escalates to `POST /api/voice/escalate` on the bridge.
 
-Smart-mode flips repoint the inner loop at a cloud model (default `anthropic/claude-sonnet-4-6`) via in-process `set_runtime()` — no docker restart and no daemon restart.
+**Post-cutover caveat:** `POST /api/voice/escalate` was served by the ZeroClaw bridge voice path, which was retired in issue #36 (2026-05-19). The escalation endpoint is non-functional in the current stack. Tier1Slim is therefore a **chitchat-only rollback path** — plain conversational turns work, tool calls (`memory_lookup`, `think_hard`, `take_photo`, `play_song`) do not. Use `PiVoiceLLM` (the default) for full tool support.
+
+Smart-mode flips repoint the inner loop at a cloud model (default `anthropic/claude-sonnet-4-6`) via in-process `set_runtime()` — no docker restart.
 
 ### `.config.yaml` snippet
 
@@ -159,73 +154,67 @@ LLM:
     timeout: 60
 ```
 
-Plus environment variables (consumed by the bridge for smart-mode dispatch):
-
-```
-DOTTY_VOICE_PROVIDER=tier1slim
-TIER1SLIM_CLOUD_API_KEY=sk-or-...           # required for OFF→ON smart-mode flip
-```
-
 Full reference: [tier1slim.md](./tier1slim.md).
 
 ### Notes
 
-- The inner loop bypasses the bridge entirely on plain turns, so `bridge.py` going down doesn't break chitchat (only tool calls fail).
-- `set_runtime()` lets the bridge hot-swap the live provider — used for smart-mode flips and would also support per-time-of-day model selection in future.
+- The inner loop bypasses the bridge entirely on plain turns, so chitchat works even if `bridge.py` is unreachable.
+- `set_runtime()` lets the bridge hot-swap the live provider — used for smart-mode flips.
 - Persona uses `personas/dotty_voice.md`; the top-level `prompt:` block is deliberately ignored because the 4 B chat template only honours one system message.
 
-## 4. ZeroClaw (always-on single-tier agent)
+## 4. PiVoiceLLM (pi agent — default)
 
-The `ZeroClawLLM` provider routes through the FastAPI bridge on the ZeroClaw host into a long-running ZeroClaw agent process. ZeroClaw handles its own LLM calls (to OpenRouter, Ollama, or any supported provider), persistent memory, tool execution, and MCP integration. Every voice turn round-trips through ZeroClaw — heavier than Tier1Slim, but you get the full agent loop on every turn whether you need it or not.
+The default in the shipped `.config.yaml`. The `PiVoiceLLM` provider routes each voice turn to the **dotty-pi container** — the pi coding agent running on the same Docker host as xiaozhi-server.
+
+`PiClient` drives the agent by running `docker exec -i dotty-pi pi --mode rpc …` and exchanging JSONL messages over its stdin/stdout. The agent's outer loop uses `qwen3.5:4b` on local llama-swap for fast chitchat and loads the **dotty-pi-ext extension**, which exposes five voice-focused tools:
+
+| Tool | Purpose |
+|---|---|
+| `memory_lookup` | Recall a fact from past conversations (FTS on brain.db) |
+| `remember` | Stash a new fact into brain.db |
+| `think_hard` | Escalate a hard question to `qwen3.6:27b-think` |
+| `take_photo` | Describe what Dotty's camera sees via a VLM |
+| `play_song` | Play a song through the speaker |
+
+Only TTS-bound text streams back to xiaozhi-server — tool results stay internal to the agent loop.
 
 ### Prerequisites
 
-- ZeroClaw installed on the ZeroClaw host (or another host): `cargo install zeroclaw`.
-- `bridge.py` running as a systemd service (`zeroclaw-bridge.service`).
-- Persona configured in `~/.zeroclaw/workspace/` (`SOUL.md`, `IDENTITY.md`, etc.).
+- dotty-pi container running on the Docker host.
+- llama-swap running and reachable by the dotty-pi container (`qwen3.5:4b` for the outer loop; `qwen3.6:27b-think` for `think_hard`).
 
 ### `.config.yaml` snippet
 
 ```yaml
 selected_module:
-  LLM: ZeroClawLLM
+  LLM: PiVoiceLLM
 
 LLM:
-  ZeroClawLLM:
-    type: zeroclaw
-    url: http://<ZEROCLAW_HOST>:8080/api/message/stream
-    channel: dotty
-    timeout: 90
-    system_prompt: |
-      You are <ROBOT_NAME>, a desktop robot (StackChan body). Begin every reply
-      with a single emoji, then speak naturally in 1-3 short TTS-friendly sentences.
+  PiVoiceLLM:
+    type: pi_voice
+    container_name: dotty-pi
 ```
 
 ### Notes
 
-- Higher latency because ZeroClaw may invoke tools or consult memory before
-  replying. The `timeout: 90` accommodates this.
-- The bridge enforces an English + emoji sandwich around every turn to prevent
-  Qwen3's Chinese-leak tendency (see [brain.md](./brain.md)).
-- Persistent memory (SQLite-backed) means the robot remembers across sessions.
-- Supports 70+ built-in tools plus any MCP servers you connect.
-- Set `DOTTY_VOICE_PROVIDER=zeroclaw` (the default) so smart-mode flips know to rewrite ZeroClaw's `config.toml` rather than Tier1Slim's runtime.
+- Higher latency than a raw llama-swap call because the pi agent loop adds overhead — tool-using turns are slower than plain chitchat.
+- Persistent memory (`brain.db`, FTS5) means the robot remembers across sessions.
+- All four server-side services (xiaozhi-server, dotty-pi, dotty-behaviour, bridge.py) run as Docker containers on the same host — no separate "brain host" required.
 
 ## Switching backends
 
 1. Edit `.config.yaml` — change `selected_module.LLM` and the relevant `LLM:` block.
-2. If you're switching the smart-mode dispatch path, also set `DOTTY_VOICE_PROVIDER` (`tier1slim` or `zeroclaw`) in the bridge's systemd unit env block.
-3. Restart xiaozhi-server: `docker compose restart xiaozhi-server`.
-4. Test with a voice command or `curl` to the bridge endpoint.
+2. Restart xiaozhi-server: `docker compose restart xiaozhi-server`.
+3. Test with a voice command or a `curl` to the health endpoint.
 
-All four `LLM:` blocks can coexist in the config; only the one named in `selected_module.LLM` is active.
+All `LLM:` blocks can coexist in the config; only the one named in `selected_module.LLM` is active.
 
 ## See also
 
-- [tier1slim.md](./tier1slim.md) — the default voice path in detail.
-- [brain.md](./brain.md) — model matrix and ZeroClaw architecture.
+- [tier1slim.md](./tier1slim.md) — Tier1Slim alternate voice path in detail.
+- [brain.md](./brain.md) — model matrix and dotty-pi agent architecture.
 - [voice-pipeline.md](./voice-pipeline.md) — ASR, TTS, and VAD modules.
 - [architecture.md](./architecture.md) — how the LLM slot fits into the full pipeline.
 - [cookbook/llama-swap-concurrent-models.md](./cookbook/llama-swap-concurrent-models.md) — running multiple resident models on one GPU.
 
-Last verified: 2026-05-17.
+Last verified: 2026-05-22.

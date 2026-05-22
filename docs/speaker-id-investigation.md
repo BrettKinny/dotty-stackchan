@@ -36,7 +36,7 @@ similar latent capabilities the deployment doesn't expose.
 fork) wires:
 
 - `self._asr` (ASR module instance, line 60)
-- `self._llm` (LLM provider — currently the ZeroClaw bridge)
+- `self._llm` (LLM provider — currently `PiVoiceLLM`)
 - `self._memory` (initialised but disabled — `Memory: nomem` in
   `.config.yaml`)
 
@@ -45,9 +45,8 @@ There is **no voiceprint hook**. Searching for `speaker`, `voiceprint`,
 matches (other than the unrelated "small speaker" persona text in the
 config).
 
-`custom-providers/zeroclaw/zeroclaw.py:_payload()` builds a metadata
-dict: `{provider: "zeroclaw", smart_mode: ...}`. There is no slot for
-a speaker hint coming from xiaozhi.
+`custom-providers/pi_voice/pi_voice.py` builds a metadata dict for the
+pi RPC call. There is no slot for a speaker hint coming from xiaozhi.
 
 ## What it would take to wire it
 
@@ -65,8 +64,8 @@ To turn "voiceprint exists upstream" into "Signal E in the resolver":
    recognised speaker id (and confidence) to the LLM call metadata so
    the bridge can read it. This is one extra field on the dict already
    passed to the `LLMProvider`.
-4. **Provider passthrough** — `custom-providers/zeroclaw/zeroclaw.py`
-   forwards xiaozhi metadata into the bridge's `MessageIn.metadata`.
+4. **Provider passthrough** — `custom-providers/pi_voice/pi_voice.py`
+   forwards xiaozhi metadata into the pi RPC request.
    Add a passthrough for `speaker_id` / `speaker_confidence`.
 5. **Resolver Signal E** — extend `bridge/speaker.py:_signal_perception`
    (or a new `_signal_voiceprint`) to read `payload.metadata` and

@@ -39,7 +39,8 @@ source-of-truth for re-verification.
 
 | Resource | URL | What's there |
 |---|---|---|
-| ZeroClaw | https://github.com/zeroclaw-labs/zeroclaw | Agent runtime. Architecture, workspace files, providers, MCP support. Rust / dual MIT+Apache-2.0. |
+| pi agent (dotty-pi) | https://github.com/BrettKinny/dotty-stackchan/tree/main/dotty-pi | The Docker container that runs the pi coding agent — the current Dotty brain. |
+| dotty-pi-ext | https://github.com/BrettKinny/dotty-stackchan/tree/main/dotty-pi-ext | pi extension providing the 5 voice tools (memory_lookup, remember, think_hard, take_photo, play_song). |
 | Qwen3-30B-A3B-Instruct-2507 | https://huggingface.co/Qwen/Qwen3-30B-A3B-Instruct-2507 | Model card. Param counts, experts, context length, sampling recommendations. |
 | OpenRouter (Qwen3 page) | https://openrouter.ai/qwen/qwen3-30b-a3b-instruct-2507 | Pricing, latency, provider availability. |
 | OpenRouter docs | https://openrouter.ai/docs | Tool calling, streaming, failover. |
@@ -53,9 +54,7 @@ source-of-truth for re-verification.
 | Xiaozhi WebSocket protocol | https://github.com/78/xiaozhi-esp32/blob/main/docs/websocket.md | Full message catalog, hello shape, binary audio framing. |
 | Xiaozhi MCP protocol | https://github.com/78/xiaozhi-esp32/blob/main/docs/mcp-protocol.md | `tools/list`, `tools/call`, `AddTool` vs `AddUserOnlyTool`. |
 | Xiaozhi emotion docs | https://xiaozhi.dev/en/docs/development/emotion/ | 21-emotion catalog + wire format. |
-| Agent Client Protocol | https://agentclientprotocol.com | ACP spec (Zed-originated). JSON-RPC 2.0 over stdio/HTTP/WS. |
-| ACP prompt-turn spec | https://agentclientprotocol.com/protocol/prompt-turn | `session/prompt`, `session/update`, `session/cancel`, `session/request_permission`. |
-| MCP (Model Context Protocol) | https://modelcontextprotocol.io | The base spec ACP reuses JSON shapes from. |
+| MCP (Model Context Protocol) | https://modelcontextprotocol.io | JSON-RPC 2.0 tool-use protocol used by the firmware's MCP tools and the pi agent. |
 
 <a id="pricing"></a>
 ## Pricing (volatile)
@@ -70,7 +69,6 @@ OpenRouter pricing changes often — values below are most recently observed per
 
 | Component | License | Notes |
 |---|---|---|
-| ZeroClaw | MIT / Apache-2.0 (dual) | Binary is yours to run. |
 | FunASR / SenseVoiceSmall | Check the HF card | Weights license varies. |
 | SileroVAD | MIT | — |
 | Piper engine | MIT | — |

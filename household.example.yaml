@@ -1,9 +1,9 @@
 # Household registry for Dotty.
 #
-# Copy this file to `~/.zeroclaw/household.yaml` (or wherever
-# HOUSEHOLD_YAML_PATH points) on the bridge host (the ZeroClaw host) and edit the
-# entries to match your household. The bridge hot-reloads on save — no
-# restart needed.
+# Copy this file to the path set by HOUSEHOLD_YAML_PATH (default:
+# /mnt/user/appdata/dotty-behaviour/state/household.yaml) on the Docker host
+# and edit the entries to match your household. dotty-behaviour hot-reloads
+# on save — no restart needed.
 #
 # Schema (all fields under each person are optional except display_name):
 #
@@ -29,10 +29,10 @@
 #                            ("[Sam]") so events get bucketed per person.
 #   voice_print_id           null until speaker-ID lands; reserved.
 #
-# Privacy: this file lives on the ZeroClaw host, never egresses. The bridge sends
-# only the *compact_description* of the active person to the LLM (~200
-# chars). Birthdate is used locally for "birthday in N days" — never
-# sent to the LLM in raw ISO form.
+# Privacy: this file lives on the Docker host, never egresses. dotty-behaviour
+# sends only the *compact_description* of the active person to the LLM (~200
+# chars). Birthdate is used locally for "birthday in N days" — never sent to
+# the LLM in raw ISO form.
 
 default_person: _household
 

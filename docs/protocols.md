@@ -1,6 +1,6 @@
 ---
 title: Protocols
-description: Xiaozhi WebSocket protocol, ACP JSON-RPC, and the emotion frame format.
+description: Xiaozhi WebSocket protocol, pi RPC transport, emotion frame format, and the HTTP APIs served by dotty-behaviour and bridge.py.
 ---
 
 # Protocols — what's on the wire
@@ -10,8 +10,8 @@ description: Xiaozhi WebSocket protocol, ACP JSON-RPC, and the emotion frame for
 - **Xiaozhi WebSocket protocol** — between device and xiaozhi-server. Opus audio + JSON control frames. Supports MCP over JSON-RPC 2.0 in-band. Canonical spec: `github.com/78/xiaozhi-esp32/blob/main/docs/websocket.md`.
 - **Emotion channel** — 21 upstream emotion identifiers; the server picks one from the LLM's leading emoji and emits a separate `llm`-type frame. This stack uses a 9-emoji subset.
 - **MCP over WS** — the device acts as an MCP server; xiaozhi-server calls `tools/list` and `tools/call` against it. Tool names use dotted namespaces like `self.audio_speaker.set_volume`.
-- **Bridge HTTP API** — `POST /api/message` (legacy `ZeroClawLLM` path), `POST /api/voice/escalate` + `POST /api/voice/remember` + `POST /api/voice/memory_log` (Tier1Slim), `POST /api/perception/event` (xiaozhi → bridge perception relay).
-- **Agent Client Protocol (ACP)** — JSON-RPC 2.0 over stdio between the FastAPI bridge and `zeroclaw acp`. Zed-originated spec, maintained at `agentclientprotocol.com`.
+- **pi RPC** — `PiClient` ↔ the dotty-pi agent communicate as JSONL messages over the stdin/stdout of `docker exec -i dotty-pi pi --mode rpc`. This is the voice transport for the default `PiVoiceLLM` provider.
+- **HTTP APIs** — split across two services: dotty-behaviour (:8090) serves perception, vision, audio, and calendar endpoints; bridge.py (:8080) serves the admin dashboard `/ui` and admin routes.
 
 ## Xiaozhi WebSocket
 
@@ -141,19 +141,20 @@ Server emits a dedicated `llm`-type frame:
 
 ### Default emoji allowlist
 
-`bridge.py` enforces a 9-emoji subset:
+The persona prompt and xiaozhi-server's top-level `prompt:` block enforce the following 9-emoji subset:
 
 ```
 😊 😆 😢 😮 🤔 😠 😐 😍 😴
 ```
 
-If the LLM returns a leading emoji outside the allowlist (or no emoji at all), the bridge prepends 😐. Rationale: smaller set = more predictable face animations, fewer corner-cases in the xiaozhi emoji-stripper.
+Smaller set = more predictable face animations, fewer corner-cases in the xiaozhi emoji-stripper.
 
-### Three-layer enforcement
+### Two-layer enforcement
 
-1. **ZeroClaw persona prompt** — asks for leading emoji.
-2. **xiaozhi-server top-level `prompt:`** — also asks for leading emoji.
-3. **Bridge `_ensure_emoji_prefix`** — last line of defence; prepends 😐 if absent.
+1. **Persona prompt** (`personas/dotty_voice.md`) — asks for a leading emoji.
+2. **xiaozhi-server top-level `prompt:`** — also asks for a leading emoji.
+
+(A third bridge-side `_ensure_emoji_prefix` fallback existed in the retired ZeroClaw voice path; it is not present in the current `PiVoiceLLM` path.)
 
 ## MCP tools over WS
 
@@ -228,145 +229,75 @@ Device signals MCP support in `hello.features.mcp = true`. Server then queries t
 
 See [hardware.md](./hardware.md#on-device-mcp-tools) for the default 11-tool MCP surface.
 
-<a id="bridge-http"></a>
-## Bridge HTTP API
+<a id="pi-rpc"></a>
+## pi RPC — PiVoiceLLM transport
 
-The FastAPI bridge (`bridge.py`) listens on port 8080 (LAN-reachable, no auth currently). All payloads are JSON unless noted.
+The `PiVoiceLLM` provider communicates with the dotty-pi agent via **pi RPC mode**: JSONL messages exchanged over the stdin/stdout of a `docker exec` invocation.
 
-### `POST /api/message` — legacy `ZeroClawLLM` path
-
-Used by the `ZeroClawLLM` provider on every voice turn.
-
-Request:
-
-```json
-{"content": "<user text>", "channel": "stackchan", "session_id": "<optional>"}
+```
+xiaozhi-server
+  └─ PiClient
+       └─ docker exec -i dotty-pi pi --mode rpc …
+                             │           ▲
+                    JSONL request        │
+                    (stdin)              │ JSONL response
+                                        │ (stdout, streamed)
 ```
 
-Response:
+Each turn is a single JSONL object written to stdin; the agent streams JSONL response chunks back on stdout. Only TTS-bound text chunks are forwarded to xiaozhi-server — tool call details stay internal to the agent loop. The agent exits cleanly after each turn; `PiClient` re-invokes `docker exec` for the next turn.
 
-```json
-{"response": "😊 Sure, the weather is..."}
-```
+The dotty-pi agent loads the **dotty-pi-ext extension** at startup, which registers the five voice tools (`memory_lookup`, `remember`, `think_hard`, `take_photo`, `play_song`). Tool results never appear in the TTS stream.
 
-The bridge wraps `channel == "stackchan"` content in the English+emoji sandwich and re-enforces the emoji prefix on the response.
+<a id="http-apis"></a>
+## HTTP APIs
 
-### `POST /api/voice/escalate` — Tier1Slim tool dispatch
+Server-side HTTP is split across two services. All payloads are JSON unless noted.
 
-Used by `Tier1Slim` when the small inner-loop model emits a `tool_call`. Blocks until the result returns (or the per-tool timeout fires).
+### dotty-behaviour — perception, vision, audio, calendar (:8090)
 
-Request:
+`dotty-behaviour` is a FastAPI service (port 8090, same Docker host) that owns the ambient behaviour layer.
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/perception/event` | xiaozhi → dotty-behaviour perception relay (face, sound, state events) |
+| `POST /api/vision/explain` | VLM describe-image call |
+| `POST /api/audio/explain` | Audio event explanation |
+| `POST /api/voice/take_photo` | Voice-triggered camera snapshot + VLM describe |
+| `GET /api/calendar/*` | Calendar context queries |
+
+`POST /api/perception/event` is the primary inbound path for firmware `event` frames forwarded by `EventTextMessageHandler` in `custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py`:
 
 ```json
 {
-  "tool": "<memory_lookup|think_hard|take_photo|play_song>",
-  "args": {"query": "..."},
-  "session_id": "<xiaozhi session id>"
-}
-```
-
-Response:
-
-```json
-{"result": "<short string, truncated to 1000 chars>"}
-```
-
-Timeouts: `memory_lookup` 5 s, `think_hard` 30 s, others 5 s (env-overridable via `BRIDGE_TIMEOUT_SHORT` / `BRIDGE_TIMEOUT_LONG`).
-
-### `POST /api/voice/remember` — Tier1Slim fact-stash (fire-and-forget)
-
-Triggered when the model embeds a `[REMEMBER: ...]` marker in the reply.
-
-Request:
-
-```json
-{"fact": "user's favourite colour is blue", "session_id": "..."}
-```
-
-Response: `{"ok": true}` (Tier1Slim doesn't wait for it; 2 s timeout client-side).
-
-### `POST /api/voice/memory_log` — Tier1Slim turn log (fire-and-forget)
-
-Posted at end-of-turn so ZeroClaw can index the conversation for future `memory_lookup`.
-
-Request:
-
-```json
-{"user": "what colour is the sky", "assistant": "😊 the sky is blue!", "session_id": "..."}
-```
-
-### `POST /api/perception/event` — xiaozhi → bridge perception relay
-
-Used by `EventTextMessageHandler` in `custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py` to forward firmware `event` frames.
-
-Request mirrors the firmware frame:
-
-```json
-{
-  "name": "<face_detected|face_lost|sound_event|state_changed|dance_started|dance_ended|chat_status|...>",
-  "data": {"...": "..."},
+  "name": "<face_detected|face_lost|sound_event|state_changed|dance_started|dance_ended|chat_status|…>",
+  "data": {"…": "…"},
   "device_id": "<xiaozhi device-id>",
   "session_id": "<xiaozhi session id>",
   "ts": 1715000000.0
 }
 ```
 
-Response: `{"ok": true}`. The bridge broadcasts the event to all `_perception_listeners` and updates `_perception_state[device_id]` accordingly. Consumer tasks (face_greeter, sound_turner, face_lost_aborter, wake_word_turner, face_identified_refresher, purr_player) each subscribe to the bus and react. See [architecture.md](./architecture.md#perception-event-bus).
+Response: `{"ok": true}`. dotty-behaviour broadcasts the event to all perception listeners and updates per-device state. See [architecture.md](./architecture.md#perception-event-bus) for the 9 ambient consumers.
 
-### `GET /health`
+### bridge.py — dashboard and admin (:8080)
 
-Liveness probe. Returns `{"ok": true}` when the bridge is up and the ACP child is reachable.
+`bridge.py` is a FastAPI service (port 8080, same Docker host) that serves the admin dashboard. Its voice and perception relay roles were retired in issue #36 (2026-05-19); it survives as the dashboard service.
 
-### `POST /admin/*` (localhost-only)
+| Endpoint | Purpose |
+|---|---|
+| `GET /ui` | Admin dashboard web UI |
+| `POST /admin/*` | Admin mutations (toggle, kid-mode, smart-mode, set-tier1slim-model, play-asset, etc.) |
+| `GET /health` | Liveness probe; returns `{"ok": true}` |
 
-Administrative mutations — see [architecture.md](./architecture.md#bridge-adminadmin-zeroclaw-host-127001-only).
-
-<a id="acp"></a>
-## ACP — Agent Client Protocol
-
-Canonical spec: [agentclientprotocol.com](https://agentclientprotocol.com). Zed-Industries-originated, JSON-RPC 2.0, designed for editor↔agent interop; reusable for any agent-over-stdio situation.
-
-**Our transport:** `zeroclaw acp` is spawned with `stdin`/`stdout` inherited. The FastAPI bridge reads/writes JSON-RPC 2.0 framed messages (one JSON object per line or Content-Length-prefixed, per ACP spec).
-
-### Core methods
-
-| Method | Direction | Params | Returns / effect |
-|---|---|---|---|
-| `initialize` | client → agent | Protocol version, client capabilities | Agent capabilities, supported tool-sets |
-| `session/new` | client → agent | `working_directory` | `sessionId` and metadata |
-| `session/prompt` | client → agent | `sessionId`, `prompt: ContentBlock[]` (text/images/resources) | `stopReason: "end_turn" \| "max_tokens" \| "max_turn_requests" \| "refusal" \| "cancelled"` |
-| `session/update` | agent → client (notification) | `sessionId`, `update.sessionUpdate: "plan" \| "agent_message_chunk" \| "tool_call" \| "tool_call_update"` with content | Agent streams progress |
-| `session/request_permission` | agent → client | `sessionId`, tool call details | Client approves/denies tool execution |
-| `session/cancel` | client → agent | `sessionId` | Agent halts; pending `session/prompt` resolves with `cancelled` |
-
-### What our bridge uses today
-
-- `initialize` (once at child startup)
-- `session/new` (with session caching — reuses across turns, rotates on idle/turn-count/age)
-- `session/prompt` (streaming via `session/event` chunks; bridge also supports buffered mode)
-- `session/event` — tool call/result logging (`tool_call`, `tool_result` types) and streaming text chunks
-- `session/request_permission` — auto-approves tool calls (safety net for tools not in ZeroClaw's `auto_approve` list)
-
-- `session/cancel` → sent on barge-in (device emits `abort`, xiaozhi closes the streaming HTTP connection, bridge cancels the in-flight ACP prompt and drains stale output)
-
-### ACP vs MCP — how they differ
-
-| | MCP | ACP |
-|---|---|---|
-| Purpose | Expose tools to a model | Drive a whole agent |
-| Typical client | An LLM harness | A code editor (or here, our bridge) |
-| Message shapes | `tools/list`, `tools/call`, `resources/*`, `prompts/*` | `session/prompt`, `session/update`, `session/cancel`, `session/request_permission` |
-| Re-uses MCP | — | Yes — shares ContentBlock and resource JSON shapes |
-
-Both are JSON-RPC 2.0. The device's MCP exchanges ride the Xiaozhi WS; the bridge's ACP exchanges ride local stdio.
+`POST /api/voice/escalate` (used by the `Tier1Slim` alternate provider) is also defined on bridge.py but is non-functional in the current stack — the ZeroClaw voice dispatch layer it depended on was retired in #36. See [docs/cutover-behaviour.md](./cutover-behaviour.md) for the historical runbook.
 
 ## See also
 
 - [hardware.md](./hardware.md) — what emits the device-side frames.
 - [voice-pipeline.md](./voice-pipeline.md) — what xiaozhi-server does between frames.
-- [tier1slim.md](./tier1slim.md) — the Tier1Slim provider that drives `/api/voice/escalate`.
-- [brain.md](./brain.md) — what the bridge does with the ACP results.
+- [tier1slim.md](./tier1slim.md) — the Tier1Slim alternate provider and its (now non-functional) escalation wire format.
+- [brain.md](./brain.md) — the dotty-pi agent and its tool set.
 - [architecture.md](./architecture.md#perception-event-bus) — the perception bus consumers.
 - [references.md](./references.md#protocols) — all protocol spec links.
 
-Last verified: 2026-05-17.
+Last verified: 2026-05-22.

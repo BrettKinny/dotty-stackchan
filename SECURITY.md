@@ -11,8 +11,8 @@ typical hobby project; when Kid Mode is active the threat model escalates
 further because children become the audience:
 
 - **Voice pipeline exposure:** ASR transcripts, LLM prompts, and TTS audio
-  traverse the LAN between the device, the Docker host, and the ZeroClaw host. An
-  attacker on the LAN could intercept or inject traffic.
+  traverse the LAN between the device and the Docker host. An attacker on the
+  LAN could intercept or inject traffic.
 - **Kid Mode safety:** When Kid Mode is active, children are the intended
   audience. Prompt injection or jailbreaks that bypass the content-safety
   enforcement layer could expose a child to harmful content.
@@ -25,12 +25,14 @@ further because children become the audience:
 
 ## What is in scope
 
-- The FastAPI bridge (`bridge.py`) and its ACP session handling
-- Custom xiaozhi-server providers (`zeroclaw.py`, `edge_stream.py`,
+- The admin dashboard service (`bridge.py`) and its HTTP endpoints
+- The `dotty-pi` agent container and `dotty-behaviour` perception service
+- Custom xiaozhi-server providers (`pi_voice/`, `tier1_slim/`, `edge_stream.py`,
   `fun_local.py`, `piper_local.py`)
-- Docker Compose configuration and container security
-- Content-safety prompt enforcement (prompt sandwich, emoji prefix enforcement,
-  Kid Mode filtering)
+- Docker Compose configuration and container security (including the
+  `/var/run/docker.sock` bind-mount used by `PiVoiceLLM`)
+- Content-safety prompt enforcement (persona prompt sandwich, emoji prefix
+  enforcement, Kid Mode filtering)
 - The bridge Docker image and its CI pipeline
 - Documentation that could lead to insecure deployments if followed as-is
 
@@ -38,8 +40,7 @@ further because children become the audience:
 
 - Upstream xiaozhi-esp32-server vulnerabilities (report to
   [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server))
-- Upstream ZeroClaw vulnerabilities (report to
-  [zeroclaw-labs/zeroclaw](https://github.com/zeroclaw-labs/zeroclaw))
+- Upstream pi coding agent vulnerabilities (report to the `@earendil-works/pi-coding-agent` maintainer)
 - Upstream M5Stack StackChan firmware vulnerabilities (report to
   [m5stack/StackChan](https://github.com/m5stack/StackChan))
 - LLM model behavior that is not caused by this project's prompts or code

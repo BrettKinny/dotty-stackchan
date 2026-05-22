@@ -99,7 +99,7 @@ Subsequent slices land:
 ## Cutover (historical)
 
 Cutover landed 2026-05-19. xiaozhi-server's `VISION_BRIDGE_URL` env
-var was flipped from `http://<ZEROCLAW_HOST>:8080` to
+var was flipped from the old RPi bridge URL to
 `http://<XIAOZHI_HOST>:8090` (the Unraid LAN IP, not loopback — see
 the networking note above), and the matching `plugins.vision_explain`
 URL in `data/.config.yaml` was flipped the same way. Full runbook +

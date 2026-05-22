@@ -5,7 +5,7 @@ description: How to run Dotty's voice stack on an ESP32-S3 board other than the 
 
 # Variant port guide
 
-Dotty's server stack (xiaozhi-server, bridge, ZeroClaw) is protocol-agnostic — it doesn't care which ESP32-S3 board is on the other end of the WebSocket. All the interesting porting work is in the firmware.
+Dotty's server stack (xiaozhi-server, bridge, dotty-pi, dotty-behaviour) is protocol-agnostic — it doesn't care which ESP32-S3 board is on the other end of the WebSocket. All the interesting porting work is in the firmware.
 
 This guide explains how to bring up the voice pipeline on a different ESP32-S3 board, and what hardware adaptation is needed to get the robot-body features (servos, LEDs, display) working.
 
@@ -20,7 +20,7 @@ This guide explains how to bring up the voice pipeline on a different ESP32-S3 b
 
 ## Server side: nothing to change
 
-xiaozhi-server, the bridge, and ZeroClaw run on the server host — not on the device. They communicate over the Xiaozhi WebSocket protocol, which is board-agnostic.
+xiaozhi-server, the bridge, dotty-pi, and dotty-behaviour all run on the Docker host — not on the device. They communicate over the Xiaozhi WebSocket protocol, which is board-agnostic.
 
 The only server-side value that varies per board is the OTA firmware filename, which you set in the device's `sdkconfig` before flashing.
 
@@ -182,7 +182,7 @@ Once the device connects, run through:
 2. **Voice round-trip** — speak a simple phrase and confirm ASR → LLM → TTS returns audio to the device.
 3. **MCP tool call** — send a test instruction through the bridge:
    ```bash
-   curl -X POST http://<ZEROCLAW_HOST>:8080/api/message \
+   curl -X POST http://<XIAOZHI_HOST>:8080/api/message \
      -H 'Content-Type: application/json' \
      -d '{"content":"Turn your head to the right"}'
    ```

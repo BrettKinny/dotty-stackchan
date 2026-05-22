@@ -44,31 +44,31 @@ Features xiaozhi-esp32-server supports upstream that aren't turned on or surface
 | **Custom wake word** | Replace/add to the stock wake word via ESP-SR MultiNet | Low | **New-task candidate** |
 | **Voiceprint speaker ID** | Distinguish family members; apply per-user persona/context | Medium | Cross-refs child-safety task (different guardrails for kids vs adults) |
 | **xiaozhi-server VLLM module** | Server-side "What's in this photo?" pipeline | Medium | Already covered by the bridge-side `take_photo` + VLM long-poll path described in [`modes.md`](./modes.md#vision); this row tracks the *upstream* xiaozhi-server VLLM module, which we don't enable. |
-| **PowerMem** | Dual-layer short-term + summarized memory (currently ZeroClaw owns memory) | Low | Would overlap with ZeroClaw's memory — probably don't |
+| **PowerMem** | Dual-layer short-term + summarized memory (currently the `dotty-pi` agent owns memory via its FTS brain.db) | Low | Would overlap with the pi agent's memory — probably don't |
 | **Intent router** (`function_call` mode) | Route simple commands (turn off lights, set timer) without round-tripping to the LLM | Medium | **New-task candidate** |
 | **RagFlow knowledge base** | Retrieval-augmented responses against a household doc store | Low | **New-task candidate** |
-| **Multi-device routing** | Run the StackChan as one of several voice surfaces on the same ZeroClaw brain | Low | Needs the full-module deployment (DB-backed) |
+| **Multi-device routing** | Run the StackChan as one of several voice surfaces on the same pi agent brain | Low | Needs the full-module deployment (DB-backed) |
 | **Piper streaming synthesis** | Lower first-audio latency than the current batch synthesis | Medium | `ROADMAP.md` → "Reduce first-audio latency" |
 | **ffmpeg post-processing on TTS** | Robot-voice character via ring modulator / bitcrush / vocoder | Medium | `ROADMAP.md` → "TTS provider swap — robot-sounding voice" |
 
 <a id="brain-unused"></a>
 ## Brain — unused
 
-ZeroClaw + Qwen3 + OpenRouter features that could be wired into the bridge.
+`dotty-pi` (pi agent + qwen3.5:4b on llama-swap) + `dotty-pi-ext` features that could be wired up.
 
 | Capability | What it unlocks | Priority | Cross-ref |
 |---|---|---|---|
-| **ACP `session/update` streaming** | First-token TTS instead of waiting for the full response (perceived-latency win) | **High** | `ROADMAP.md` → "Reduce first-audio latency" |
-| **Long-lived ZeroClaw sessions** | Skip `session/new` per turn — carry context across turns within a conversation | Medium | `ROADMAP.md` → "Reduce first-audio latency" (ACP session overhead) |
-| **`session/request_permission`** | Bridge confirms tool calls before they execute — useful for child-safety. Bridge now auto-approves (2026-04-25); tool allowlist for child-safety is a follow-up. | Medium | `ROADMAP.md` → "Lock down for child-safe operation" |
-| ~~**Qwen3 function-calling / tool-use**~~ | **Wired up (2026-04-25).** ZeroClaw auto-approves tools in `auto_approve` list and sends tool execution as `session/event` notifications. Bridge logs tool calls at INFO level. Works for `weather`, `web_search_tool`, `calculator`, etc. | ~~Medium~~ Done | — |
-| **ZeroClaw MCP-server mode** | Expose ZeroClaw's tools/memory to other MCP clients | Low | **New-task candidate** |
-| **Qwen3 `role: "system"` injection** | Move the English+emoji constraints into a proper system message instead of a prompt prefix/suffix; better MoE adherence | Medium | Rework of bridge's wrapping logic |
-| **Qwen3 extended context (256K native)** | Keep long conversation history / memory verbatim instead of summarising | Low | Costs more tokens per turn — probably not worth it yet |
-| **OpenRouter latency/cost dashboard** | Observability beyond the local `state/costs.jsonl` | Low | Already available — just point a browser at it |
-| **OpenRouter failover / multi-model** | A/B a smaller faster model for voice turns specifically | Medium | `ROADMAP.md` → "Reduce first-audio latency" (smaller model for voice) |
-| **ZeroClaw cost/trace surfacing** | Expose `state/costs.jsonl` + `runtime-trace.jsonl` via the bridge `/health` or a new `/stats` endpoint | Low | **New-task candidate** |
-| **ZeroClaw cron scheduler** | The robot could say "good morning" on a schedule, not just on demand | Low | **New-task candidate** |
+| **Streaming first-token to TTS** | First-token TTS instead of waiting for the full response (perceived-latency win) | **High** | `ROADMAP.md` → "Reduce first-audio latency" |
+| **Long-lived pi agent sessions** | Carry context across turns within a conversation without re-loading the persona each time | Medium | `ROADMAP.md` → "Reduce first-audio latency" |
+| **Tool pre-approval gate** | Bridge confirms tool calls before they execute — useful for child-safety. | Medium | `ROADMAP.md` → "Lock down for child-safe operation" |
+| ~~**Tool-use**~~ | **Wired up.** The `dotty-pi-ext` extension exposes 5 voice tools (`memory_lookup`, `remember`, `think_hard`, `take_photo`, `play_song`). | Done | — |
+| **pi agent MCP-server mode** | Expose the agent's tools/memory to other MCP clients | Low | **New-task candidate** |
+| **Qwen3 `role: "system"` injection** | Move the English+emoji constraints into a proper system message instead of a prompt prefix/suffix; better MoE adherence | Medium | Rework of persona prompt structure |
+| **Qwen3 extended context (96K native)** | Keep long conversation history / memory verbatim instead of summarising | Low | Costs more tokens per turn — probably not worth it yet |
+| **llama-swap latency/cost dashboard** | Observability into per-turn inference cost on the local model | Low | **New-task candidate** |
+| **Model A/B for voice turns** | Test a smaller/faster model for chitchat, escalate to 27B-think only when needed | Medium | `ROADMAP.md` → "Reduce first-audio latency" |
+| **Per-turn cost/trace surfacing** | Expose pi agent trace data via the bridge `/health` or a new `/stats` endpoint | Low | **New-task candidate** |
+| **pi agent cron scheduler** | The robot could say "good morning" on a schedule, not just on demand | Low | **New-task candidate** |
 
 <a id="observability"></a>
 ## Cross-cutting — observability
@@ -82,7 +82,7 @@ None of these are feature requests — they're gaps in what we can *see* about t
 | Per-turn cost breakdown | Whether Qwen3 via OpenRouter is cheaper than a smaller local model |
 | Per-session trace diff | Whether English-sandwich is still needed after a hypothetical model upgrade |
 
-These are all feeders for the **`ROADMAP.md`** "Map the ZeroClaw ↔ xiaozhi-server ↔ StackChan firmware interaction" backlog item.
+These are all feeders for the **`ROADMAP.md`** "Map the dotty-pi ↔ xiaozhi-server ↔ StackChan firmware interaction" backlog item.
 
 ## Prioritisation rule of thumb
 
@@ -99,7 +99,7 @@ These are all feeders for the **`ROADMAP.md`** "Map the ZeroClaw ↔ xiaozhi-ser
 - [ROADMAP.md](ROADMAP.md) — live backlog; this file is a *source* for it, not a replacement.
 - [hardware.md](./hardware.md) — what the hardware features actually are.
 - [voice-pipeline.md](./voice-pipeline.md) — what the server supports upstream.
-- [brain.md](./brain.md) — what ZeroClaw/Qwen/OpenRouter expose.
+- [brain.md](./brain.md) — what the pi agent / Qwen / llama-swap expose.
 - [references.md](./references.md) — upstream source for every capability claim.
 
 Last verified: 2026-05-17.
