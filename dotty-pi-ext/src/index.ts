@@ -13,6 +13,7 @@ import { memoryLookupTool } from "./tools/memory_lookup.ts";
 import { playSongTool } from "./tools/play_song.ts";
 import { recallPersonTool } from "./tools/recall_person.ts";
 import { rememberTool } from "./tools/remember.ts";
+import { rememberPersonTool } from "./tools/remember_person.ts";
 import { takePhotoTool } from "./tools/take_photo.ts";
 import { thinkHardTool } from "./tools/think_hard.ts";
 
@@ -20,6 +21,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(memoryLookupTool);
   pi.registerTool(recallPersonTool);
   pi.registerTool(rememberTool);
+  pi.registerTool(rememberPersonTool);
   pi.registerTool(thinkHardTool);
   pi.registerTool(playSongTool);
   pi.registerTool(takePhotoTool);
