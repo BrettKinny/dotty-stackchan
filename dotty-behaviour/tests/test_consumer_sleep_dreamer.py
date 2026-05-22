@@ -100,7 +100,7 @@ def test_sleep_scheduling_fires_dreams_and_writes_ndjson() -> None:
                 lines = files[0].read_text(encoding="utf-8").splitlines()
                 # Both dreams should have fired
                 assert len(lines) == 2
-                records = [json.loads(l) for l in lines]
+                records = [json.loads(line) for line in lines]
                 for r in records:
                     assert r["type"] == "dream"
                     assert r["device"] == "dev-1"
