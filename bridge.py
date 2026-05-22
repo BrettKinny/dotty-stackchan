@@ -3984,6 +3984,96 @@ def _build_person_memory_block(person_id: str | None) -> str:
     return "[Person memory]\n" + "\n".join(facts) + "\n"
 
 
+def _voice_memory_person_records_blocking() -> list[dict]:
+    """List every per-person memory row — approved (`person:<id>`) and
+    pending review (`person_pending:<id>`). Powers the /ui/memory
+    dashboard (#53). Read-only. Empty list on error / missing db."""
+    import sqlite3
+    if not _VOICE_MEMORY_DB.exists():
+        return []
+    try:
+        conn = sqlite3.connect(
+            f"file:{_VOICE_MEMORY_DB}?mode=ro", uri=True, timeout=2,
+        )
+        try:
+            conn.row_factory = sqlite3.Row
+            cur = conn.execute(
+                """
+                SELECT id, content, namespace, importance,
+                       created_at, updated_at
+                FROM memories
+                WHERE substr(namespace, 1, 7) = 'person:'
+                   OR substr(namespace, 1, 15) = 'person_pending:'
+                ORDER BY namespace, importance DESC, updated_at DESC
+                """
+            )
+            return [dict(r) for r in cur.fetchall()]
+        finally:
+            conn.close()
+    except Exception:
+        log.exception("voice memory person records list failed")
+        return []
+
+
+def _voice_memory_approve_blocking(mem_id: str) -> bool:
+    """Promote a pending per-person memory row to approved —
+    `person_pending:<id>` → `person:<id>` (the #53 kid-safety review
+    action). Returns False if the row is missing or not in a pending
+    namespace, so a double-approve is a safe no-op."""
+    import sqlite3
+    if not _VOICE_MEMORY_DB.exists() or not mem_id:
+        return False
+    prefix = "person_pending:"
+    now = datetime.now(ZoneInfo("UTC")).isoformat()
+    try:
+        conn = sqlite3.connect(str(_VOICE_MEMORY_DB), timeout=5)
+        try:
+            cur = conn.execute(
+                "SELECT namespace FROM memories WHERE id = ?", (mem_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return False
+            namespace = row[0] or ""
+            if not namespace.startswith(prefix):
+                return False
+            approved = "person:" + namespace[len(prefix):]
+            conn.execute(
+                "UPDATE memories SET namespace = ?, updated_at = ? "
+                "WHERE id = ?",
+                (approved, now, mem_id),
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception:
+        log.exception("voice memory approve failed (id=%s)", mem_id)
+        return False
+
+
+def _voice_memory_delete_blocking(mem_id: str) -> bool:
+    """Delete a memory row by id — the /ui/memory redact action. The
+    FTS5 triggers drop the matching index row. Returns False if nothing
+    matched."""
+    import sqlite3
+    if not _VOICE_MEMORY_DB.exists() or not mem_id:
+        return False
+    try:
+        conn = sqlite3.connect(str(_VOICE_MEMORY_DB), timeout=5)
+        try:
+            cur = conn.execute(
+                "DELETE FROM memories WHERE id = ?", (mem_id,),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+    except Exception:
+        log.exception("voice memory delete failed (id=%s)", mem_id)
+        return False
+
+
 async def _voice_tool_memory_lookup(args: dict, session_id: str) -> str:
     query = (args.get("query") or "").strip()
     if not query:
@@ -5194,6 +5284,18 @@ if _configure_dashboard is not None:
             return None
         return getattr(person, "display_name", None) or None
 
+    async def _dashboard_memory_records() -> list[dict]:
+        """All per-person memory rows (approved + pending) for /ui/memory."""
+        return await asyncio.to_thread(_voice_memory_person_records_blocking)
+
+    async def _dashboard_memory_approve(mem_id: str) -> dict:
+        ok = await asyncio.to_thread(_voice_memory_approve_blocking, mem_id)
+        return {"ok": ok}
+
+    async def _dashboard_memory_redact(mem_id: str) -> dict:
+        ok = await asyncio.to_thread(_voice_memory_delete_blocking, mem_id)
+        return {"ok": ok}
+
     _configure_dashboard(
         send_message=_dashboard_send_message,
         vision_cache=_vision_cache,
@@ -5211,6 +5313,9 @@ if _configure_dashboard is not None:
         unsubscribe_events=_dashboard_unsubscribe_events,
         perception_state_getter=_dashboard_perception_state_getter,
         perception_recent_getter=get_recent_perception,
+        memory_records_getter=_dashboard_memory_records,
+        memory_approve=_dashboard_memory_approve,
+        memory_redact=_dashboard_memory_redact,
         identity_display_name=_identity_display_name,
         last_user_line_getter=_get_last_user_line,
     )

@@ -50,6 +50,9 @@ _state: dict[str, Any] = {
     "perception_recent_getter": None,
     "identity_display_name": None,
     "last_user_line_getter": None,
+    "memory_records_getter": None,
+    "memory_approve": None,
+    "memory_redact": None,
 }
 
 
@@ -65,7 +68,10 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
               perception_state_getter: Any = None,
               perception_recent_getter: Any = None,
               identity_display_name: Any = None,
-              last_user_line_getter: Any = None) -> None:
+              last_user_line_getter: Any = None,
+              memory_records_getter: Any = None,
+              memory_approve: Any = None,
+              memory_redact: Any = None) -> None:
     """Register bridge state with the dashboard. Idempotent."""
     if send_message is not None:
         _state["send_message"] = send_message
@@ -103,6 +109,12 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
         _state["identity_display_name"] = identity_display_name
     if last_user_line_getter is not None:
         _state["last_user_line_getter"] = last_user_line_getter
+    if memory_records_getter is not None:
+        _state["memory_records_getter"] = memory_records_getter
+    if memory_approve is not None:
+        _state["memory_approve"] = memory_approve
+    if memory_redact is not None:
+        _state["memory_redact"] = memory_redact
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -804,6 +816,77 @@ async def state_set(request: Request, state: str = Form(...)) -> Any:
     return templates.TemplateResponse(
         request, "state_result.html",
         {"ok": ok, "state": state, "label": _STATE_LABELS.get(state, state)},
+    )
+
+
+@router.get("/memory", response_class=HTMLResponse, include_in_schema=False)
+async def memory_partial(request: Request) -> Any:
+    """#53 per-person memory review surface — approved records plus the
+    kid-safety pending-review queue, grouped by person."""
+    getter = _state.get("memory_records_getter")
+    rows = (await getter()) if getter else []
+    pending: dict[str, list] = {}
+    approved: dict[str, list] = {}
+    for r in rows:
+        ns = r.get("namespace") or ""
+        if ns.startswith("person_pending:"):
+            pending.setdefault(ns[len("person_pending:"):], []).append(r)
+        elif ns.startswith("person:"):
+            approved.setdefault(ns[len("person:"):], []).append(r)
+    return templates.TemplateResponse(
+        request, "memory_list.html",
+        {
+            "available": getter is not None,
+            "pending": pending,
+            "approved": approved,
+            "pending_count": sum(len(v) for v in pending.values()),
+        },
+    )
+
+
+@router.post("/actions/memory/approve", response_class=HTMLResponse,
+             include_in_schema=False)
+async def memory_approve(request: Request, mem_id: str = Form(...)) -> Any:
+    """Promote a pending per-person fact to readable memory."""
+    fn = _state.get("memory_approve")
+    if fn is None:
+        raise HTTPException(503, "memory_approve not configured")
+    try:
+        result = await fn(mem_id)
+        ok = bool(result.get("ok") if isinstance(result, dict) else result)
+    except Exception as exc:
+        log.exception("memory approve failed")
+        return templates.TemplateResponse(
+            request, "memory_result.html",
+            {"ok": False, "action": "approve", "error": str(exc)},
+        )
+    return templates.TemplateResponse(
+        request, "memory_result.html",
+        {"ok": ok, "action": "approve",
+         "error": None if ok else "row not found or not pending review"},
+    )
+
+
+@router.post("/actions/memory/redact", response_class=HTMLResponse,
+             include_in_schema=False)
+async def memory_redact(request: Request, mem_id: str = Form(...)) -> Any:
+    """Delete a per-person memory row (approved or pending)."""
+    fn = _state.get("memory_redact")
+    if fn is None:
+        raise HTTPException(503, "memory_redact not configured")
+    try:
+        result = await fn(mem_id)
+        ok = bool(result.get("ok") if isinstance(result, dict) else result)
+    except Exception as exc:
+        log.exception("memory redact failed")
+        return templates.TemplateResponse(
+            request, "memory_result.html",
+            {"ok": False, "action": "redact", "error": str(exc)},
+        )
+    return templates.TemplateResponse(
+        request, "memory_result.html",
+        {"ok": ok, "action": "redact",
+         "error": None if ok else "row not found"},
     )
 
 
