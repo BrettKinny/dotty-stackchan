@@ -19,9 +19,8 @@ re-verify claims against the canonical specs rather than trusting our paraphrase
 | Understand the overall shape | [architecture.md](./architecture.md) |
 | Know what the physical robot can do | [hardware.md](./hardware.md) |
 | Understand the voice pipeline (ASR/TTS/VAD) | [voice-pipeline.md](./voice-pipeline.md) |
-| Understand the default voice LLM (Tier1Slim + escalation) | [tier1slim.md](./tier1slim.md) |
-| Understand the brain (model matrix + ZeroClaw) | [brain.md](./brain.md) |
-| Run different models on voice vs. Discord | [multi-daemon-split.md](./multi-daemon-split.md) |
+| Understand the brain (the pi agent + model matrix) | [brain.md](./brain.md) |
+| Understand the Tier1Slim voice LLM (alternate backend) | [tier1slim.md](./tier1slim.md) |
 | Know what's on the wire between components | [protocols.md](./protocols.md) |
 | See every cross-layer signal at a glance | [interaction-map.md](./interaction-map.md) |
 | Know what mode the robot is in (and what the LEDs mean) | [modes.md](./modes.md) |
@@ -37,10 +36,9 @@ docs/
 ├── architecture.md          ← high-level data flow, actor responsibilities
 ├── hardware.md              ← M5Stack StackChan body + firmware lineage + MCP tool catalog
 ├── voice-pipeline.md        ← xiaozhi-esp32-server, FunASR/Whisper, VAD, Piper/EdgeTTS
-├── tier1slim.md             ← two-tier voice LLM provider + escalation contract
-├── brain.md                 ← model matrix (Tier1Slim + ZeroClaw), bridge, OpenRouter
-├── multi-daemon-split.md    ← split voice + Discord across two ZeroClaw daemons
-├── protocols.md             ← Xiaozhi WebSocket, MCP-over-WS, ACP JSON-RPC, emotion
+├── brain.md                 ← the pi agent runtime + model matrix + dashboard service
+├── tier1slim.md             ← Tier1Slim voice LLM provider (alternate) + escalation contract
+├── protocols.md             ← Xiaozhi WebSocket, MCP-over-WS, pi RPC, emotion
 ├── interaction-map.md       ← every cross-layer signal: source, dest, protocol, notes
 ├── modes.md                 ← behavioural mode taxonomy + LED contract + transitions
 ├── latent-capabilities.md   ← upstream features we could wire up (cross-refs ROADMAP.md)
@@ -55,14 +53,14 @@ docs/
 - **Grep-bait headers** — e.g. `## MCP tool handshake`, `## session/prompt` — so you can navigate by header search.
 - **Relative links only** — `[voice-pipeline.md](./voice-pipeline.md)`; never absolute paths.
 - **Freshness footer** — every non-index file ends with `Last verified: YYYY-MM-DD`.
-- **Placeholders for per-deployment values** — `<XIAOZHI_HOST>`, `<ZEROCLAW_HOST>`, etc. (mapping lives with the deployer, not in this repo).
+- **Placeholders for per-deployment values** — `<XIAOZHI_HOST>`, `<XIAOZHI_USER>`, etc. (mapping lives with the deployer, not in this repo).
 - **Soft claims where unverified** — if a fact came from a secondary source or we couldn't verify, the text says so rather than pretending to cite upstream.
 
 ## Relationship to the rest of the repo
 
 - `../README.md` — deployment & ops (commands, layout, troubleshooting).
 - `../CLAUDE.md` — agent orientation for this repo specifically.
-- `../bridge.py`, `../zeroclaw.py`, `../edge_stream.py`, `../fun_local.py`, `../piper_local.py` — canonical source for the custom provider patches.
+- `../bridge.py`, `../custom-providers/` — canonical source for the dashboard service and the custom ASR/LLM/TTS provider patches.
 - These `docs/` — the *why* and the *what else is possible* behind the above.
 
 ## When docs here are stale
@@ -78,4 +76,4 @@ Each sub-file has a `Last verified:` date. Freshness decays roughly as follows:
 
 If you're reading this a year from now, treat the protocol + model claims as *starting points for re-verification*, not ground truth.
 
-Last verified: 2026-05-17.
+Last verified: 2026-05-22.

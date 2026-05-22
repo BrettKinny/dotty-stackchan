@@ -9,6 +9,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - **Bridge systemd unit loads API keys from `${BRIDGE_DIR}/.env`** (#15) — `zeroclaw-bridge.service.template` and `scripts/install-bridge.sh` now emit `EnvironmentFile=-${BRIDGE_DIR}/.env`. `install-bridge.sh` creates a mode-0600 stub `.env` containing `OPENROUTER_API_KEY=` (and commented `VISION_API_KEY` / `VLM_API_KEY` placeholders) when one isn't already present, so the missing-vision-key failure surfaces as the bridge's existing ERROR ("camera offline") instead of a silent confabulation. Existing `.env` files are preserved.
 
+### Changed
+- **Documentation reconciled to the post-#36 architecture** — `README.md`, `CLAUDE.md`, and the `docs/` tree previously described the retired ZeroClaw bridge and its Raspberry-Pi brain host. They now describe the live stack: the `dotty-pi` pi-agent container (the voice brain, reached via the `PiVoiceLLM` provider), `dotty-behaviour` (perception bus + ambient consumers + greeter, port 8090), and `bridge.py` as the admin dashboard service (port 8080). `.config.yaml.template` and `docker-compose.yml.template` updated to match — `vision_explain` / `VISION_BRIDGE_URL` now point at dotty-behaviour, and the `zeroclaw` provider mount + `ZeroClawLLM` config block are gone. The #36 cutover was executed 2026-05-19; this is the follow-up doc sweep its runbook deferred.
+
+### Removed
+- **`custom-providers/zeroclaw/`** — the `ZeroClawLLM` voice provider, dead since the #36 cutover.
+- **`docs/multi-daemon-split.md`, `docs/advanced/multi-host.md`** — both documented ZeroClaw-host topologies that no longer exist.
+
 ## [server-v0.1.0] - 2026-05-17
 
 First git-tagged public release. Covers all server + firmware work shipped to `main` between project inception and 2026-05-17. The earlier `[0.1.0] - 2026-04-25` entry below describes a pre-tag internal milestone — retained for historical reference, but `server-v0.1.0` is the canonical first release.

@@ -57,6 +57,3 @@ show_missing = true
 # file structure (imports after a duck-typed shim class, etc.) — adding a
 # top-level import block would diverge from the source they're patching.
 "custom-providers/xiaozhi-patches/**" = ["E402"]
-# zeroclaw.py imports core.utils.textUtils after the try/except dance
-# that ensures the bind-mount path resolves first.
-"custom-providers/zeroclaw/zeroclaw.py" = ["E402"]

@@ -1,14 +1,11 @@
-# zeroclaw-bridge Python dependencies
+# bridge.py (admin dashboard service) Python dependencies
 # Pin to major.minor — patch bumps are safe; minors may change API.
 fastapi>=0.115,<1
 uvicorn[standard]>=0.34,<1
 pydantic>=2.9,<3
 jinja2>=3.1,<4
 python-multipart>=0.0.9,<1
-# HTTP client — used by bridge.py for /admin endpoints + greeter inject-text
-# and by custom-providers/zeroclaw/zeroclaw.py for OpenRouter SSE streaming.
-# Was previously imported lazily in 6 functions and only worked on the live
-# host because face-recognition pulled it in transitively.
+# HTTP client — used by bridge.py for /admin endpoints + greeter inject-text.
 requests>=2.31,<3
 # Observability — Prometheus /metrics endpoint and counters/histograms.
 # Bridge degrades gracefully if the import fails; see bridge/metrics.py.

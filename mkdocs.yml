@@ -59,7 +59,6 @@ nav:
       - Add Emoji: cookbook/add-emoji.md
       - Disable Kid Mode: cookbook/disable-kid-mode.md
   - Advanced:
-      - Multi-host deployment: advanced/multi-host.md
       - Variant port guide: advanced/variant-port-guide.md
   - Reference:
       - Emoji Mapping: emoji-mapping.md

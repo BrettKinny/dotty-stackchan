@@ -52,7 +52,7 @@ Appdata layout on the Docker host:
 ├── sessions/                # pi session state
 ├── persona/                 # Dotty persona files
 ├── memory/
-│   └── brain.db             # FTS5 store (see brain-db-fts-only.md memory note)
+│   └── brain.db             # FTS5 full-text store
 └── extensions/
     └── dotty-pi-ext/        # voice-tool extension
 ```
