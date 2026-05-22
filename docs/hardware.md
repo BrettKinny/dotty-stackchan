@@ -9,7 +9,7 @@ description: M5Stack StackChan hardware specs, CoreS3 ESP32-S3 SoC, and servo ch
 
 - The robot body is the **M5Stack StackChan** kit: an M5Stack **CoreS3** (ESP32-S3) head on a 2-servo chassis.
 - The CoreS3 supplies the SoC, display, camera, mic array, speaker, IMU, proximity, microSD — all integrated. NFC and the IR tx/rx pair physically live on the kit body, not the CoreS3 (see the kit table below).
-- The *StackChan kit* adds the head-yaw servo, head-pitch servo, 12 RGB LEDs, 3-zone touch panel, 550 mAh supplementary battery, USB-C, NFC, an IR tx/rx pair, an IO expander, a dedicated battery monitor, and the 3D-printed body. A separate handheld remote controller ships in the same box; the M5Stack product page does not specify whether it's an IR or RF/ESP-NOW remote, and the body provides both transports — verify against the physical unit before writing code against it.
+- The *StackChan kit* adds the head-yaw servo, head-pitch servo, 12 RGB LEDs, 3-zone touch panel, 550 mAh supplementary battery, USB-C, NFC, an IR tx/rx pair, an IO expander, a dedicated battery monitor, and the 3D-printed body. A separate handheld ESP-NOW remote controller ships in the same box (M5Stack's product page describes it as an ESP-NOW wireless remote).
 - Firmware on the device is built from [`m5stack/StackChan`](https://github.com/m5stack/StackChan) — an Arduino C++ codebase that bundles the **XiaoZhi AI agent** client. It is **not** the same codebase as `meganetaaan/stack-chan` (the original Moddable/JS project) or `78/xiaozhi-esp32` (generic voice-assistant firmware).
 - The device advertises itself over the Xiaozhi WebSocket protocol and exposes **on-device tools via MCP** (see [protocols.md](./protocols.md)).
 - Canonical hardware reference: [`docs.m5stack.com/en/StackChan`](https://docs.m5stack.com/en/StackChan) (kit-level) and [`docs.m5stack.com/en/core/CoreS3`](https://docs.m5stack.com/en/core/CoreS3) (head unit). See [references.md](./references.md#hardware).
@@ -58,10 +58,10 @@ Values from the [M5Stack StackChan product docs](https://docs.m5stack.com/en/Sta
 | Supplementary battery | 550 mAh (per M5Stack product docs) |
 | USB | USB-C (power + data) |
 | Buttons | Power, reset; power-indicator LED |
-| Wireless extras | ESP-NOW supported (peer-to-peer over the 2.4 GHz radio, no AP needed); pairs with the **StackChan World** mobile app over Bluetooth |
+| Wireless extras | ESP-NOW supported (peer-to-peer over the 2.4 GHz radio, no AP needed); companion **StackChan World** mobile app (iOS / Android) |
 | Chassis | 3D-printed body, base, feet (STL published) |
 | Dimensions (assembled) | 54.0 × 70.5 × 61.5 mm, **187.2 g** |
-| Remote controller | Ships in-box, 37.6 g. M5Stack's product page doesn't specify its transport — the body has both IR rx (IRM56384) and ESP-NOW, so the remote may use either. Verify on the physical unit before writing code against it. |
+| Remote controller | Ships in-box, 37.6 g. M5Stack's product page describes it as an ESP-NOW wireless remote control. |
 
 **Pin map (CoreS3 → body):**
 

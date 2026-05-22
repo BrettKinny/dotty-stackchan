@@ -27,8 +27,8 @@ Underlying peripherals on the M5Stack CoreS3 / StackChan kit that the firmware d
 | **microSD slot** | Offline sound packs, local fallback voices, recorded memories | Medium | Partially overlaps `ROADMAP.md` → "Create backup script" |
 | **3-zone touch panel** | Multi-zone gesture controls (head-pat as a discrete event) | Low | **New-task candidate** |
 | **Camera beyond `take_photo`** | On-device VLM preprocessing; streaming to a local vision server | Medium | Cross-refs `ROADMAP.md` → "Lock down for child-safe operation" (camera exposure) |
-| **ESP-NOW radio** (Wi-Fi-band, no AP) | Peer-to-peer link to a second StackChan, or to the in-box remote if it's an ESP-NOW remote (transport not confirmed — see [hardware.md](./hardware.md#what-the-stackchan-kit-adds-on-top)) | Low | **New-task candidate** |
-| **In-box remote controller** | M5Stack ships a handheld remote with the kit; transport (IR vs ESP-NOW) is not specified by M5Stack's product page. Could drive states/toggles without voice once the actual transport is confirmed on the physical unit. | Low | **New-task candidate** |
+| **ESP-NOW radio** (Wi-Fi-band, no AP) | Peer-to-peer link to a second StackChan, or to the in-box ESP-NOW remote (see [hardware.md](./hardware.md#what-the-stackchan-kit-adds-on-top)) | Low | **New-task candidate** |
+| **In-box remote controller** | M5Stack ships a handheld ESP-NOW remote with the kit. Could drive states/toggles without voice — receiver-side ESP-NOW handling would need adding to the firmware. | Low | **New-task candidate** |
 | **Hardware-enforced privacy LEDs** | LED state wired to the peripheral-enable signal, not a software hint | **High / safety** | `ROADMAP.md` → "Hardwire privacy-indicator LEDs in firmware" |
 | **Servo velocity/acceleration caps** | Calmer, safer, less-startling head motion | **High / safety** | `ROADMAP.md` → "Tame violent servo motion" |
 

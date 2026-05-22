@@ -31,7 +31,7 @@ The only hardware this stack has been tested end-to-end on.
 | **Wi-Fi** | 2.4 GHz only (no 5 GHz) |
 | **Body kit** | M5Stack StackChan servo kit |
 | **Servos** | 2x feedback servos — yaw (X axis): 360° continuous rotation, model not specified by M5Stack; pitch (Y axis): **SCS0009**, 90° travel, M5Stack-recommended operating range 5°–85° |
-| **Additional** | 12x WS2812C RGB LEDs, 3-zone touch panel (Si12T), NFC (ST25R3916), IR tx/rx (IRM56384), 550 mAh supplementary battery, PY32L020 IO expander, INA226 battery monitor, in-box handheld remote controller (transport not specified by M5Stack — see [hardware.md](./hardware.md#what-the-stackchan-kit-adds-on-top)) |
+| **Additional** | 12x WS2812C RGB LEDs, 3-zone touch panel (Si12T), NFC (ST25R3916), IR tx/rx (IRM56384), 550 mAh supplementary battery, PY32L020 IO expander, INA226 battery monitor, in-box handheld ESP-NOW remote controller (see [hardware.md](./hardware.md#what-the-stackchan-kit-adds-on-top)) |
 | **Assembled dimensions** | 54.0 × 70.5 × 61.5 mm, 187.2 g |
 | **Firmware** | Built from [`m5stack/StackChan`](https://github.com/m5stack/StackChan) (Arduino C++) |
 
