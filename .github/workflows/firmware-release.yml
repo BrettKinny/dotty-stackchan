@@ -54,18 +54,26 @@ jobs:
           . /opt/esp/idf/export.sh
           idf.py build
 
-      # Collect the three release binaries and generate checksums.
-      # Build output lands in firmware/firmware/build/.
-      # NOTE: generated_assets.bin is produced by the SPIFFS assets
-      # partition build. If the partition layout changes, this path
-      # may need updating.
-      - name: Generate SHA256 checksums
+      # Collect every binary a full flash needs and generate checksums.
+      # idf.py writes the bootloader, partition table, and face-detect
+      # model into subdirectories of build/ — copy them next to the flat
+      # binaries so the release ships a complete, self-contained set.
+      # Omitting bootloader.bin / partition-table.bin bricks devices whose
+      # previous firmware left an incompatible partition layout: the
+      # device boot-loops on "No bootable app partitions" (see #83, #7).
+      - name: Stage binaries and generate SHA256 checksums
         working-directory: firmware/firmware/build
         run: |
+          cp bootloader/bootloader.bin .
+          cp partition_table/partition-table.bin .
+          cp espdl_models/human_face_detect.espdl .
           sha256sum \
-            stack-chan.bin \
+            bootloader.bin \
+            partition-table.bin \
             ota_data_initial.bin \
+            stack-chan.bin \
             generated_assets.bin \
+            human_face_detect.espdl \
             > SHA256SUMS.txt
           echo "--- checksums ---"
           cat SHA256SUMS.txt
@@ -87,7 +95,7 @@ jobs:
       #   if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
       #   working-directory: firmware/firmware/build
       #   run: |
-      #     for f in stack-chan.bin ota_data_initial.bin generated_assets.bin SHA256SUMS.txt; do
+      #     for f in bootloader.bin partition-table.bin ota_data_initial.bin stack-chan.bin generated_assets.bin human_face_detect.espdl SHA256SUMS.txt; do
       #       gpg --batch --yes --pinentry-mode loopback \
       #           --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
       #           --detach-sign --armor "$f"
@@ -99,14 +107,20 @@ jobs:
           name: ${{ github.ref_name }}
           generate_release_notes: true
           files: |
-            firmware/firmware/build/stack-chan.bin
+            firmware/firmware/build/bootloader.bin
+            firmware/firmware/build/partition-table.bin
             firmware/firmware/build/ota_data_initial.bin
+            firmware/firmware/build/stack-chan.bin
             firmware/firmware/build/generated_assets.bin
+            firmware/firmware/build/human_face_detect.espdl
             firmware/firmware/build/SHA256SUMS.txt
             # Add once signing is enabled:
-            # firmware/firmware/build/stack-chan.bin.asc
+            # firmware/firmware/build/bootloader.bin.asc
+            # firmware/firmware/build/partition-table.bin.asc
             # firmware/firmware/build/ota_data_initial.bin.asc
+            # firmware/firmware/build/stack-chan.bin.asc
             # firmware/firmware/build/generated_assets.bin.asc
+            # firmware/firmware/build/human_face_detect.espdl.asc
             # firmware/firmware/build/SHA256SUMS.txt.asc
 
   notify-failure:

@@ -94,7 +94,7 @@ between "Generate SHA256 checksums" and "Create GitHub Release."
   if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
   working-directory: firmware/firmware/build
   run: |
-    for f in stack-chan.bin ota_data_initial.bin generated_assets.bin SHA256SUMS.txt; do
+    for f in bootloader.bin partition-table.bin ota_data_initial.bin stack-chan.bin generated_assets.bin human_face_detect.espdl SHA256SUMS.txt; do
       gpg --batch --yes --pinentry-mode loopback \
           --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
           --detach-sign --armor "$f"

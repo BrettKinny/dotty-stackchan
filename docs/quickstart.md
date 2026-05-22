@@ -21,8 +21,9 @@ alternative configurations.
 
 Download the latest release from
 [GitHub Releases](https://github.com/BrettKinny/dotty-stackchan/releases)
-(look for a tag starting with `fw-v`). You need three files:
-`stack-chan.bin`, `ota_data_initial.bin`, and `generated_assets.bin`.
+(look for a tag starting with `fw-v`). Grab all six binaries:
+`bootloader.bin`, `partition-table.bin`, `ota_data_initial.bin`,
+`stack-chan.bin`, `generated_assets.bin`, and `human_face_detect.espdl`.
 
 Install esptool and flash over USB-C:
 
@@ -32,10 +33,18 @@ pip install esptool
 python -m esptool --chip esp32s3 -b 460800 \
   --before default_reset --after hard_reset \
   write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m \
-  0xd000 ota_data_initial.bin \
-  0x20000 stack-chan.bin \
-  0x610000 generated_assets.bin
+  0x0      bootloader.bin \
+  0x8000   partition-table.bin \
+  0xd000   ota_data_initial.bin \
+  0x20000  stack-chan.bin \
+  0xa60000 generated_assets.bin \
+  0xe70000 human_face_detect.espdl
 ```
+
+Flashing the bootloader (`0x0`) and partition table (`0x8000`) is
+**required** — skip them and the device keeps whatever partition layout
+the previous firmware left behind. That layout won't match these
+images, and the robot boot-loops on `No bootable app partitions`.
 
 Verify checksums against `SHA256SUMS.txt` in the release if desired.
 

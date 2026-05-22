@@ -50,6 +50,16 @@ Symptom-first lookup table covering common and obscure failure modes. Pair with 
 
 ---
 
+## "No bootable app partitions" boot loop after flashing
+
+**Symptom:** After flashing the firmware the screen is frozen or black. A serial monitor shows the bootloader looping on `E boot: No bootable app partitions in the partition table`, or `Image length ... doesn't fit in partition length ...`.
+
+**Cause:** The device was flashed without a partition table, so it kept the layout left by whatever firmware was on it before (the M5Burner StackChan demo, Home Assistant Voice, etc.). That layout doesn't match Dotty's images.
+
+**Fix:** Re-flash with the **full six-file command** in [Quickstart step 1](quickstart.md#1-flash-the-firmware). It writes `bootloader.bin` at `0x0` and `partition-table.bin` at `0x8000` — with those in place the partition offsets line up. If your downloaded release is missing either file, grab the latest `fw-v` release, which ships all six binaries.
+
+---
+
 ## Robot not responding after OTA / firmware update
 
 **Symptom:** The robot boots and connects to WiFi, but never responds to voice. May show a face but no indication of listening.
