@@ -56,3 +56,80 @@ async def voice_take_photo(
     if best_desc and best_age <= TAKE_PHOTO_FRESHNESS_SEC:
         return {"description": best_desc[:TAKE_PHOTO_MAX_CHARS]}
     return {"description": TAKE_PHOTO_FALLBACK}
+
+
+# --- per-person memory: kid-safety review classifier (#53) -----------------
+#
+# dotty-pi-ext's remember_person tool writes per-person facts straight to
+# brain.db, but a fact about a minor must be human-reviewed before it
+# becomes readable context. The gate *decision* needs the household
+# registry, so it lives here (single-source, Python) rather than being
+# duplicated in the TS tool — remember_person calls this classifier, then
+# writes to person:<id> or person_pending:<id> accordingly.
+
+
+def get_household(request: Request):
+    hh = getattr(request.app.state, "household", None)
+    if hh is None:
+        raise RuntimeError("HouseholdRegistry not attached to app.state")
+    return hh
+
+
+# #53 kid-safety gate — CANONICAL SOURCE.
+#
+# `_ADULT_RELATIONS` + `person_needs_review` below are the single source
+# of truth for the per-person-memory gate. bridge.py carries a
+# byte-identical transitional mirror (`_ADULT_RELATIONS` /
+# `_person_memory_needs_review`) because its legacy write paths gate
+# in-process — the two services are separate Docker images on separate
+# hosts, so they cannot share an import. Edit *here* first, then mirror
+# into bridge.py; the mirror disappears when the #36 rehoming retires
+# bridge.py + bridge/*.
+#
+# Relations that affirmatively mark a household member as an adult — lets
+# a registry entry with no `age:` still auto-commit. Everything *not* in
+# this set (a known minor, an ambiguous relation, an unknown person)
+# routes to review.
+_ADULT_RELATIONS = frozenset({
+    "self", "owner", "parent", "mother", "father", "mum", "mom", "dad",
+    "partner", "spouse", "husband", "wife", "grandparent", "grandmother",
+    "grandfather", "aunt", "uncle", "sibling", "brother", "sister",
+})
+
+
+def person_needs_review(household, person_id: str) -> bool:
+    """#53 kid-safety gate. A declared per-person fact may be auto-
+    committed only when the speaker is affirmatively an adult per the
+    household registry (`age >= 18`, or an adult `relation`). A known
+    minor, an unknown person, or a registry entry too sparse to classify
+    all route to review. Safe failure mode: "a human looks first"."""
+    if household is None:
+        return True
+    try:
+        person = household.get(person_id)
+    except Exception:
+        log.debug("person_needs_review: registry.get raised", exc_info=True)
+        return True
+    if person is None:
+        return True  # unknown person — cannot rule out a minor
+    if person.age is not None:
+        return person.age < 18
+    return (person.relation or "").strip().lower() not in _ADULT_RELATIONS
+
+
+@router.get("/api/voice/person_review_status")
+async def voice_person_review_status(
+    person_id: str,
+    household=Depends(get_household),
+) -> dict:
+    """Kid-safety classifier for dotty-pi-ext's remember_person tool.
+
+    Returns whether a declared fact about `person_id` must be routed to
+    the `person_pending:<id>` review queue (minor / unknown /
+    unclassifiable) rather than committed straight to readable
+    `person:<id>` memory."""
+    pid = (person_id or "").strip().lower()
+    return {
+        "person_id": pid,
+        "needs_review": person_needs_review(household, pid),
+    }

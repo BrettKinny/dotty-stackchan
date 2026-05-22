@@ -131,7 +131,7 @@ The CoreS3 uses the ES7210 codec for mic input via I2S. If your board uses a dif
 
 **Servos**
 
-The StackChan kit uses SG90-class feedback servos on a dedicated bus. If your board uses a different servo controller or different pins:
+The StackChan kit uses feedback servos on a dedicated UART bus (yaw: continuous-rotation, model not specified by M5Stack; pitch: SCS0009 with a recommended 5°–85° travel window). If your board uses a different servo controller or different pins:
 
 1. Update pin definitions in the servo driver.
 2. Update the physical angle limits (min/max) for your mechanism.

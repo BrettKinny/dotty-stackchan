@@ -1,0 +1,12 @@
+{# Result of an /ui/actions/memory/* action. On success, reloads the
+   memory card after a beat so the list reflects the change. Mirrors
+   state_result.html. #}
+{% if ok %}
+<div class="alert alert-info dotty-alert"
+     hx-get="/ui/memory" hx-trigger="load delay:500ms" hx-swap="innerHTML"
+     hx-target="#memory-card-body">
+  {% if action == "approve" %}Approved — moved to readable memory.{% else %}Redacted.{% endif %}
+</div>
+{% else %}
+<div class="alert alert-error dotty-alert">{{ error or "Action failed." }}</div>
+{% endif %}

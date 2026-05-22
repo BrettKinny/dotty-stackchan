@@ -64,3 +64,32 @@ export async function fetchTakePhoto(
     return fallback;
   }
 }
+
+/**
+ * GET /api/voice/person_review_status — the #53 kid-safety classifier.
+ * Returns true when a declared fact about `personId` must be routed to
+ * the review queue (a minor, an unknown person, or an unclassifiable
+ * registry entry).
+ *
+ * Fail-safe: any failure (network, non-2xx, malformed JSON) returns
+ * `true`. When the gate is unreachable we route to review rather than
+ * risk auto-committing an unreviewed fact about a minor.
+ */
+export async function fetchPersonReviewStatus(
+  personId: string,
+  opts: BehaviourOptions = {},
+): Promise<boolean> {
+  try {
+    const resp = await behaviourFetch(
+      `/api/voice/person_review_status?person_id=${encodeURIComponent(personId)}`,
+      { method: "GET" },
+      opts,
+    );
+    if (!resp.ok) return true;
+    const data = (await resp.json()) as { needs_review?: unknown };
+    // Only an explicit `false` clears the gate — missing/garbage → review.
+    return data.needs_review !== false;
+  } catch {
+    return true;
+  }
+}

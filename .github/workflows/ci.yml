@@ -83,12 +83,20 @@ jobs:
             'aiohttp>=3.9,<4' \
             'requests>=2.31,<3' \
             'httpx>=0.27,<1'
-      - name: Run bridge + pi_voice unit tests with coverage
-        # --cov-fail-under locks in today's measured coverage as the
-        # floor; lower the gate only when intentionally removing tests.
+      - name: Run bridge + pi_voice unit tests
         run: |
           pytest tests/ custom-providers/pi_voice/tests/ -v --tb=short \
-            --cov --cov-report=term --cov-fail-under=56
+            --cov --cov-report=
+      - name: Run dotty-behaviour unit tests + combined coverage gate
+        # Separate pytest process on purpose: dotty-behaviour/conftest.py puts
+        # the package's flat modules (config, consumers, routes, …) on sys.path,
+        # which would shadow the bridge's modules if both suites were collected
+        # in one session. --cov-append accumulates onto the step above, and the
+        # --cov-fail-under floor is evaluated on the combined data (currently
+        # ~70%). Lower the gate only when intentionally removing tests.
+        run: |
+          pytest dotty-behaviour/tests/ -v --tb=short \
+            --cov --cov-append --cov-report=term --cov-fail-under=56
 
   pi-ext-tests:
     name: dotty-pi-ext TS Tests

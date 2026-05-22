@@ -30,13 +30,14 @@ The only hardware this stack has been tested end-to-end on.
 | **Speaker** | AW88298 amplifier, 16-bit I2S, 1 W |
 | **Wi-Fi** | 2.4 GHz only (no 5 GHz) |
 | **Body kit** | M5Stack StackChan servo kit |
-| **Servos** | 2x SG90-class feedback servos (pan: 360 deg yaw, tilt: 90 deg pitch) |
-| **Additional** | 12x RGB LEDs, 3-zone touch panel, NFC, IR tx/rx, 700 mAh supplementary battery |
+| **Servos** | 2x feedback servos — yaw (X axis): 360° continuous rotation, model not specified by M5Stack; pitch (Y axis): **SCS0009**, 90° travel, M5Stack-recommended operating range 5°–85° |
+| **Additional** | 12x WS2812C RGB LEDs, 3-zone touch panel (Si12T), NFC (ST25R3916), IR tx/rx (IRM56384), 550 mAh supplementary battery, PY32L020 IO expander, INA226 battery monitor, in-box handheld ESP-NOW remote controller (see [hardware.md](./hardware.md#what-the-stackchan-kit-adds-on-top)) |
+| **Assembled dimensions** | 54.0 × 70.5 × 61.5 mm, 187.2 g |
 | **Firmware** | Built from [`m5stack/StackChan`](https://github.com/m5stack/StackChan) (Arduino C++) |
 
 This is the configuration described throughout the rest of the docs. The servo kit provides the head-pan and head-tilt movement that makes StackChan look like a robot rather than a screen on a desk.
 
-**Servo note.** The StackChan kit uses SG90-class feedback servos. There is currently no firmware-side velocity or acceleration cap, which means head movements can be abrupt. This is a known limitation documented in [hardware.md](./hardware.md#safety-relevant-hardware-facts).
+**Servo note.** The StackChan pitch servo is documented as an SCS0009; the yaw servo's model isn't specified by M5Stack but is a feedback servo with continuous rotation. There is currently no firmware-side velocity or acceleration cap, which means head movements can be abrupt. This is a known limitation documented in [hardware.md](./hardware.md#safety-relevant-hardware-facts).
 
 For the full BOM and 3D-printed chassis STLs, see the upstream repo: [m5stack/StackChan](https://github.com/m5stack/StackChan).
 
@@ -75,4 +76,4 @@ These are explicitly not supported and are unlikely to work without significant 
 - [references.md](./references.md#hardware) — upstream hardware links.
 - [m5stack/StackChan](https://github.com/m5stack/StackChan) — hardware BOM, chassis STLs, firmware source.
 
-Last verified: 2026-05-17.
+Last verified: 2026-05-18.

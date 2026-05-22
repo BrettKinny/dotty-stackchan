@@ -1086,10 +1086,11 @@ def _resolve_speaker_for_request(payload):
 
 def _voice_preparer(channel: str | None, resolution=None,
                     room_description: str | None = None,
-                    device_id: str | None = None):
+                    device_id: str | None = None,
+                    person_memory_block: str | None = None):
     """Build a `prepare` callback for `acp.prompt`.
 
-    Three layers of speaker context, additive (any combination may be
+    Four layers of speaker context, additive (any combination may be
     present per turn):
 
       * **Resolver path** — a `SpeakerResolution` with a registry
@@ -1108,6 +1109,10 @@ def _voice_preparer(channel: str | None, resolution=None,
       * **Legacy face-rec path** — when neither of the above produces
         anything, consume any pending face-recognized identity marker
         for this channel and emit the historic `[Speaker: name]` line.
+      * **Person memory** — durable per-person facts from the
+        `person:<id>` namespace of `brain.db`, pre-rendered by the
+        caller and passed in as `person_memory_block`. Injected after
+        `[Speaking with]` and before `[Current perception]`. See #53.
 
     `device_id` is curried into the wrapper so `_build_perception_block`
     can read the latest perception caches at every turn (multi-turn
@@ -1120,6 +1125,8 @@ def _voice_preparer(channel: str | None, resolution=None,
         speaker_block = _build_speaker_block(resolution)
         if speaker_block:
             block_parts.append(speaker_block)
+    if person_memory_block:
+        block_parts.append(person_memory_block)
     if room_description:
         cleaned = room_description.strip()
         # Defensive: cap length so a runaway VLM response can't blow
@@ -3273,6 +3280,21 @@ def _call_narrative_llm(
         return None
 
 
+# `_call_vision_api` never raises — it swallows request/timeout errors and
+# returns one of these sentinel strings, so the upstream LLM receives an
+# explicit "vision is unavailable" instruction instead of confabulating a
+# description. The sentinels double as the dashboard failure-aggregator's
+# classification keys — see `_classify_vision_result` (#74).
+_VISION_ERR_NO_KEY = (
+    "ERROR: my camera is offline right now. Tell the user the vision "
+    "system is unavailable and do not guess at what the photo shows."
+)
+_VISION_ERR_API = (
+    "ERROR: the vision service didn't respond. Tell the user you "
+    "couldn't process the photo and do not guess at what it shows."
+)
+
+
 def _call_vision_api(
     b64_image: str, question: str, *,
     system_prompt: str = VISION_SYSTEM_PROMPT,
@@ -3288,10 +3310,7 @@ def _call_vision_api(
             "VLM call aborted — VLM_API_KEY/VISION_API_KEY/OPENROUTER_API_KEY "
             "all unset; set one in zeroclaw-bridge.service Environment="
         )
-        return (
-            "ERROR: my camera is offline right now. Tell the user the vision "
-            "system is unavailable and do not guess at what the photo shows."
-        )
+        return _VISION_ERR_NO_KEY
     payload = {
         "model": VLM_MODEL,
         "messages": [
@@ -3324,10 +3343,24 @@ def _call_vision_api(
         return resp.json()["choices"][0]["message"]["content"].strip()
     except Exception:
         log.exception("vision API call failed")
-        return (
-            "ERROR: the vision service didn't respond. Tell the user you "
-            "couldn't process the photo and do not guess at what it shows."
-        )
+        return _VISION_ERR_API
+
+
+def _classify_vision_result(text: str | None) -> str | None:
+    """Map a `_call_vision_api` return value to a dashboard failure kind
+    (#74), or None when the call succeeded.
+
+    `_call_vision_api` swallows its own request/timeout exceptions and
+    returns an `ERROR:` sentinel *string* rather than raising — so a dead
+    or unconfigured vision service reaches `vision_explain` as an ordinary
+    return. Without this the aggregator would only ever see the rare
+    `err_kind="exception"` and miss the most common real failure mode:
+    the VLM endpoint not responding."""
+    if text == _VISION_ERR_NO_KEY:
+        return "camera_offline"   # VLM API key unset — a config error
+    if text == _VISION_ERR_API:
+        return "vision_api"       # request failed / non-2xx / bad body
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -3628,6 +3661,11 @@ async def vision_explain(
         for k in [k for k, v in _vision_cache.items() if now - v["timestamp"] > VISION_CACHE_TTL_SEC]:
             _vision_cache.pop(k, None)
 
+        # A failed VLM call returns an `ERROR:` sentinel string rather
+        # than raising (see `_call_vision_api`), so classify the final
+        # description for the dashboard failure aggregator (#74) —
+        # otherwise the most common failure mode never reaches the count.
+        err_kind = _classify_vision_result(description)
         log.info("vision result device=%s desc=%s", device_id, description[:120])
         return {"description": description}
     except Exception:
@@ -3868,6 +3906,10 @@ _VOICE_THINKER_URL = os.environ.get(
 _VOICE_THINKER_MODEL = os.environ.get("VOICE_THINKER_MODEL", "qwen3.6:27b-think")
 _VOICE_THINKER_TIMEOUT = float(os.environ.get("VOICE_THINKER_TIMEOUT", "30"))
 
+# #53 per-person memory — how many durable facts to load into a turn's
+# `[Person memory]` block. Direct `person:<id>` namespace fetch, not FTS.
+_PERSON_MEMORY_MAX_FACTS = int(os.environ.get("PERSON_MEMORY_MAX_FACTS", "8"))
+
 
 def _voice_memory_search_blocking(query: str, limit: int = 5) -> list[dict]:
     """FTS5 search across `memories`. Read-only, WAL-friendly. Returns
@@ -3939,6 +3981,170 @@ def _voice_memory_store_blocking(
             conn.close()
     except Exception:
         log.exception("voice memory store failed (category=%s)", category)
+        return False
+
+
+def _voice_memory_person_fetch_blocking(
+    person_id: str, limit: int = _PERSON_MEMORY_MAX_FACTS,
+) -> list[dict]:
+    """Fetch durable per-person memory rows for `person_id` — a direct
+    `namespace='person:<id>'` lookup, *not* an FTS search. Ordered by
+    importance then recency. Read-only, WAL-friendly. Empty list on any
+    error, unknown person, or missing db.
+
+    Only the approved `person:<id>` namespace is read. The kid-safety
+    pending namespace (`person_pending:<id>`, written for minors) is
+    deliberately excluded so unreviewed facts never reach a prompt — see
+    the #53 review-before-write gate."""
+    import sqlite3
+    if not _VOICE_MEMORY_DB.exists():
+        log.warning("voice memory: db not found at %s", _VOICE_MEMORY_DB)
+        return []
+    pid = (person_id or "").strip().lower()
+    if not pid:
+        return []
+    try:
+        conn = sqlite3.connect(
+            f"file:{_VOICE_MEMORY_DB}?mode=ro", uri=True, timeout=2,
+        )
+        try:
+            conn.row_factory = sqlite3.Row
+            cur = conn.execute(
+                """
+                SELECT key, content, category, importance,
+                       created_at, updated_at
+                FROM memories
+                WHERE namespace = ?
+                ORDER BY importance DESC, updated_at DESC
+                LIMIT ?
+                """,
+                (f"person:{pid}", limit),
+            )
+            return [dict(r) for r in cur.fetchall()]
+        finally:
+            conn.close()
+    except Exception:
+        log.exception(
+            "voice memory person fetch failed for person_id=%r", pid,
+        )
+        return []
+
+
+def _build_person_memory_block(person_id: str | None) -> str:
+    """Render durable per-person memory for `person_id` as a
+    `[Person memory]` block for the talk-turn system prompt.
+
+    Performs a blocking SQLite read — **must** be called via
+    `asyncio.to_thread`, never directly on the event loop. Returns ""
+    when nothing is stored or `person_id` is None, so turns for unknown
+    / first-time speakers don't waste prompt tokens on an empty marker.
+    `_voice_preparer` injects the result after `[Speaking with]` and
+    before `[Current perception]` (#53)."""
+    if not person_id:
+        return ""
+    rows = _voice_memory_person_fetch_blocking(person_id)
+    if not rows:
+        return ""
+    facts: list[str] = []
+    for r in rows:
+        content = (r.get("content") or "").strip()
+        if not content:
+            continue
+        if len(content) > 160:
+            content = content[:159].rstrip() + "…"
+        facts.append(f"- {content}")
+    if not facts:
+        return ""
+    return "[Person memory]\n" + "\n".join(facts) + "\n"
+
+
+def _voice_memory_person_records_blocking() -> list[dict]:
+    """List every per-person memory row — approved (`person:<id>`) and
+    pending review (`person_pending:<id>`). Powers the /ui/memory
+    dashboard (#53). Read-only. Empty list on error / missing db."""
+    import sqlite3
+    if not _VOICE_MEMORY_DB.exists():
+        return []
+    try:
+        conn = sqlite3.connect(
+            f"file:{_VOICE_MEMORY_DB}?mode=ro", uri=True, timeout=2,
+        )
+        try:
+            conn.row_factory = sqlite3.Row
+            cur = conn.execute(
+                """
+                SELECT id, content, namespace, importance,
+                       created_at, updated_at
+                FROM memories
+                WHERE substr(namespace, 1, 7) = 'person:'
+                   OR substr(namespace, 1, 15) = 'person_pending:'
+                ORDER BY namespace, importance DESC, updated_at DESC
+                """
+            )
+            return [dict(r) for r in cur.fetchall()]
+        finally:
+            conn.close()
+    except Exception:
+        log.exception("voice memory person records list failed")
+        return []
+
+
+def _voice_memory_approve_blocking(mem_id: str) -> bool:
+    """Promote a pending per-person memory row to approved —
+    `person_pending:<id>` → `person:<id>` (the #53 kid-safety review
+    action). Returns False if the row is missing or not in a pending
+    namespace, so a double-approve is a safe no-op."""
+    import sqlite3
+    if not _VOICE_MEMORY_DB.exists() or not mem_id:
+        return False
+    prefix = "person_pending:"
+    now = datetime.now(ZoneInfo("UTC")).isoformat()
+    try:
+        conn = sqlite3.connect(str(_VOICE_MEMORY_DB), timeout=5)
+        try:
+            cur = conn.execute(
+                "SELECT namespace FROM memories WHERE id = ?", (mem_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return False
+            namespace = row[0] or ""
+            if not namespace.startswith(prefix):
+                return False
+            approved = "person:" + namespace[len(prefix):]
+            conn.execute(
+                "UPDATE memories SET namespace = ?, updated_at = ? "
+                "WHERE id = ?",
+                (approved, now, mem_id),
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception:
+        log.exception("voice memory approve failed (id=%s)", mem_id)
+        return False
+
+
+def _voice_memory_delete_blocking(mem_id: str) -> bool:
+    """Delete a memory row by id — the /ui/memory redact action. The
+    FTS5 triggers drop the matching index row. Returns False if nothing
+    matched."""
+    import sqlite3
+    if not _VOICE_MEMORY_DB.exists() or not mem_id:
+        return False
+    try:
+        conn = sqlite3.connect(str(_VOICE_MEMORY_DB), timeout=5)
+        try:
+            cur = conn.execute(
+                "DELETE FROM memories WHERE id = ?", (mem_id,),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+    except Exception:
+        log.exception("voice memory delete failed (id=%s)", mem_id)
         return False
 
 
@@ -4110,11 +4316,35 @@ async def _voice_tool_play_song(args: dict, session_id: str) -> str:
     return f"(couldn't play {match}: {err})"
 
 
+async def _voice_tool_remember_person(args: dict, session_id: str) -> str:
+    """#53 escalate handler — store a durable fact about a named household
+    member. `args` carries the 4B's `name` + `fact`. The household-registry
+    id is the person's name lowercased (the `person:<id>` namespace
+    convention), so `name` is used directly as the person_id. Returns the
+    same confirmation strings as the pi-runtime `remember_person` tool so
+    the second model call can phrase the spoken reply consistently."""
+    name = (args.get("name") or args.get("person_id") or "").strip()
+    if not name:
+        return "(no person specified)"
+    if not (args.get("fact") or "").strip():
+        return "(empty fact)"
+    valid, stored, needs_review = await _person_memory_store(
+        name, args.get("fact") or "", session_id or None,
+    )
+    if not valid or not stored:
+        return "(remember failed)"
+    return (
+        "(saved — a grown-up will check that)" if needs_review
+        else f"(remembered about {name})"
+    )
+
+
 _VOICE_TOOLS = {
     "memory_lookup": _voice_tool_memory_lookup,
     "think_hard": _voice_tool_think_hard,
     "take_photo": _voice_tool_take_photo,
     "play_song": _voice_tool_play_song,
+    "remember_person": _voice_tool_remember_person,
 }
 
 
@@ -4131,6 +4361,12 @@ class VoiceMemoryLogIn(BaseModel):
 
 
 class VoiceRememberIn(BaseModel):
+    fact: str
+    session_id: str | None = None
+
+
+class VoiceRememberPersonIn(BaseModel):
+    person_id: str
     fact: str
     session_id: str | None = None
 
@@ -4186,6 +4422,105 @@ async def voice_remember(payload: VoiceRememberIn):
         ),
         name="voice_remember",
     )
+
+
+# #53 kid-safety gate — TRANSITIONAL MIRROR.
+#
+# The canonical implementation lives in dotty-behaviour/routes/voice.py
+# (`_ADULT_RELATIONS` + `person_needs_review`). This copy exists only so
+# the legacy bridge.py write paths can gate in-process against the
+# in-process `_household_registry` — the two services are separate
+# Docker images on separate hosts and cannot share an import. It MUST
+# stay byte-identical to the dotty-behaviour version: edit there first,
+# then mirror here. Both copies disappear when the #36 rehoming retires
+# bridge.py + bridge/*.
+#
+# Relations that affirmatively mark a household member as an adult —
+# lets a registry entry with no `age:` still auto-commit. Everything
+# *not* in this set (a known minor, an ambiguous relation, an unknown
+# person) is routed to review by the kid-safety gate below.
+_ADULT_RELATIONS = frozenset({
+    "self", "owner", "parent", "mother", "father", "mum", "mom", "dad",
+    "partner", "spouse", "husband", "wife", "grandparent", "grandmother",
+    "grandfather", "aunt", "uncle", "sibling", "brother", "sister",
+})
+
+
+def _person_memory_needs_review(person_id: str) -> bool:
+    """#53 kid-safety gate: decide whether a declared fact about
+    `person_id` must go to the `person_pending:<id>` review queue
+    rather than straight into readable `person:<id>` memory.
+
+    Conservative by design — a fact auto-commits **only** when the
+    speaker is affirmatively an adult per the hand-authored household
+    registry (`age >= 18`, or an adult `relation`). A known minor, an
+    unknown person, or a registry entry too sparse to classify all
+    route to review. The safe failure mode is "a human looks first",
+    never "written about a minor unreviewed"."""
+    if _household_registry is None:
+        return True
+    try:
+        person = _household_registry.get(person_id)
+    except Exception:
+        log.debug("person memory gate: registry.get raised", exc_info=True)
+        return True
+    if person is None:
+        return True  # unknown person — cannot rule out a minor
+    if person.age is not None:
+        return person.age < 18
+    return (person.relation or "").strip().lower() not in _ADULT_RELATIONS
+
+
+async def _person_memory_store(
+    person_id: str, fact: str, session_id: str | None,
+) -> tuple[bool, bool, bool]:
+    """#53 gate + store for a declared per-person fact. Runs the kid-safety
+    gate (`_person_memory_needs_review`), writes to `person:<id>` or the
+    `person_pending:<id>` review queue accordingly, and returns
+    `(valid, stored, needs_review)`. `valid` is False when `person_id` or
+    `fact` is empty after normalisation. Shared by the
+    `/api/voice/remember_person` endpoint and the tier1slim escalate tool
+    handler so both write paths apply an identical gate decision."""
+    pid = (person_id or "").strip().lower()
+    fact = (fact or "").strip()[:300]
+    if not pid or not fact:
+        return False, False, False
+    needs_review = _person_memory_needs_review(pid)
+    namespace = (
+        f"person_pending:{pid}" if needs_review else f"person:{pid}"
+    )
+    stored = await asyncio.to_thread(
+        _voice_memory_store_blocking,
+        content=fact, category="core", namespace=namespace,
+        importance=0.7, session_id=session_id,
+    )
+    if stored:
+        log.info(
+            "person memory %s person=%s review=%s",
+            "queued" if needs_review else "stored", pid, needs_review,
+        )
+    else:
+        log.warning("person memory store failed person=%s", pid)
+    return True, stored, needs_review
+
+
+@app.post("/api/voice/remember_person")
+async def voice_remember_person(payload: VoiceRememberPersonIn):
+    """Store a declared fact about a specific household member (#53).
+
+    Unlike `/api/voice/remember` this is *not* fire-and-forget: the
+    kid-safety gate (`_person_memory_needs_review`) decides up front
+    whether the fact lands in readable `person:<id>` memory or the
+    `person_pending:<id>` review queue, and the caller is told which —
+    so the voice layer can phrase its confirmation ("I'll remember
+    that" vs "I'll check with a grown-up first"). Facts routed to
+    review are never loaded into a prompt until approved."""
+    valid, stored, needs_review = await _person_memory_store(
+        payload.person_id, payload.fact, payload.session_id,
+    )
+    if not valid:
+        return {"ok": False, "pending_review": False, "error": "empty"}
+    return {"ok": stored, "pending_review": needs_review}
 
 
 # ---------------------------------------------------------------------------
@@ -4854,12 +5189,16 @@ async def message(payload: MessageIn) -> MessageOut:
     )
     await _refresh_caches()
     speaker = _resolve_speaker_for_request(payload)
+    person_memory_block = None
     if speaker is not None and speaker.person_id:
         log.info(
             "speaker channel=%s person=%s addressee=%s conf=%.2f signals=%s",
             payload.channel, speaker.person_id, speaker.addressee,
             speaker.confidence,
             ",".join(v.signal for v in speaker.votes) or "-",
+        )
+        person_memory_block = await asyncio.to_thread(
+            _build_person_memory_block, speaker.person_id,
         )
     t0 = perf_counter()
     error_msg = None
@@ -4873,6 +5212,7 @@ async def message(payload: MessageIn) -> MessageOut:
                     room_description=(payload.metadata or {}).get(
                         "room_description"),
                     device_id=(payload.metadata or {}).get("device_id"),
+                    person_memory_block=person_memory_block,
                 ),
             ),
             timeout=REQUEST_TIMEOUT_SEC,
@@ -5070,6 +5410,18 @@ if _configure_dashboard is not None:
             return None
         return getattr(person, "display_name", None) or None
 
+    async def _dashboard_memory_records() -> list[dict]:
+        """All per-person memory rows (approved + pending) for /ui/memory."""
+        return await asyncio.to_thread(_voice_memory_person_records_blocking)
+
+    async def _dashboard_memory_approve(mem_id: str) -> dict:
+        ok = await asyncio.to_thread(_voice_memory_approve_blocking, mem_id)
+        return {"ok": ok}
+
+    async def _dashboard_memory_redact(mem_id: str) -> dict:
+        ok = await asyncio.to_thread(_voice_memory_delete_blocking, mem_id)
+        return {"ok": ok}
+
     _configure_dashboard(
         send_message=_dashboard_send_message,
         vision_cache=_vision_cache,
@@ -5087,6 +5439,9 @@ if _configure_dashboard is not None:
         unsubscribe_events=_dashboard_unsubscribe_events,
         perception_state_getter=_dashboard_perception_state_getter,
         perception_recent_getter=get_recent_perception,
+        memory_records_getter=_dashboard_memory_records,
+        memory_approve=_dashboard_memory_approve,
+        memory_redact=_dashboard_memory_redact,
         identity_display_name=_identity_display_name,
         last_user_line_getter=_get_last_user_line,
         sound_balance_getter=_sound_balance_series,
@@ -5554,12 +5909,16 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
     )
     await _refresh_caches()
     speaker = _resolve_speaker_for_request(payload)
+    person_memory_block = None
     if speaker is not None and speaker.person_id:
         log.info(
             "speaker channel=%s person=%s addressee=%s conf=%.2f signals=%s",
             payload.channel, speaker.person_id, speaker.addressee,
             speaker.confidence,
             ",".join(v.signal for v in speaker.votes) or "-",
+        )
+        person_memory_block = await asyncio.to_thread(
+            _build_person_memory_block, speaker.person_id,
         )
 
     # `t_request_start` is captured per-request and read inside on_chunk
@@ -5630,6 +5989,7 @@ async def message_stream(payload: MessageIn) -> StreamingResponse:
                         room_description=(payload.metadata or {}).get(
                             "room_description"),
                         device_id=(payload.metadata or {}).get("device_id"),
+                        person_memory_block=person_memory_block,
                     ),
                 ),
                 timeout=REQUEST_TIMEOUT_SEC,

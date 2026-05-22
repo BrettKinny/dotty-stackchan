@@ -9,7 +9,7 @@ description: Frequently asked questions about hardware, setup, and configuration
 
 ### What hardware do I need?
 
-The verified setup is an **M5Stack CoreS3** mounted in the **M5Stack StackChan servo kit** (2x SG90 servos for pan/tilt, 12 RGB LEDs, 3D-printed chassis). You also need a Docker-capable host on your LAN (a spare PC or any Linux box with Docker) to run the voice and brain containers.
+The verified setup is an **M5Stack CoreS3** mounted in the **M5Stack StackChan servo kit** (2x feedback servos — yaw continuous-rotation + SCS0009 pitch — for pan/tilt, 12 RGB LEDs, 3D-printed chassis). You also need a Docker-capable host on your LAN (a spare PC or any Linux box with Docker) to run the voice and brain containers.
 
 See [hardware-support.md](./hardware-support.md) for the full spec table and support tiers.
 
