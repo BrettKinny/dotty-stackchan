@@ -75,6 +75,17 @@ def get_household(request: Request):
     return hh
 
 
+# #53 kid-safety gate — CANONICAL SOURCE.
+#
+# `_ADULT_RELATIONS` + `person_needs_review` below are the single source
+# of truth for the per-person-memory gate. bridge.py carries a
+# byte-identical transitional mirror (`_ADULT_RELATIONS` /
+# `_person_memory_needs_review`) because its legacy write paths gate
+# in-process — the two services are separate Docker images on separate
+# hosts, so they cannot share an import. Edit *here* first, then mirror
+# into bridge.py; the mirror disappears when the #36 rehoming retires
+# bridge.py + bridge/*.
+#
 # Relations that affirmatively mark a household member as an adult — lets
 # a registry entry with no `age:` still auto-commit. Everything *not* in
 # this set (a known minor, an ambiguous relation, an unknown person)

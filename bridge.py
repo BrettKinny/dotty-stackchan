@@ -4424,10 +4424,21 @@ async def voice_remember(payload: VoiceRememberIn):
     )
 
 
+# #53 kid-safety gate — TRANSITIONAL MIRROR.
+#
+# The canonical implementation lives in dotty-behaviour/routes/voice.py
+# (`_ADULT_RELATIONS` + `person_needs_review`). This copy exists only so
+# the legacy bridge.py write paths can gate in-process against the
+# in-process `_household_registry` — the two services are separate
+# Docker images on separate hosts and cannot share an import. It MUST
+# stay byte-identical to the dotty-behaviour version: edit there first,
+# then mirror here. Both copies disappear when the #36 rehoming retires
+# bridge.py + bridge/*.
+#
 # Relations that affirmatively mark a household member as an adult —
 # lets a registry entry with no `age:` still auto-commit. Everything
 # *not* in this set (a known minor, an ambiguous relation, an unknown
-# person) is routed to review by the #53 kid-safety gate below.
+# person) is routed to review by the kid-safety gate below.
 _ADULT_RELATIONS = frozenset({
     "self", "owner", "parent", "mother", "father", "mum", "mom", "dad",
     "partner", "spouse", "husband", "wife", "grandparent", "grandmother",
