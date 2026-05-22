@@ -1,0 +1,20 @@
+{# #72 — recent content-filter hits. Rendered into #safety-card-body
+   (innerHTML swap) — no own `.card` chrome. Backed by an in-memory ring
+   (last 20); empty after a bridge restart. #}
+<div class="card-body p-3">
+  <div class="text-xs text-base-content/60 mb-2 px-1">Content filter — recent hits</div>
+  {% if rows %}
+  <ul class="divide-y divide-base-300">
+    {% for r in rows %}
+    <li class="py-2 flex items-baseline gap-2">
+      <span class="text-xs text-base-content/50 font-mono">{{ r.time }}</span>
+      <span class="badge badge-xs {% if r.tier == 'alert' %}badge-error{% elif r.tier == 'log' %}badge-warning{% else %}badge-ghost{% endif %}">{{ r.tier }}</span>
+      <span class="text-sm font-mono break-all">{{ r.rule }}</span>
+      <span class="text-xs text-base-content/40 ml-auto font-mono whitespace-nowrap">{{ r.prefix }}…</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="text-sm text-base-content/50 text-center py-4">No filter activity.</div>
+  {% endif %}
+</div>

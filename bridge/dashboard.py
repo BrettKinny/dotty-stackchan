@@ -885,6 +885,29 @@ async def discord_partial(request: Request) -> Any:
     return templates.TemplateResponse(request, "discord.html", ctx)
 
 
+@router.get("/safety/recent", response_class=HTMLResponse, include_in_schema=False)
+async def safety_recent(request: Request) -> Any:
+    """#72 — recent content-filter hits from the in-memory ring (last 20).
+    In-memory only; empties on a bridge restart."""
+    from bridge.text import recent_content_filter_hits
+    rows: list[dict[str, Any]] = []
+    for hit in recent_content_filter_hits():
+        ts = hit.get("ts") or 0
+        try:
+            time_str = datetime.fromtimestamp(ts).astimezone().strftime("%H:%M:%S")
+        except Exception:
+            time_str = "?"
+        rows.append({
+            "time": time_str,
+            "tier": hit.get("tier") or "?",
+            "rule": hit.get("rule") or "",
+            "prefix": hit.get("prefix") or "",
+        })
+    return templates.TemplateResponse(
+        request, "safety_recent.html", {"rows": rows},
+    )
+
+
 @router.post("/actions/state", response_class=HTMLResponse, include_in_schema=False)
 async def state_set(request: Request, state: str = Form(...)) -> Any:
     setter = _state.get("state_setter")
