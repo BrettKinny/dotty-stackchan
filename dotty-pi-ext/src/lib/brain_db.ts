@@ -96,6 +96,63 @@ export function searchMemories(
   }
 }
 
+/** Mirrors bridge.py `_PERSON_MEMORY_MAX_FACTS` — per-person fact budget. */
+export const PERSON_MEMORY_MAX_FACTS = 8;
+
+export interface PersonMemoryRow {
+  key: string;
+  content: string;
+  category: string;
+  importance: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PersonFetchOptions {
+  /** Override brain.db path (defaults to DOTTY_BRAIN_DB env / canonical). */
+  dbPath?: string;
+  /** Cap rows returned (defaults to PERSON_MEMORY_MAX_FACTS). */
+  limit?: number;
+}
+
+/**
+ * Direct per-person memory fetch — mirrors
+ * bridge.py:_voice_memory_person_fetch_blocking (#53). A namespace-scoped
+ * SELECT against `namespace='person:<id>'`, NOT an FTS search, ordered by
+ * importance then recency.
+ *
+ * Only the approved `person:<id>` namespace is read — the kid-safety
+ * pending namespace (`person_pending:<id>`) is deliberately never
+ * returned, so unreviewed facts about minors cannot reach a turn. Empty
+ * array on missing db, empty id, or any sqlite error.
+ */
+export function fetchPersonMemories(
+  personId: string,
+  opts: PersonFetchOptions = {},
+): PersonMemoryRow[] {
+  const limit = opts.limit ?? PERSON_MEMORY_MAX_FACTS;
+  const path = opts.dbPath ?? DEFAULT_PATH;
+  const pid = (personId ?? "").trim().toLowerCase();
+  if (!pid) return [];
+
+  try {
+    const db = openReadOnly(path);
+    const stmt = db.prepare(`
+      SELECT key, content, category, importance, created_at, updated_at
+      FROM memories
+      WHERE namespace = ?
+      ORDER BY importance DESC, updated_at DESC
+      LIMIT ?
+    `);
+    return stmt.all(`person:${pid}`, limit) as PersonMemoryRow[];
+  } catch (err) {
+    process.stderr.write(
+      `[brain_db] person fetch failed for person_id=${JSON.stringify(pid.slice(0, 60))}: ${err}\n`,
+    );
+    return [];
+  }
+}
+
 export interface StoreOptions {
   content: string;
   /** Defaults to "core" (long-retention fact, mirrors bridge.py /remember). */
