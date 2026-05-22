@@ -44,6 +44,21 @@
   </div>
   {% endif %}
 
+  {% if sound_spark %}
+  {# #69 — sound-localizer balance over the last 60 s. 0.5 is centred;
+     a flat line near 1.0 is the stuck-left bias tracked in #27. #}
+  <div class="mt-2 flex items-center gap-2" title="Sound-localizer balance, last 60 s">
+    <span class="text-xs text-base-content/50 whitespace-nowrap">Sound balance</span>
+    <svg viewBox="0 0 {{ sound_spark.width }} {{ sound_spark.height }}"
+         class="flex-1 h-6" preserveAspectRatio="none" aria-hidden="true">
+      <polyline points="{{ sound_spark.points }}"
+                fill="none" stroke="#22c55e" stroke-width="1.5"
+                vector-effect="non-scaling-stroke" />
+    </svg>
+    <span class="text-xs font-mono text-base-content/40">{{ "%.2f"|format(sound_spark.last) }}</span>
+  </div>
+  {% endif %}
+
   <div id="state-result" class="mt-2 empty:hidden"></div>
 </div>
 <script>

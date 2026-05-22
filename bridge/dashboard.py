@@ -50,6 +50,8 @@ _state: dict[str, Any] = {
     "perception_recent_getter": None,
     "identity_display_name": None,
     "last_user_line_getter": None,
+    "sound_balance_getter": None,
+    "vision_failures_getter": None,
 }
 
 
@@ -65,7 +67,9 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
               perception_state_getter: Any = None,
               perception_recent_getter: Any = None,
               identity_display_name: Any = None,
-              last_user_line_getter: Any = None) -> None:
+              last_user_line_getter: Any = None,
+              sound_balance_getter: Any = None,
+              vision_failures_getter: Any = None) -> None:
     """Register bridge state with the dashboard. Idempotent."""
     if send_message is not None:
         _state["send_message"] = send_message
@@ -103,6 +107,10 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
         _state["identity_display_name"] = identity_display_name
     if last_user_line_getter is not None:
         _state["last_user_line_getter"] = last_user_line_getter
+    if sound_balance_getter is not None:
+        _state["sound_balance_getter"] = sound_balance_getter
+    if vision_failures_getter is not None:
+        _state["vision_failures_getter"] = vision_failures_getter
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -178,6 +186,9 @@ XIAOZHI_OTA_PORT = int(os.environ.get("XIAOZHI_OTA_PORT", "8003"))
 XIAOZHI_WS_PORT = int(os.environ.get("XIAOZHI_WS_PORT", "8000"))
 LOG_DIR = Path(os.environ.get("CONVO_LOG_DIR", "/root/zeroclaw-bridge/logs"))
 VOICE_CHANNELS = ("dotty", "stackchan")
+# #64 — the zeroclaw-discord daemon's systemd unit. It runs on the same
+# RPi as the bridge, so its status is a local `systemctl` query.
+DISCORD_UNIT = os.environ.get("ZEROCLAW_DISCORD_UNIT", "zeroclaw-discord")
 
 _START_TIME = time.time()
 
@@ -766,6 +777,42 @@ _STATE_DESCRIPTIONS = {
 }
 
 
+def _sound_balance_sparkline() -> dict | None:
+    """Build the State-tile sound-balance sparkline (#69) — an SVG
+    polyline over the last 60 s of localizer `balance` samples. Returns
+    None when there's no recent sound data (fewer than 2 points)."""
+    getter = _state.get("sound_balance_getter")
+    series = getter() if getter else []
+    if not series or len(series) < 2:
+        return None
+    width, height = 100.0, 24.0
+    n = len(series)
+    pts: list[str] = []
+    for i, bal in enumerate(series):
+        x = (i / (n - 1)) * width
+        y = (1.0 - max(0.0, min(1.0, float(bal)))) * height
+        pts.append(f"{x:.1f},{y:.1f}")
+    return {
+        "points": " ".join(pts),
+        "last": series[-1],
+        "width": width,
+        "height": height,
+    }
+
+
+def _vision_failures_count() -> int:
+    """Total vision-capture failures in the last hour (#74) — summed
+    across error kinds. 0 when the getter is unwired or the window is
+    clear."""
+    getter = _state.get("vision_failures_getter")
+    if getter is None:
+        return 0
+    try:
+        return sum(getter().values())
+    except Exception:
+        return 0
+
+
 @router.get("/state", response_class=HTMLResponse, include_in_schema=False)
 async def state_partial(request: Request) -> Any:
     getter = _state.get("state_getter")
@@ -778,8 +825,52 @@ async def state_partial(request: Request) -> Any:
             "states": _STATES,
             "labels": _STATE_LABELS,
             "descriptions": _STATE_DESCRIPTIONS,
+            "sound_spark": _sound_balance_sparkline(),
         },
     )
+
+
+def _discord_unit_status() -> dict[str, Any]:
+    """#64 — query the zeroclaw-discord systemd unit. The Discord daemon
+    runs on the same RPi as the bridge, so `systemctl` is a local call
+    with no SSH. Read-only `systemctl show` — works without root."""
+    import subprocess
+    ctx: dict[str, Any] = {"unit": DISCORD_UNIT, "available": False}
+    try:
+        out = subprocess.run(
+            ["systemctl", "show", DISCORD_UNIT, "--no-pager",
+             "--property=LoadState,ActiveState,SubState,ActiveEnterTimestamp"],
+            capture_output=True, text=True, timeout=3,
+        )
+    except Exception:
+        return ctx
+    if out.returncode != 0:
+        return ctx
+    props: dict[str, str] = {}
+    for line in out.stdout.splitlines():
+        if "=" in line:
+            key, val = line.split("=", 1)
+            props[key] = val
+    if props.get("LoadState") == "not-found":
+        ctx["not_found"] = True
+        return ctx
+    active = props.get("ActiveState", "unknown")
+    ctx.update({
+        "available": True,
+        "active_state": active,
+        "sub_state": props.get("SubState", ""),
+        "since": props.get("ActiveEnterTimestamp", ""),
+        "running": active == "active",
+        "failed": active == "failed",
+    })
+    return ctx
+
+
+@router.get("/discord", response_class=HTMLResponse, include_in_schema=False)
+async def discord_partial(request: Request) -> Any:
+    """zeroclaw-discord daemon health card (#64)."""
+    ctx = await asyncio.to_thread(_discord_unit_status)
+    return templates.TemplateResponse(request, "discord.html", ctx)
 
 
 @router.post("/actions/state", response_class=HTMLResponse, include_in_schema=False)
@@ -1038,6 +1129,7 @@ def _build_perception_card_ctx(device_id: str | None) -> dict:
         "latest_voice_line": latest_voice_line,
         "synthesis_text": synthesis_text,
         "synthesis_age_label": synthesis_age_label,
+        "vision_failures_1h": _vision_failures_count(),
     }
 
 

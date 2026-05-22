@@ -76,6 +76,12 @@
             No image captured yet.
           </div>
           {% endif %}
+          {# #74 — vision-capture failures aggregated over the last hour. #}
+          {% if vision_failures_1h %}
+          <div class="text-[10px] text-warning mt-1">
+            ⚠ {{ vision_failures_1h }} capture failure{{ "s" if vision_failures_1h != 1 else "" }} in the last hour
+          </div>
+          {% endif %}
         </div>
       </div>
 
