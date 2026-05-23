@@ -5587,6 +5587,78 @@ async def _admin_smart_mode(payload: _AdminSmartModeIn) -> dict:
     }
 
 
+# --- reload-config (issue #77) ----------------------------------------
+#
+# Re-read a whitelist of env-driven module globals from os.environ
+# without restarting the bridge. Scope: pure-data vars whose only
+# consumer is the request path. Background-task-coupled vars
+# (CALENDAR_IDS, CALENDAR_POLL_SEC, *_STATE paths, LOCAL_TZ,
+# DOTTY_VOICE_PROVIDER) need a real restart and are intentionally
+# excluded.
+
+_RELOAD_CONFIG_WHITELIST: tuple[tuple[str, str, type], ...] = (
+    ("WEATHER_LOCATION", "WEATHER_LOCATION", str),
+    ("WEATHER_TTL_SEC", "WEATHER_TTL_SEC", float),
+    ("CALENDAR_TTL_SEC", "CALENDAR_TTL_SEC", float),
+    ("VISION_MODEL", "VISION_MODEL", str),
+    ("VISION_API_KEY", "VISION_API_KEY", str),
+    ("VISION_API_URL", "VISION_API_URL", str),
+    ("VISION_TIMEOUT_SEC", "VISION_TIMEOUT", float),
+    ("VLM_MODEL", "VLM_MODEL", str),
+    ("VLM_API_KEY", "VLM_API_KEY", str),
+    ("VLM_API_URL", "VLM_API_URL", str),
+)
+
+
+def _mask_secret(value: str) -> str:
+    if not value:
+        return value
+    if len(value) < 12:
+        return "***"
+    return f"{value[:4]}…{value[-4:]}"
+
+
+def _maybe_mask(name: str, value) -> str:
+    s = "" if value is None else str(value)
+    if "API_KEY" in name or "_KEY" in name or "TOKEN" in name:
+        return _mask_secret(s)
+    return s
+
+
+@_admin_router.post("/reload-config")
+async def _admin_reload_config() -> dict:
+    """Re-read whitelisted env vars into module globals. Returns
+    {ok, reloaded:[{name, old, new}], unchanged:[name]}. Secrets are
+    masked in the response."""
+    g = globals()
+    reloaded: list[dict] = []
+    unchanged: list[str] = []
+    for var_name, env_name, caster in _RELOAD_CONFIG_WHITELIST:
+        old = g.get(var_name)
+        raw = os.environ.get(env_name, "")
+        try:
+            new = caster(raw) if raw != "" else (
+                "" if caster is str else caster(0)
+            )
+        except (TypeError, ValueError):
+            log.warning(
+                "reload-config: cast failed for %s=%r as %s",
+                env_name, raw, caster.__name__,
+            )
+            continue
+        if new == old:
+            unchanged.append(var_name)
+            continue
+        g[var_name] = new
+        reloaded.append({
+            "name": var_name,
+            "old": _maybe_mask(var_name, old),
+            "new": _maybe_mask(var_name, new),
+        })
+        log.info("reload-config: %s reloaded", var_name)
+    return {"ok": True, "reloaded": reloaded, "unchanged": unchanged}
+
+
 @_admin_router.post("/state")
 async def _admin_state(payload: _AdminStateIn) -> dict:
     """Phase 4 — dashboard / external trigger to set Dotty's high-level state.

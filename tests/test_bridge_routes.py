@@ -685,5 +685,93 @@ class VisionLatestTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(body["room_match_person_id"])
 
 
+# ---------------------------------------------------------------------------
+# /admin/reload-config — issue #77
+# ---------------------------------------------------------------------------
+
+class AdminReloadConfigTests(unittest.TestCase):
+    def setUp(self):
+        # Bypass the localhost guard — TestClient's client.host is
+        # "testclient", which the real guard rejects with 403.
+        bridge_app.app.dependency_overrides[
+            bridge_app._admin_require_localhost
+        ] = lambda: None
+        # Disable CSRF enforcement for the duration of this test; the
+        # middleware reads bridge.csrf._ENFORCE at request time.
+        from bridge import csrf as _csrf
+        self._csrf_mod = _csrf
+        self._csrf_orig = _csrf._ENFORCE
+        _csrf._ENFORCE = False
+        # Seed env vars from current module globals so a baseline
+        # reload reports no changes. Without this, defaults in the
+        # module globals (e.g. WEATHER_LOCATION="Brisbane") don't
+        # appear in os.environ and the reload reports them as changed
+        # to "".
+        self._env_patch = patch.dict(os.environ, {
+            "WEATHER_LOCATION": str(bridge_app.WEATHER_LOCATION or ""),
+            "WEATHER_TTL_SEC": str(bridge_app.WEATHER_TTL_SEC),
+            "CALENDAR_TTL_SEC": str(bridge_app.CALENDAR_TTL_SEC),
+            "VISION_MODEL": str(bridge_app.VISION_MODEL or ""),
+            "VISION_API_KEY": str(bridge_app.VISION_API_KEY or ""),
+            "VISION_API_URL": str(bridge_app.VISION_API_URL or ""),
+            "VISION_TIMEOUT": str(bridge_app.VISION_TIMEOUT_SEC),
+            "VLM_MODEL": str(bridge_app.VLM_MODEL or ""),
+            "VLM_API_KEY": str(bridge_app.VLM_API_KEY or ""),
+            "VLM_API_URL": str(bridge_app.VLM_API_URL or ""),
+        })
+        self._env_patch.start()
+
+    def tearDown(self):
+        bridge_app.app.dependency_overrides.clear()
+        self._csrf_mod._ENFORCE = self._csrf_orig
+        self._env_patch.stop()
+
+    def test_no_changes_reports_all_unchanged(self):
+        r = client.post("/admin/reload-config")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["reloaded"], [])
+        self.assertIn("WEATHER_LOCATION", body["unchanged"])
+
+    def test_changed_var_appears_in_reloaded(self):
+        old_loc = bridge_app.WEATHER_LOCATION
+        with patch.dict(os.environ, {"WEATHER_LOCATION": "Sydney"}):
+            try:
+                r = client.post("/admin/reload-config")
+                self.assertEqual(r.status_code, 200)
+                body = r.json()
+                names = [item["name"] for item in body["reloaded"]]
+                self.assertIn("WEATHER_LOCATION", names)
+                entry = next(
+                    item for item in body["reloaded"]
+                    if item["name"] == "WEATHER_LOCATION"
+                )
+                self.assertEqual(entry["new"], "Sydney")
+                # Live module global actually updated
+                self.assertEqual(bridge_app.WEATHER_LOCATION, "Sydney")
+            finally:
+                # Restore the original value via another reload
+                bridge_app.WEATHER_LOCATION = old_loc
+
+    def test_secret_is_masked_in_response(self):
+        with patch.dict(
+            os.environ,
+            {"VISION_API_KEY": "sk-test-abcd1234efgh5678"},
+        ):
+            r = client.post("/admin/reload-config")
+            self.assertEqual(r.status_code, 200)
+            body = r.json()
+            entry = next(
+                (it for it in body["reloaded"] if it["name"] == "VISION_API_KEY"),
+                None,
+            )
+            self.assertIsNotNone(entry)
+            # Mask format: first4…last4
+            self.assertNotIn("abcd1234efgh", entry["new"])
+            self.assertTrue(entry["new"].startswith("sk-t"))
+            self.assertTrue(entry["new"].endswith("5678"))
+
+
 if __name__ == "__main__":
     unittest.main()
