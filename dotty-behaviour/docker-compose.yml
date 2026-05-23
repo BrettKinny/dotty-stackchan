@@ -39,6 +39,17 @@ services:
       - DOTTY_STATE_DIR=/var/lib/dotty-behaviour/state
       - HOUSEHOLD_YAML_PATH=/var/lib/dotty-behaviour/state/household.yaml
       - GREETER_STATE_PATH=/var/lib/dotty-behaviour/state/greeter_state.json
+      # Vision-language model credentials (issue #15). Required for
+      # photo intents — without these the container falls through to
+      # the VLM_OFFLINE_SENTINEL contract in dispatch/vlm.py and the
+      # downstream LLM is told the camera is unavailable rather than
+      # confabulating a description. Resolved in fallback order:
+      # VLM_API_KEY → VISION_API_KEY → OPENROUTER_API_KEY. Set any one
+      # in your shell or in .env next to this compose file.
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - VISION_API_KEY=${VISION_API_KEY:-}
+      - VLM_API_KEY=${VLM_API_KEY:-}
+      - AUDIO_CAPTION_API_KEY=${AUDIO_CAPTION_API_KEY:-}
     volumes:
       - /mnt/user/appdata/dotty-behaviour/state:/var/lib/dotty-behaviour/state
       - /mnt/user/appdata/dotty-behaviour/logs:/var/lib/dotty-behaviour/logs

@@ -35,6 +35,23 @@ ssh root@<UNRAID_HOST> '
 '
 ```
 
+### Vision-key env var (issue #15)
+
+Photo intents need an OpenAI-compatible API key for the VLM call. The
+compose file picks up any of these from the shell that runs
+`docker compose up`:
+
+- `VLM_API_KEY` (preferred)
+- `VISION_API_KEY` (fallback)
+- `OPENROUTER_API_KEY` (fallback of fallback)
+
+If none are set the container still starts, but `dispatch/vlm.py`
+returns the `VLM_OFFLINE_SENTINEL` string for every photo intent so
+the downstream LLM is told the camera is unavailable rather than
+confabulating a description. Set the key in the host shell before
+`docker compose up`, or pass `--env-file <path>` at a `.env` that
+contains it.
+
 ## Why a separate container
 
 The bridge was a separate process on the RPi for the whole life of
