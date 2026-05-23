@@ -22,6 +22,13 @@ services:
     container_name: dotty-behaviour
     network_mode: host
     restart: unless-stopped
+    # Optional host-resident .env at $REMOTE_DIR/.env (Unraid:
+    # /mnt/user/appdata/dotty-behaviour-src/.env). Stays out of the
+    # deploy tar (only tracked files ship) and survives recreates.
+    # Use for OPENROUTER_API_KEY / VISION_API_KEY / VLM_API_KEY etc.
+    env_file:
+      - path: .env
+        required: false
     environment:
       - TZ=Australia/Brisbane
       - DOTTY_BEHAVIOUR_PORT=8090
