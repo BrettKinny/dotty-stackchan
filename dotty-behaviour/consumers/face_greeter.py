@@ -9,9 +9,10 @@ intent more specifically).
 Bare path (face_detected):
   * Suppressed when current hour is outside [HOUR_START, HOUR_END)
     (sensor-noise frames at 3am should not greet an empty room).
-  * Suppressed when the household registry is non-empty — Layer-6
-    proactive greeter / room-view recognition fires a richer named
-    greet within 1-2 s.
+  * Suppressed when the household has at least one roster member
+    with `appearance:` set — the only members the room_view path can
+    identify by photo. Layer-6 proactive greeter / room-view
+    recognition fires a richer named greet within 1-2 s.
   * Per-device cooldown.
   * Empty FACE_GREET_TEXT disables the verbal injection — the
     firmware-side wake popup still fires.
@@ -76,10 +77,10 @@ class FaceGreeter:
         self._tasks.add(t)
         t.add_done_callback(self._tasks.discard)
 
-    def _roster_is_populated(self) -> bool:
+    def _roster_has_identifiable_members(self) -> bool:
         if self._household is None:
             return False
-        return bool(self._household)
+        return bool(self._household.roster_ids_with_appearance())
 
     async def _handle_face_detected(self, device_id: str, now: float) -> None:
         # Time-of-day gate
@@ -94,7 +95,7 @@ class FaceGreeter:
             return
 
         # Hand off to roster-aware greeter when one exists
-        if self._roster_is_populated():
+        if self._roster_has_identifiable_members():
             log.debug(
                 "face_detected → suppressed (roster owns greeting): device=%s",
                 device_id,

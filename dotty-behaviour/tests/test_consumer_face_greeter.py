@@ -83,7 +83,7 @@ def test_face_detected_fires_bare_hi_when_no_roster() -> None:
     asyncio.run(go())
 
 
-def test_face_detected_suppressed_when_roster_non_empty() -> None:
+def test_face_detected_fires_bare_hi_when_roster_lacks_appearances() -> None:
     async def go() -> None:
         with tempfile.TemporaryDirectory() as td:
             household = _household_with(
@@ -108,7 +108,9 @@ people:
                     )
                 )
                 await let_consumer_settle()
-                assert xiaozhi.inject_text_calls == []
+                assert xiaozhi.inject_text_calls == [
+                    {"device_id": "dev-1", "text": "Hi!"}
+                ]
 
             await _drive(consumer, body)
 
