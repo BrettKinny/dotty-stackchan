@@ -33,7 +33,7 @@ log = logging.getLogger("dashboard")
 # "Say" action invoke the same path /api/message uses without an HTTP hop.
 _state: dict[str, Any] = {
     "send_message": None,
-    "vision_cache": None,
+    "vision_cache_getter": None,
     "audio_cache": None,
     "scene_synthesis_cache": None,
     "kid_mode_getter": None,
@@ -58,7 +58,7 @@ _state: dict[str, Any] = {
 }
 
 
-def configure(*, send_message: Any = None, vision_cache: dict | None = None,
+def configure(*, send_message: Any = None, vision_cache_getter: Any = None,
               audio_cache: dict | None = None,
               scene_synthesis_cache: dict | None = None,
               kid_mode_getter: Any = None, kid_mode_setter: Any = None,
@@ -79,8 +79,8 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
     """Register bridge state with the dashboard. Idempotent."""
     if send_message is not None:
         _state["send_message"] = send_message
-    if vision_cache is not None:
-        _state["vision_cache"] = vision_cache
+    if vision_cache_getter is not None:
+        _state["vision_cache_getter"] = vision_cache_getter
     if audio_cache is not None:
         _state["audio_cache"] = audio_cache
     if scene_synthesis_cache is not None:
@@ -123,6 +123,64 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
         _state["sound_balance_getter"] = sound_balance_getter
     if vision_failures_getter is not None:
         _state["vision_failures_getter"] = vision_failures_getter
+
+
+def _vision_cache_snapshot() -> dict[str, dict]:
+    """Read-through accessor for the vision cache.
+
+    Resolves the configured getter (Tile 2 of #115 wires this to
+    ``bridge._dashboard_vision_cache_getter``, which fetches from
+    dotty-behaviour's ``/api/vision/cache`` with a 2 s cache + 1.5 s
+    timeout + circuit breaker). Returns ``{}`` if no getter has been
+    wired yet, so call sites can keep ``cache.get(...)`` semantics
+    without conditionals."""
+    getter = _state.get("vision_cache_getter")
+    if not getter:
+        return {}
+    try:
+        result = getter()
+    except Exception:
+        log.warning("vision_cache_getter raised", exc_info=True)
+        return {}
+    return result if isinstance(result, dict) else {}
+
+
+# Bridge proxies the dotty-behaviour binary JPEG endpoint so the browser
+# only ever talks to the bridge origin (CORS-safe, dashboard remains the
+# single dashboard entry point). Read the same env var bridge.py uses so
+# operators set it once.
+_DOTTY_BEHAVIOUR_URL = os.environ.get(
+    "DOTTY_BEHAVIOUR_URL", "http://localhost:8090"
+).rstrip("/")
+
+
+def _fetch_robot_photo(device_id: str) -> Response:
+    """Proxy a JPEG from dotty-behaviour's /api/vision/photo/{device_id}.
+
+    Used by both /ui/host/robot/photo/{device_id} (the host-detail modal)
+    and /ui/vision/photo (the /ui/vision/large modal cache-buster URL).
+    Raises HTTPException(404) when dotty-behaviour reports no photo for
+    that device, HTTPException(503) on any other fetch failure so the
+    modal's onerror handler can swap in a placeholder."""
+    url = f"{_DOTTY_BEHAVIOUR_URL}/api/vision/photo/{device_id}"
+    try:
+        r = requests.get(url, timeout=2.0)
+    except requests.RequestException as exc:
+        log.warning("robot-photo proxy fetch failed (%s): %s", url, exc)
+        raise HTTPException(503, "dotty-behaviour unreachable") from exc
+    if r.status_code == 404:
+        raise HTTPException(404, "no cached photo")
+    if not r.ok:
+        log.warning(
+            "robot-photo proxy non-2xx (%s): status=%d", url, r.status_code,
+        )
+        raise HTTPException(503, "upstream photo fetch failed")
+    return Response(
+        content=r.content,
+        media_type=r.headers.get("content-type", "image/jpeg"),
+        headers={"Cache-Control": "no-store"},
+    )
+
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -684,8 +742,12 @@ async def start_story(request: Request, text: str = Form(...)) -> Any:
 
 
 def _latest_vision_entry() -> tuple[str, dict] | None:
-    """Pick the most-recently captured device entry from the vision cache."""
-    cache = _state.get("vision_cache") or {}
+    """Pick the most-recently captured device entry from the vision cache.
+
+    Reads through the metadata-only getter — entries no longer carry
+    jpeg_bytes locally. Callers that need the JPEG bytes must HTTP-proxy
+    to dotty-behaviour via ``_fetch_robot_photo``."""
+    cache = _vision_cache_snapshot()
     if not cache:
         return None
     device_id, entry = max(
@@ -696,21 +758,31 @@ def _latest_vision_entry() -> tuple[str, dict] | None:
 
 @router.get("/vision/photo", include_in_schema=False)
 async def vision_photo(download: int = 0) -> Response:
-    """Serve the latest captured JPEG. ?download=1 forces an attachment."""
+    """Serve the latest captured JPEG. ?download=1 forces an attachment.
+
+    Picks the most-recent device from the metadata cache then proxies to
+    dotty-behaviour for the binary."""
     pick = _latest_vision_entry()
     if pick is None:
         raise HTTPException(status_code=404, detail="no recent capture")
     device_id, entry = pick
-    jpeg = entry.get("jpeg_bytes")
-    if not jpeg:
-        raise HTTPException(status_code=404, detail="no recent capture")
-    headers: dict[str, str] = {"Cache-Control": "no-store"}
+    resp = _fetch_robot_photo(device_id)
     if download:
         ts = int(entry.get("wall_ts") or time.time())
         safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", str(device_id)) or "device"
         filename = f"dotty-{safe_id}-{ts}.jpg"
-        headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-    return Response(content=jpeg, media_type="image/jpeg", headers=headers)
+        # Rebuild the response with the attachment header — Response
+        # objects are immutable enough that re-wrapping is cleaner than
+        # mutating headers in place.
+        return Response(
+            content=resp.body,
+            media_type=resp.media_type or "image/jpeg",
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+    return resp
 
 
 @router.get("/vision/large", response_class=HTMLResponse, include_in_schema=False)
@@ -720,14 +792,17 @@ async def vision_large(request: Request) -> Any:
     ctx: dict[str, Any] = {"have_photo": False}
     if pick is not None:
         device_id, entry = pick
-        jpeg = entry.get("jpeg_bytes")
         elapsed = max(0.0, time.monotonic() - entry.get("timestamp", time.monotonic()))
         # Cache-buster — the photo URL is stable across captures so without
         # this the browser would hand back the previous JPEG when the modal
         # reopens after a new capture.
         cb = int(entry.get("wall_ts") or time.time())
+        # An entry's presence in the metadata cache implies a JPEG exists
+        # in dotty-behaviour — the writer always populates jpeg_bytes
+        # alongside the metadata fields. The proxy will 404 if that ever
+        # changes, and the modal's onerror handler degrades gracefully.
         ctx = {
-            "have_photo": jpeg is not None,
+            "have_photo": True,
             "device_id": device_id,
             "description": entry.get("description", ""),
             "question": entry.get("question", ""),
@@ -1054,7 +1129,7 @@ def _pick_perception_device_id() -> str | None:
     Returns None when the bridge has not yet seen any device — the card
     then renders empty states across the board.
     """
-    vc = _state.get("vision_cache") or {}
+    vc = _vision_cache_snapshot()
     if vc:
         try:
             return max(vc.items(), key=lambda kv: kv[1].get("wall_ts", 0.0))[0]
@@ -1082,7 +1157,7 @@ def _build_perception_card_ctx(device_id: str | None) -> dict:
     """
     psg = _state.get("perception_state_getter")
     name_lookup = _state.get("identity_display_name")
-    vision_cache = _state.get("vision_cache") or {}
+    vision_cache = _vision_cache_snapshot()
     audio_cache = _state.get("audio_cache") or {}
     synth_cache = _state.get("scene_synthesis_cache") or {}
     perception_recent = _state.get("perception_recent_getter")
@@ -1170,12 +1245,15 @@ def _build_perception_card_ctx(device_id: str | None) -> dict:
             if isinstance(wall_ts, (int, float)):
                 age_s = max(0.0, time.time() - float(wall_ts))
                 age_label = _humanize_age(age_s)
+            # has_photo derives from entry presence — jpeg_bytes is no
+            # longer in the metadata-only payload, but the explain writer
+            # always populates it alongside the metadata fields.
             latest_vision = {
                 "description": (vc_entry.get("description") or "").strip(),
                 "source": vc_entry.get("source") or "room_view",
                 "age_label": age_label,
                 "stale": age_s > 55.0,
-                "has_photo": bool(vc_entry.get("jpeg_bytes")),
+                "has_photo": True,
             }
 
     # --- audio caption (real description ➜ heuristic fallback) ---
@@ -2055,13 +2133,15 @@ async def status_strip(request: Request, placement: str = "header") -> Any:
         have_photo = False
         if pick is not None:
             _, entry = pick
-            if entry.get("jpeg_bytes"):
-                have_photo = True
-                elapsed = max(
-                    0.0,
-                    time.monotonic() - entry.get("timestamp", time.monotonic()),
-                )
-                vision_age = _humanize_age(elapsed)
+            # Entry presence implies jpeg_bytes upstream (the metadata-
+            # only getter strips the field, but the explain writer
+            # always sets both fields together).
+            have_photo = True
+            elapsed = max(
+                0.0,
+                time.monotonic() - entry.get("timestamp", time.monotonic()),
+            )
+            vision_age = _humanize_age(elapsed)
         ctx.update({
             "have_photo": have_photo,
             "vision_age": vision_age,
@@ -2262,23 +2342,18 @@ async def host_detail(request: Request, slug: str) -> Any:
     )
 
 
-# Robot modal photo — serves the cached JPEG from _vision_cache as
-# image/jpeg so the modal can render it with a plain <img src>. We
-# can't point the <img> at /api/vision/latest/{mac} because that
-# endpoint blocks for up to 15 s waiting for a fresh capture and
-# returns JSON, not an image. Returns 404 if there's no cached entry,
-# which lets the modal's onerror handler swap in a placeholder.
+# Robot modal photo — proxies the JPEG from dotty-behaviour's
+# /api/vision/photo/{device_id} binary endpoint so the modal can render
+# it with a plain <img src> and the browser only ever talks to the
+# bridge origin (CORS-safe, dashboard remains the single dashboard
+# entry point). We can't point the <img> at /api/vision/latest/{mac}
+# because that endpoint blocks for up to 15 s waiting for a fresh
+# capture and returns JSON, not an image. Returns 404 if dotty-
+# behaviour reports no photo for that device, which lets the modal's
+# onerror handler swap in a placeholder.
 @router.get("/host/robot/photo/{device_id}", include_in_schema=False)
 async def host_robot_photo(device_id: str) -> Response:
-    cache = _state.get("vision_cache") or {}
-    entry = cache.get(device_id)
-    if not entry or not entry.get("jpeg_bytes"):
-        raise HTTPException(404, "no cached photo")
-    return Response(
-        content=entry["jpeg_bytes"],
-        media_type="image/jpeg",
-        headers={"Cache-Control": "no-store"},
-    )
+    return _fetch_robot_photo(device_id)
 
 
 # --- "Scene context" panel for the Robot modal ---------------------------
@@ -2360,9 +2435,10 @@ def _render_perception_event(ev: dict) -> dict:
 
 def _build_security_panel_ctx(device_id: str) -> dict:
     """Assemble the template context for security_panel.html. Pulls from
-    _vision_cache, the perception ring (via the configured getter), and
-    bridge.security_watch.RECENT_CYCLES (filtered to device_id)."""
-    cache = _state.get("vision_cache") or {}
+    the vision cache getter, the perception ring (via the configured
+    getter), and bridge.security_watch.RECENT_CYCLES (filtered to
+    device_id)."""
+    cache = _vision_cache_snapshot()
     cache_entry = cache.get(device_id) or {}
 
     latest_vision: dict | None = None
@@ -2371,11 +2447,13 @@ def _build_security_panel_ctx(device_id: str) -> dict:
         age_label = "—"
         if isinstance(wall_ts, (int, float)):
             age_label = _humanize_age(max(0.0, time.time() - float(wall_ts)))
+        # has_photo derives from entry presence — see _build_perception_
+        # card_ctx for the same rationale.
         latest_vision = {
             "description": (cache_entry.get("description") or "").strip(),
             "source": cache_entry.get("source") or "room_view",
             "age_label": age_label,
-            "has_photo": bool(cache_entry.get("jpeg_bytes")),
+            "has_photo": True,
         }
 
     perception_getter = _state.get("perception_recent_getter")

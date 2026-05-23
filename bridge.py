@@ -521,11 +521,10 @@ async def health() -> dict:
 # stubs so the dashboard renders without errors (the perception card just
 # shows no data until the dashboard ports to dotty-behaviour).
 
-# Empty vision/audio/scene caches — dashboard reads these but the writers
-# (vision_explain, audio_explain, scene_synthesis_loop) all moved to
-# dotty-behaviour in #36. Tiles 2-6 of #115 rewire each of these in turn;
-# perception (state + recent) is Tile 1 and is wired below.
-_vision_cache: dict[str, dict] = {}
+# Empty audio/scene caches — dashboard reads these but the writers
+# (audio_explain, scene_synthesis_loop) all moved to dotty-behaviour in
+# #36. Tiles 3-6 of #115 rewire each of these in turn; perception was
+# Tile 1, vision is Tile 2 (see _dashboard_vision_cache_getter below).
 _audio_cache: dict[str, dict] = {}
 _scene_synthesis_cache: dict[str, dict] = {}
 _perception_state: dict[str, dict] = {}
@@ -597,6 +596,18 @@ def _dashboard_perception_state_getter() -> dict:
     ``_dotty_behaviour_get``). Returns ``{}`` on any failure so the
     dashboard renders empty rather than hanging."""
     result = _dotty_behaviour_get("/api/perception/state", None, {})
+    return result if isinstance(result, dict) else {}
+
+
+def _dashboard_vision_cache_getter() -> dict[str, dict]:
+    """Live vision_cache from dotty-behaviour's /api/vision/cache.
+
+    Metadata only — the jpeg bytes are fetched separately by the
+    /ui/host/robot/photo/{device_id} + /ui/vision/photo proxy routes
+    in bridge.dashboard, which round-trip through dotty-behaviour's
+    /api/vision/photo/{device_id} binary endpoint. Same cache + timeout
+    + circuit-breaker contract as the perception getters."""
+    result = _dotty_behaviour_get("/api/vision/cache", None, {})
     return result if isinstance(result, dict) else {}
 
 
@@ -776,7 +787,7 @@ if _configure_dashboard is not None:
         # now go through dotty-pi); kept None so configure() stays
         # idempotent if the dashboard module gains a reference later.
         send_message=None,
-        vision_cache=_vision_cache,
+        vision_cache_getter=_dashboard_vision_cache_getter,
         audio_cache=_audio_cache,
         scene_synthesis_cache=_scene_synthesis_cache,
         kid_mode_getter=_read_kid_mode,
