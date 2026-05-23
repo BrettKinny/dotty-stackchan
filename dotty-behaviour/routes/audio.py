@@ -138,3 +138,15 @@ async def audio_explain(
         device_id, description[:120],
     )
     return {"description": description}
+
+
+@router.get("/api/audio/cache")
+async def audio_cache_route(
+    state: PerceptionState = Depends(get_perception_state),
+) -> dict[str, dict]:
+    """Per-device audio_cache (caption + timestamps).
+
+    Consumed by the bridge dashboard's audio tile via the Tile 4 (#115)
+    HTTP rewire. Returns the same fields the explain handler writes
+    (description, timestamp, wall_ts, question, source)."""
+    return state.audio_cache

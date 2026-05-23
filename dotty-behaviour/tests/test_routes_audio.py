@@ -138,3 +138,39 @@ def test_audio_format_from_upload_filename_fallback() -> None:
 def test_audio_format_from_upload_default_wav() -> None:
     f = UploadFile(filename="mystery", file=io.BytesIO(b""))
     assert audio_format_from_upload(f) == "wav"
+
+
+# ---------------------------------------------------------------------------
+# /api/audio/cache (Tile 4 of #115 — bridge dashboard reads via HTTP.)
+# ---------------------------------------------------------------------------
+
+
+def test_audio_cache_route_returns_cache() -> None:
+    with TestClient(app) as client:
+        state = client.app.state.perception  # type: ignore[attr-defined]
+        state.audio_cache.clear()
+        state.audio_cache["dev-a"] = {
+            "description": "A dog barks outside.",
+            "timestamp": 1.23,
+            "wall_ts": 1234567890.0,
+            "question": "What do you hear?",
+            "source": "audio_explain",
+        }
+        resp = client.get("/api/audio/cache")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "dev-a" in body
+        entry = body["dev-a"]
+        assert entry["description"] == "A dog barks outside."
+        assert entry["question"] == "What do you hear?"
+        assert entry["source"] == "audio_explain"
+        assert entry["wall_ts"] == 1234567890.0
+
+
+def test_audio_cache_route_empty_when_no_captures() -> None:
+    with TestClient(app) as client:
+        state = client.app.state.perception  # type: ignore[attr-defined]
+        state.audio_cache.clear()
+        resp = client.get("/api/audio/cache")
+        assert resp.status_code == 200
+        assert resp.json() == {}
