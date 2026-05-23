@@ -150,6 +150,10 @@ class HouseholdRegistry:
             return None
         return self._people.get(person_id.lower())
 
+    def __len__(self) -> int:
+        self._reload_if_changed()
+        return len(self._people)
+
     def iter(self) -> Iterable[Person]:  # noqa: A003
         self._reload_if_changed()
         return tuple(self._people.values())

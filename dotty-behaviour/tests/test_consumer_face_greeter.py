@@ -83,6 +83,38 @@ def test_face_detected_fires_bare_hi_when_no_roster() -> None:
     asyncio.run(go())
 
 
+def test_face_detected_suppressed_when_roster_non_empty() -> None:
+    async def go() -> None:
+        with tempfile.TemporaryDirectory() as td:
+            household = _household_with(
+                Path(td),
+                """
+people:
+  brett:
+    display_name: Brett
+""",
+            )
+            state = PerceptionState()
+            xiaozhi = FakeXiaozhi()
+            consumer = _consumer(state, xiaozhi, household)
+
+            async def body() -> None:
+                state.broadcast(
+                    PerceptionEvent(
+                        device_id="dev-1",
+                        name="face_detected",
+                        data={},
+                        ts=time.time(),
+                    )
+                )
+                await let_consumer_settle()
+                assert xiaozhi.inject_text_calls == []
+
+            await _drive(consumer, body)
+
+    asyncio.run(go())
+
+
 def test_face_detected_suppressed_when_roster_has_appearances() -> None:
     async def go() -> None:
         with tempfile.TemporaryDirectory() as td:
