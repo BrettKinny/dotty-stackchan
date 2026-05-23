@@ -179,3 +179,211 @@ def test_unregister_vision_waiter_after_signal_is_idempotent() -> None:
     state.unregister_vision_waiter("dev-1", event)
     # second unregister is a no-op
     state.unregister_vision_waiter("dev-1", event)
+
+
+# ---------------------------------------------------------------------------
+# Room-view sentinel path (#101 — restores PR #93's named-greet path)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _FakePerson:
+    display_name: str
+    appearance: str = ""
+
+
+@dataclass
+class _FakeHousehold:
+    """Minimal HouseholdRegistry stand-in for room_view tests."""
+
+    people: list[_FakePerson] = field(default_factory=list)
+
+    def render_roster_for_vlm(self, *, max_line_chars: int = 80) -> str:
+        return "\n".join(
+            f"  {p.display_name}: {p.appearance}"
+            for p in self.people if p.appearance
+        )
+
+    def iter(self):  # noqa: A003 — matches HouseholdRegistry method
+        return tuple(self.people)
+
+    def roster_ids_with_appearance(self) -> set[str]:
+        return {
+            p.display_name.lower() for p in self.people if p.appearance
+        }
+
+
+def _override_household(client: TestClient, fake: _FakeHousehold) -> None:
+    client.app.state.household = fake  # type: ignore[arg-type]
+
+
+def test_room_view_sentinel_matches_roster_and_broadcasts_face_recognized() -> None:
+    """The full happy path: sentinel question → roster-aware VLM call →
+    parse → cache with source=room_view + room_match_person_id →
+    face_recognized event broadcast on the perception bus."""
+    with TestClient(app) as client:
+        fake_vlm = _FakeVLM(
+            description=(
+                "DESC: adult with goatee and dark sweater | "
+                "NAME: Brett | MOOD: engaged"
+            ),
+        )
+        _override_vlm(client, fake_vlm)
+        _override_household(client, _FakeHousehold(people=[
+            _FakePerson("Brett", appearance="tall, dark hair, goatee"),
+            _FakePerson("Hudson", appearance="small child, blond"),
+        ]))
+
+        state = client.app.state.perception
+        bus_q = state.subscribe()
+        try:
+            r = client.post(
+                "/api/vision/explain",
+                files={"file": _jpeg_file()},
+                data={"question": "__ROOM_VIEW_V1__"},
+                headers={"device-id": "dev-rv"},
+            )
+            assert r.status_code == 200
+
+            cached = state.vision_cache["dev-rv"]
+            assert cached["source"] == "room_view"
+            assert cached["room_match_person_id"] == "brett"
+            assert cached["description"] == (
+                "adult with goatee and dark sweater"
+            )
+
+            # System prompt for VLM call was the roster-aware one.
+            assert "ONLY by names from the list" in (
+                fake_vlm.calls[0]["system_prompt"]
+            )
+            # Roster substituted into the question.
+            assert "Brett: tall, dark hair, goatee" in fake_vlm.calls[0][
+                "question"
+            ]
+
+            # face_recognized broadcast landed on the bus.
+            event = bus_q.get_nowait()
+            assert event.name == "face_recognized"
+            assert event.device_id == "dev-rv"
+            assert event.data == {
+                "identity": "brett", "source": "room_view",
+            }
+
+            # Mood plumbed into perception state.
+            assert state.state["dev-rv"]["face_mood"] == "engaged"
+        finally:
+            state.unsubscribe(bus_q)
+
+
+def test_room_view_no_match_does_not_broadcast() -> None:
+    """Off-roster name → cache description but no face_recognized event."""
+    with TestClient(app) as client:
+        fake_vlm = _FakeVLM(
+            description=(
+                "DESC: stranger in a red jacket | "
+                "NAME: unknown | MOOD: neutral"
+            ),
+        )
+        _override_vlm(client, fake_vlm)
+        _override_household(client, _FakeHousehold(people=[
+            _FakePerson("Brett", appearance="tall, dark hair"),
+        ]))
+
+        state = client.app.state.perception
+        bus_q = state.subscribe()
+        try:
+            r = client.post(
+                "/api/vision/explain",
+                files={"file": _jpeg_file()},
+                data={"question": "__ROOM_VIEW_V1__"},
+                headers={"device-id": "dev-rv2"},
+            )
+            assert r.status_code == 200
+
+            cached = state.vision_cache["dev-rv2"]
+            assert cached["source"] == "room_view"
+            assert cached["room_match_person_id"] is None
+            assert cached["description"] == "stranger in a red jacket"
+
+            # No face_recognized event broadcast.
+            assert bus_q.empty()
+        finally:
+            state.unsubscribe(bus_q)
+
+
+def test_room_view_cooldown_blocks_second_call() -> None:
+    """Within DOTTY_IDLE_VISION_COOLDOWN_SEC of the previous capture, the
+    second sentinel call skips the VLM entirely and caches the
+    no-one-in-view sentinel."""
+    with TestClient(app) as client:
+        fake_vlm = _FakeVLM(
+            description=(
+                "DESC: tall adult | NAME: Brett | MOOD: engaged"
+            ),
+        )
+        _override_vlm(client, fake_vlm)
+        _override_household(client, _FakeHousehold(people=[
+            _FakePerson("Brett", appearance="tall, dark hair"),
+        ]))
+
+        state = client.app.state.perception
+
+        # First call — VLM fires.
+        r1 = client.post(
+            "/api/vision/explain",
+            files={"file": _jpeg_file()},
+            data={"question": "__ROOM_VIEW_V1__"},
+            headers={"device-id": "dev-cd"},
+        )
+        assert r1.status_code == 200
+        assert len(fake_vlm.calls) == 1
+
+        # Second call within cooldown — should skip the VLM and cache
+        # the no-person sentinel.
+        r2 = client.post(
+            "/api/vision/explain",
+            files={"file": _jpeg_file()},
+            data={"question": "__ROOM_VIEW_V1__"},
+            headers={"device-id": "dev-cd"},
+        )
+        assert r2.status_code == 200
+        assert r2.json() == {"description": "no one in view"}
+        # VLM was NOT called again.
+        assert len(fake_vlm.calls) == 1
+        cached = state.vision_cache["dev-cd"]
+        assert cached["source"] == "room_view"
+        assert cached["room_match_person_id"] is None
+
+
+def test_room_view_with_empty_registry_falls_back_to_v1() -> None:
+    """Sentinel question + empty roster → v1 path (no VLM system-prompt
+    swap, no face_recognized event), but `source` still 'room_view' so
+    the dashboard attributes the capture correctly."""
+    with TestClient(app) as client:
+        fake_vlm = _FakeVLM(description="Adult in dark sweater.")
+        _override_vlm(client, fake_vlm)
+        _override_household(client, _FakeHousehold(people=[]))  # empty
+
+        state = client.app.state.perception
+        bus_q = state.subscribe()
+        try:
+            r = client.post(
+                "/api/vision/explain",
+                files={"file": _jpeg_file()},
+                data={"question": "__ROOM_VIEW_V1__"},
+                headers={"device-id": "dev-empty"},
+            )
+            assert r.status_code == 200
+            cached = state.vision_cache["dev-empty"]
+            assert cached["source"] == "room_view"
+            assert cached["room_match_person_id"] is None
+            # Fallback v1 question substituted, NOT the sentinel.
+            assert "approximate age range" in fake_vlm.calls[0]["question"]
+            # Default (non-roster) system prompt was used.
+            assert "ONLY by names from the list" not in (
+                fake_vlm.calls[0]["system_prompt"]
+            )
+            # No face_recognized event.
+            assert bus_q.empty()
+        finally:
+            state.unsubscribe(bus_q)
