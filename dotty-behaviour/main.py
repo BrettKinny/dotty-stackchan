@@ -45,6 +45,7 @@ from routes import audio as audio_routes
 from routes import calendar as calendar_routes
 from routes import health as health_routes
 from routes import perception as perception_routes
+from routes import scene_synthesis as scene_synthesis_routes
 from routes import vision as vision_routes
 from routes import voice as voice_routes
 
@@ -356,3 +357,4 @@ app.include_router(vision_routes.router)
 app.include_router(audio_routes.router)
 app.include_router(voice_routes.router)
 app.include_router(calendar_routes.router)
+app.include_router(scene_synthesis_routes.router)
