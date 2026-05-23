@@ -34,8 +34,8 @@ log = logging.getLogger("dashboard")
 _state: dict[str, Any] = {
     "send_message": None,
     "vision_cache_getter": None,
-    "audio_cache": None,
-    "scene_synthesis_cache": None,
+    "audio_cache_getter": None,
+    "scene_synthesis_cache_getter": None,
     "kid_mode_getter": None,
     "kid_mode_setter": None,
     "smart_mode_getter": None,
@@ -59,8 +59,8 @@ _state: dict[str, Any] = {
 
 
 def configure(*, send_message: Any = None, vision_cache_getter: Any = None,
-              audio_cache: dict | None = None,
-              scene_synthesis_cache: dict | None = None,
+              audio_cache_getter: Any = None,
+              scene_synthesis_cache_getter: Any = None,
               kid_mode_getter: Any = None, kid_mode_setter: Any = None,
               smart_mode_getter: Any = None, smart_mode_setter: Any = None,
               state_getter: Any = None, state_setter: Any = None,
@@ -81,10 +81,10 @@ def configure(*, send_message: Any = None, vision_cache_getter: Any = None,
         _state["send_message"] = send_message
     if vision_cache_getter is not None:
         _state["vision_cache_getter"] = vision_cache_getter
-    if audio_cache is not None:
-        _state["audio_cache"] = audio_cache
-    if scene_synthesis_cache is not None:
-        _state["scene_synthesis_cache"] = scene_synthesis_cache
+    if audio_cache_getter is not None:
+        _state["audio_cache_getter"] = audio_cache_getter
+    if scene_synthesis_cache_getter is not None:
+        _state["scene_synthesis_cache_getter"] = scene_synthesis_cache_getter
     if kid_mode_getter is not None:
         _state["kid_mode_getter"] = kid_mode_getter
     if kid_mode_setter is not None:
@@ -141,6 +141,42 @@ def _vision_cache_snapshot() -> dict[str, dict]:
         result = getter()
     except Exception:
         log.warning("vision_cache_getter raised", exc_info=True)
+        return {}
+    return result if isinstance(result, dict) else {}
+
+
+def _audio_cache_snapshot() -> dict[str, dict]:
+    """Read-through accessor for the audio cache (Tile 4 of #115).
+
+    Mirrors ``_vision_cache_snapshot``: resolves the configured getter
+    (bridge wires this to ``_dashboard_audio_cache_getter``, which
+    fetches from dotty-behaviour's ``/api/audio/cache``). Returns
+    ``{}`` if no getter is wired or any failure occurs."""
+    getter = _state.get("audio_cache_getter")
+    if not getter:
+        return {}
+    try:
+        result = getter()
+    except Exception:
+        log.warning("audio_cache_getter raised", exc_info=True)
+        return {}
+    return result if isinstance(result, dict) else {}
+
+
+def _scene_synthesis_cache_snapshot() -> dict[str, dict]:
+    """Read-through accessor for the scene synthesis cache (Tile 3 of #115).
+
+    Same shape as ``_vision_cache_snapshot``/``_audio_cache_snapshot``.
+    Bridge wires this to ``_dashboard_scene_synthesis_cache_getter``,
+    which fetches from dotty-behaviour's
+    ``/api/scene-synthesis/recent``."""
+    getter = _state.get("scene_synthesis_cache_getter")
+    if not getter:
+        return {}
+    try:
+        result = getter()
+    except Exception:
+        log.warning("scene_synthesis_cache_getter raised", exc_info=True)
         return {}
     return result if isinstance(result, dict) else {}
 
@@ -1158,8 +1194,8 @@ def _build_perception_card_ctx(device_id: str | None) -> dict:
     psg = _state.get("perception_state_getter")
     name_lookup = _state.get("identity_display_name")
     vision_cache = _vision_cache_snapshot()
-    audio_cache = _state.get("audio_cache") or {}
-    synth_cache = _state.get("scene_synthesis_cache") or {}
+    audio_cache = _audio_cache_snapshot()
+    synth_cache = _scene_synthesis_cache_snapshot()
     perception_recent = _state.get("perception_recent_getter")
     last_user_line_getter = _state.get("last_user_line_getter")
     state_getter = _state.get("state_getter")

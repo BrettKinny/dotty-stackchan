@@ -521,12 +521,10 @@ async def health() -> dict:
 # stubs so the dashboard renders without errors (the perception card just
 # shows no data until the dashboard ports to dotty-behaviour).
 
-# Empty audio/scene caches — dashboard reads these but the writers
-# (audio_explain, scene_synthesis_loop) all moved to dotty-behaviour in
-# #36. Tiles 3-6 of #115 rewire each of these in turn; perception was
-# Tile 1, vision is Tile 2 (see _dashboard_vision_cache_getter below).
-_audio_cache: dict[str, dict] = {}
-_scene_synthesis_cache: dict[str, dict] = {}
+# Perception state stub — the writer moved to dotty-behaviour in #36
+# and the dashboard now reads through ``_dashboard_perception_state_getter``
+# (Tile 1 of #115). Kept as a module-level placeholder for any straggling
+# imports; remove once #115 lands all 6 tiles.
 _perception_state: dict[str, dict] = {}
 
 
@@ -608,6 +606,25 @@ def _dashboard_vision_cache_getter() -> dict[str, dict]:
     /api/vision/photo/{device_id} binary endpoint. Same cache + timeout
     + circuit-breaker contract as the perception getters."""
     result = _dotty_behaviour_get("/api/vision/cache", None, {})
+    return result if isinstance(result, dict) else {}
+
+
+def _dashboard_audio_cache_getter() -> dict[str, dict]:
+    """Live audio_cache from dotty-behaviour's /api/audio/cache.
+
+    Tile 4 of #115. Same cache + timeout + circuit-breaker contract as
+    the other dotty-behaviour-backed getters."""
+    result = _dotty_behaviour_get("/api/audio/cache", None, {})
+    return result if isinstance(result, dict) else {}
+
+
+def _dashboard_scene_synthesis_cache_getter() -> dict[str, dict]:
+    """Live scene_synthesis_cache from
+    dotty-behaviour's /api/scene-synthesis/recent.
+
+    Tile 3 of #115. Same cache + timeout + circuit-breaker contract as
+    the other dotty-behaviour-backed getters."""
+    result = _dotty_behaviour_get("/api/scene-synthesis/recent", None, {})
     return result if isinstance(result, dict) else {}
 
 
@@ -788,8 +805,8 @@ if _configure_dashboard is not None:
         # idempotent if the dashboard module gains a reference later.
         send_message=None,
         vision_cache_getter=_dashboard_vision_cache_getter,
-        audio_cache=_audio_cache,
-        scene_synthesis_cache=_scene_synthesis_cache,
+        audio_cache_getter=_dashboard_audio_cache_getter,
+        scene_synthesis_cache_getter=_dashboard_scene_synthesis_cache_getter,
         kid_mode_getter=_read_kid_mode,
         kid_mode_setter=_dashboard_set_kid_mode,
         smart_mode_getter=_read_smart_mode,

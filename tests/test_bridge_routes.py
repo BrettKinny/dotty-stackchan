@@ -191,5 +191,84 @@ class PerceptionGetterTests(unittest.TestCase):
         self.assertEqual(calls["n"], 1, "expected cache hit on repeat calls")
 
 
+# ---------------------------------------------------------------------------
+# Audio + scene-synthesis cache getters — rewired in #115 Tiles 3 + 4
+# ---------------------------------------------------------------------------
+
+
+class AudioAndSceneGetterTests(unittest.TestCase):
+    """Smoke tests for the dotty-behaviour-backed audio_cache and
+    scene_synthesis_cache getters. Same contract as the perception
+    getters above — degrade to ``{}`` on failure, pass-through on
+    success, share the 2 s _dotty_behaviour_cache TTL."""
+
+    def setUp(self) -> None:
+        bridge_app._dotty_behaviour_cache.clear()
+
+    def _patch_get(self, response):
+        original = bridge_app.requests.get
+
+        def fake_get(*args, **kwargs):
+            if isinstance(response, Exception):
+                raise response
+            return response
+
+        bridge_app.requests.get = fake_get
+        self.addCleanup(lambda: setattr(bridge_app.requests, "get", original))
+
+    def test_audio_cache_getter_returns_fetched_dict(self):
+        class FakeResp:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {
+                    "dev-1": {
+                        "description": "Quiet hum.",
+                        "wall_ts": 1700000000.0,
+                        "source": "audio_explain",
+                    }
+                }
+
+        self._patch_get(FakeResp())
+        result = bridge_app._dashboard_audio_cache_getter()
+        self.assertEqual(result["dev-1"]["description"], "Quiet hum.")
+        self.assertEqual(result["dev-1"]["source"], "audio_explain")
+
+    def test_audio_cache_getter_degrades_on_connection_error(self):
+        import requests as _requests
+
+        self._patch_get(_requests.exceptions.ConnectionError("simulated"))
+        result = bridge_app._dashboard_audio_cache_getter()
+        self.assertEqual(result, {})
+
+    def test_scene_synthesis_cache_getter_returns_fetched_dict(self):
+        class FakeResp:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {
+                    "dev-1": {
+                        "text": "Brett sits down.",
+                        "ts_wall": 1700000000.0,
+                        "face_id": "person-brett",
+                        "state": "idle",
+                    }
+                }
+
+        self._patch_get(FakeResp())
+        result = bridge_app._dashboard_scene_synthesis_cache_getter()
+        self.assertEqual(result["dev-1"]["text"], "Brett sits down.")
+        self.assertEqual(result["dev-1"]["face_id"], "person-brett")
+
+    def test_scene_synthesis_cache_getter_degrades_on_timeout(self):
+        import requests as _requests
+
+        self._patch_get(_requests.exceptions.Timeout("simulated"))
+        result = bridge_app._dashboard_scene_synthesis_cache_getter()
+        self.assertEqual(result, {})
+
+
 if __name__ == "__main__":
     unittest.main()
