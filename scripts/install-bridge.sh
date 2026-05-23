@@ -1,18 +1,17 @@
 #!/bin/bash
-# install-bridge.sh — Install zeroclaw-bridge on a Linux host with systemd.
+# install-bridge.sh — Install dotty-bridge (admin dashboard) on a Linux host with systemd.
 #
 # Usage:
 #   sudo ./install-bridge.sh [OPTIONS]
 #
 # Options:
-#   --bridge-dir DIR     Install directory  (default: /root/zeroclaw-bridge)
-#   --zeroclaw-bin PATH  Path to zeroclaw binary (default: /root/.cargo/bin/zeroclaw)
+#   --bridge-dir DIR     Install directory  (default: /root/dotty-bridge)
 #   --port PORT          Bridge listen port (default: 8080)
 #   --dry-run            Print what would happen without making changes
 #   --help               Show this help
 #
 # The script is idempotent — safe to re-run. It will:
-#   1. Verify prerequisites (Python 3.10+, pip, systemd, zeroclaw binary)
+#   1. Verify prerequisites (Python 3.10+, pip, systemd)
 #   2. Create the bridge directory and copy bridge.py into it
 #   3. Create a Python venv and install dependencies from bridge/requirements.txt
 #   4. Write and install a systemd service file
@@ -29,11 +28,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # ---------- defaults ----------
-BRIDGE_DIR="/root/zeroclaw-bridge"
-ZEROCLAW_BIN="/root/.cargo/bin/zeroclaw"
+BRIDGE_DIR="/root/dotty-bridge"
 PORT=8080
 DRY_RUN=false
-SERVICE_NAME="zeroclaw-bridge"
+SERVICE_NAME="dotty-bridge"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
 # ---------- colors ----------
@@ -58,7 +56,6 @@ usage() {
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --bridge-dir)   BRIDGE_DIR="$2"; shift 2 ;;
-        --zeroclaw-bin) ZEROCLAW_BIN="$2"; shift 2 ;;
         --port)         PORT="$2"; shift 2 ;;
         --dry-run)      DRY_RUN=true; shift ;;
         --help|-h)      usage ;;
@@ -113,13 +110,7 @@ if ! command -v systemctl &>/dev/null; then
 fi
 info "systemd OK"
 
-# zeroclaw binary
-if [[ ! -x "${ZEROCLAW_BIN}" ]]; then
-    err "zeroclaw binary not found or not executable at: ${ZEROCLAW_BIN}"
-    err "Install ZeroClaw first, or pass --zeroclaw-bin /path/to/zeroclaw"
-    exit 1
-fi
-info "zeroclaw binary OK (${ZEROCLAW_BIN})"
+
 
 # repo files — bridge.py imports textUtils from custom-providers/ via a
 # sys.path shim, and the `bridge` package via normal Python import. Both
@@ -189,7 +180,7 @@ fi
 step "Installing systemd service: ${SERVICE_NAME}"
 
 SERVICE_CONTENT="[Unit]
-Description=ZeroClaw HTTP Bridge for StackChan
+Description=Dotty Admin Dashboard (StackChan)
 After=network.target
 Wants=network.target
 
@@ -201,7 +192,6 @@ WorkingDirectory=${BRIDGE_DIR}
 # without it the bridge logs a clear ERROR on photo intents instead of
 # confabulating a description from an empty VLM response.
 EnvironmentFile=-${BRIDGE_DIR}/.env
-Environment=ZEROCLAW_BIN=${ZEROCLAW_BIN}
 Environment=PORT=${PORT}
 Environment=DOTTY_KID_MODE=true
 ExecStart=${VENV_DIR}/bin/uvicorn bridge:app --host 0.0.0.0 --port ${PORT}
@@ -216,7 +206,7 @@ WantedBy=multi-user.target"
 # ---------- create stub .env if absent (issue #15) ----------
 # Make the API-key drop-in obvious. systemd already EnvironmentFile=-'s it.
 ENV_FILE="${BRIDGE_DIR}/.env"
-ENV_STUB="# zeroclaw-bridge runtime env (issue #15). Loaded by systemd via
+ENV_STUB="# dotty-bridge runtime env (issue #15). Loaded by systemd via
 # EnvironmentFile= in /etc/systemd/system/${SERVICE_NAME}.service. Fill in
 # at least OPENROUTER_API_KEY or photo (VLM) intents will fail with an
 # explicit 'camera offline' message instead of confabulating descriptions.
