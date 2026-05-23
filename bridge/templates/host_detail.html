@@ -17,6 +17,7 @@
   <div id="robot-scene-context"
        hx-get="/ui/security/recent/{{ photo_device_id }}"
        hx-trigger="load, every 7s"
+       hx-sync="this:drop"
        hx-swap="innerHTML">
     <div class="text-xs text-base-content/50 py-2">Loading scene context…</div>
   </div>

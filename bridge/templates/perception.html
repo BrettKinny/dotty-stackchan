@@ -10,6 +10,7 @@
 <div id="perception-card-body" class="card bg-base-100 shadow-sm overflow-hidden"
      hx-get="/ui/perception"
      hx-trigger="every 10s, dotty-refresh from:window"
+     hx-sync="this:drop"
      hx-swap="outerHTML" hx-target="this">
   <div class="card-body p-3 space-y-3">
     <div class="flex items-center justify-between">

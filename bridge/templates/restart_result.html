@@ -1,5 +1,6 @@
 <div class="alert alert-info dotty-alert"
      hx-get="/health" hx-trigger="load delay:3s, every 2s"
+     hx-sync="this:drop"
      hx-swap="none"
      hx-on::after-request="if(event.detail.successful){this.remove();}"
      hx-on::load="(function(el){setTimeout(function(){
