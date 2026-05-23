@@ -206,7 +206,6 @@ setup: _preflight-compose ## Interactive first-run wizard (re-runnable; remember
 	 }; \
 	 render .config.yaml.template            data/.config.yaml; \
 	 render docker-compose.yml.template      docker-compose.yml; \
-	 render zeroclaw-bridge.service.template zeroclaw-bridge.service; \
 	 echo ""; \
 	 $(MAKE) fetch-models; \
 	 echo ""; \
@@ -219,8 +218,7 @@ setup: _preflight-compose ## Interactive first-run wizard (re-runnable; remember
 	 echo "  1. Flash the StackChan firmware (see SETUP.md or m5stack/StackChan repo)."; \
 	 echo "  2. In the device's Advanced Options, set the OTA URL to:"; \
 	 echo "       http://$$XIAOZHI_HOST:8003/xiaozhi/ota/"; \
-	 echo "  3. Deploy zeroclaw-bridge.service to the ZeroClaw host and start it."; \
-	 echo "  4. Run 'make doctor' to verify everything is healthy."; \
+	 echo "  3. Run 'make doctor' to verify everything is healthy."; \
 	 echo ""
 
 # ─────────────────────────────────────────────────────────────────────
