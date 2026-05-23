@@ -32,7 +32,6 @@ log = logging.getLogger("dashboard")
 # Bridge wires its in-process message handler in via configure(). Lets the
 # "Say" action invoke the same path /api/message uses without an HTTP hop.
 _state: dict[str, Any] = {
-    "send_message": None,
     "vision_cache": None,
     "audio_cache": None,
     "scene_synthesis_cache": None,
@@ -58,7 +57,7 @@ _state: dict[str, Any] = {
 }
 
 
-def configure(*, send_message: Any = None, vision_cache: dict | None = None,
+def configure(*, vision_cache: dict | None = None,
               audio_cache: dict | None = None,
               scene_synthesis_cache: dict | None = None,
               kid_mode_getter: Any = None, kid_mode_setter: Any = None,
@@ -77,8 +76,6 @@ def configure(*, send_message: Any = None, vision_cache: dict | None = None,
               sound_balance_getter: Any = None,
               vision_failures_getter: Any = None) -> None:
     """Register bridge state with the dashboard. Idempotent."""
-    if send_message is not None:
-        _state["send_message"] = send_message
     if vision_cache is not None:
         _state["vision_cache"] = vision_cache
     if audio_cache is not None:
