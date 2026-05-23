@@ -885,6 +885,35 @@ async def discord_partial(request: Request) -> Any:
     return templates.TemplateResponse(request, "discord.html", ctx)
 
 
+# #65 tier 1 — voice tool inventory. Hardcoded list of the tools shipped
+# by dotty-pi-ext (see dotty-pi-ext/package.json). Per the issue body the
+# static list is intentional: "hardcoded; same five values until a sixth
+# tool ships". Tier 2 (call counts via PiClient stdout parsing) and Tier 3
+# (safety-denial counts) are deferred follow-ups.
+_VOICE_TOOLS: list[dict[str, str]] = [
+    {"name": "memory_lookup",
+     "description": "Search Dotty's long-term memory by keyword"},
+    {"name": "remember",
+     "description": "Save a new memory (\"Brett's birthday is …\")"},
+    {"name": "think_hard",
+     "description": "Hand a hard reasoning task to the bigger 27B model"},
+    {"name": "take_photo",
+     "description": "Capture + VLM-describe the current camera frame"},
+    {"name": "play_song",
+     "description": "Play a song from Dotty's local catalogue"},
+]
+
+
+@router.get("/tools-inventory",
+            response_class=HTMLResponse, include_in_schema=False)
+async def tools_inventory_partial(request: Request) -> Any:
+    """#65 tier 1 — static inventory of voice tools shipped by
+    dotty-pi-ext. No backend state; the list changes only on redeploy."""
+    return templates.TemplateResponse(
+        request, "tools_inventory.html", {"tools": _VOICE_TOOLS},
+    )
+
+
 @router.get("/safety/recent", response_class=HTMLResponse, include_in_schema=False)
 async def safety_recent(request: Request) -> Any:
     """#72 — recent content-filter hits from the in-memory ring (last 20).

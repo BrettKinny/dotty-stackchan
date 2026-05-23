@@ -1,0 +1,15 @@
+{# #65 tier 1 — static voice tool inventory shipped by dotty-pi-ext.
+   Rendered into #tools-inventory-card-body (innerHTML swap) — no own
+   `.card` chrome. Hardcoded list; rebuild dotty-pi-ext to change. Tier 2
+   (call counts) and Tier 3 (denial counts) are deferred follow-ups. #}
+<div class="card-body p-3">
+  <div class="text-xs text-base-content/60 mb-2 px-1">Voice tools — dotty-pi-ext</div>
+  <ul class="divide-y divide-base-300">
+    {% for tool in tools %}
+    <li class="py-1.5 flex items-baseline gap-2">
+      <span class="text-sm font-mono whitespace-nowrap">{{ tool.name }}</span>
+      <span class="text-xs text-base-content/60">{{ tool.description }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
