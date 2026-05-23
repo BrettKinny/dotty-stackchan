@@ -31,7 +31,6 @@ os.environ.setdefault("IDLE_PHOTOGRAPHER_ENABLED", "0")
 os.environ.setdefault("DREAMER_ENABLED", "0")
 os.environ.setdefault("DANCE_REFLECTOR_ENABLED", "0")
 os.environ.setdefault("CALENDAR_IDS", "")
-os.environ.setdefault("ZEROCLAW_BIN", "/bin/true")
 # Pin a known secret so cookie signatures are deterministic across the
 # whole test file. Must be set before bridge.csrf imports.
 os.environ["DOTTY_CSRF_SECRET"] = "test-secret-for-csrf-tests-only"

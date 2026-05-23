@@ -57,7 +57,6 @@ os.environ.setdefault("IDLE_PHOTOGRAPHER_ENABLED", "0")
 os.environ.setdefault("DREAMER_ENABLED", "0")
 os.environ.setdefault("DANCE_REFLECTOR_ENABLED", "0")
 os.environ.setdefault("CALENDAR_IDS", "")  # short-circuits _fetch_calendar_events
-os.environ.setdefault("ZEROCLAW_BIN", "/bin/true")  # never spawned
 
 _repo_root = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location(
@@ -83,21 +82,6 @@ bridge_app.app.router.lifespan_context = _noop_lifespan
 # Per-test acp stub + cache reset helpers
 # ---------------------------------------------------------------------------
 
-class _StubProc:
-    """Stand-in for asyncio subprocess. /health reads only `returncode`."""
-    def __init__(self, alive: bool = True):
-        self.returncode = None if alive else 1
-
-
-def _install_acp_stub(*, alive: bool = True, sid: str | None = None, turns: int = 0):
-    """Replace the module-level `acp` with a stub bare enough for /health
-    and the voice memory-write endpoints to read sensible values."""
-    acp_stub = MagicMock()
-    acp_stub._proc = _StubProc(alive=alive) if alive is not None else None
-    acp_stub._sid = sid
-    acp_stub._sid_turns = turns
-    bridge_app.acp = acp_stub
-    return acp_stub
 
 
 def _reset_perception_state():
@@ -122,28 +106,12 @@ client_no_raise = TestClient(bridge_app.app, raise_server_exceptions=False)
 # ---------------------------------------------------------------------------
 
 class HealthTests(unittest.TestCase):
-    def test_alive_acp_no_session(self):
-        _install_acp_stub(alive=True, sid=None, turns=0)
+    def test_health_returns_ok(self):
         r = client.get("/health")
         self.assertEqual(r.status_code, 200)
         body = r.json()
         self.assertEqual(body["status"], "ok")
-        self.assertEqual(body["service"], "zeroclaw-bridge")
-        self.assertTrue(body["acp_running"])
-        self.assertFalse(body["cached_session"])
-        self.assertEqual(body["session_turns"], 0)
-
-    def test_dead_acp(self):
-        _install_acp_stub(alive=False, sid=None, turns=0)
-        r = client.get("/health")
-        self.assertEqual(r.status_code, 200)
-        self.assertFalse(r.json()["acp_running"])
-
-    def test_cached_session_reported(self):
-        _install_acp_stub(alive=True, sid="sess-42", turns=7)
-        body = client.get("/health").json()
-        self.assertTrue(body["cached_session"])
-        self.assertEqual(body["session_turns"], 7)
+        self.assertEqual(body["service"], "dotty-bridge")
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +120,6 @@ class HealthTests(unittest.TestCase):
 
 class PerceptionEventStateTests(unittest.TestCase):
     def setUp(self):
-        _install_acp_stub()
         _reset_perception_state()
 
     def test_post_event_returns_204_and_updates_state(self):
@@ -217,7 +184,6 @@ class CalendarTodayTests(unittest.TestCase):
     cache directly to drive each scenario."""
 
     def setUp(self):
-        _install_acp_stub()
         # Reset cache to a known state.
         bridge_app._calendar_cache.update({
             "date": "2026-05-17",
@@ -269,7 +235,7 @@ class VoiceMemoryLogTests(unittest.TestCase):
     assert it was invoked with the expected args."""
 
     def setUp(self):
-        _install_acp_stub()
+        pass
 
     def test_memory_log_204_and_calls_store(self):
         with patch.object(bridge_app, "_voice_memory_store_blocking") as mock_store:
@@ -318,7 +284,7 @@ class VoiceMemoryLogTests(unittest.TestCase):
 
 class VoiceRememberTests(unittest.TestCase):
     def setUp(self):
-        _install_acp_stub()
+        pass
 
     def test_remember_204_and_calls_store_with_core_category(self):
         with patch.object(bridge_app, "_voice_memory_store_blocking") as mock_store:
@@ -357,7 +323,7 @@ class VoiceRememberTests(unittest.TestCase):
 
 class VoiceEscalateTests(unittest.TestCase):
     def setUp(self):
-        _install_acp_stub()
+        pass
 
     def test_unknown_tool_returns_friendly_string(self):
         r = client.post("/api/voice/escalate", json={
@@ -413,7 +379,6 @@ class VisionExplainTests(unittest.TestCase):
     own dedicated test module."""
 
     def setUp(self):
-        _install_acp_stub()
         bridge_app._vision_cache.clear()
 
     def test_returns_description_and_caches_it(self):
@@ -436,7 +401,6 @@ class VisionExplainTests(unittest.TestCase):
 
 class AudioExplainTests(unittest.TestCase):
     def setUp(self):
-        _install_acp_stub()
         bridge_app._audio_cache.clear()
 
     def test_returns_caption_and_caches_it(self):
@@ -487,7 +451,6 @@ class PerceptionFeedTests(unittest.IsolatedAsyncioTestCase):
     follow-up."""
 
     async def asyncSetUp(self):
-        _install_acp_stub()
         _reset_perception_state()
         # Clean slate — leftover queues from earlier tests would pull events.
         bridge_app._perception_listeners.clear()
@@ -535,7 +498,6 @@ class VisionLatestTests(unittest.IsolatedAsyncioTestCase):
     the same event loop."""
 
     async def asyncSetUp(self):
-        _install_acp_stub()
         bridge_app._vision_cache.clear()
         bridge_app._vision_events.clear()
 
