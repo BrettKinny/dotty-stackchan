@@ -270,5 +270,92 @@ class AudioAndSceneGetterTests(unittest.TestCase):
         self.assertEqual(result, {})
 
 
+# ---------------------------------------------------------------------------
+# Sound-balance series getter — rewired in #115 Tile 5
+# ---------------------------------------------------------------------------
+
+
+class SoundBalanceGetterTests(unittest.TestCase):
+    """Smoke tests for the dotty-behaviour-backed sound-balance series
+    getter. Resolves the device id from the perception state getter
+    (single-robot heuristic) and pulls the sparkline series."""
+
+    def setUp(self) -> None:
+        bridge_app._dotty_behaviour_cache.clear()
+
+    def _patch_get(self, by_path):
+        """Monkeypatch requests.get to dispatch on URL path. ``by_path``
+        is a dict mapping path-substring → response (or Exception)."""
+        original = bridge_app.requests.get
+
+        def fake_get(url, *args, **kwargs):
+            for needle, response in by_path.items():
+                if needle in url:
+                    if isinstance(response, Exception):
+                        raise response
+                    return response
+            raise AssertionError(f"unexpected URL fetched: {url}")
+
+        bridge_app.requests.get = fake_get
+        self.addCleanup(lambda: setattr(bridge_app.requests, "get", original))
+
+    def test_sound_balance_series_returns_fetched_list(self):
+        class StateResp:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"dev-1": {"face_present": True}}
+
+        class BalanceResp:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return [0.1, 0.5, 0.9]
+
+        self._patch_get(
+            {
+                "/api/perception/state": StateResp(),
+                "/api/perception/sound-balance/": BalanceResp(),
+            }
+        )
+        result = bridge_app._dashboard_sound_balance_series()
+        self.assertEqual(result, [0.1, 0.5, 0.9])
+
+    def test_sound_balance_series_no_device_returns_empty(self):
+        class EmptyStateResp:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {}
+
+        self._patch_get({"/api/perception/state": EmptyStateResp()})
+        result = bridge_app._dashboard_sound_balance_series()
+        self.assertEqual(result, [])
+
+    def test_sound_balance_series_degrades_on_connection_error(self):
+        import requests as _requests
+
+        class StateResp:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"dev-1": {"face_present": True}}
+
+        self._patch_get(
+            {
+                "/api/perception/state": StateResp(),
+                "/api/perception/sound-balance/": _requests.exceptions.ConnectionError(
+                    "simulated"
+                ),
+            }
+        )
+        result = bridge_app._dashboard_sound_balance_series()
+        self.assertEqual(result, [])
+
+
 if __name__ == "__main__":
     unittest.main()

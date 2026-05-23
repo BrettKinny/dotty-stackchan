@@ -656,9 +656,24 @@ def _dashboard_last_user_line_getter(device_id: str) -> dict | None:
 
 
 def _dashboard_sound_balance_series() -> list[float]:
-    """Empty sound-balance series — sound_event handling moved to
-    dotty-behaviour with the rest of the perception bus."""
-    return []
+    """Live sound_event balance series from dotty-behaviour.
+
+    Picks the first device with perception state (single-robot
+    deployment heuristic — matches the device-picking strategy used
+    for the perception card) and reads its sound-balance ring via
+    /api/perception/sound-balance/{device_id}. Same cache + timeout +
+    circuit-breaker contract as the other dotty-behaviour-backed
+    getters — returns ``[]`` on any failure."""
+    state = _dashboard_perception_state_getter()
+    device_id = next(iter(state), None) if isinstance(state, dict) else None
+    if not device_id:
+        return []
+    result = _dotty_behaviour_get(
+        f"/api/perception/sound-balance/{device_id}",
+        {"limit": 30},
+        [],
+    )
+    return result if isinstance(result, list) else []
 
 
 def _dashboard_vision_failures_last_hour() -> dict[str, int]:
