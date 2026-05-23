@@ -271,6 +271,13 @@ def test_room_view_sentinel_matches_roster_and_broadcasts_face_recognized() -> N
 
             # Mood plumbed into perception state.
             assert state.state["dev-rv"]["face_mood"] == "engaged"
+            # Identity mirrored into per-device state (face_identified_
+            # refresher reads last_face_id to keep pixel 6 green past
+            # its 4 s firmware timeout). Bug caught during the #102
+            # bench sweep — broadcast alone wasn't enough; we also need
+            # to call update_state the way /api/perception/event does.
+            assert state.state["dev-rv"]["last_face_id"] == "brett"
+            assert state.state["dev-rv"]["last_face_recognized_t"] > 0
         finally:
             state.unsubscribe(bus_q)
 

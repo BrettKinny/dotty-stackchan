@@ -247,11 +247,24 @@ async def vision_explain(
     # (FaceGreeter, ProactiveGreeter) see the resolved identity.
     # Without this the person_id is trapped in the cache and never
     # reaches the perception bus.
+    #
+    # Mirror the POST /api/perception/event ingress shape: call
+    # `update_state` first so `last_face_id` + `last_face_recognized_t`
+    # land on the per-device state (face_identified_refresher reads
+    # last_face_id to keep pixel 6 green past its 4 s firmware
+    # timeout), then `broadcast` to wake the bus subscribers.
     if room_match_person_id:
+        face_recognized_data = {
+            "identity": room_match_person_id,
+            "source": "room_view",
+        }
+        state.update_state(
+            device_id, "face_recognized", face_recognized_data, now_wall,
+        )
         state.broadcast(PerceptionEvent(
             device_id=device_id,
             name="face_recognized",
-            data={"identity": room_match_person_id, "source": "room_view"},
+            data=face_recognized_data,
             ts=now_wall,
         ))
 
