@@ -25,6 +25,7 @@ COPY config.py main.py ./
 COPY perception ./perception
 COPY routes ./routes
 COPY dispatch ./dispatch
+COPY vision ./vision
 COPY consumers ./consumers
 COPY greeter ./greeter
 COPY household ./household
