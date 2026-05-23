@@ -143,6 +143,58 @@ def test_recent_unknown_device_returns_empty_list() -> None:
         assert r.json() == []
 
 
+def test_sound_balance_series_filters_and_orders() -> None:
+    """Three sound_events with a non-sound event interleaved → response is
+    just the sound balances, oldest-first."""
+    with TestClient(app) as client:
+        client.post(
+            "/api/perception/event",
+            json={
+                "device_id": "dev-1",
+                "name": "sound_event",
+                "data": {"balance": 0.3},
+                "ts": 1.0,
+            },
+        )
+        client.post(
+            "/api/perception/event",
+            json={
+                "device_id": "dev-1",
+                "name": "sound_event",
+                "data": {"balance": 0.6},
+                "ts": 2.0,
+            },
+        )
+        client.post(
+            "/api/perception/event",
+            json={
+                "device_id": "dev-1",
+                "name": "face_detected",
+                "data": {},
+                "ts": 2.5,
+            },
+        )
+        client.post(
+            "/api/perception/event",
+            json={
+                "device_id": "dev-1",
+                "name": "sound_event",
+                "data": {"balance": 0.9},
+                "ts": 3.0,
+            },
+        )
+        r = client.get("/api/perception/sound-balance/dev-1")
+        assert r.status_code == 200
+        assert r.json() == [0.3, 0.6, 0.9]
+
+
+def test_sound_balance_series_unknown_device_returns_empty_list() -> None:
+    with TestClient(app) as client:
+        r = client.get("/api/perception/sound-balance/nobody")
+        assert r.status_code == 200
+        assert r.json() == []
+
+
 def test_perception_feed_subscribe_and_dispatch() -> None:
     """Exercise the SSE generator directly without going through
     TestClient's streaming context (which hangs on close because the

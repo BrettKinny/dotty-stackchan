@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from config import PERCEPTION_RECENT_MAX
 from perception import PerceptionEvent, PerceptionState
 
 router = APIRouter(prefix="/api/perception")
@@ -96,6 +97,31 @@ async def perception_recent(
     perception card.
     """
     return state.get_recent(device_id, limit=limit)
+
+
+@router.get("/sound-balance/{device_id}")
+async def sound_balance_series(
+    device_id: str,
+    limit: int = 30,
+    state: PerceptionState = Depends(get_perception_state),
+) -> list[float]:
+    """Recent sound_event balance values for a device (oldest-first).
+
+    Used by the bridge dashboard state-card sparkline. Returns at most
+    ``limit`` recent values; missing/non-numeric balances are skipped.
+    Iterates the recent-events ring (newest-first) in reverse so the
+    output is oldest-first — matches the sparkline's left-to-right
+    time axis.
+    """
+    recent = state.get_recent(device_id, limit=PERCEPTION_RECENT_MAX)
+    balances: list[float] = []
+    for event in reversed(recent):
+        if event.get("name") != "sound_event":
+            continue
+        balance = event.get("data", {}).get("balance")
+        if isinstance(balance, (int, float)):
+            balances.append(float(balance))
+    return balances[-limit:]
 
 
 @router.get("/feed")
