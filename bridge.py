@@ -2660,102 +2660,6 @@ async def _perception_purr_player() -> None:
 _FIXED_AUDIO_ASSETS: tuple[Path, ...] = (PURR_AUDIO_PATH,)
 
 
-# ---------------------------------------------------------------------------
-# ProactiveGreeter (Layer 6) — adapters
-# ---------------------------------------------------------------------------
-# The greeter expects an object that exposes ``subscribe()`` ->
-# ``asyncio.Queue`` and ``unsubscribe(q)``. Our perception bus is a pair
-# of free functions (`_perception_subscribe` / `_perception_unsubscribe`)
-# operating on a module-level listener list; the adapter below is the
-# minimum shim needed to bridge the two shapes without altering the
-# in-process bus surface that other consumers already rely on.
-class _PerceptionBusAdapter:
-    """Wraps the free-function perception bus to match the greeter's
-    duck-typed dependency-injection contract."""
-
-    @staticmethod
-    def subscribe() -> asyncio.Queue:
-        return _perception_subscribe()
-
-    @staticmethod
-    def unsubscribe(q: asyncio.Queue) -> None:
-        _perception_unsubscribe(q)
-
-
-class _CalendarFacade:
-    """Wraps `_calendar_cache` + `summarize_for_prompt` into the
-    `get_events()` / `summarize_for_prompt(events, person, include_household)`
-    shape the greeter wants. Reads the cache lazily so a midnight roll or
-    a fresh poll lands without a greeter restart. All branches are
-    defensive — any raise here would propagate into the greeter's
-    handler and be try/except-swallowed there, but we still degrade
-    gracefully so the LLM-prompt path stays valid."""
-
-    @staticmethod
-    def get_events() -> list:
-        try:
-            return list(_calendar_cache.get("events") or [])
-        except Exception:
-            log.debug(
-                "greeter calendar facade: get_events() raised", exc_info=True,
-            )
-            return []
-
-    @staticmethod
-    def summarize_for_prompt(
-        events: list,
-        *,
-        person: str | None = None,
-        include_household: bool = True,
-    ) -> list[str]:
-        try:
-            return summarize_for_prompt(
-                events,
-                person=person,
-                include_household=include_household,
-            )
-        except Exception:
-            log.debug(
-                "greeter calendar facade: summarize_for_prompt raised",
-                exc_info=True,
-            )
-            return []
-
-
-async def _greeter_llm_client(prompt: str) -> str:
-    """LLM adapter for ProactiveGreeter. Routes through the same ACP
-    client voice turns use. The resulting text is sent verbatim through
-    `_dispatch_say` (TTS-direct), so we don't want voice wrapping
-    applied here — what the greeter generates is exactly what Dotty
-    speaks. Failures bubble up to the greeter, which has its own
-    try/except + template fallback."""
-    return await asyncio.wait_for(
-        acp.prompt(prompt),
-        timeout=REQUEST_TIMEOUT_SEC,
-    )
-
-
-async def _greeter_tts_pusher(device_id: str, text: str) -> None:
-    """TTS adapter for ProactiveGreeter. Routes through the
-    /xiaozhi/admin/say endpoint which generates TTS server-side and
-    streams opus straight to the device WS — bypassing the ASR/LLM
-    pipeline entirely so the greeter's pre-generated text is spoken
-    verbatim. Errors are logged inside `_dispatch_say`; we add one
-    more guard so an exception here can NEVER reach the greeter
-    loop."""
-    try:
-        await _dispatch_say(device_id, text)
-    except Exception:
-        log.exception(
-            "greeter tts pusher: _dispatch_say raised "
-            "(device=%s)", device_id,
-        )
-
-
-# Lazily constructed in lifespan so unit-import of bridge.py stays cheap
-# (the greeter reads env on construction).
-_proactive_greeter: "ProactiveGreeter | None" = None  # noqa: F821
-
 # Household registry — single source of truth for who lives here. Loaded
 # from ~/.zeroclaw/household.yaml (overridable via HOUSEHOLD_YAML_PATH).
 # Hot-reloads on file mtime change. None == registry init failed; bridge
@@ -2923,41 +2827,15 @@ async def lifespan(app: FastAPI):
         )
         _speaker_resolver = None
 
-    # Layer 6: proactive greeter. Defensive — a construct-or-start failure
-    # must never block the bridge from booting (voice path comes first).
-    global _proactive_greeter
-    try:
-        from bridge.proactive_greeter import ProactiveGreeter
-        _proactive_greeter = ProactiveGreeter(
-            perception_bus=_PerceptionBusAdapter(),
-            llm_client=_greeter_llm_client,
-            calendar_cache=_CalendarFacade(),
-            tts_pusher=_greeter_tts_pusher,
-            kid_mode_provider=lambda: KID_MODE,
-            household_registry=_household_registry,
-            turn_logger=_convo_log.log_turn,
-        )
-        _proactive_greeter.start()
-    except Exception:
-        log.exception(
-            "ProactiveGreeter start failed — continuing without it",
-        )
-        _proactive_greeter = None
-
     yield
     for t in perception_tasks:
         t.cancel()
     calendar_task.cancel()
     await asyncio.gather(*perception_tasks, calendar_task, return_exceptions=True)
-    if _proactive_greeter is not None:
-        try:
-            await _proactive_greeter.stop()
-        except Exception:
-            log.exception("ProactiveGreeter.stop() raised")
     await acp.shutdown()
 
 
-app = FastAPI(title="ZeroClaw Bridge", lifespan=lifespan)
+app = FastAPI(title="Dotty Admin Dashboard", lifespan=lifespan)
 app.add_middleware(CSRFMiddleware)
 
 # Prometheus exposition. Mounted as an ASGI sub-app so it shares the
