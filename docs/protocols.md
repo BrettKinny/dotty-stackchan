@@ -11,7 +11,7 @@ description: Xiaozhi WebSocket protocol, pi RPC transport, emotion frame format,
 - **Emotion channel** — 21 upstream emotion identifiers; the server picks one from the LLM's leading emoji and emits a separate `llm`-type frame. This stack uses a 9-emoji subset.
 - **MCP over WS** — the device acts as an MCP server; xiaozhi-server calls `tools/list` and `tools/call` against it. Tool names use dotted namespaces like `self.audio_speaker.set_volume`.
 - **pi RPC** — `PiClient` ↔ the dotty-pi agent communicate as JSONL messages over the stdin/stdout of `docker exec -i dotty-pi pi --mode rpc`. This is the voice transport for the default `PiVoiceLLM` provider.
-- **HTTP APIs** — split across two services: dotty-behaviour (:8090) serves perception, vision, audio, and calendar endpoints; bridge.py (:8080) serves the admin dashboard `/ui` and admin routes.
+- **HTTP APIs** — split across two services: dotty-behaviour (:8090) serves perception, vision, audio, and calendar endpoints; bridge.py (:8081) serves the admin dashboard `/ui` and admin routes.
 
 ## Xiaozhi WebSocket
 
@@ -279,9 +279,9 @@ Server-side HTTP is split across two services. All payloads are JSON unless note
 
 Response: `{"ok": true}`. dotty-behaviour broadcasts the event to all perception listeners and updates per-device state. See [architecture.md](./architecture.md#perception-event-bus) for the 9 ambient consumers.
 
-### bridge.py — dashboard and admin (:8080)
+### bridge.py — dashboard and admin (:8081)
 
-`bridge.py` is a FastAPI service (port 8080, same Docker host) that serves the admin dashboard. Its voice and perception relay roles were retired in issue #36 (2026-05-19); it survives as the dashboard service.
+`bridge.py` is a FastAPI service (port 8081, same Docker host) that serves the admin dashboard. Its voice and perception relay roles were retired in issue #36 (2026-05-19); it survives as the dashboard service.
 
 | Endpoint | Purpose |
 |---|---|

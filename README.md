@@ -56,7 +56,7 @@ Full state taxonomy, colour palette, transition diagram, and per-state backing a
 
 ## Web dashboard (locally hosted)
 
-The dashboard service serves a web dashboard at `http://<XIAOZHI_HOST>:8080/ui` — host status, mode toggles (Kid Mode / Smart Mode), state switcher, perception card (face / identity), emoji presets, and a live event log (turns, perception events, errors). Light and dark themes follow the system preference. It runs as a small FastAPI service (`bridge.py`) on your own hardware — no external service ever sees your data.
+The dashboard service serves a web dashboard at `http://<XIAOZHI_HOST>:8081/ui` — host status, mode toggles (Kid Mode / Smart Mode), state switcher, perception card (face / identity), emoji presets, and a live event log (turns, perception events, errors). Light and dark themes follow the system preference. It runs as a small FastAPI service (`bridge.py`) on your own hardware — no external service ever sees your data.
 
 <p align="center">
   <img src="docs/assets/dashboard-light.png" alt="Dotty dashboard — light theme" width="48%">
@@ -78,7 +78,7 @@ The dashboard service serves a web dashboard at `http://<XIAOZHI_HOST>:8080/ui` 
 | xiaozhi-esp32-server | server (`<XIAOZHI_HOST>`) | Docker — voice I/O, ports 8000 + 8003 |
 | dotty-pi | server (`<XIAOZHI_HOST>`) | Docker — the pi agent, Dotty's voice brain |
 | dotty-behaviour | server (`<XIAOZHI_HOST>`) | Docker — FastAPI: perception bus, ambient consumers, vision, greeter; port 8090 |
-| dashboard service | server (`<XIAOZHI_HOST>`) | Docker — FastAPI admin dashboard (`bridge.py`); port 8080 |
+| dashboard service | server (`<XIAOZHI_HOST>`) | Docker — FastAPI admin dashboard (`bridge.py`); port 8081 |
 | Admin workstation | any LAN box | Development / `ssh` only |
 
 ## Get it running

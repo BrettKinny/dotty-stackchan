@@ -33,7 +33,7 @@ flowchart LR
         end
         PI["dotty-pi<br/>(pi agent container)"]
         BH["dotty-behaviour<br/>FastAPI :8090"]
-        BR["bridge.py<br/>FastAPI :8080 (/ui dashboard)"]
+        BR["bridge.py<br/>FastAPI :8081 (/ui dashboard)"]
     end
 
     subgraph Llama["llama-swap (same host or LAN GPU host)"]
@@ -66,7 +66,7 @@ Solid arrows are per-turn data flow; dotted arrows are cloud / conditional. All 
 | **PiVoiceLLM custom provider** | Docker host (inside xiaozhi container) | Default LLM provider — translates each voice turn into a pi RPC request, streams TTS-bound text back | Python, mounted via volume |
 | **dotty-pi** | Docker host | The voice-tool brain — pi coding agent with the `dotty-pi-ext` extension; owns the agent loop and tool dispatch | Docker container (`dotty-pi`) |
 | **dotty-behaviour** | Docker host | Perception event bus, 9 ambient consumers, vision/audio explain endpoints, proactive greeter, calendar context | FastAPI container, port 8090 |
-| **bridge.py** | Docker host | Admin dashboard service (`/ui`, port 8080). Voice and perception roles were retired in #36; dashboard port to dotty-behaviour is pending. | FastAPI container, port 8080 |
+| **bridge.py** | Docker host | Admin dashboard service (`/ui`, port 8081). Voice and perception roles were retired in #36; dashboard port to dotty-behaviour is pending. | FastAPI container, port 8081 |
 | **llama-swap** | Same host or LAN GPU host | Routes OpenAI-compatible requests to per-model llama-server children; co-loads `qwen3.5:4b` (pi outer loop) and `qwen3.6:27b-think` (`think_hard` target) | Docker container (`ghcr.io/mostlygeek/llama-swap:cuda`) |
 | **OpenRouter** | Cloud | Routes cloud LLM calls (smart_mode `claude-sonnet-4-6`, VLM `gemini-2.0-flash`, audio caption `gemini-2.5-flash`) | External |
 
@@ -165,7 +165,7 @@ It does **not** know about the xiaozhi WebSocket protocol or audio.
 
 Admin routes are split across two services and reached at different prefixes.
 
-### bridge.py `/admin/*` (Docker host, `127.0.0.1:8080` only)
+### bridge.py `/admin/*` (Docker host, `127.0.0.1:8081` only)
 
 Runtime mutations. Bound to localhost only — LAN callers get `403`. Note: the voice-path mutations (`smart-mode` daemon restart, `persona` workspace files) referenced pre-cutover ZeroClaw config; those endpoints exist but their ZeroClaw-specific side-effects are retired.
 

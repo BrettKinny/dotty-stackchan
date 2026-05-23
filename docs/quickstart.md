@@ -108,8 +108,9 @@ are brought up separately:
 - **dotty-behaviour** (perception bus + admin dashboard): see
   [dotty-behaviour/README.md](../dotty-behaviour/README.md) for build and
   run instructions. The `scripts/deploy-behaviour.sh` helper deploys it.
-- **bridge.py** (admin dashboard service, `:8080`): runs as a container
-  on the same host; started via the compose file.
+- **bridge.py** (admin dashboard service, `:8081`): runs as a container
+  on the same host (`bridge/Dockerfile` + `bridge/docker-compose.yml`,
+  deployed via `scripts/deploy-bridge-unraid.sh`).
 
 No separate host, no systemd bridge unit, no SSH to a second machine.
 
@@ -178,7 +179,7 @@ All four containers run on the single Docker host (`<XIAOZHI_HOST>`):
 | `xiaozhi-esp32-server` | Voice pipeline: ASR, TTS, WebSocket to StackChan | 8000 (WS), 8003 (OTA/HTTP) |
 | `dotty-pi` | pi coding agent — the voice-tool brain | internal (via `docker exec`) |
 | `dotty-behaviour` | Perception bus + ambient consumers + calendar | 8090 |
-| `bridge.py` | Admin dashboard | 8080 |
+| `bridge.py` | Admin dashboard | 8081 |
 
 Container volume mounts for `xiaozhi-esp32-server`:
 
@@ -205,7 +206,7 @@ The full file inventory lives in [architecture.md](./architecture.md#deployment-
 | OTA (enter into StackChan settings) | `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/` | The robot on boot |
 | WebSocket | `ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/` | The robot after OTA handshake |
 | Perception / ambient events | `http://<XIAOZHI_HOST>:8090` | xiaozhi-server → dotty-behaviour |
-| Admin dashboard | `http://<XIAOZHI_HOST>:8080/ui` | Humans (LAN-only HTMX UI) |
+| Admin dashboard | `http://<XIAOZHI_HOST>:8081/ui` | Humans (LAN-only HTMX UI) |
 | Bridge health | `http://<XIAOZHI_HOST>:8080/health` | Humans, monitoring |
 
 ---
@@ -236,7 +237,7 @@ ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs -f dotty-pi'
 ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'cd <XIAOZHI_PATH> && docker compose restart'
 
 # Admin dashboard
-open http://<XIAOZHI_HOST>:8080/ui
+open http://<XIAOZHI_HOST>:8081/ui
 
 # Bridge health
 curl http://<XIAOZHI_HOST>:8080/health
@@ -261,7 +262,7 @@ For the `PiVoiceLLM` path (default): see [dotty-pi/README.md](../dotty-pi/README
 ```bash
 make doctor          # health checks
 make logs            # tail server logs
-curl http://<XIAOZHI_HOST>:8080/health   # test the bridge/dashboard
+curl http://<XIAOZHI_HOST>:8081/health   # test the bridge/dashboard
 ```
 
 See [troubleshooting.md](troubleshooting.md) for common issues.

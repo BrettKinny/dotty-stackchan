@@ -13,7 +13,7 @@ description: The pi agent runtime (dotty-pi container), the model matrix, and th
 - **Which LLM runs which turn:** the pi outer loop targets `qwen3.5:4b` (local llama-swap, ~500 ms warm); `think_hard` escalates directly to `qwen3.6:27b-think` (co-resident on llama-swap). Smart-mode flips the inner-loop model to a cloud model.
 - Two documented alternate voice providers exist: **`Tier1Slim`** (handles plain turns directly against llama-swap, escalates tool calls via POST) and **`OpenAICompat`**. See [llm-backends.md](./llm-backends.md).
 
-> **Cutover note (2026-05-19, issue #36):** The brain previously ran as the ZeroClaw Rust agent on a Raspberry Pi, fronted by a FastAPI bridge (`bridge.py`) under systemd. ZeroClaw and the RPi host are retired. `bridge.py` survives as the admin dashboard service (port 8080, `/ui`) on the Docker host; its voice and perception roles moved to `PiVoiceLLM`/`dotty-pi` and `dotty-behaviour` respectively.
+> **Cutover note (2026-05-19, issue #36):** The brain previously ran as the ZeroClaw Rust agent on a Raspberry Pi, fronted by a FastAPI bridge (`bridge.py`) under systemd. ZeroClaw and the RPi host are retired. `bridge.py` survives as the admin dashboard service (port 8081, `/ui`) on the Docker host; its voice and perception roles moved to `PiVoiceLLM`/`dotty-pi` and `dotty-behaviour` respectively.
 
 ## Model matrix
 
@@ -77,7 +77,7 @@ The outer pi loop must target `qwen3.5:4b` — **not** `qwen3.6:27b`. llama-swap
 
 ## The bridge — `bridge.py` (dashboard service)
 
-`bridge.py` was the original HTTP→ZeroClaw translator, running under systemd on the RPi. Post-cutover (#36) it runs as a Docker container on the same Docker host, port 8080. Its **voice path** (`/api/message`, `/api/voice/*`) and **perception relay** (`/api/perception/event`) roles are retired — those functions moved to `PiVoiceLLM`/`dotty-pi` and `dotty-behaviour`. What remains:
+`bridge.py` was the original HTTP→ZeroClaw translator, running under systemd on the RPi. Post-cutover (#36) it runs as a Docker container on the same Docker host, port 8081. Its **voice path** (`/api/message`, `/api/voice/*`) and **perception relay** (`/api/perception/event`) roles are retired — those functions moved to `PiVoiceLLM`/`dotty-pi` and `dotty-behaviour`. What remains:
 
 - **Admin dashboard** (`/ui`) — the operator web UI for monitoring turns, toggling kid-mode/smart-mode, viewing scene context, and LED state.
 - **`/admin/*` endpoints** (localhost-only) — runtime toggles for kid-mode, smart-mode, safety allowlist.

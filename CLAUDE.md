@@ -51,7 +51,7 @@ This repo uses placeholders (`<XIAOZHI_HOST>`, `<XIAOZHI_USER>`, `<XIAOZHI_PATH>
 
 - **xiaozhi-server install dir** (on the Docker host): `<XIAOZHI_PATH>` (e.g. `/opt/xiaozhi-server/`)
 - **Custom LLM provider** (on the Docker host): mounted into the xiaozhi container at `/opt/xiaozhi-server/core/providers/llm/pi_voice/`
-- **dotty-pi / dotty-behaviour / bridge.py**: each deployed as its own container on the Docker host (see their respective `README.md` files and `scripts/deploy-behaviour.sh`)
+- **dotty-pi / dotty-behaviour / bridge.py**: each deployed as its own container on the Docker host (see their respective `README.md` files; deploy via `scripts/deploy-behaviour.sh` and `scripts/deploy-bridge-unraid.sh`)
 - **This project dir**: wherever you cloned `dotty-stackchan`
 
 ## Ports
@@ -60,7 +60,7 @@ This repo uses placeholders (`<XIAOZHI_HOST>`, `<XIAOZHI_USER>`, `<XIAOZHI_PATH>
 |---------|------|------|----------|
 | xiaozhi WebSocket | Docker host LAN IP | 8000 | ws:// |
 | xiaozhi OTA/HTTP | Docker host LAN IP | 8003 | http:// |
-| dashboard service (`bridge.py`) | Docker host LAN IP | 8080 | http:// (`/ui`) |
+| dashboard service (`bridge.py`) | Docker host LAN IP | 8081 | http:// (`/ui`) |
 | dotty-behaviour (perception, vision, greeter) | Docker host LAN IP | 8090 | http:// |
 
 ## Config Files to Know
@@ -73,7 +73,7 @@ This repo uses placeholders (`<XIAOZHI_HOST>`, `<XIAOZHI_USER>`, `<XIAOZHI_PATH>
 - `custom-providers/piper_local/piper_local.py` — local Piper TTS provider (offline alternative to EdgeTTS).
 - `custom-providers/asr/fun_local.py` — patched FunASR provider. Adds a `language` config key (upstream hardcodes `"auto"`, which mis-detects Korean/Japanese on unclear English). Mounted as a file-level override over the upstream provider.
 - `custom-providers/xiaozhi-patches/{http_server,websocket_server,portal_bridge}.py` — drop-in overrides against upstream xiaozhi-server. Add the `/xiaozhi/admin/*` admin routes (toggle, kid-mode, smart-mode, set-tier1slim-model, play-asset, songs catalogue, inject-text/tts) and the `shared_llm` singleton that lets admin routes mutate the running LLM provider's runtime config.
-- `bridge.py` — the **admin dashboard** service (FastAPI, port 8080, served at `/ui`); runs as a container on the Docker host. Its former voice and perception-bus roles were retired in #36 — the dashboard port to `dotty-behaviour` is still pending. Supporting modules live under `bridge/`.
+- `bridge.py` — the **admin dashboard** service (FastAPI, port 8081, served at `/ui`); runs as a container on the Docker host (build via `bridge/Dockerfile`, deploy via `scripts/deploy-bridge-unraid.sh`). Its former voice and perception-bus roles were retired in #36 — the dashboard port to `dotty-behaviour` is still pending. Supporting modules live under `bridge/`.
 - `dotty-pi/` — Docker image + compose for the pi agent container (the brain). See `dotty-pi/README.md`.
 - `dotty-pi-ext/` — pi extension providing the five voice tools (`memory_lookup`, `remember`, `think_hard`, `take_photo`, `play_song`), loaded into the `dotty-pi` agent.
 - `dotty-behaviour/` — FastAPI service (port 8090): the perception event bus, ambient consumers, vision/audio explain endpoints, the proactive greeter, and calendar context. Successor to the bridge's perception role. See `dotty-behaviour/README.md`.
@@ -115,7 +115,7 @@ Run `make help` for the full list. Key targets:
 - **Change system prompt**: Edit `data/.config.yaml` on the Docker host, top-level `prompt:` block. Restart container.
 - **Check logs**: `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs -f xiaozhi-esp32-server'`
 - **Restart pipeline**: `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'cd <XIAOZHI_PATH> && docker compose restart'`
-- **Test the dashboard service**: `curl http://<XIAOZHI_HOST>:8080/health`
+- **Test the dashboard service**: `curl http://<XIAOZHI_HOST>:8081/health`
 - **Test dotty-behaviour**: `curl http://<XIAOZHI_HOST>:8090/health`
 
 ## Firmware iteration

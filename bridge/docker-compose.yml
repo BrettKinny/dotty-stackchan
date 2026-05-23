@@ -1,0 +1,64 @@
+# dotty-bridge — Unraid-resident admin dashboard service (FastAPI /ui).
+#
+# Post-#36 deploy home for bridge.py. Sits alongside dotty-behaviour /
+# dotty-pi / xiaozhi-server on the Docker host.
+#
+# Bind-mount layout under /mnt/user/appdata/dotty-bridge/:
+#   state/        — kid-mode + smart-mode toggle files (DOTTY_KID_MODE_STATE
+#                   / DOTTY_SMART_MODE_STATE point here), brain.db scratch,
+#                   any other workspace state bridge.py grows.
+#   logs/         — CONVO_LOG_DIR daily NDJSON.
+#   secrets/      — Google Calendar service-account JSON, OpenRouter key
+#                   when not provided via env. Read-only mount.
+#
+# Path mapping (clean redirect; no /root/zeroclaw-bridge bind-mount):
+#   bridge.py defaults its three legacy /root/zeroclaw-bridge/ paths
+#   (kid-mode state, smart-mode state, CONVO_LOG_DIR) to that RPi-era
+#   directory, but each one reads its env var first. The environment
+#   block below redirects all three to /var/lib/dotty-bridge/{state,logs}
+#   so no bridge.py patch is required and nothing inside the container
+#   ever touches /root/zeroclaw-bridge/.
+#
+# network_mode: host so the dashboard can reach llama-swap (:8080) and
+# xiaozhi-server (:8003 admin / :8000 ws) on loopback. Note: bridge.py's
+# own listen port is 8081 (PORT env) — 8080 is taken by llama-swap on
+# Unraid, so the legacy CLAUDE.md "dashboard on 8080" entry is updated
+# in this PR.
+services:
+  dotty-bridge:
+    image: dotty-bridge:0.1.0
+    container_name: dotty-bridge
+    network_mode: host
+    restart: unless-stopped
+    # Optional host-resident .env at $REMOTE_DIR/.env (Unraid:
+    # /mnt/user/appdata/dotty-bridge-src/.env). Stays out of the deploy
+    # tar (only tracked files ship) and survives recreates. Use for
+    # OPENROUTER_API_KEY / VISION_API_KEY / VLM_API_KEY /
+    # AUDIO_CAPTION_API_KEY / CALENDAR_ID / etc.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - TZ=Australia/Brisbane
+      - PORT=8081
+      - PYTHONUNBUFFERED=1
+      # xiaozhi-server admin endpoints (loopback on Unraid host network).
+      - XIAOZHI_HOST=127.0.0.1
+      - XIAOZHI_OTA_PORT=8003
+      # State + logs — redirect the legacy /root/zeroclaw-bridge/* paths
+      # to /var/lib/dotty-bridge/* inside the container, which is bind-
+      # mounted from /mnt/user/appdata/dotty-bridge/{state,logs}.
+      - DOTTY_KID_MODE_STATE=/var/lib/dotty-bridge/state/kid-mode
+      - DOTTY_SMART_MODE_STATE=/var/lib/dotty-bridge/state/smart-mode
+      - CONVO_LOG_DIR=/var/lib/dotty-bridge/logs
+      # Household roster used for face-name greeting + per-person calendar
+      # bucketing. Defaults to ~/.zeroclaw/household.yaml on the legacy
+      # host; redirect to the bind-mounted state dir.
+      - HOUSEHOLD_YAML_PATH=/var/lib/dotty-bridge/state/household.yaml
+      # Calendar service-account JSON (lives under the read-only secrets
+      # mount). Only meaningful if CALENDAR_ID is also set via .env.
+      - CALENDAR_SA_PATH=/var/lib/dotty-bridge/secrets/google-calendar-sa.json
+    volumes:
+      - /mnt/user/appdata/dotty-bridge/state:/var/lib/dotty-bridge/state
+      - /mnt/user/appdata/dotty-bridge/logs:/var/lib/dotty-bridge/logs
+      - /mnt/user/appdata/dotty-bridge/secrets:/var/lib/dotty-bridge/secrets:ro

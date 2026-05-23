@@ -65,7 +65,7 @@ Symptom-first lookup table covering common and obscure failure modes. Pair with 
 **Symptom:** The robot boots and connects to WiFi, but never responds to voice. May show a face but no indication of listening.
 
 **Fix:**
-1. Check the bridge health endpoint: `curl http://<XIAOZHI_HOST>:8080/health`. If the bridge is down, restart it.
+1. Check the bridge health endpoint: `curl http://<XIAOZHI_HOST>:8081/health`. If the bridge is down, restart it.
 2. Check xiaozhi-server logs: `docker logs -f xiaozhi-esp32-server` on the server. Look for connection attempts from the robot.
 3. Verify the robot's OTA URL hasn't changed. After a firmware update, re-enter the OTA URL (`http://<XIAOZHI_HOST>:8003/xiaozhi/ota/`) in the robot's Advanced Options if needed.
 4. Open the browser test page (`repo/main/xiaozhi-server/test/test_page.html`) and point it at `ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/`. If the browser page works but the robot doesn't, it's a robot-side configuration issue.
@@ -132,7 +132,7 @@ Symptom-first lookup table covering common and obscure failure modes. Pair with 
 
 **Fix:**
 1. Check that the `bridge.py` dashboard container and the `dotty-pi` brain container are running: `docker ps | grep -E 'bridge|dotty-pi'`
-2. Test the bridge dashboard health endpoint: `curl http://<XIAOZHI_HOST>:8080/health`
+2. Test the bridge dashboard health endpoint: `curl http://<XIAOZHI_HOST>:8081/health`
 3. For `PiVoiceLLM` failures, check that the `dotty-pi` container is healthy and the Docker socket is bind-mounted into the xiaozhi container. `docker exec -i dotty-pi echo ok` should return `ok`.
 4. If the bridge container crashes on startup, check its logs: `docker logs bridge`
 
