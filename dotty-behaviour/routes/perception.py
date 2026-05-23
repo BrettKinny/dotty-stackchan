@@ -84,6 +84,20 @@ async def perception_state_route(
     return state.annotate_for_introspection()
 
 
+@router.get("/recent/{device_id}")
+async def perception_recent(
+    device_id: str,
+    limit: int = 50,
+    state: PerceptionState = Depends(get_perception_state),
+) -> list[dict]:
+    """Most-recent perception events for a device (newest first).
+
+    Bounded by PERCEPTION_RECENT_MAX. Used by the bridge dashboard
+    perception card.
+    """
+    return state.get_recent(device_id, limit=limit)
+
+
 @router.get("/feed")
 async def perception_feed(
     request: Request,

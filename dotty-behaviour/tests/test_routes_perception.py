@@ -89,6 +89,60 @@ def test_health_endpoint() -> None:
         assert body["service"] == "dotty-behaviour"
 
 
+def test_recent_returns_broadcast_event() -> None:
+    """Broadcast one event, then GET /api/perception/recent/{device_id}
+    and assert it shows up in the ring buffer (newest first)."""
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/perception/event",
+            json={
+                "device_id": "dev-1",
+                "name": "face_detected",
+                "data": {"confidence": 0.9},
+                "ts": 100.0,
+            },
+        )
+        assert r.status_code == 204
+        r = client.get("/api/perception/recent/dev-1")
+        assert r.status_code == 200
+        items = r.json()
+        assert isinstance(items, list)
+        assert len(items) == 1
+        assert items[0]["name"] == "face_detected"
+        assert items[0]["ts"] == 100.0
+        assert items[0]["data"] == {"confidence": 0.9}
+
+
+def test_recent_respects_limit_and_order() -> None:
+    """Events are returned newest-first and capped at the limit param."""
+    with TestClient(app) as client:
+        for i in range(5):
+            client.post(
+                "/api/perception/event",
+                json={
+                    "device_id": "dev-r",
+                    "name": "face_detected",
+                    "data": {"i": i},
+                    "ts": float(i),
+                },
+            )
+        r = client.get(
+            "/api/perception/recent/dev-r", params={"limit": 3}
+        )
+        assert r.status_code == 200
+        items = r.json()
+        assert len(items) == 3
+        # newest-first
+        assert [it["data"]["i"] for it in items] == [4, 3, 2]
+
+
+def test_recent_unknown_device_returns_empty_list() -> None:
+    with TestClient(app) as client:
+        r = client.get("/api/perception/recent/nobody")
+        assert r.status_code == 200
+        assert r.json() == []
+
+
 def test_perception_feed_subscribe_and_dispatch() -> None:
     """Exercise the SSE generator directly without going through
     TestClient's streaming context (which hangs on close because the
