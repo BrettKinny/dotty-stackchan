@@ -6,6 +6,8 @@
 
 **Your self-hosted [StackChan](https://github.com/m5stack/StackChan) robot assistant — kid-safe by default, hackable by design, private by architecture.**
 
+> 🤖 **AI-assisted project.** Most of the code and nearly all of the docs in this repo were written by AI agents (primarily Claude Code) under my direction. I've been coding professionally for 15+ years; Dotty is one of a few side projects I'm using to learn the current generation of AI/LLM tooling first-hand — what the tools do well, where they break, and how to drive them. Feedback on the output very welcome.
+
 > ⚠️ **Heads up: this is not a stable project yet.** Dotty is buggy, frequently broken, and actively changing day-to-day. End-to-end behaviour works on the maintainer's hardware but regressions land all the time, the API and config surface shifts without notice, and a fresh deploy on someone else's gear has not been verified. Treat this as a hobby-grade work-in-progress, not a polished product. Bugs, PRs, and "this didn't work for me" issues all very welcome. 🍺☕ If you do try a fresh end-to-end deploy, please get in touch — I'll buy you a beer or a coffee. The best place to ask questions, get help, or show off a build is the [Dotty community Discord](https://discord.gg/7sKE5c6A).
 >
 > **Known rough edges:** face emoji rendering is missing visual differentiation for 4 of 9 emotions (sad / surprise / love / laughing); sound-direction localizer has a hardware-AEC-related left-bias on M5Stack CoreS3 (energy detection works, direction is unreliable); kid-voice ASR accuracy on SenseVoice has a kid-speech gap that whisper.cpp will close in a follow-up.
