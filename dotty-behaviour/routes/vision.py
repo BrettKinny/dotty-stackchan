@@ -25,7 +25,7 @@ from time import perf_counter
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 import config
 from dispatch import VLMClient
@@ -283,6 +283,43 @@ async def vision_explain(
         device_id, description[:120],
     )
     return {"description": description}
+
+
+@router.get("/api/vision/cache")
+async def vision_cache_route(
+    state: PerceptionState = Depends(get_perception_state),
+) -> dict[str, dict]:
+    """Per-device vision_cache, metadata only (no jpeg_bytes — see
+    /api/vision/photo/{device_id} for the binary).
+
+    Consumed by the bridge dashboard's vision card + /ui/vision/large
+    modal via the Tile 2 (#115) HTTP rewire. Returns the same fields the
+    explain handler writes (description, timestamp, wall_ts, question,
+    room_match_person_id, source) minus the raw JPEG bytes — those are
+    served separately by the binary endpoint below so we don't burn JSON
+    bandwidth on base64-expanded image data."""
+    return {
+        device_id: {k: v for k, v in entry.items() if k != "jpeg_bytes"}
+        for device_id, entry in state.vision_cache.items()
+    }
+
+
+@router.get("/api/vision/photo/{device_id}")
+async def vision_photo_route(
+    device_id: str,
+    state: PerceptionState = Depends(get_perception_state),
+):
+    """Raw JPEG bytes for the most recent vision capture for `device_id`.
+
+    Companion to /api/vision/cache. The bridge dashboard proxies this
+    endpoint through /ui/host/robot/photo/{device_id} (and /ui/vision/
+    photo) so the browser only ever talks to the bridge origin."""
+    entry = state.vision_cache.get(device_id)
+    if not entry or not entry.get("jpeg_bytes"):
+        return JSONResponse(status_code=404, content={"error": "no photo"})
+    return Response(
+        content=entry["jpeg_bytes"], media_type="image/jpeg",
+    )
 
 
 @router.get("/api/vision/latest/{device_id}")

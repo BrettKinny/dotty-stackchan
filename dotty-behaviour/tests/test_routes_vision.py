@@ -394,3 +394,72 @@ def test_room_view_with_empty_registry_falls_back_to_v1() -> None:
             assert bus_q.empty()
         finally:
             state.unsubscribe(bus_q)
+
+
+# ---------------------------------------------------------------------------
+# /api/vision/cache + /api/vision/photo/{device_id} (Tile 2 of #115 — the
+# bridge dashboard's vision card + /ui/vision/large modal consume these.)
+# ---------------------------------------------------------------------------
+
+
+def test_vision_cache_route_returns_metadata_only() -> None:
+    """The JSON dump must strip jpeg_bytes — base64-expanding raw image
+    bytes through the JSON encoder is wasteful and the dashboard fetches
+    the binary separately via /api/vision/photo/{device_id}."""
+    with TestClient(app) as client:
+        fake = _FakeVLM(description="A toy robot.")
+        _override_vlm(client, fake)
+        # Seed the cache through the explain endpoint so the entry shape
+        # matches production (rather than hand-building it on app.state).
+        r = client.post(
+            "/api/vision/explain",
+            files={"file": _jpeg_file(b"BINARYDATA")},
+            data={"question": "What do you see?"},
+            headers={"device-id": "dev-meta"},
+        )
+        assert r.status_code == 200
+
+        resp = client.get("/api/vision/cache")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "dev-meta" in body
+        entry = body["dev-meta"]
+        assert entry["description"] == "A toy robot."
+        assert entry["question"] == "What do you see?"
+        assert entry["source"] == "v1"
+        # Critical: jpeg_bytes must NOT appear in the JSON payload.
+        assert "jpeg_bytes" not in entry
+        # Other metadata fields are preserved.
+        assert "timestamp" in entry
+        assert "wall_ts" in entry
+
+
+def test_vision_cache_route_empty_when_no_captures() -> None:
+    with TestClient(app) as client:
+        resp = client.get("/api/vision/cache")
+        assert resp.status_code == 200
+        assert resp.json() == {}
+
+
+def test_vision_photo_route_serves_binary_jpeg() -> None:
+    with TestClient(app) as client:
+        fake = _FakeVLM()
+        _override_vlm(client, fake)
+        r = client.post(
+            "/api/vision/explain",
+            files={"file": _jpeg_file(b"RAWJPEGBYTES")},
+            headers={"device-id": "dev-photo"},
+        )
+        assert r.status_code == 200
+
+        resp = client.get("/api/vision/photo/dev-photo")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "image/jpeg"
+        assert resp.content == b"RAWJPEGBYTES"
+
+
+def test_vision_photo_route_404_when_missing() -> None:
+    with TestClient(app) as client:
+        resp = client.get("/api/vision/photo/no-such-device")
+        assert resp.status_code == 404
+        assert resp.json() == {"error": "no photo"}
