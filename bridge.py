@@ -909,3 +909,18 @@ async def _admin_safety(payload: _AdminSafetyIn) -> dict:
 
 
 app.include_router(_admin_router)
+
+
+if __name__ == "__main__":
+    # Entrypoint for `python bridge.py` (the container CMD). The #111 rip
+    # removed this block by accident along with the legacy voice path —
+    # without it the script runs the module-level FastAPI wiring then
+    # exits, never starts uvicorn, and the container restart-loops with
+    # "Prometheus /metrics mounted" as its last log line.
+    import uvicorn
+    uvicorn.run(
+        app,
+        host=os.environ.get("DOTTY_BRIDGE_HOST", "0.0.0.0"),
+        port=int(os.environ.get("PORT", "8081")),
+        log_level=os.environ.get("DOTTY_BRIDGE_LOG_LEVEL", "info"),
+    )
