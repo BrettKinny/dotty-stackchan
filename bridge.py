@@ -521,24 +521,98 @@ async def health() -> dict:
 # stubs so the dashboard renders without errors (the perception card just
 # shows no data until the dashboard ports to dotty-behaviour).
 
-# Empty perception/vision/audio caches — dashboard reads these but the
-# writers (vision_explain, audio_explain, scene_synthesis_loop) all moved
-# to dotty-behaviour in #36. Kept as empty dicts so the perception card
-# templates don't 500 — they just render "no data".
+# Empty vision/audio/scene caches — dashboard reads these but the writers
+# (vision_explain, audio_explain, scene_synthesis_loop) all moved to
+# dotty-behaviour in #36. Tiles 2-6 of #115 rewire each of these in turn;
+# perception (state + recent) is Tile 1 and is wired below.
 _vision_cache: dict[str, dict] = {}
 _audio_cache: dict[str, dict] = {}
 _scene_synthesis_cache: dict[str, dict] = {}
 _perception_state: dict[str, dict] = {}
 
 
+# ---------------------------------------------------------------------------
+# dotty-behaviour HTTP fetch helper (perception card, Tile 1 of #115)
+# ---------------------------------------------------------------------------
+# The bridge dashboard polls multiple template tiles per render via HTMX
+# (10s cadence) plus SSE nudges, so a single dashboard refresh can fan
+# out into ~3-6 calls to the same getter. To keep dotty-behaviour quiet
+# we wrap each getter in a 2-second per-process cache; to keep the
+# dashboard render unblockable we cap each fetch at 1.5s and degrade
+# to the empty fallback on any exception.
+#
+# DOTTY_BEHAVIOUR_URL is configurable for future flexibility, but bridge
+# runs network_mode: host alongside dotty-behaviour so localhost is the
+# expected production value.
+DOTTY_BEHAVIOUR_URL = os.environ.get(
+    "DOTTY_BEHAVIOUR_URL", "http://localhost:8090"
+).rstrip("/")
+_DOTTY_BEHAVIOUR_TIMEOUT_SEC = 1.5
+_DOTTY_BEHAVIOUR_CACHE_TTL_SEC = 2.0
+
+# Per-cache-key: (expires_at, value).
+_dotty_behaviour_cache: dict[str, tuple[float, Any]] = {}
+
+
+def _dotty_behaviour_get(path: str, params: dict | None, fallback: Any) -> Any:
+    """Cached, timeout-bounded, circuit-broken GET against dotty-behaviour.
+
+    Used by the dashboard perception getters. On any timeout / connection
+    error / non-2xx response, logs a warning and returns ``fallback`` —
+    the dashboard renders with empty data rather than blocking the whole
+    page on a slow or dead dotty-behaviour.
+    """
+    cache_key = path + "?" + json.dumps(params or {}, sort_keys=True)
+    now = time.monotonic()
+    cached = _dotty_behaviour_cache.get(cache_key)
+    if cached is not None and cached[0] > now:
+        return cached[1]
+
+    url = f"{DOTTY_BEHAVIOUR_URL}{path}"
+    try:
+        r = requests.get(
+            url, params=params, timeout=_DOTTY_BEHAVIOUR_TIMEOUT_SEC
+        )
+        r.raise_for_status()
+        value = r.json()
+    except Exception as exc:  # network, timeout, JSON, HTTP — all degrade
+        log.warning(
+            "dotty-behaviour fetch failed (%s): %s — returning fallback",
+            url,
+            exc,
+        )
+        value = fallback
+
+    _dotty_behaviour_cache[cache_key] = (
+        now + _DOTTY_BEHAVIOUR_CACHE_TTL_SEC,
+        value,
+    )
+    return value
+
+
 def _dashboard_perception_state_getter() -> dict:
-    """Empty perception snapshot — dotty-behaviour owns the live bus."""
-    return {}
+    """Live perception snapshot from dotty-behaviour's /api/perception/state.
+
+    Bounded by a 1.5s request timeout and a 2s per-process cache (see
+    ``_dotty_behaviour_get``). Returns ``{}`` on any failure so the
+    dashboard renders empty rather than hanging."""
+    result = _dotty_behaviour_get("/api/perception/state", None, {})
+    return result if isinstance(result, dict) else {}
 
 
-def _dashboard_perception_recent_getter(device_id: str, limit: int | None = None) -> list[dict]:
-    """Empty recent-events ring — dotty-behaviour owns the live bus."""
-    return []
+def _dashboard_perception_recent_getter(
+    device_id: str, limit: int | None = None
+) -> list[dict]:
+    """Live recent-events ring from dotty-behaviour's
+    /api/perception/recent/{device_id}.
+
+    Same cache + timeout + circuit-breaker contract as
+    ``_dashboard_perception_state_getter``."""
+    params = {"limit": limit} if limit is not None else None
+    result = _dotty_behaviour_get(
+        f"/api/perception/recent/{device_id}", params, []
+    )
+    return result if isinstance(result, list) else []
 
 
 def _dashboard_state_getter() -> str:

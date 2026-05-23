@@ -90,5 +90,106 @@ class HealthTests(unittest.TestCase):
             self.assertNotIn(legacy_key, body)
 
 
+# ---------------------------------------------------------------------------
+# Perception getters — rewired to dotty-behaviour in #115 Tile 1
+# ---------------------------------------------------------------------------
+
+
+class PerceptionGetterTests(unittest.TestCase):
+    """Smoke tests for the dotty-behaviour-backed perception getters.
+
+    These getters are called from the dashboard's template tiles (in
+    sync render contexts), so they must:
+      - degrade to the empty fallback on timeout / connection error
+      - cache results for ~2s so HTMX poll fan-out doesn't hammer
+        dotty-behaviour
+    """
+
+    def setUp(self) -> None:
+        # Reset the per-process cache between tests so fixtures don't
+        # leak across cases.
+        bridge_app._dotty_behaviour_cache.clear()
+
+    def _patch_get(self, response):
+        """Monkeypatch requests.get on the bridge module to return
+        ``response`` (a stub object with raise_for_status/json or an
+        exception to raise)."""
+        original = bridge_app.requests.get
+
+        def fake_get(*args, **kwargs):
+            if isinstance(response, Exception):
+                raise response
+            return response
+
+        bridge_app.requests.get = fake_get
+        self.addCleanup(lambda: setattr(bridge_app.requests, "get", original))
+
+    def test_state_getter_returns_fetched_dict(self):
+        class FakeResp:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"dev-1": {"face_present": True}}
+
+        self._patch_get(FakeResp())
+        result = bridge_app._dashboard_perception_state_getter()
+        self.assertEqual(result, {"dev-1": {"face_present": True}})
+
+    def test_recent_getter_returns_fetched_list(self):
+        class FakeResp:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return [{"ts": 1.0, "name": "face_detected", "data": {}}]
+
+        self._patch_get(FakeResp())
+        result = bridge_app._dashboard_perception_recent_getter(
+            "dev-1", limit=10
+        )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["name"], "face_detected")
+
+    def test_state_getter_degrades_on_timeout(self):
+        import requests as _requests
+
+        self._patch_get(_requests.exceptions.Timeout("simulated"))
+        result = bridge_app._dashboard_perception_state_getter()
+        self.assertEqual(result, {})
+
+    def test_recent_getter_degrades_on_connection_error(self):
+        import requests as _requests
+
+        self._patch_get(_requests.exceptions.ConnectionError("simulated"))
+        result = bridge_app._dashboard_perception_recent_getter("dev-1")
+        self.assertEqual(result, [])
+
+    def test_state_getter_caches_within_ttl(self):
+        """A second call within the cache TTL should NOT hit requests.get."""
+        calls = {"n": 0}
+
+        class FakeResp:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"dev-x": {"foo": 1}}
+
+        original = bridge_app.requests.get
+
+        def fake_get(*args, **kwargs):
+            calls["n"] += 1
+            return FakeResp()
+
+        bridge_app.requests.get = fake_get
+        self.addCleanup(lambda: setattr(bridge_app.requests, "get", original))
+
+        bridge_app._dashboard_perception_state_getter()
+        bridge_app._dashboard_perception_state_getter()
+        bridge_app._dashboard_perception_state_getter()
+        self.assertEqual(calls["n"], 1, "expected cache hit on repeat calls")
+
+
 if __name__ == "__main__":
     unittest.main()
