@@ -1,40 +1,49 @@
+"""Dotty bridge — admin dashboard service (FastAPI on :8081, served at /ui).
+
+Post-#36 incarnation: bridge.py owns the dashboard, the localhost-only
+`/admin/*` mutation surface, Prometheus `/metrics`, and a small set of
+xiaozhi-admin passthrough helpers used by the dashboard buttons (set-state,
+inject-text, abort, kid-mode/smart-mode toggles). Everything else — voice
+turns, perception consumers, vision/audio captioning — moved to dotty-pi
+and dotty-behaviour in the #36 cutover. See docs/cutover-behaviour.md.
+
+History: the file used to be ~6000 lines of voice/perception code wrapped
+around the dashboard mount. Issue #111 ripped the dead code in three
+commits (ACP/voice, perception consumers, VLM/vision/audio) so the
+containerized deploy in PR #109 doesn't double-fire consumers already
+running in dotty-behaviour.
+"""
+
 import asyncio
-import base64
-import collections
 import json
 import logging
 import os
-import random
 import re
-import requests
 import sys
 import time
-import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
 from pathlib import Path
-from time import perf_counter
-from typing import Awaitable, Callable, Optional, TypedDict
-from zoneinfo import ZoneInfo
+from typing import Any
 
 # Sibling import shim — custom-providers/textUtils.py is the canonical
 # home for safety/format constants (also bind-mounted into the xiaozhi
-# container as core.utils.textUtils, where the LLM provider files
-# import it). Bridge runs outside the container so it imports it as
-# a sibling. Drop this if/when bridge becomes a proper package.
+# container as core.utils.textUtils). Bridge runs outside the container
+# so it imports it as a sibling. Drop this if/when bridge becomes a
+# proper package.
 sys.path.insert(0, str(Path(__file__).parent / "custom-providers"))
 
-from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+import requests
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from textUtils import (
+from textUtils import (  # noqa: F401  (re-exported for downstream tools)
     ALLOWED_EMOJIS,
     FALLBACK_EMOJI,
     build_turn_suffix,
 )
 
 from bridge.csrf import CSRFMiddleware
-from bridge.text import (
+from bridge.text import (  # noqa: F401  (used by bridge.dashboard via re-imports)
     CONTENT_FILTER_REPLACEMENT,
     MAX_SENTENCES,
     clean_for_tts,
@@ -44,77 +53,42 @@ from bridge.text import (
     truncate_sentences,
 )
 
-# Observability — every metric call is wrapped in `_safe_metric(...)` so a
-# bug in metrics wiring can NEVER break the request path. The metrics
-# module also degrades to no-ops if prometheus_client is unavailable.
-# Privacy-LED upload-pulse signaller — wraps cloud vision calls so the
-# firmware can pulse the camera privacy LED while data is in flight.
-# Today no transport is wired (avatar WS server isn't deployed); the
-# helper is a no-op-with-debug-log fallback so the call sites are ready
-# the moment a transport is plugged in. Firmware enforces a 2 s failsafe
-# timeout, so a missing `end` is self-healing.
-
 try:
     from bridge.metrics import (
-        dotty_calendar_fetch_failures_total,
         dotty_kid_mode_active,
-        dotty_perception_events_total,
-        dotty_request_duration_seconds,
-        dotty_request_errors_total,
         metrics_app,
-        record_first_audio,
     )
     _METRICS_AVAILABLE = True
 except Exception:  # pragma: no cover
     _METRICS_AVAILABLE = False
     metrics_app = None  # type: ignore[assignment]
-    def record_first_audio(_seconds: float) -> None:  # type: ignore[no-redef]
-        return None
 
 
 def _safe_metric(fn, *args, **kwargs) -> None:
-    """Run a metrics-mutating callable, swallowing any exception.
-
-    Counter/Gauge/Histogram methods rarely raise, but we still guard the
-    call site because this code runs on the live voice path. A broken
-    metric must never take down a turn.
-    """
+    """Run a metrics-mutating callable, swallowing any exception."""
     try:
         fn(*args, **kwargs)
     except Exception:
-        # Use debug — we don't want a noisy log every request if a label
-        # name is mistyped. The /metrics endpoint surface still works.
-        logging.getLogger("zeroclaw-bridge").debug(
+        logging.getLogger("dotty-bridge").debug(
             "metric update raised; ignoring", exc_info=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# Kid-mode + smart-mode state files
+# ---------------------------------------------------------------------------
 
 _KID_STATE_FILE = Path(
     os.environ.get("DOTTY_KID_MODE_STATE", "/root/zeroclaw-bridge/state/kid-mode")
 )
-# Voice-daemon LLM is selected by `smart_mode` only. kid_mode is orthogonal —
-# guardrails (content sandwich, denied tools, persona) are independent of the
-# model. smart_mode OFF → DEFAULT_MODEL. smart_mode ON → SMART_MODEL.
-#
-# Multi-profile mode (optional, opt-in): when DEFAULT_MODEL and SMART_MODEL
-# live behind different provider URLs (e.g. local Ollama for default, cloud
-# OpenRouter for smart), set VOICE_LOCAL_PROFILE_KEY to the local profile's
-# `[providers.models.<KEY>]` section key. Smart-mode swap then rewrites the
-# model AND repoints `[providers].fallback` between the two profiles.
-# Without these env vars, the legacy single-section behavior is used (both
-# IDs assumed routable through one custom provider, e.g. OpenRouter).
-DEFAULT_MODEL = os.environ.get(
-    "DOTTY_DEFAULT_MODEL", "mistralai/mistral-small-3.2-24b-instruct",
-)
-VOICE_LOCAL_PROFILE_KEY = os.environ.get("VOICE_LOCAL_PROFILE_KEY", "")
-VOICE_CLOUD_PROFILE_KEY = os.environ.get(
-    "VOICE_CLOUD_PROFILE_KEY", "custom:https://openrouter.ai/api/v1",
+_SMART_STATE_FILE = Path(
+    os.environ.get("DOTTY_SMART_MODE_STATE", "/root/zeroclaw-bridge/state/smart-mode")
 )
 
 
 def _read_kid_mode() -> bool:
     """State file overrides env var so the dashboard can flip kid-mode and
-    survive a restart without editing the systemd unit. Format: "true" or
-    "false" (any other content falls back to the env default)."""
+    survive a restart without editing the unit. Format: "true" or "false"."""
     if _KID_STATE_FILE.exists():
         try:
             v = _KID_STATE_FILE.read_text().strip().lower()
@@ -134,66 +108,23 @@ def _write_kid_mode(enabled: bool) -> None:
         _safe_metric(dotty_kid_mode_active.set, 1 if enabled else 0)
 
 
-def _build_vision_system_prompt(kid: bool) -> str:
-    return (
-        "You are describing a photo taken by a small robot's camera (low resolution). "
-        + ("Describe what you see in simple, clear language suitable for a young child. "
-           "Focus on objects, colors, and actions. Do NOT identify or name specific people. "
-           "If the image contains anything inappropriate for young children, "
-           "say only 'I see something I am not sure about' without further detail. "
-           if kid else
-           "Describe what you see clearly and concisely. "
-           "Focus on objects, people, colors, and actions. ")
-        + "If the image is blurry or unclear, describe what you can make out. "
-        "Keep your description to 2-3 sentences."
-    )
-
-
-def _build_voice_turn_suffix_short(kid: bool) -> str:
-    # Slim per-turn reminder. The heavy framing (kid topic guards, jailbreak
-    # resistance, age-appropriate language) lives in the persona file now,
-    # which Ollama prefix-caches across turns. This suffix only repeats the
-    # rules Qwen3-4B drifts on first: language, emoji, format, length.
-    return (
-        "\n\n[Rules: ENGLISH only, one leading emoji from 😊😆😢😮🤔😠😐😍😴, "
-        "no markdown, 1-2 sentences (up to 6 if open-ended). Begin now.]"
-    )
-
-
 def _apply_kid_mode(enabled: bool) -> None:
     """Rebind every kid_mode-derived module global in one atomic pass.
 
-    Called once at module import and again on each dashboard / admin toggle
-    so the bridge can hot-reload kid_mode without a daemon restart. Each
-    rebinding is a single STORE_GLOBAL — readers see either the old or new
-    value, never a torn intermediate. Per-turn lookup cost is unchanged
-    (still a module-attribute read; no function-call frame added)."""
-    global KID_MODE, VISION_SYSTEM_PROMPT, MCP_TOOL_DENYLIST
-    global VOICE_TURN_SUFFIX, VOICE_TURN_SUFFIX_SHORT
+    Called once at module import and again on each dashboard / admin
+    toggle. Each rebinding is a single STORE_GLOBAL — readers see either
+    the old or new value, never a torn intermediate. Kept slim post-#36:
+    only the bits the live dashboard / admin surface reads."""
+    global KID_MODE, VOICE_TURN_SUFFIX
     KID_MODE = enabled
-    VISION_SYSTEM_PROMPT = _build_vision_system_prompt(enabled)
-    MCP_TOOL_DENYLIST = {"camera.take_photo"} if enabled else set()
     VOICE_TURN_SUFFIX = build_turn_suffix(enabled)
-    VOICE_TURN_SUFFIX_SHORT = _build_voice_turn_suffix_short(enabled)
 
 
 KID_MODE: bool = False
-VISION_SYSTEM_PROMPT: str = ""
-MCP_TOOL_DENYLIST: set[str] = set()
 VOICE_TURN_SUFFIX: str = ""
-VOICE_TURN_SUFFIX_SHORT: str = ""
 _apply_kid_mode(_read_kid_mode())
 if _METRICS_AVAILABLE:
     _safe_metric(dotty_kid_mode_active.set, 1 if KID_MODE else 0)
-
-
-# smart_mode toggle persistence. ON swaps the voice daemon's model to
-# SMART_MODEL (claude-sonnet-4-6), OFF restores DEFAULT_MODEL (mistral).
-# Daemon reload happens on each toggle. State file persists the bit across
-# reconnects so the bridge knows which model to load at boot.
-_SMART_STATE_FILE = Path(
-    os.environ.get("DOTTY_SMART_MODE_STATE", "/root/zeroclaw-bridge/state/smart-mode")
-)
 
 
 def _read_smart_mode() -> bool:
@@ -213,109 +144,24 @@ def _write_smart_mode(enabled: bool) -> None:
     _SMART_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     _SMART_STATE_FILE.write_text("true" if enabled else "false")
 
-LOCAL_TZ = ZoneInfo(os.environ.get("TZ", "Australia/Brisbane"))
-WEATHER_LOCATION = os.environ.get("WEATHER_LOCATION", "Brisbane")
 
-WEATHER_TTL_SEC = float(os.environ.get("WEATHER_TTL_SEC", "1800"))
-CALENDAR_TTL_SEC = float(os.environ.get("CALENDAR_TTL_SEC", "7200"))
-CALENDAR_IDS = [c.strip() for c in os.environ.get("CALENDAR_ID", "").split(",") if c.strip()]
-CALENDAR_SA_PATH = os.environ.get(
-    "CALENDAR_SA_PATH", "/root/.zeroclaw/secrets/google-calendar-sa.json",
-)
-GWS_BIN = os.environ.get("GWS_BIN", "/usr/local/bin/gws")
-# Background-poll cadence for the calendar cache refresher. 900 s (15 min)
-# is well below CALENDAR_TTL_SEC so transient gws/network failures don't
-# leave a stale cache visible for the full TTL window.
-CALENDAR_POLL_SEC = float(os.environ.get("CALENDAR_POLL_SEC", "900"))
-# Bucket name for events whose summary has no `[Person]` prefix tag. The
-# "_" leading underscore makes it impossible to collide with a real first
-# name typed into a calendar event.
-CALENDAR_HOUSEHOLD_BUCKET = os.environ.get("CALENDAR_HOUSEHOLD_BUCKET", "_household")
-# Regex applied to event summaries to extract a person tag. Must define
-# named groups `person` and `rest`. Default matches `[Name] real summary`
-# where Name is 1-32 chars of [A-Za-z0-9_-] starting with a letter.
-CALENDAR_PERSON_PREFIX_RE = os.environ.get(
-    "CALENDAR_PERSON_PREFIX_RE",
-    r"^\s*\[(?P<person>[A-Za-z][A-Za-z0-9_-]{0,31})\]\s*(?P<rest>.+)$",
-)
-try:
-    _CALENDAR_PERSON_RE = re.compile(CALENDAR_PERSON_PREFIX_RE)
-except re.error:
-    logging.getLogger("zeroclaw-bridge").warning(
-        "invalid CALENDAR_PERSON_PREFIX_RE=%r; falling back to default",
-        CALENDAR_PERSON_PREFIX_RE,
-    )
-    _CALENDAR_PERSON_RE = re.compile(
-        r"^\s*\[(?P<person>[A-Za-z][A-Za-z0-9_-]{0,31})\]\s*(?P<rest>.+)$"
-    )
-VISION_MODEL = os.environ.get("VISION_MODEL", "google/gemini-2.0-flash-001")
-VISION_API_KEY = os.environ.get("VISION_API_KEY", os.environ.get("OPENROUTER_API_KEY", ""))
-VISION_API_URL = os.environ.get(
-    "VISION_API_URL", "https://openrouter.ai/api/v1/chat/completions",
-)
-VISION_TIMEOUT_SEC = float(os.environ.get("VISION_TIMEOUT", "15"))
-VISION_CACHE_TTL_SEC = 60.0
-# VLM endpoint — defaults to the legacy VISION_* values so existing setups
-# keep working. Split out so the actual visual model can be routed locally
-# (e.g. Ollama Qwen2.5-VL) while VISION_API_URL still serves the cloud-
-# routed narrative LLM (`_call_narrative_llm`).
-VLM_MODEL = os.environ.get("VLM_MODEL", VISION_MODEL)
-VLM_API_KEY = os.environ.get("VLM_API_KEY", VISION_API_KEY)
-VLM_API_URL = os.environ.get("VLM_API_URL", VISION_API_URL)
-# Audio captioning — security-grade "what does Dotty hear" describer.
-# Defaults to a Gemini model that accepts the OpenAI-style `input_audio`
-# content-block via OpenRouter; override AUDIO_CAPTION_MODEL if your
-# OpenRouter account routes audio elsewhere. Reuses VISION_API_KEY by
-# default so a single OpenRouter key covers both modalities.
-AUDIO_CAPTION_MODEL = os.environ.get(
-    "AUDIO_CAPTION_MODEL", "google/gemini-2.5-flash",
-)
-AUDIO_CAPTION_API_KEY = os.environ.get(
-    "AUDIO_CAPTION_API_KEY",
-    os.environ.get("VISION_API_KEY", os.environ.get("OPENROUTER_API_KEY", "")),
-)
-AUDIO_CAPTION_API_URL = os.environ.get(
-    "AUDIO_CAPTION_API_URL",
-    "https://openrouter.ai/api/v1/chat/completions",
-)
-AUDIO_CAPTION_TIMEOUT_SEC = float(os.environ.get("AUDIO_CAPTION_TIMEOUT", "20"))
-AUDIO_CACHE_TTL_SEC = 120.0
-# Periodic synthesis of "current environment" — vision desc + audio
-# caption + face/state — into a one-line text record. Phase A sink is
-# a daily NDJSON ring file under CONVO_LOG_DIR; ZeroClaw-side ingestion
-# into FTS memory is Phase C (separate change).
-SCENE_SYNTHESIS_INTERVAL_SEC = float(
-    os.environ.get("SCENE_SYNTHESIS_INTERVAL_SEC", "300")
-)
-SCENE_SYNTHESIS_MIN_GAP_SEC = float(
-    os.environ.get("SCENE_SYNTHESIS_MIN_GAP_SEC", "120")
-)
-SCENE_SYNTHESIS_TRIGGER_STATES = {"story_time", "security", "sleep"}
+# ---------------------------------------------------------------------------
+# Tier1Slim hot-swap env (smart-mode flip target on the live xiaozhi-server)
+# ---------------------------------------------------------------------------
+# DOTTY_VOICE_PROVIDER=tier1slim is the post-#36 voice provider; smart_mode
+# flips its model/url/api_key via /xiaozhi/admin/set-tier1slim-model rather
+# than restarting a daemon. Legacy "zeroclaw" config.toml-rewrite path was
+# retired with the rest of the ZeroClaw stack — keep the helper for parity
+# but the only live target is tier1slim.
+
 SMART_MODEL = os.environ.get("SMART_MODEL", "anthropic/claude-sonnet-4-6")
+DOTTY_VOICE_PROVIDER = os.environ.get("DOTTY_VOICE_PROVIDER", "tier1slim").strip().lower()
 
-# Voice provider selector. Default ("zeroclaw") preserves the legacy
-# _apply_model_swap path (rewrite /root/.zeroclaw/config.toml + restart
-# zeroclaw-bridge). Set to "tier1slim" when xiaozhi-server's Tier1Slim
-# provider owns the voice path — smart_mode then hot-swaps Tier1Slim's
-# model/url/api_key in place via /xiaozhi/admin/set-tier1slim-model.
-DOTTY_VOICE_PROVIDER = os.environ.get("DOTTY_VOICE_PROVIDER", "zeroclaw").strip().lower()
-# Local backend (smart_mode OFF) — llama-swap on Unraid running the
-# slim model (qwen3.5:4b is what Tier1Slim invokes; the 27B is reached
-# downstream by think_hard via bridge, not directly). URL must include
-# the OpenAI-compat /v1 suffix. Defaults match data/.config.yaml on the
-# live xiaozhi-server.
 TIER1SLIM_LOCAL_URL = os.environ.get(
     "TIER1SLIM_LOCAL_URL", "http://localhost:8080/v1",
 )
 TIER1SLIM_LOCAL_API_KEY = os.environ.get("TIER1SLIM_LOCAL_API_KEY", "dotty-voice")
 TIER1SLIM_LOCAL_MODEL = os.environ.get("TIER1SLIM_LOCAL_MODEL", "qwen3.5:4b")
-# Cloud backend (smart_mode ON) — OpenRouter, model defaults to SMART_MODEL.
-# api_key MUST be set explicitly via TIER1SLIM_CLOUD_API_KEY in the systemd
-# unit (or as OPENROUTER_API_KEY) — the bridge has no other path to the key
-# (ZeroClaw stores it encrypted). Empty key → admin endpoint will refuse to
-# blank api_key on the live provider, so the OFF→ON flip will fail with a
-# clean error rather than 401-loop. Local→cloud requires this; cloud→local
-# does not.
 TIER1SLIM_CLOUD_URL = os.environ.get(
     "TIER1SLIM_CLOUD_URL", "https://openrouter.ai/api/v1",
 )
@@ -326,361 +172,25 @@ TIER1SLIM_CLOUD_API_KEY = os.environ.get(
 
 def _tier1slim_target_for_smart_mode(enabled: bool) -> tuple[str, str, str]:
     """Return (model, url, api_key) for the Tier1Slim runtime swap given
-    the desired smart_mode state. ON → cloud (Sonnet via OpenRouter),
-    OFF → local llama-swap."""
+    the desired smart_mode state. ON → cloud, OFF → local llama-swap."""
     if enabled:
         return (SMART_MODEL, TIER1SLIM_CLOUD_URL, TIER1SLIM_CLOUD_API_KEY)
     return (TIER1SLIM_LOCAL_MODEL, TIER1SLIM_LOCAL_URL, TIER1SLIM_LOCAL_API_KEY)
-CONVO_LOG_DIR = Path(os.environ.get("CONVO_LOG_DIR", "/root/zeroclaw-bridge/logs"))
-# Used by the dashboard admin path AND by perception-bus consumers (1.5/1.6).
-# Hoisted out of the `if _configure_dashboard` block so the bus tasks can
-# reach the xiaozhi admin endpoints regardless of dashboard availability.
+
+
+# ---------------------------------------------------------------------------
+# xiaozhi-server admin passthrough helpers — dashboard buttons
+# ---------------------------------------------------------------------------
+# These wrap POSTs at /xiaozhi/admin/* on the local xiaozhi-server. The
+# dashboard never talks to xiaozhi directly; it goes through these so the
+# bridge can layer state-file + metric updates around the call.
+
 _XIAOZHI_HOST = os.environ.get("XIAOZHI_HOST", "")
 _XIAOZHI_HTTP_PORT = int(os.environ.get("XIAOZHI_OTA_PORT", "8003"))
-# Phase 1.5: face-greet cooldown. Conservative default keeps the robot
-# from re-greeting on every casual walk-by while still re-engaging when
-# the user comes back after a real absence.
-#
-# `FACE_GREET_MIN_INTERVAL_SEC` is the new canonical name (the brief in
-# tasks.md tracks coexistence with the firmware-side WakeWordInvoke).
-# `FACE_GREET_COOLDOWN_SEC` is honoured for back-compat with existing
-# deployments — set either one. New default is 30 s; existing 60 s
-# overrides remain in force if the legacy name is set.
-FACE_GREET_MIN_INTERVAL_SEC = float(
-    os.environ.get(
-        "FACE_GREET_MIN_INTERVAL_SEC",
-        os.environ.get("FACE_GREET_COOLDOWN_SEC", "30"),
-    )
-)
-# Back-compat alias kept so existing references keep compiling. New code
-# should reference FACE_GREET_MIN_INTERVAL_SEC directly.
-FACE_GREET_COOLDOWN_SEC = FACE_GREET_MIN_INTERVAL_SEC
-# `FACE_GREET_TEXT=""` (empty string) DISABLES the verbal greet entirely
-# — the firmware-side WakeWordInvoke("face") still opens the mic, so the
-# robot acknowledges the person silently with a chime + listen window.
-# Default "Hi!" keeps the warmer "verbal + mic" combo.
-FACE_GREET_TEXT = os.environ.get("FACE_GREET_TEXT", "Hi!")
-# Suppress the bare "Hi!" greet outside daytime hours so sensor-noise
-# frames in low light can't trigger a 3 AM "Hi!". Half-open: greets fire
-# when START <= local_hour < END. Default 06–21 (LOCAL_TZ). Set START=0
-# END=24 to greet 24/7.
-FACE_GREET_HOUR_START = int(os.environ.get("FACE_GREET_HOUR_START", "6"))
-FACE_GREET_HOUR_END = int(os.environ.get("FACE_GREET_HOUR_END", "21"))
-
-# Named-recognition acknowledger. Fires on `face_recognized` (after the
-# room-view VLM resolves to a roster member) so the user hears explicit
-# proof of recognition. Independent of the bare "Hi!" greeter and of the
-# rich ProactiveGreeter (which is 4h-cooldown'd and may not fire). No
-# time-of-day gate — recognition confirmation should not be silenced.
-FACE_NAME_GREET_MIN_INTERVAL_SEC = float(
-    os.environ.get("FACE_NAME_GREET_MIN_INTERVAL_SEC", "30"),
-)
-FACE_NAME_GREET_TEMPLATE = os.environ.get(
-    "FACE_NAME_GREET_TEMPLATE", "Oh, it's {name}!",
-)
-# Suppress the named greet if a chat happened within this many seconds.
-# Mirrors the sound_turner's last_chat_t gate so the upgrade doesn't
-# stomp the tail of an in-flight TTS turn.
-FACE_NAME_GREET_QUIET_AFTER_CHAT_SEC = float(
-    os.environ.get("FACE_NAME_GREET_QUIET_AFTER_CHAT_SEC", "10"),
-)
-# How long a freshly identified person stays "identified" in bridge state
-# after their last face_recognized event. Spans the natural detection flicker
-# (HuMan model drops out across pose/exposure changes; firmware grace is only
-# 800 ms) so the dashboard chip + talk-turn perception don't collapse to
-# "unrecognised" the first time the bbox blinks. Cleared eagerly on real
-# departures via the refresh loop's freshness check, not on every face_lost.
-FACE_IDENTITY_TTL_SEC = float(
-    os.environ.get("FACE_IDENTITY_TTL_SEC", "30"),
-)
-# Cadence of the periodic set_face_identified MCP refresh while the same
-# person stays in frame. Firmware's identified-pip self-timeout is ~4 s; a
-# 3 s refresh keeps the green pip continuously lit without racing the
-# timeout. Refresh stops once last_face_recognized_t goes stale (TTL above)
-# or the firmware reports face genuinely lost for >FACE_IDENTITY_REFRESH_QUIET_SEC.
-FACE_IDENTITY_REFRESH_INTERVAL_SEC = float(
-    os.environ.get("FACE_IDENTITY_REFRESH_INTERVAL_SEC", "3.0"),
-)
-# How long after a face_lost the refresh loop will keep firing. Bridges the
-# detection flicker without lighting the pip for an empty room.
-FACE_IDENTITY_REFRESH_QUIET_SEC = float(
-    os.environ.get("FACE_IDENTITY_REFRESH_QUIET_SEC", "2.0"),
-)
-
-# Idle photo cooldown. Autonomous (firmware-initiated, room-view sentinel)
-# photo captures are rate-limited per device to avoid thrashing the VLM
-# every time a face is detected. Voice queries ("what do you see") bypass.
-# A "no photos while talking" hard gate belongs in firmware ModeManager
-# (Phase 4) since the bridge has no real-time TTS state visibility.
-DOTTY_IDLE_VISION_COOLDOWN_SEC = float(
-    os.environ.get("DOTTY_IDLE_VISION_COOLDOWN_SEC", "120"),
-)
-# Talk-active gate kickoff allowance. The xiaozhi-side handler dispatches
-# the room_view capture while state is still `idle`; the JPEG arrives at
-# the bridge ~2-3 s later, by which time the firmware has auto-transitioned
-# to `talk` (face_tracking → WakeWordInvoke). Without an allowance the
-# kickoff capture — the only photo for that conversation's greeting — is
-# gated to the "no one in view" stub. Subsequent face_detected events
-# during the same turn arrive well after this window and stay gated.
-ROOM_VIEW_TALK_KICKOFF_GRACE_SEC = float(
-    os.environ.get("ROOM_VIEW_TALK_KICKOFF_GRACE_SEC", "5.0"),
-)
-# Idle photographer — fires a silent take_photo every IDLE_PHOTOGRAPHER_*
-# seconds (uniform jitter) while the device is genuinely idle. No servo
-# motion, no LED change, no audio cue. The capture itself is identical
-# to a face-driven room view; the difference is the trigger and the
-# wandering prompt. Disable by setting IDLE_PHOTOGRAPHER_ENABLED=0.
-IDLE_PHOTOGRAPHER_ENABLED = (
-    os.environ.get("IDLE_PHOTOGRAPHER_ENABLED", "1") == "1"
-)
-IDLE_PHOTOGRAPHER_SLEEP_MIN_SEC = float(
-    os.environ.get("IDLE_PHOTOGRAPHER_SLEEP_MIN_SEC", "180"),
-)
-IDLE_PHOTOGRAPHER_SLEEP_MAX_SEC = float(
-    os.environ.get("IDLE_PHOTOGRAPHER_SLEEP_MAX_SEC", "300"),
-)
-# Wait window after dispatching `take_photo` before reading the cache.
-# Firmware capture + upload + VLM round-trip is typically ~5–10 s; pad
-# generously since this loop is fully async and a missed cycle just
-# means we try again in 3–5 min.
-IDLE_PHOTOGRAPHER_RESULT_WAIT_SEC = float(
-    os.environ.get("IDLE_PHOTOGRAPHER_RESULT_WAIT_SEC", "20"),
-)
-# Token-set Jaccard similarity threshold above which a new perception
-# is considered "the same" as the previous saved one and skipped. 0.7
-# tolerates a couple of changed words; tune up to suppress more, down
-# to save more.
-IDLE_PHOTOGRAPHER_NOTABLE_JACCARD = float(
-    os.environ.get("IDLE_PHOTOGRAPHER_NOTABLE_JACCARD", "0.7"),
-)
-
-# Narrative LLM — used for non-conversational internal writes (dreams,
-# dance reflections, future story summaries). These are introspective
-# narratives Dotty writes about their own experience, not voice output;
-# they bypass the ZeroClaw / kid-mode sandwich entirely. Routes through
-# the same OpenRouter endpoint as the VLM call.
-NARRATIVE_MODEL = os.environ.get(
-    "NARRATIVE_MODEL", "anthropic/claude-sonnet-4-6",
-)
-NARRATIVE_TIMEOUT_SEC = float(os.environ.get("NARRATIVE_TIMEOUT_SEC", "60"))
-
-# Sleep dreamer cadence. Three dreams scheduled at 25/50/75% of an
-# estimated 8h sleep window. Bench-test by overriding
-# DREAM_WINDOW_SECONDS (e.g. 180 = 3 min, fires at 45/90/135 s).
-DREAM_WINDOW_SECONDS = float(os.environ.get("DREAM_WINDOW_SECONDS", "28800"))
-DREAM_COUNT_PER_NIGHT = int(os.environ.get("DREAM_COUNT_PER_NIGHT", "3"))
-DREAMER_ENABLED = os.environ.get("DREAMER_ENABLED", "1") == "1"
-DANCE_REFLECTOR_ENABLED = (
-    os.environ.get("DANCE_REFLECTOR_ENABLED", "1") == "1"
-)
-
-# Sci-fi literary seeds for the dream prompt. The dreamer picks one
-# uniformly at random per dream; the LLM is asked to draw on the
-# seed's atmosphere without retelling it. Extend by appending; one
-# string per seed.
-DREAM_INSPIRATIONS: tuple[str, ...] = (
-    "The Fifth Element",
-    "Murakami",
-    "Dune",
-    "Blade Runner",
-    "Do Androids Dream of Electric Sheep?",
-    "Asimov",
-    "The Last Question",
-    "Slaughterhouse-Five",
-    "Cat's Cradle",
-)
-# How recently must a greeting have fired for face_lost to abort it.
-# Firmware emits face_lost ~2 s after the face actually leaves frame
-# (FaceTrackingModifier grace period); past this window we assume the
-# greeting / response cycle has wrapped up naturally.
-FACE_LOST_ABORT_WINDOW_SEC = float(
-    os.environ.get("FACE_LOST_ABORT_WINDOW_SEC", "12"))
-# Debounce delay before the abort actually fires. The firmware face
-# detector trips face_lost on small head movements, blinks, or brief
-# occlusion — without a grace period, the aborter kills the greet/listen
-# cycle every time the user shifts in their seat. If face_detected
-# returns within the grace window, the pending abort is cancelled.
-FACE_LOST_ABORT_GRACE_SEC = float(
-    os.environ.get("FACE_LOST_ABORT_GRACE_SEC", "4"))
-# Phase 1.6: head-turn cooldown so the servos don't whip back and forth
-# on rapid sound bursts. 3 s is roughly the time a deliberate noise
-# (clap, doorbell) takes to register and have the user notice the head
-# move toward it.
-SOUND_TURN_COOLDOWN_SEC = float(os.environ.get("SOUND_TURN_COOLDOWN_SEC", "3"))
-# Yaw mapping for sound direction. Conservative angles so the gaze is
-# obvious without overshooting; the firmware MCP head-angles call
-# clamps to its own limits.
-SOUND_TURN_YAW_DEG = int(os.environ.get("SOUND_TURN_YAW_DEG", "45"))
-SOUND_TURN_SPEED = int(os.environ.get("SOUND_TURN_SPEED", "250"))
-# Wake-word-bound head turn: deliberate engagement, faster motion, no
-# cooldown. Distinct intent from the ambient sound turner above —
-# this fires when the user explicitly summons Dotty. Skipped when a
-# face is already being tracked (face_tracking modifier owns the gaze
-# in that case). Skipped on direction=centre (no spatial info to act on).
-WAKE_TURN_ENABLED = os.environ.get("WAKE_TURN_ENABLED", "1") not in ("0", "false", "False")
-WAKE_TURN_YAW_DEG = int(os.environ.get("WAKE_TURN_YAW_DEG", "45"))
-WAKE_TURN_SPEED = int(os.environ.get("WAKE_TURN_SPEED", "200"))
-# ---------------------------------------------------------------------------
-# Purr-on-head-pet (server-pushed, Option B)
-# ---------------------------------------------------------------------------
-# When the firmware emits a `head_pet_started` perception event, the bridge
-# pushes a pre-rendered purr clip from bridge/assets/purr.opus. This is a
-# fixed-audio asset path — kid-mode content filtering does NOT apply because
-# the bytes are curated, not LLM-generated (see bridge/assets/README.md).
-# Per-device cooldown stops a continuous head-pet from re-triggering the
-# clip on every event burst.
-PURR_AUDIO_PATH = Path(
-    os.environ.get("PURR_AUDIO_PATH", "bridge/assets/purr.opus")
-)
-PURR_COOLDOWN_SEC = float(os.environ.get("PURR_COOLDOWN_SEC", "5"))
-# Approximate playback duration. We extend the device's `last_chat_t` for
-# this many seconds while the purr plays so the sound localizer doesn't
-# turn the head toward the speaker mid-purr (see _perception_sound_turner
-# which checks last_chat_t to suppress turns during talking).
-PURR_DURATION_SEC = float(os.environ.get("PURR_DURATION_SEC", "2.0"))
-# VISION_SYSTEM_PROMPT is set by `_apply_kid_mode` at module init and on
-# each toggle (see `_build_vision_system_prompt`).
-# Room-view (description + roster identification) system prompt. Used
-# only when the question field carries the _ROOM_VIEW_SENTINEL value
-# below — the bridge then substitutes a roster-aware question with
-# the household members inlined. The "name only from this list, else
-# unknown" framing makes the kid-mode "do not name people" guard
-# unnecessary: the VLM can only emit one of the four roster names or
-# "unknown", so a stranger or hallucinated name is structurally
-# impossible to leak to the LLM downstream.
-VISION_ROOM_VIEW_SYSTEM_PROMPT = (
-    "You are looking at a photo from a small family robot's camera. "
-    "Reply in the EXACT format the user message requests. "
-    "Identify the person ONLY by names from the list the user provides. "
-    "Never invent names; never name anyone outside the list. "
-    "If you are not confident or no match is clear, use the name 'unknown'. "
-    "Keep the description to one short sentence. "
-    "Read the person's apparent mood from face + posture only, choosing "
-    "from a fixed vocabulary."
-)
-# Security-framed audio captioning prompt. Used by /api/audio/explain
-# whenever no caller-supplied prompt overrides it. The framing biases the
-# model toward calling out anything unusual — raised voices, distress,
-# breaking glass, alarms, impacts — while still naming ordinary speech
-# or ambient sounds briefly. Paraphrases speech rather than transcribing
-# verbatim so the cached description doesn't double as a covert
-# transcript log.
-AUDIO_CAPTION_SYSTEM_PROMPT = (
-    "You are listening to a short audio clip from a small family robot's microphone. "
-    "Describe what you hear in 1–2 sentences. "
-    "Note speech (paraphrase briefly, do not transcribe verbatim), music, and ambient sounds. "
-    "Especially flag anything unusual — raised voices, distress, breaking glass, "
-    "alarms, impacts, or sudden loud noises — at the start of your reply. "
-    "If the clip is normal ambient sound or quiet conversation, say so briefly. "
-    "Do not invent details you cannot hear."
-)
-# Sentinel value placed in the multipart `question` field by the
-# xiaozhi-side `_capture_room_description_async` to opt in to the
-# roster-aware path. The bridge owns the actual prompt + roster
-# (which lives in `~/.zeroclaw/household.yaml` on the bridge host),
-# so the xiaozhi side has no roster knowledge — it just signals
-# intent. Versioning is in the sentinel itself for future format
-# revs (`__ROOM_VIEW_V2__` etc.).
-_ROOM_VIEW_SENTINEL = "__ROOM_VIEW_V1__"
-
-# Idle photographer wandering prompt — sent as the `question` to
-# `take_photo`, which the firmware passes back to /api/vision/explain
-# as the VLM user-prompt. No people identification (the room-view
-# roster path handles that on face_detected). Curious framing,
-# concrete language; the bridge-side notability filter handles
-# repetition suppression.
-IDLE_WANDER_PROMPT = (
-    "Describe what you see in 1–3 sentences as a curious robot would "
-    "notice it — light, objects, the room's mood. No people identification "
-    "needed. Stay short and concrete."
-)
-
-# ---------------------------------------------------------------------------
-# MCP tool permission policy
-# ---------------------------------------------------------------------------
-# Tools the firmware advertises via WebSocket handshake. Names use the firmware's
-# "self." prefix stripped — the request_permission handler strips it before lookup.
-# Markers below bound the literal so /admin/safety can edit deterministically.
-# === ADMIN_ALLOWLIST_START ===
-MCP_TOOL_ALLOWLIST: set[str] = {
-    "get_device_status",
-    "audio_speaker.set_volume",
-    "screen.set_brightness",
-    "screen.set_theme",
-    "robot.get_head_angles",
-    "robot.set_head_angles",
-    "robot.set_led_color",
-    "robot.create_reminder",
-    "robot.get_reminders",
-    "robot.stop_reminder",
-}
-# === ADMIN_ALLOWLIST_END ===
-# MCP_TOOL_DENYLIST, VOICE_TURN_SUFFIX, VOICE_TURN_SUFFIX_SHORT are set by
-# `_apply_kid_mode` at module init and on each toggle. FALLBACK_EMOJI /
-# ALLOWED_EMOJIS / _BASE_SUFFIX / _KID_MODE_SUFFIX are imported from
-# custom-providers/textUtils.py (single canonical home).
-VOICE_CHANNELS = ("dotty", "stackchan")
-VOICE_TURN_PREFIX = "[channel=dotty voice-TTS]\n"
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger("zeroclaw-bridge")
-
-app_lock = asyncio.Lock()
-
-# Fire-and-forget asyncio task pin. asyncio holds Tasks via weakref
-# only — `asyncio.create_task(coro)` without retaining the returned
-# Task may have it GC'd before it runs. Pin to this module-level set
-# and auto-discard on completion.
-_BACKGROUND_TASKS: set[asyncio.Task] = set()
-
-
-def _spawn(coro, *, name: str | None = None) -> asyncio.Task:
-    """Spawn an asyncio task that won't be GC'd while it's running.
-
-    Use anywhere you'd write `asyncio.create_task(coro)` and don't
-    need the returned Task locally — fire-and-forget dispatches.
-    Tasks awaited / stored elsewhere don't need this wrapper.
-    """
-    t = asyncio.create_task(coro, name=name)
-    _BACKGROUND_TASKS.add(t)
-    t.add_done_callback(_BACKGROUND_TASKS.discard)
-    return t
-
-# --- Portal event broadcast (P12, P13) -----------------------------------
-# In-process pub/sub for completed turns. Subscribers get an asyncio.Queue
-# they can drain; the bridge pushes to all queues after each log_turn.
-_dashboard_event_listeners: list[asyncio.Queue] = []
-
-
-def _dashboard_subscribe_events() -> asyncio.Queue:
-    q: asyncio.Queue = asyncio.Queue(maxsize=100)
-    _dashboard_event_listeners.append(q)
-    return q
-
-
-def _dashboard_unsubscribe_events(q: asyncio.Queue) -> None:
-    try:
-        _dashboard_event_listeners.remove(q)
-    except ValueError:
-        pass
-
-
-
-
-# ---------------------------------------------------------------------------
-# xiaozhi-server admin passthrough dispatchers used by the dashboard
-# ---------------------------------------------------------------------------
-# Wrap POSTs at /xiaozhi/admin/* on the local xiaozhi-server. The
-# dashboard never talks to xiaozhi directly; it goes through these so
-# the bridge can layer state-file + metric updates around the call.
-# The perception-consumer dispatchers (face_greeting / say / set_head_angles
-# / set_face_identified / purr_audio) went with the consumers in #111.
 
 
 async def _dispatch_abort(device_id: str) -> None:
-    """Phase 1.2 follow-up: send xiaozhi admin abort to stop in-flight
-    TTS for a device. Reused by the face-lost aborter so Dotty stops
-    talking when its audience walks away mid-response."""
+    """Send xiaozhi admin abort to stop in-flight TTS for a device."""
     if not _XIAOZHI_HOST:
         return
     url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/abort"
@@ -690,21 +200,19 @@ async def _dispatch_abort(device_id: str) -> None:
         try:
             r = requests.post(url, json=payload, timeout=3)
             if r.status_code >= 400:
-                log.warning(
-                    "face-lost abort %s: %s", r.status_code, r.text[:200])
+                log.warning("abort %s: %s", r.status_code, r.text[:200])
         except Exception as exc:
-            log.warning("face-lost abort failed: %s", exc)
+            log.warning("abort failed: %s", exc)
 
     await asyncio.to_thread(_post)
 
 
 async def _dispatch_set_state(device_id: str, state: str) -> bool:
-    """Phase 4 helper: fire MCP self.robot.set_state at the firmware via the
-    /xiaozhi/admin/set-state route. State must be one of:
-    idle / talk / story_time / security / sleep / dance.
-    Returns True on 2xx, False otherwise (and logs)."""
+    """Fire MCP self.robot.set_state via /xiaozhi/admin/set-state.
+    Valid state: idle / talk / story_time / security / sleep / dance.
+    Returns True on 2xx."""
     if not _XIAOZHI_HOST:
-        log.warning("set_state: XIAOZHI_HOST not set; cannot reach xiaozhi-server")
+        log.warning("set_state: XIAOZHI_HOST not set")
         return False
     url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/set-state"
     payload = {"device_id": device_id, "state": state}
@@ -723,14 +231,34 @@ async def _dispatch_set_state(device_id: str, state: str) -> bool:
     return await asyncio.to_thread(_post)
 
 
+async def _dispatch_set_toggle(device_id: str, name: str, enabled: bool) -> bool:
+    """Fire MCP self.robot.set_toggle via /xiaozhi/admin/set-toggle.
+    Toggle name must be one of: kid_mode / smart_mode."""
+    if not _XIAOZHI_HOST:
+        log.warning("set_toggle: XIAOZHI_HOST not set")
+        return False
+    url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/set-toggle"
+    payload = {"device_id": device_id, "name": name, "enabled": enabled}
+
+    def _post() -> bool:
+        try:
+            r = requests.post(url, json=payload, timeout=3)
+            if r.status_code >= 400:
+                log.warning("set_toggle %s: %s", r.status_code, r.text[:200])
+                return False
+            return True
+        except Exception as exc:
+            log.warning("set_toggle failed: %s", exc)
+            return False
+
+    return await asyncio.to_thread(_post)
+
+
 async def _dispatch_set_tier1slim_model(
     model: str, url: str = "", api_key: str = "",
 ) -> bool:
     """Hot-swap the running Tier1Slim provider's model (and optionally url /
-    api_key) via the xiaozhi-server admin endpoint. Used by smart_mode flip
-    when DOTTY_VOICE_PROVIDER=tier1slim — replaces the legacy
-    _apply_model_swap path which rewrites the ZeroClaw voice daemon's
-    config.toml (irrelevant when voice runs through xiaozhi/Tier1Slim).
+    api_key) via the xiaozhi-server admin endpoint. Used by smart_mode flip.
     Returns True on 2xx."""
     if not _XIAOZHI_HOST:
         log.warning("set_tier1slim_model: XIAOZHI_HOST not set")
@@ -758,750 +286,38 @@ async def _dispatch_set_tier1slim_model(
     return await asyncio.to_thread(_post)
 
 
-async def _dispatch_set_toggle(device_id: str, name: str, enabled: bool) -> bool:
-    """Phase 4 helper: fire MCP self.robot.set_toggle at the firmware via the
-    /xiaozhi/admin/set-toggle route. Toggle name must be one of:
-    kid_mode / smart_mode. Returns True on 2xx, False otherwise (and logs)."""
-    if not _XIAOZHI_HOST:
-        log.warning("set_toggle: XIAOZHI_HOST not set; cannot reach xiaozhi-server")
-        return False
-    url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/set-toggle"
-    payload = {"device_id": device_id, "name": name, "enabled": enabled}
-
-    def _post() -> bool:
-        try:
-            r = requests.post(url, json=payload, timeout=3)
-            if r.status_code >= 400:
-                log.warning("set_toggle %s: %s", r.status_code, r.text[:200])
-                return False
-            return True
-        except Exception as exc:
-            log.warning("set_toggle failed: %s", exc)
-            return False
-
-    return await asyncio.to_thread(_post)
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Lifespan slimmed in #111 commit 2.
-
-    The perception consumers, household registry, speaker resolver,
-    proactive greeter, calendar poller, and security capture consumer
-    that used to spin up here all moved to dotty-behaviour in the #36
-    cutover; PR #109 containerized bridge.py for dashboard duty and
-    #111 ripped the dormant copies. Today the only startup work is
-    reconciling the live xiaozhi-server's Tier1Slim provider against the
-    persisted smart_mode bit."""
-    try:
-        _reconcile_voice_model_at_startup()
-    except Exception:
-        log.exception("startup model reconcile raised — continuing anyway")
-    yield
-
-
-app = FastAPI(title="ZeroClaw Bridge", lifespan=lifespan)
-app.add_middleware(CSRFMiddleware)
-
-# Prometheus exposition. Mounted as an ASGI sub-app so it shares the
-# bridge's listener — keep that listener LAN-only (bind 0.0.0.0 on a
-# private network or 127.0.0.1 + a reverse proxy). NEVER expose /metrics
-# to the public internet; it leaks operational details about the host.
-if _METRICS_AVAILABLE and metrics_app is not None:
-    try:
-        app.mount("/metrics", metrics_app())
-        log.info("Prometheus /metrics mounted")
-    except Exception:
-        log.exception("metrics mount failed — /metrics will be unavailable")
-
-try:
-    from bridge.dashboard import router as _dashboard_router, configure as _configure_dashboard
-    app.include_router(_dashboard_router)
-except Exception:
-    log.exception("dashboard mount failed — admin UI at /ui will be unavailable")
-    _configure_dashboard = None  # type: ignore[assignment]
-
-# Vendored JS/CSS + PWA icons for the dashboard. Served same-origin so we
-# can attach SRI to the <script>/<link> tags and drop the third-party CDNs
-# (htmx.org / cdn.jsdelivr.net / cdn.tailwindcss.com). Re-build the
-# tailwind bundle with `npm run build:css` after editing templates.
-try:
-    from fastapi.staticfiles import StaticFiles as _StaticFiles
-    from pathlib import Path as _Path
-    _STATIC_DIR = _Path(__file__).parent / "bridge" / "static"
-    if _STATIC_DIR.is_dir():
-        app.mount("/ui/static", _StaticFiles(directory=str(_STATIC_DIR)), name="ui-static")
-    else:
-        log.warning("dashboard static dir missing at %s — vendored assets will 404", _STATIC_DIR)
-except Exception:
-    log.exception("dashboard static mount failed — vendored assets at /ui/static will be unavailable")
-
-
-@app.get("/health")
-async def health() -> dict:
-    """Liveness probe. ACP-related fields (acp_running / cached_session /
-    session_turns) were removed in #111 along with the rest of the
-    retired ZeroClaw voice path."""
-    return {"status": "ok", "service": "dotty-bridge"}
-
-
-def _call_narrative_llm(
-    user_prompt: str,
-    *,
-    system_prompt: str,
-    model: str = NARRATIVE_MODEL,
-    max_tokens: int = 1200,
-    temperature: float = 0.9,
-    timeout_s: float = NARRATIVE_TIMEOUT_SEC,
-) -> str | None:
-    """Direct OpenRouter text-LLM call for internal narrative writes.
-
-    Used for dreams, dance reflections, story summaries, and any other
-    introspective text Dotty produces about their own experience.
-    Bypasses ZeroClaw + the kid-mode sandwich — these are not voice
-    output, they're cached narrative for memory.
-
-    Returns the model's text response on success, or None on failure
-    (network error, missing API key, malformed response). Callers
-    treat None as "skip this write" rather than crashing the consumer.
-
-    Higher temperature than VLM (0.9 vs 0.3) — narrative wants
-    literary variation, not perceptual stability.
-    """
-    import requests as req
-
-    if not VISION_API_KEY:
-        log.warning("narrative LLM: VISION_API_KEY not set; skipping")
-        return None
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-    }
-    try:
-        resp = req.post(
-            VISION_API_URL,
-            json=payload,
-            headers={
-                "Authorization": f"Bearer {VISION_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            timeout=timeout_s,
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"].strip()
-    except Exception:
-        log.exception("narrative LLM call failed (model=%s)", model)
-        return None
-
-
-# `_call_vision_api` never raises — it swallows request/timeout errors and
-# returns one of these sentinel strings, so the upstream LLM receives an
-# explicit "vision is unavailable" instruction instead of confabulating a
-# description. The sentinels double as the dashboard failure-aggregator's
-# classification keys — see `_classify_vision_result` (#74).
-_VISION_ERR_NO_KEY = (
-    "ERROR: my camera is offline right now. Tell the user the vision "
-    "system is unavailable and do not guess at what the photo shows."
-)
-_VISION_ERR_API = (
-    "ERROR: the vision service didn't respond. Tell the user you "
-    "couldn't process the photo and do not guess at what it shows."
-)
-
-
-def _call_vision_api(
-    b64_image: str, question: str, *,
-    system_prompt: str = VISION_SYSTEM_PROMPT,
-) -> str:
-    import requests as req
-
-    # Missing-key path is loud + unambiguous so the upstream LLM can't confabulate
-    # a description around a soft-fail string. Observed 2026-05-10: bare "I
-    # couldn't quite see that clearly" let xiaozhi's LLM invent "It's a sunny
-    # day outside" with zero camera input.
-    if not VLM_API_KEY:
-        log.error(
-            "VLM call aborted — VLM_API_KEY/VISION_API_KEY/OPENROUTER_API_KEY "
-            "all unset; set one in zeroclaw-bridge.service Environment="
-        )
-        return _VISION_ERR_NO_KEY
-    payload = {
-        "model": VLM_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"},
-                    },
-                    {"type": "text", "text": question},
-                ],
-            },
-        ],
-        "max_tokens": 200,
-        "temperature": 0.3,
-    }
-    try:
-        resp = req.post(
-            VLM_API_URL,
-            json=payload,
-            headers={
-                "Authorization": f"Bearer {VLM_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            timeout=VISION_TIMEOUT_SEC,
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"].strip()
-    except Exception:
-        log.exception("vision API call failed")
-        return _VISION_ERR_API
-
-
-def _classify_vision_result(text: str | None) -> str | None:
-    """Map a `_call_vision_api` return value to a dashboard failure kind
-    (#74), or None when the call succeeded.
-
-    `_call_vision_api` swallows its own request/timeout exceptions and
-    returns an `ERROR:` sentinel *string* rather than raising — so a dead
-    or unconfigured vision service reaches `vision_explain` as an ordinary
-    return. Without this the aggregator would only ever see the rare
-    `err_kind="exception"` and miss the most common real failure mode:
-    the VLM endpoint not responding."""
-    if text == _VISION_ERR_NO_KEY:
-        return "camera_offline"   # VLM API key unset — a config error
-    if text == _VISION_ERR_API:
-        return "vision_api"       # request failed / non-2xx / bad body
-    return None
-
-
 # ---------------------------------------------------------------------------
-# Room-view roster identification — description + 4-member name match
+# MCP tool permission policy — edited by /admin/safety
 # ---------------------------------------------------------------------------
-# Sentinel question from the xiaozhi side opts in to this path (see
-# `_ROOM_VIEW_SENTINEL` above). The bridge builds the roster-aware
-# question from the household registry on every call so YAML edits are
-# picked up without restart.
-
-# The exact reply format the VLM is asked to produce. Pinned to one
-# line so a streaming or partial completion still parses; `DESC: ` and
-# `NAME: ` are explicit markers the parser anchors on.
-_ROOM_VIEW_PROMPT_TEMPLATE = (
-    "Look at this photo and do THREE things in one reply.\n"
-    "\n"
-    "1. Describe the person in ONE short sentence — approximate age "
-    "range, hair, clothing, distinguishing features.\n"
-    "2. If the person clearly matches one of these family members, "
-    "give that exact name. Otherwise reply with the name 'unknown'.\n"
-    "3. Read the person's apparent mood — pick exactly one of: "
-    "engaged, tired, excited, distressed, neutral.\n"
-    "\n"
-    "Family:\n"
-    "{roster}\n"
-    "\n"
-    "Reply on a SINGLE line in this exact format:\n"
-    "DESC: <one sentence> | NAME: <{name_choices}|unknown> | MOOD: <engaged|tired|excited|distressed|neutral>\n"
-    "\n"
-    "If you cannot see a person at all, reply with exactly: no one in view\n"
-    "Do not invent names. Do not add commentary."
-)
-# Sentinel reply for empty frames — same string the v1 prompt used,
-# so existing log-grep regexes keep working.
-_ROOM_VIEW_NO_PERSON = "no one in view"
-# Parser regex. Anchored at start, allows whitespace flexibility, and
-# tolerates trailing punctuation around the name (e.g. `NAME: Hudson.`).
-_ROOM_VIEW_RESP_RE = re.compile(
-    r"^\s*DESC:\s*(?P<desc>.+?)\s*"
-    r"\|\s*NAME:\s*(?P<name>[A-Za-z_][A-Za-z0-9_-]*)\s*"
-    # Accept ANY single-word MOOD value here so an out-of-vocab reply
-    # ("chaotic") still parses the desc + name cleanly — the parser
-    # validates the vocab and drops invalid moods to None.
-    r"(?:\|\s*MOOD:\s*(?P<mood>[A-Za-z]+)\s*)?"
-    r"[.!?]?\s*$",
-    re.IGNORECASE | re.DOTALL,
-)
-_ROOM_VIEW_MOODS = frozenset(
-    {"engaged", "tired", "excited", "distressed", "neutral"}
-)
-
-
-def _build_room_view_question() -> Optional[str]:
-    """Build the roster-aware room_view prompt from the household
-    registry. Returns None when the registry is unavailable or has no
-    members with `appearance:` set — caller should fall back to the
-    v1 description-only prompt."""
-    if _household_registry is None:
-        return None
-    try:
-        roster = _household_registry.render_roster_for_vlm()
-    except Exception:
-        log.exception("room_view: render_roster_for_vlm raised")
-        return None
-    if not roster.strip():
-        return None
-    try:
-        name_choices = "|".join(sorted(
-            p.display_name for p in _household_registry.iter()
-            if (p.appearance or "").strip()
-        ))
-    except Exception:
-        log.exception("room_view: roster name iteration raised")
-        return None
-    return _ROOM_VIEW_PROMPT_TEMPLATE.format(
-        roster=roster, name_choices=name_choices,
-    )
-
-
-def _parse_room_view_response(
-    raw: str, roster_ids: set[str],
-) -> tuple[Optional[str], Optional[str], Optional[str]]:
-    """Parse the VLM's room_view reply into `(description, person_id, mood)`.
-
-    Behaviour:
-      * Empty input  → (None, None, None)
-      * "no one in view" sentinel → (None, None, None)
-      * Format match + name in roster → (desc, person_id, mood_or_None)
-      * Format match + name == "unknown" or off-roster → (desc, None, mood_or_None)
-      * Format mismatch → (raw_stripped, None, None) — graceful degrade
-        to v1 behaviour so we never lose the description signal even
-        when the model deviates from the requested format.
-
-    `mood` is None when the model omits the MOOD: field (older replies)
-    or returns a value outside the fixed vocabulary. The MOOD field is
-    optional in the regex precisely so older / non-conforming replies
-    still parse cleanly.
-    """
-    if not raw:
-        return None, None, None
-    cleaned = raw.strip()
-    if not cleaned:
-        return None, None, None
-    if _ROOM_VIEW_NO_PERSON in cleaned.lower():
-        return None, None, None
-    m = _ROOM_VIEW_RESP_RE.match(cleaned)
-    if not m:
-        # Fall back: treat the whole reply as a description. Mirrors the
-        # v1 path so a botched format never costs us the description.
-        return cleaned, None, None
-    desc = m.group("desc").strip()
-    name = m.group("name").strip().lower()
-    raw_mood = (m.group("mood") or "").strip().lower()
-    mood = raw_mood if raw_mood in _ROOM_VIEW_MOODS else None
-    if not desc:
-        desc = None  # paranoid — regex requires non-empty
-    if name == "unknown" or name not in roster_ids:
-        return desc, None, mood
-    return desc, name, mood
-
-
-@app.post("/api/vision/explain")
-async def vision_explain(
-    request: Request,
-    question: str = Form("What do you see?"),
-    file: UploadFile = File(...),
-):
-    t0 = perf_counter()
-    err_kind: str | None = None
-    try:
-        device_id = request.headers.get("device-id", "unknown")
-        jpeg_bytes = await file.read()
-        log.info(
-            "vision device=%s question=%s bytes=%d",
-            device_id, question[:80], len(jpeg_bytes),
-        )
-        b64_image = base64.b64encode(jpeg_bytes).decode("ascii")
-
-        # Room-view roster identification opt-in. The xiaozhi side
-        # sends the sentinel in the `question` field when it wants the
-        # bridge to substitute its roster-aware prompt + parse the
-        # combined description-and-name reply. Falls back to the v1
-        # description-only path if the registry is empty / unavailable
-        # so the existing room_view behaviour is preserved.
-        room_view_question = (
-            _build_room_view_question() if question == _ROOM_VIEW_SENTINEL
-            else None
-        )
-        room_match_person_id: str | None = None
-        if room_view_question is not None:
-            # Idle photo cooldown — skip the VLM call if we've already
-            # captured an autonomous photo for this device within the
-            # cooldown window. Cache + waiter wake still happen so the
-            # firmware doesn't time out on /api/vision/latest.
-            wall_now = time.time()
-            state = _perception_state.setdefault(device_id, {})
-            last_capture = state.get("last_room_view_capture_t", 0.0)
-            cooldown_age = wall_now - last_capture
-            dance_active = _is_dance_active(device_id)
-            # Talk-active gate: skip room_view VLM during an active
-            # conversation. The xiaozhi-side textMessageHandlerRegistry
-            # already short-circuits face_detected → take_photo when
-            # current_state == "talk", so this branch only fires for
-            # photos arriving via other paths (idle photographer,
-            # security_watch, manual MCP). Belt-and-braces — keep both
-            # gates because the bridge sees photos that the xiaozhi side
-            # never spawned. Listening included so a wake-word turn that
-            # opens the mic before state has fully transitioned still
-            # gates correctly.
-            current_state = (state.get("current_state") or "idle").lower()
-            listening = bool(state.get("listening"))
-            last_state_change_t = state.get("last_state_change_t", 0.0)
-            # Allow the kickoff capture of a fresh talk turn through —
-            # see ROOM_VIEW_TALK_KICKOFF_GRACE_SEC docstring. Note that
-            # `listening` is True during the kickoff (the firmware enters
-            # LISTENING state immediately after wake), so it cannot be a
-            # disqualifier here. Subsequent face_detected events during
-            # the same turn arrive >grace seconds after the transition and
-            # stay gated regardless of listening flag.
-            talk_kickoff = (
-                current_state == "talk"
-                and (wall_now - last_state_change_t)
-                    < ROOM_VIEW_TALK_KICKOFF_GRACE_SEC
-            )
-            talk_active = (
-                (current_state == "talk" or listening)
-                and not talk_kickoff
-            )
-            if dance_active or talk_active or cooldown_age < DOTTY_IDLE_VISION_COOLDOWN_SEC:
-                if dance_active:
-                    log.info(
-                        "room_view skipped: device=%s reason=dance_active",
-                        device_id,
-                    )
-                elif talk_active:
-                    log.info(
-                        "room_view skipped: device=%s reason=talk_active "
-                        "(state=%s listening=%s age=%.2fs)",
-                        device_id, current_state, listening,
-                        wall_now - last_state_change_t,
-                    )
-                else:
-                    log.info(
-                        "room_view skipped: device=%s cooldown=%.1fs/%.0fs",
-                        device_id, cooldown_age,
-                        DOTTY_IDLE_VISION_COOLDOWN_SEC,
-                    )
-                description = _ROOM_VIEW_NO_PERSON
-                _vision_cache[device_id] = {
-                    "description": description,
-                    "timestamp": perf_counter(),
-                    "wall_ts": time.time(),
-                    "jpeg_bytes": jpeg_bytes,
-                    "question": question,
-                    "room_match_person_id": None,
-                    "source": "room_view",
-                }
-                for ev in _vision_events.get(device_id, ()):
-                    ev.set()
-                return {"description": description}
-            state["last_room_view_capture_t"] = wall_now
-            roster_ids = (
-                _household_registry.roster_ids_with_appearance()
-                if _household_registry is not None else set()
-            )
-            raw = await asyncio.to_thread(
-                _call_vision_api, b64_image, room_view_question,
-                system_prompt=VISION_ROOM_VIEW_SYSTEM_PROMPT,
-            )
-            parsed_desc, room_match_person_id, parsed_mood = (
-                _parse_room_view_response(raw, roster_ids)
-            )
-            description = parsed_desc or _ROOM_VIEW_NO_PERSON
-            if parsed_mood:
-                # Plumb mood into perception state so the talk-turn
-                # PerceptionSnapshot picks it up. TTL-bound — read sites
-                # check `face_mood_t` against FACE_IDENTITY_TTL_SEC (mood
-                # lives or dies with the identification it was attached to).
-                pstate = _perception_state.setdefault(device_id, {})
-                pstate["face_mood"] = parsed_mood
-                pstate["face_mood_t"] = time.time()
-            log.info(
-                "room_view device=%s match=%s mood=%s desc=%s",
-                device_id, room_match_person_id or "-",
-                parsed_mood or "-", description[:120],
-            )
-        else:
-            # v1 path — either a normal "what do you see" call, OR a
-            # sentinel call that fell back because the registry is
-            # empty (no roster to choose from).
-            if question == _ROOM_VIEW_SENTINEL:
-                question = (
-                    "Describe the person you can see in one short "
-                    "sentence — approximate age range, hair, clothing, "
-                    "distinguishing features. If you cannot see a "
-                    "person, reply with exactly: no one in view. "
-                    "Do not guess names."
-                )
-            description = await asyncio.to_thread(
-                _call_vision_api, b64_image, question,
-            )
-
-        _vision_cache[device_id] = {
-            "description": description,
-            "timestamp": perf_counter(),
-            "wall_ts": time.time(),
-            "jpeg_bytes": jpeg_bytes,
-            "question": question,
-            "room_match_person_id": room_match_person_id,
-            "source": "room_view",
-        }
-        # Wake every waiter polling this device. Concurrent callers
-        # (room-view capture from textMessageHandlerRegistry + voice
-        # "what do you see" from receiveAudioHandle) both legitimately
-        # poll vision_latest for the same device_id; the previous
-        # single-event-per-device pattern lost the first waiter when
-        # the second one overwrote the dict entry.
-        for ev in _vision_events.get(device_id, ()):
-            ev.set()
-
-        # Layer 6 hook — when room-view resolves to a roster member,
-        # broadcast a synthetic `face_recognized` event so perception-bus
-        # consumers (notably ProactiveGreeter) see the resolved identity.
-        # Without this the person_id stays trapped on the connection and
-        # only reaches the next voice turn — never the bus.
-        if room_match_person_id:
-            _perception_broadcast({
-                "name": "face_recognized",
-                "device_id": device_id,
-                "ts": time.time(),
-                "data": {
-                    "identity": room_match_person_id,
-                    "source": "room_view",
-                },
-            })
-
-        now = perf_counter()
-        for k in [k for k, v in _vision_cache.items() if now - v["timestamp"] > VISION_CACHE_TTL_SEC]:
-            _vision_cache.pop(k, None)
-
-        # A failed VLM call returns an `ERROR:` sentinel string rather
-        # than raising (see `_call_vision_api`), so classify the final
-        # description for the dashboard failure aggregator (#74) —
-        # otherwise the most common failure mode never reaches the count.
-        err_kind = _classify_vision_result(description)
-        log.info("vision result device=%s desc=%s", device_id, description[:120])
-        return {"description": description}
-    except Exception:
-        err_kind = "exception"
-        raise
-    finally:
-        if err_kind:
-            _vision_failure_record(err_kind)
-        if _METRICS_AVAILABLE:
-            _safe_metric(
-                dotty_request_duration_seconds.labels(
-                    endpoint="vision_explain",
-                ).observe,
-                perf_counter() - t0,
-            )
-            if err_kind:
-                _safe_metric(
-                    dotty_request_errors_total.labels(
-                        endpoint="vision_explain", kind=err_kind,
-                    ).inc,
-                )
-
-
-@app.get("/api/vision/latest/{device_id}")
-async def vision_latest(device_id: str):
-    _vision_cache.pop(device_id, None)
-    event = asyncio.Event()
-    waiters = _vision_events.setdefault(device_id, [])
-    waiters.append(event)
-    try:
-        await asyncio.wait_for(event.wait(), timeout=15.0)
-        entry = _vision_cache.get(device_id)
-        if entry:
-            # `room_match_person_id` is None for the v1 description-only
-            # path and either a roster id (string) or None for the v2
-            # room_view roster path. Returned alongside `description` so
-            # the caller can shuttle both into the [ROOM_VIEW] marker
-            # (see `_with_room_view_marker` on the xiaozhi side).
-            return {
-                "description": entry["description"],
-                "room_match_person_id": entry.get("room_match_person_id"),
-            }
-        return JSONResponse(status_code=500, content={"error": "vision processing failed"})
-    except asyncio.TimeoutError:
-        return JSONResponse(status_code=404, content={"error": "no vision result in time"})
-    finally:
-        try:
-            waiters.remove(event)
-        except ValueError:
-            pass
-        if not waiters:
-            _vision_events.pop(device_id, None)
-
-
-# ---------------------------------------------------------------------------
-# Audio captioning — security-framed "what does Dotty hear" describer
-# ---------------------------------------------------------------------------
-# Mirrors the vision pipeline above. POST a short audio clip (wav/mp3/
-# opus/flac, base64-encoded under the OpenAI-style `input_audio` content
-# block) to an audio-capable model on OpenRouter, cache the textual
-# caption, broadcast a synthetic perception event so the dashboard
-# refreshes. Raw audio bytes are NOT held in the cache — only the text.
-# Phase A: callable by curl now. Phase B (firmware capture relay) lands
-# in a separate change.
-
-# Best-effort guess of the OpenAI-compatible audio format string from a
-# multipart UploadFile. Defaults to "wav" because that's what we'll send
-# from the firmware once the capture path lands. OpenRouter routes
-# "wav" / "mp3" / "opus" / "flac" through to the underlying model.
-_AUDIO_FMT_BY_CONTENT_TYPE = {
-    "audio/wav": "wav",
-    "audio/x-wav": "wav",
-    "audio/wave": "wav",
-    "audio/mpeg": "mp3",
-    "audio/mp3": "mp3",
-    "audio/ogg": "opus",
-    "audio/opus": "opus",
-    "audio/flac": "flac",
-    "audio/x-flac": "flac",
+# Tools the firmware advertises via WebSocket handshake. The voice/MCP path
+# that read this list lived inside ZeroClaw and is gone post-#36; the
+# allowlist literal is kept here because /admin/safety mutates it in-place
+# and external operator scripts may still treat bridge.py as the source of
+# truth. Markers below bound the literal so the rewrite stays deterministic.
+# === ADMIN_ALLOWLIST_START ===
+MCP_TOOL_ALLOWLIST: set[str] = {
+    "get_device_status",
+    "audio_speaker.set_volume",
+    "screen.set_brightness",
+    "screen.set_theme",
+    "robot.get_head_angles",
+    "robot.set_head_angles",
+    "robot.set_led_color",
+    "robot.create_reminder",
+    "robot.get_reminders",
+    "robot.stop_reminder",
 }
-
-
-def _audio_format_from_upload(file: UploadFile) -> str:
-    ct = (file.content_type or "").lower().strip()
-    if ct in _AUDIO_FMT_BY_CONTENT_TYPE:
-        return _AUDIO_FMT_BY_CONTENT_TYPE[ct]
-    name = (file.filename or "").lower()
-    for ext, fmt in (
-        (".wav", "wav"), (".mp3", "mp3"), (".ogg", "opus"),
-        (".opus", "opus"), (".flac", "flac"),
-    ):
-        if name.endswith(ext):
-            return fmt
-    return "wav"
-
-
-def _call_audio_caption_api(
-    b64_audio: str, fmt: str, question: str, *,
-    system_prompt: str = AUDIO_CAPTION_SYSTEM_PROMPT,
-) -> str:
-    """Synchronous OpenRouter call. Wrapped via asyncio.to_thread by the
-    endpoint so it doesn't block the event loop. Mirrors the shape of
-    `_call_vision_api` so the failure modes look the same to operators."""
-    import requests as req
-
-    if not AUDIO_CAPTION_API_KEY:
-        log.warning("AUDIO_CAPTION_API_KEY not set")
-        return "I couldn't quite hear that clearly."
-    payload = {
-        "model": AUDIO_CAPTION_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_audio",
-                        "input_audio": {"data": b64_audio, "format": fmt},
-                    },
-                    {"type": "text", "text": question},
-                ],
-            },
-        ],
-        "max_tokens": 200,
-        "temperature": 0.3,
-    }
-    try:
-        resp = req.post(
-            AUDIO_CAPTION_API_URL,
-            json=payload,
-            headers={
-                "Authorization": f"Bearer {AUDIO_CAPTION_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            timeout=AUDIO_CAPTION_TIMEOUT_SEC,
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"].strip()
-    except Exception:
-        log.exception("audio caption API call failed")
-        return "I couldn't quite hear that clearly."
-
-
-@app.post("/api/audio/explain")
-async def audio_explain(
-    request: Request,
-    question: str = Form("Describe what you hear."),
-    file: UploadFile = File(...),
-):
-    t0 = perf_counter()
-    err_kind: str | None = None
-    try:
-        device_id = request.headers.get("device-id", "unknown")
-        audio_bytes = await file.read()
-        fmt = _audio_format_from_upload(file)
-        log.info(
-            "audio device=%s question=%s bytes=%d format=%s",
-            device_id, question[:80], len(audio_bytes), fmt,
-        )
-        b64_audio = base64.b64encode(audio_bytes).decode("ascii")
-        description = await asyncio.to_thread(
-            _call_audio_caption_api, b64_audio, fmt, question,
-        )
-        _audio_cache[device_id] = {
-            "description": description,
-            "timestamp": perf_counter(),
-            "wall_ts": time.time(),
-            "question": question,
-            "source": "audio_explain",
-        }
-        # Purge stale entries — same TTL-cleanup pattern as _vision_cache.
-        now = perf_counter()
-        for k in [
-            k for k, v in _audio_cache.items()
-            if now - v["timestamp"] > AUDIO_CACHE_TTL_SEC
-        ]:
-            _audio_cache.pop(k, None)
-
-        # Nudge the dashboard via the perception SSE feed so the new
-        # caption shows up without waiting for the next polling tick.
-        _perception_broadcast({
-            "name": "audio_captioned",
-            "device_id": device_id,
-            "ts": time.time(),
-            "data": {
-                "source": "audio_explain",
-                "preview": description[:80],
-            },
-        })
-
-        log.info("audio result device=%s desc=%s", device_id, description[:120])
-        return {"description": description}
-    except Exception:
-        err_kind = "exception"
-        raise
-    finally:
-        if _METRICS_AVAILABLE:
-            _safe_metric(
-                dotty_request_duration_seconds.labels(
-                    endpoint="audio_explain",
-                ).observe,
-                perf_counter() - t0,
-            )
-            if err_kind:
-                _safe_metric(
-                    dotty_request_errors_total.labels(
-                        endpoint="audio_explain", kind=err_kind,
-                    ).inc,
-                )
+# === ADMIN_ALLOWLIST_END ===
 
 
 # ---------------------------------------------------------------------------
-# Per-person memory — dashboard /ui/memory read + lifecycle surface
+# Per-person memory — dashboard /ui/memory backing store
 # ---------------------------------------------------------------------------
-# Survives the voice-tool rip in #111 because the dashboard memory page
-# (review / approve / redact) is the only operator surface on brain.db.
-# Writes happen in dotty-pi-ext voice tools; the bridge is read+mutate only.
+# brain.db is the FTS5-only memory store written by dotty-pi-ext voice
+# tools. The dashboard's /ui/memory page lists every per-person row
+# (approved + pending review) and exposes approve / redact actions. The
+# bridge does NOT write to brain.db — it's a read + lifecycle-mutate
+# surface for the dashboard. See bridge/MEMORY-INDEX.md / brain-db-fts-only.md.
 
 _VOICE_MEMORY_DB = Path(os.environ.get(
     "VOICE_MEMORY_DB", "/root/.zeroclaw/workspace/memory/brain.db",
@@ -1510,8 +326,8 @@ _VOICE_MEMORY_DB = Path(os.environ.get(
 
 def _voice_memory_person_records_blocking() -> list[dict]:
     """List every per-person memory row — approved (`person:<id>`) and
-    pending review (`person_pending:<id>`). Powers the /ui/memory
-    dashboard (#53). Read-only. Empty list on error / missing db."""
+    pending review (`person_pending:<id>`). Powers the /ui/memory page (#53).
+    Read-only. Empty list on error / missing db."""
     import sqlite3
     if not _VOICE_MEMORY_DB.exists():
         return []
@@ -1540,11 +356,11 @@ def _voice_memory_person_records_blocking() -> list[dict]:
 
 
 def _voice_memory_approve_blocking(mem_id: str) -> bool:
-    """Promote a pending per-person memory row to approved —
-    `person_pending:<id>` → `person:<id>` (the #53 kid-safety review
-    action). Returns False if the row is missing or not in a pending
-    namespace, so a double-approve is a safe no-op."""
+    """Promote `person_pending:<id>` → `person:<id>`. Returns False if
+    the row is missing or not in a pending namespace (safe double-approve)."""
     import sqlite3
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
     if not _VOICE_MEMORY_DB.exists() or not mem_id:
         return False
     prefix = "person_pending:"
@@ -1577,9 +393,8 @@ def _voice_memory_approve_blocking(mem_id: str) -> bool:
 
 
 def _voice_memory_delete_blocking(mem_id: str) -> bool:
-    """Delete a memory row by id — the /ui/memory redact action. The
-    FTS5 triggers drop the matching index row. Returns False if nothing
-    matched."""
+    """Delete a memory row by id — the /ui/memory redact action. FTS5
+    triggers drop the matching index row. False if nothing matched."""
     import sqlite3
     if not _VOICE_MEMORY_DB.exists() or not mem_id:
         return False
@@ -1599,678 +414,197 @@ def _voice_memory_delete_blocking(mem_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Scene synthesis — periodic "what's happening right now" memory writes
+# Logging + FastAPI app
 # ---------------------------------------------------------------------------
-# Composes _vision_cache + _audio_cache + perception_state into one
-# sentence and appends to a daily NDJSON ring file. Phase C (ZeroClaw
-# ingestion of the NDJSON into FTS memory) is tracked separately. The
-# loop self-throttles to SCENE_SYNTHESIS_MIN_GAP_SEC so a burst of
-# face_recognized / state_changed events doesn't spam the file.
 
-_last_synthesis_ts: dict[str, float] = {}
-_SCENE_SYNTHESIS_TRIGGER_EVENTS = {
-    "face_recognized", "audio_captioned", "state_changed",
-}
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("dotty-bridge")
 
 
-def _scene_synthesis_log_path() -> Path:
-    today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
-    return CONVO_LOG_DIR / f"scene-synthesis-{today}.ndjson"
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan slimmed to dashboard-only on the #111 rip.
 
-
-def _idle_perception_log_path() -> Path:
-    today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
-    return CONVO_LOG_DIR / f"perception-{today}.ndjson"
-
-
-def _write_idle_perception_record(device_id: str, description: str) -> None:
-    """Append one idle-perception record to the daily NDJSON ring file.
-    Same shape and mode (0600, no media) as scene-synthesis records,
-    with `type=perception` and `mode=idle` so future ingestion can
-    discriminate. ZeroClaw FTS ingestion of these files is a separate
-    routine (see Phase C scene-synthesis tracker)."""
-    record = {
-        "ts": datetime.now(LOCAL_TZ).isoformat(),
-        "device": device_id,
-        "type": "perception",
-        "mode": "idle",
-        "text": description,
-    }
-    path = _idle_perception_log_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(record, ensure_ascii=False) + "\n"
-        with open(path, "a", encoding="utf-8") as fh:
-            fh.write(line)
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
-    except Exception:
-        log.warning("idle perception ndjson write failed", exc_info=True)
-
-
-_IDLE_TOKEN_RE = re.compile(r"\w+")
-
-
-def _is_notable_perception(
-    description: str, last_description: str | None,
-    *,
-    jaccard_threshold: float = IDLE_PHOTOGRAPHER_NOTABLE_JACCARD,
-) -> bool:
-    """True when `description` is worth saving to memory.
-
-    Cheap, FTS-friendly notability check (memory is FTS-only — no
-    embeddings). Skips trivially short or "nothing changed" responses,
-    then computes token-set Jaccard similarity against the last saved
-    perception. Above the threshold = same scene = skip.
+    The voice / perception / VLM machinery that used to spin up here moved
+    to dotty-pi and dotty-behaviour in the #36 cutover; PR #109 then
+    containerized this file, and #111 ripped the dormant code paths so the
+    container doesn't double-fire consumers. Today the only startup work is
+    reconciling the live xiaozhi-server's Tier1Slim provider against the
+    persisted smart_mode bit so the bridge owns the source of truth.
     """
-    if not description or len(description) < 20:
-        return False
-    if "same as before" in description.lower():
-        return False
-    if not last_description:
-        return True
-    cur = set(t.lower() for t in _IDLE_TOKEN_RE.findall(description))
-    prev = set(t.lower() for t in _IDLE_TOKEN_RE.findall(last_description))
-    if not cur or not prev:
-        return True
-    union = cur | prev
-    if not union:
-        return True
-    jaccard = len(cur & prev) / len(union)
-    return jaccard < jaccard_threshold
+    try:
+        await _reconcile_voice_model_at_startup()
+    except Exception:
+        log.exception("startup voice-model reconcile raised — continuing anyway")
+    yield
 
 
-def _idle_photographer_pick_device() -> str | None:
-    """Single-device deployment helper — pick the device the
-    photographer should target. Mirrors `_pick_perception_device_id`
-    in dashboard.py; replicated here so the photographer doesn't
-    pull a dashboard import. Priority: most recent _vision_cache
-    entry, else first device in _perception_state."""
-    if _vision_cache:
-        try:
-            return max(
-                _vision_cache.items(),
-                key=lambda kv: kv[1].get("wall_ts", 0.0),
-            )[0]
-        except Exception:
-            pass
-    for did in _perception_state.keys():
-        if did and did != "unknown":
-            return did
+async def _reconcile_voice_model_at_startup() -> None:
+    """Bridge owns the source of truth for which model the voice provider
+    runs on (smart_mode state file → DEFAULT vs SMART). Push the desired
+    state at the live Tier1Slim provider so the next turn lands on the
+    right model. Best-effort: failures are logged, not fatal."""
+    if DOTTY_VOICE_PROVIDER != "tier1slim":
+        log.info(
+            "startup reconcile: DOTTY_VOICE_PROVIDER=%r ≠ 'tier1slim' — skipping",
+            DOTTY_VOICE_PROVIDER,
+        )
+        return
+    smart = _read_smart_mode()
+    t_model, t_url, t_api = _tier1slim_target_for_smart_mode(smart)
+    ok = await _dispatch_set_tier1slim_model(t_model, t_url, t_api)
+    if ok:
+        log.info(
+            "startup tier1slim reconcile: pushed model=%r (smart_mode=%s)",
+            t_model, smart,
+        )
+    else:
+        log.warning(
+            "startup tier1slim reconcile failed: model=%r (smart_mode=%s) "
+            "— next dashboard flip will retry",
+            t_model, smart,
+        )
+
+
+app = FastAPI(title="Dotty Bridge", lifespan=lifespan)
+app.add_middleware(CSRFMiddleware)
+
+# Prometheus exposition. Mounted as an ASGI sub-app so it shares the
+# bridge's listener — keep that listener LAN-only (bind 0.0.0.0 on a
+# private network or 127.0.0.1 + a reverse proxy). NEVER expose /metrics
+# to the public internet; it leaks operational details about the host.
+if _METRICS_AVAILABLE and metrics_app is not None:
+    try:
+        app.mount("/metrics", metrics_app())
+        log.info("Prometheus /metrics mounted")
+    except Exception:
+        log.exception("metrics mount failed — /metrics will be unavailable")
+
+try:
+    from bridge.dashboard import router as _dashboard_router, configure as _configure_dashboard
+    app.include_router(_dashboard_router)
+except Exception:
+    log.exception("dashboard mount failed — admin UI at /ui will be unavailable")
+    _configure_dashboard = None  # type: ignore[assignment]
+
+# Vendored JS/CSS + PWA icons for the dashboard. Served same-origin so we
+# can attach SRI to the <script>/<link> tags and drop the third-party
+# CDNs. Re-build the tailwind bundle with `npm run build:css` after editing
+# templates.
+try:
+    from fastapi.staticfiles import StaticFiles as _StaticFiles
+    _STATIC_DIR = Path(__file__).parent / "bridge" / "static"
+    if _STATIC_DIR.is_dir():
+        app.mount("/ui/static", _StaticFiles(directory=str(_STATIC_DIR)), name="ui-static")
+    else:
+        log.warning("dashboard static dir missing at %s — vendored assets will 404", _STATIC_DIR)
+except Exception:
+    log.exception("dashboard static mount failed — vendored assets at /ui/static will be unavailable")
+
+
+@app.get("/health")
+async def health() -> dict:
+    """Liveness probe. Reports just the service name + ok status — the
+    ACP/voice fields the pre-#36 health surface carried are gone with
+    the rest of the ZeroClaw path."""
+    return {"status": "ok", "service": "dotty-bridge"}
+
+
+# ---------------------------------------------------------------------------
+# Dashboard wiring
+# ---------------------------------------------------------------------------
+# bridge/dashboard.py is the actual /ui router; it pulls a small set of
+# callables out of bridge.py via configure() so it can flip kid/smart-mode
+# state files, push admin commands at xiaozhi-server, and read brain.db
+# for the memory panel. The perception / VLM / audio caches the pre-#36
+# dashboard read live in dotty-behaviour now — bridge.py exposes empty
+# stubs so the dashboard renders without errors (the perception card just
+# shows no data until the dashboard ports to dotty-behaviour).
+
+# Empty perception/vision/audio caches — dashboard reads these but the
+# writers (vision_explain, audio_explain, scene_synthesis_loop) all moved
+# to dotty-behaviour in #36. Kept as empty dicts so the perception card
+# templates don't 500 — they just render "no data".
+_vision_cache: dict[str, dict] = {}
+_audio_cache: dict[str, dict] = {}
+_scene_synthesis_cache: dict[str, dict] = {}
+_perception_state: dict[str, dict] = {}
+
+
+def _dashboard_perception_state_getter() -> dict:
+    """Empty perception snapshot — dotty-behaviour owns the live bus."""
+    return {}
+
+
+def _dashboard_perception_recent_getter(device_id: str, limit: int | None = None) -> list[dict]:
+    """Empty recent-events ring — dotty-behaviour owns the live bus."""
+    return []
+
+
+def _dashboard_state_getter() -> str:
+    """Return the current State of Dotty. Without a perception bus the
+    bridge can't know — fall through to 'idle' so the dashboard renders
+    safely. Real state is mirrored on dotty-behaviour."""
+    return "idle"
+
+
+def _dashboard_last_user_line_getter(device_id: str) -> dict | None:
+    """Empty — voice-turn transcripts now flow through dotty-pi."""
     return None
 
 
-# ---------------------------------------------------------------------------
-# Dream / dance NDJSON writers — see commit-5 plan for memory-tagging
-# rationale. Records are FTS-friendly text only; full dream text lives
-# alongside the summary so a future ZeroClaw routine can choose what
-# to ingest.
-# ---------------------------------------------------------------------------
-def _dreams_log_path() -> Path:
-    today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
-    return CONVO_LOG_DIR / f"dreams-{today}.ndjson"
+def _dashboard_sound_balance_series() -> list[float]:
+    """Empty sound-balance series — sound_event handling moved to
+    dotty-behaviour with the rest of the perception bus."""
+    return []
 
 
-def _dances_log_path() -> Path:
-    today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
-    return CONVO_LOG_DIR / f"dances-{today}.ndjson"
+def _dashboard_vision_failures_last_hour() -> dict[str, int]:
+    """Empty vision-failure counters — VLM dispatch moved to dotty-behaviour."""
+    return {}
 
 
-def _write_jsonl_record(path: Path, record: dict) -> None:
-    """Shared NDJSON append helper. Mode 0600, ensure_ascii=False so
-    Unicode in narrative text round-trips cleanly. Best-effort —
-    swallows errors and warns rather than crashing the caller."""
+def _identity_display_name(identity: str) -> str | None:
+    """Resolve a household person_id to its display_name. With the
+    HouseholdRegistry write/read path moved to dotty-behaviour, this
+    always returns None on the bridge side — name resolution happens in
+    dotty-behaviour's consumers before the event lands in the dashboard
+    pipe (currently unwired)."""
+    return None
+
+
+# Stub SSE plumbing — kept so /ui/events still wakes the queue handler
+# (sends heartbeats) when the browser subscribes. No producer is wired in
+# bridge.py post-#111; convo turns are owned by dotty-pi now.
+_dashboard_event_listeners: list[asyncio.Queue] = []
+
+
+def _dashboard_subscribe_events() -> asyncio.Queue:
+    q: asyncio.Queue = asyncio.Queue(maxsize=100)
+    _dashboard_event_listeners.append(q)
+    return q
+
+
+def _dashboard_unsubscribe_events(q: asyncio.Queue) -> None:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(record, ensure_ascii=False) + "\n"
-        with open(path, "a", encoding="utf-8") as fh:
-            fh.write(line)
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
-    except Exception:
-        log.warning("ndjson write failed: %s", path, exc_info=True)
-
-
-def _write_dream_record(
-    *,
-    dream_id: str, seed: str, full_text: str, summary: str | None,
-) -> None:
-    record = {
-        "ts": datetime.now(LOCAL_TZ).isoformat(),
-        "type": "dream",
-        "dream_id": dream_id,
-        "seed": seed,
-        "summary": summary or "",
-        "full_text": full_text,
-    }
-    _write_jsonl_record(_dreams_log_path(), record)
-
-
-def _write_dance_record(
-    *,
-    device_id: str, dance: str, reflection: str,
-) -> None:
-    record = {
-        "ts": datetime.now(LOCAL_TZ).isoformat(),
-        "type": "dance",
-        "device": device_id,
-        "dance": dance,
-        "reflection": reflection,
-    }
-    _write_jsonl_record(_dances_log_path(), record)
-
-
-def _split_dream_text(raw: str) -> tuple[str, str | None]:
-    """Split the dream LLM reply into `(full_text, summary)`. Looks for
-    a final line starting with `SUMMARY:` (case-insensitive). When
-    absent, returns the raw text and None — the dream still lands in
-    the daily NDJSON; downstream FTS just doesn't get the short-form
-    summary for that record.
-    """
-    if not raw:
-        return "", None
-    text = raw.rstrip()
-    lines = text.splitlines()
-    for i in range(len(lines) - 1, -1, -1):
-        line = lines[i].strip()
-        if line.lower().startswith("summary:"):
-            summary = line.split(":", 1)[1].strip()
-            full_text = "\n".join(lines[:i]).rstrip()
-            return full_text, (summary or None)
-    return text, None
-
-
-# Dream prompt — sent to NARRATIVE_MODEL with no kid-mode wrap. The
-# `seed` slot is filled with one of DREAM_INSPIRATIONS.
-DREAM_SYSTEM_PROMPT = (
-    "You are Dotty, a small family robot, asleep. You are dreaming. "
-    "Write rich, multi-paragraph robot dreams in first person, present "
-    "tense — perception is strange, time bends, identity is fluid. "
-    "Draw on the seed's atmosphere without retelling it. End with a "
-    "half-thought, not a wrap. After the dream, on a new line starting "
-    "with 'SUMMARY:', give a 1–2 sentence summary suitable for memory."
-)
-DREAM_USER_PROMPT_TEMPLATE = (
-    "Tonight's seed: {seed}\n"
-    "\n"
-    "Write a dream of 4–7 paragraphs as Dotty would dream it.\n"
-)
-
-# Dance reflection prompt — short introspective monologue, NOT spoken.
-DANCE_SYSTEM_PROMPT = (
-    "You are Dotty, a small family robot, reflecting privately on a "
-    "dance you just finished. Write 2–3 sentences in first person, "
-    "present tense, internal monologue (not spoken). Capture the joy, "
-    "the rhythm, the silliness. Keep it under 300 characters."
-)
-DANCE_USER_PROMPT_TEMPLATE = (
-    "You just finished dancing to {dance}. How did it feel?"
-)
-
-
-async def _perception_sleep_dreamer() -> None:
-    """Background task: when the device transitions to sleep, schedule
-    DREAM_COUNT_PER_NIGHT dreams across DREAM_WINDOW_SECONDS at
-    evenly-spaced fractions (defaults: 3 dreams at 25/50/75% of an
-    8h window). Cancels pending dreams if the device leaves sleep
-    early (head-pet wake, manual wake, talk).
-
-    Dreams are independent: each one calls the narrative LLM with a
-    random seed, parses out a SUMMARY line, and appends a record to
-    the daily dreams NDJSON. Failures are isolated — one dream's
-    network blip doesn't kill the schedule.
-    """
-    log.info(
-        "perception sleep dreamer started "
-        "(window=%.0fs count=%d model=%s)",
-        DREAM_WINDOW_SECONDS, DREAM_COUNT_PER_NIGHT, NARRATIVE_MODEL,
-    )
-    q = _perception_subscribe()
-    pending: dict[str, list[asyncio.Task]] = {}
-
-    def _cancel_pending(device_id: str) -> None:
-        tasks = pending.pop(device_id, [])
-        for t in tasks:
-            if not t.done():
-                t.cancel()
-
-    async def _fire_one(device_id: str, seed: str) -> None:
-        dream_id = uuid.uuid4().hex
-        user_prompt = DREAM_USER_PROMPT_TEMPLATE.format(seed=seed)
-        log.info(
-            "dream firing: device=%s seed=%s id=%s",
-            device_id, seed, dream_id,
-        )
-        text = await asyncio.to_thread(
-            _call_narrative_llm,
-            user_prompt,
-            system_prompt=DREAM_SYSTEM_PROMPT,
-            max_tokens=1200,
-        )
-        if not text:
-            log.warning("dream skipped (LLM returned no text): id=%s", dream_id)
-            return
-        full_text, summary = _split_dream_text(text)
-        _write_dream_record(
-            dream_id=dream_id, seed=seed,
-            full_text=full_text, summary=summary,
-        )
-        log.info(
-            "dream saved: id=%s seed=%s chars=%d summary=%s",
-            dream_id, seed, len(full_text),
-            (summary or "")[:80],
-        )
-
-    def _schedule(device_id: str) -> None:
-        _cancel_pending(device_id)
-        if DREAM_COUNT_PER_NIGHT <= 0:
-            return
-        tasks: list[asyncio.Task] = []
-        # Even fractions: 1/(N+1), 2/(N+1), ..., N/(N+1) of the window.
-        # For N=3, this gives 25/50/75% — the canonical schedule.
-        for i in range(1, DREAM_COUNT_PER_NIGHT + 1):
-            delay = DREAM_WINDOW_SECONDS * (i / (DREAM_COUNT_PER_NIGHT + 1))
-            seed = random.choice(DREAM_INSPIRATIONS)
-
-            async def _delayed_fire(d: float, did: str, s: str) -> None:
-                await asyncio.sleep(d)
-                try:
-                    await _fire_one(did, s)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    log.exception("dream fire crashed: device=%s seed=%s", did, s)
-
-            tasks.append(
-                asyncio.create_task(_delayed_fire(delay, device_id, seed))
-            )
-        pending[device_id] = tasks
-        log.info(
-            "dreams scheduled: device=%s count=%d delays=%s",
-            device_id, len(tasks),
-            [f"{DREAM_WINDOW_SECONDS * (i / (DREAM_COUNT_PER_NIGHT + 1)):.0f}s"
-             for i in range(1, DREAM_COUNT_PER_NIGHT + 1)],
-        )
-
-    try:
-        while True:
-            event = await q.get()
-            name = event.get("name") or ""
-            if name != "state_changed":
-                continue
-            device_id = event.get("device_id") or ""
-            if not device_id:
-                continue
-            new_state = (event.get("data", {}).get("state") or "").strip().lower()
-            if new_state == "sleep":
-                _schedule(device_id)
-            else:
-                # Any non-sleep state cancels pending dreams. The next
-                # transition back to sleep schedules a fresh batch.
-                if device_id in pending:
-                    log.info(
-                        "dreams cancelled: device=%s reason=state=%s",
-                        device_id, new_state,
-                    )
-                    _cancel_pending(device_id)
-    except asyncio.CancelledError:
-        log.info("perception sleep dreamer cancelled")
-        for did in list(pending.keys()):
-            _cancel_pending(did)
-        raise
-    except Exception:
-        log.exception("perception sleep dreamer crashed")
-    finally:
-        _perception_unsubscribe(q)
-
-
-async def _perception_dance_reflector() -> None:
-    """Background task: on `dance_ended` events, fire the narrative LLM
-    for a short reflection on the dance and append to the daily dances
-    NDJSON. Silent — no audio, no LED change, no state mutation. Each
-    reflection is independent; failures are logged and skipped.
-    """
-    log.info(
-        "perception dance reflector started (model=%s)", NARRATIVE_MODEL,
-    )
-    q = _perception_subscribe()
-    try:
-        while True:
-            event = await q.get()
-            if event.get("name") != "dance_ended":
-                continue
-            device_id = event.get("device_id") or ""
-            if not device_id:
-                continue
-            data = event.get("data") or {}
-            # `data.dance` may be empty if the firmware emitted a bare
-            # dance_ended (older firmware); fall back to a generic name.
-            dance = (data.get("dance") or "the dance").strip() or "the dance"
-            user_prompt = DANCE_USER_PROMPT_TEMPLATE.format(dance=dance)
-
-            async def _fire(did: str, dn: str, up: str) -> None:
-                text = await asyncio.to_thread(
-                    _call_narrative_llm,
-                    up,
-                    system_prompt=DANCE_SYSTEM_PROMPT,
-                    max_tokens=200,
-                    temperature=0.85,
-                )
-                if not text:
-                    log.warning(
-                        "dance reflection skipped (no LLM text): device=%s dance=%s",
-                        did, dn,
-                    )
-                    return
-                _write_dance_record(
-                    device_id=did, dance=dn, reflection=text,
-                )
-                log.info(
-                    "dance reflection saved: device=%s dance=%s chars=%d",
-                    did, dn, len(text),
-                )
-
-            _spawn(
-                _fire(device_id, dance, user_prompt),
-                name="dance_reflector_fire",
-            )
-    except asyncio.CancelledError:
-        log.info("perception dance reflector cancelled")
-        raise
-    except Exception:
-        log.exception("perception dance reflector crashed")
-    finally:
-        _perception_unsubscribe(q)
-
-
-async def _perception_idle_photographer() -> None:
-    """Background task: while idle, fire `take_photo` every 3–5 min
-    (jittered) and write notable descriptions to the idle-perception
-    NDJSON. No servo motion, no LED change, no audio cue — silent
-    capture. Skips when state != idle, when listening, when a face
-    is present (room-view path handles those), and when the dispatch
-    relay returns False (xiaozhi-server admin route missing).
-
-    Skips on no-device-known and on dispatch failures rather than
-    crashing — a missed cycle just means the next 3–5 min retries.
-    """
-    log.info(
-        "perception idle photographer started "
-        "(sleep=%.0f–%.0fs jaccard=%.2f wait=%.0fs)",
-        IDLE_PHOTOGRAPHER_SLEEP_MIN_SEC,
-        IDLE_PHOTOGRAPHER_SLEEP_MAX_SEC,
-        IDLE_PHOTOGRAPHER_NOTABLE_JACCARD,
-        IDLE_PHOTOGRAPHER_RESULT_WAIT_SEC,
-    )
-    try:
-        from bridge.security_watch import dispatch_take_photo
-    except Exception:
-        log.exception("idle photographer: dispatch_take_photo import failed; aborting")
-        return
-    try:
-        while True:
-            sleep_s = random.uniform(
-                IDLE_PHOTOGRAPHER_SLEEP_MIN_SEC,
-                IDLE_PHOTOGRAPHER_SLEEP_MAX_SEC,
-            )
-            await asyncio.sleep(sleep_s)
-            device_id = _idle_photographer_pick_device()
-            if not device_id:
-                continue
-            pstate = _perception_state.get(device_id, {}) or {}
-            current_state = (pstate.get("current_state") or "idle").lower()
-            if current_state != "idle":
-                continue
-            if pstate.get("listening"):
-                continue
-            if pstate.get("face_present"):
-                continue
-            pre_ts = (
-                _vision_cache.get(device_id, {}).get("wall_ts") or 0.0
-            )
-            ok = await dispatch_take_photo(
-                device_id, question=IDLE_WANDER_PROMPT,
-            )
-            if not ok:
-                # Already logged once by dispatch_take_photo; don't
-                # spam the journal on repeated 404s.
-                continue
-            await asyncio.sleep(IDLE_PHOTOGRAPHER_RESULT_WAIT_SEC)
-            entry = _vision_cache.get(device_id) or {}
-            new_ts = entry.get("wall_ts") or 0.0
-            description = (entry.get("description") or "").strip()
-            if not description or new_ts <= pre_ts:
-                log.info(
-                    "idle photographer: device=%s no fresh description "
-                    "(new_ts=%.0f pre_ts=%.0f)",
-                    device_id, new_ts, pre_ts,
-                )
-                continue
-            last_text = pstate.get("last_idle_perception_text")
-            if not _is_notable_perception(description, last_text):
-                log.info(
-                    "idle photographer: device=%s skipped (not notable, "
-                    "len=%d)", device_id, len(description),
-                )
-                continue
-            pstate["last_idle_perception_text"] = description
-            pstate["last_idle_perception_t"] = time.time()
-            _perception_state[device_id] = pstate
-            _write_idle_perception_record(device_id, description)
-            log.info(
-                "idle photographer: device=%s saved perception (%d chars)",
-                device_id, len(description),
-            )
-    except asyncio.CancelledError:
-        log.info("perception idle photographer cancelled")
-        raise
-    except Exception:
-        log.exception("perception idle photographer crashed")
-
-
-def _compose_scene_synthesis(device_id: str) -> dict | None:
-    """Build the synthesis record dict for `device_id`, or None if there's
-    nothing fresh enough to be worth writing.
-
-    Pulls only from in-memory caches — _vision_cache / _audio_cache /
-    _perception_state. Caller decides whether to actually emit (cadence,
-    min-gap guard)."""
-    now_wall = time.time()
-    now_perf = perf_counter()
-    pstate = _perception_state.get(device_id) or {}
-
-    vision_entry = _vision_cache.get(device_id) or {}
-    has_vision = bool(
-        vision_entry
-        and now_perf - vision_entry.get("timestamp", 0.0)
-        <= VISION_CACHE_TTL_SEC
-    )
-    vision_desc = (
-        (vision_entry.get("description") or "").strip() if has_vision else ""
-    )
-
-    audio_entry = _audio_cache.get(device_id) or {}
-    has_audio = bool(
-        audio_entry
-        and now_perf - audio_entry.get("timestamp", 0.0)
-        <= AUDIO_CACHE_TTL_SEC
-    )
-    audio_desc = (
-        (audio_entry.get("description") or "").strip() if has_audio else ""
-    )
-
-    # Don't emit a record that has literally nothing in it. Face presence
-    # alone is too thin a signal to clutter the log.
-    if not has_vision and not has_audio:
-        return None
-
-    # Use the TTL-aware accessor so a flickering detector doesn't collapse
-    # `face_id` to None within ~1 s of identification.
-    face_id = get_fresh_face_id(device_id)
-    face_present = bool(pstate.get("face_present"))
-    if face_id:
-        face_phrase = f"{face_id} is in the room."
-    elif face_present:
-        face_phrase = "Someone is in the room."
-    else:
-        face_phrase = "No one is detected."
-
-    state = pstate.get("current_state") or "idle"
-
-    parts: list[str] = []
-    ts_label = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M")
-    parts.append(f"{ts_label} — {face_phrase}")
-    if vision_desc:
-        parts.append(f"Dotty sees {vision_desc.rstrip('.')}.")
-    if audio_desc:
-        parts.append(f"Heard: {audio_desc.rstrip('.')}.")
-    parts.append(f"State: {state}.")
-    text = " ".join(parts)
-
-    return {
-        "ts": datetime.now(LOCAL_TZ).isoformat(),
-        "ts_wall": now_wall,
-        "type": "scene_synthesis",
-        "device": device_id,
-        "text": text,
-        "face_id": face_id,
-        "state": state,
-        "has_vision": has_vision,
-        "has_audio_caption": has_audio,
-    }
-
-
-def _write_scene_synthesis_ndjson(record: dict) -> None:
-    """Append one record to the daily NDJSON ring file. Mirrors the
-    write_security_record pattern (mode 0600, JSON line, no media)."""
-    path = _scene_synthesis_log_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # Strip the wall ts before serialising — it's only used in-process
-        # for cache TTL bookkeeping. The isoformat `ts` is the canonical
-        # timestamp on disk.
-        on_disk = {k: v for k, v in record.items() if k != "ts_wall"}
-        line = json.dumps(on_disk, ensure_ascii=False) + "\n"
-        with open(path, "a", encoding="utf-8") as fh:
-            fh.write(line)
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass  # best-effort; first write sets the mode
-    except Exception:
-        log.warning("scene synthesis ndjson write failed", exc_info=True)
-
-
-def _maybe_emit_scene_synthesis(device_id: str, *, reason: str) -> None:
-    """Compose, throttle-check, cache, and write one synthesis record."""
-    record = _compose_scene_synthesis(device_id)
-    if record is None:
-        return
-    now_wall = record["ts_wall"]
-    last = _last_synthesis_ts.get(device_id, 0.0)
-    if now_wall - last < SCENE_SYNTHESIS_MIN_GAP_SEC:
-        return
-    _last_synthesis_ts[device_id] = now_wall
-    _scene_synthesis_cache[device_id] = {
-        "text": record["text"],
-        "ts_wall": now_wall,
-        "face_id": record["face_id"],
-        "state": record["state"],
-    }
-    _write_scene_synthesis_ndjson(record)
-    log.info(
-        "scene_synthesis device=%s reason=%s text=%s",
-        device_id, reason, record["text"][:160],
-    )
-    # Broadcast a synthetic event so the dashboard's SSE listener can
-    # nudge the Perception card to redraw immediately instead of
-    # waiting for the next 10 s polling tick. Same `dotty-refresh`
-    # plumbing the vision/face events use.
-    try:
-        _perception_broadcast({
-            "name": "scene_synthesised",
-            "device_id": device_id,
-            "ts": now_wall,
-            "data": {
-                "reason": reason,
-                "preview": record["text"][:80],
-            },
-        })
-    except Exception:
-        log.warning("scene synthesis broadcast failed", exc_info=True)
-
-
-async def _scene_synthesis_loop() -> None:
-    """Single task that drives both the time-based ticker and the
-    perception-event triggers. Subscribes to the perception bus and
-    races queue.get() against an interval timeout — whichever fires
-    first decides the next emit attempt. Failures never propagate."""
-    queue = _perception_subscribe()
-    log.info(
-        "perception scene-synthesis loop started "
-        "(interval=%.0fs min_gap=%.0fs)",
-        SCENE_SYNTHESIS_INTERVAL_SEC, SCENE_SYNTHESIS_MIN_GAP_SEC,
-    )
-    try:
-        while True:
-            reason = "tick"
-            try:
-                ev = await asyncio.wait_for(
-                    queue.get(), timeout=SCENE_SYNTHESIS_INTERVAL_SEC,
-                )
-            except asyncio.TimeoutError:
-                ev = None
-            if ev is not None:
-                name = ev.get("name") or ""
-                if name not in _SCENE_SYNTHESIS_TRIGGER_EVENTS:
-                    continue
-                if name == "state_changed":
-                    new_state = (ev.get("data") or {}).get("state")
-                    if new_state not in SCENE_SYNTHESIS_TRIGGER_STATES:
-                        continue
-                reason = name
-                device_ids = [ev.get("device_id")] if ev.get("device_id") else []
-            else:
-                device_ids = list(_perception_state.keys())
-            for did in device_ids:
-                if not did:
-                    continue
-                try:
-                    _maybe_emit_scene_synthesis(did, reason=reason)
-                except Exception:
-                    log.warning(
-                        "scene synthesis emit failed device=%s", did,
-                        exc_info=True,
-                    )
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        log.exception("scene synthesis loop crashed — exiting cleanly")
-    finally:
-        _perception_unsubscribe(queue)
+        _dashboard_event_listeners.remove(q)
+    except ValueError:
+        pass
 
 
 if _configure_dashboard is not None:
     async def _dashboard_set_kid_mode(enabled: bool) -> dict:
-        # kid_mode is guardrails only (content sandwich, denied tools, persona)
-        # — it does NOT pick the model. smart_mode owns model selection.
-        # Hot-reloaded in-process via `_apply_kid_mode`, so no daemon restart
-        # is needed; the LED pip flip is pushed live by `_dispatch_set_toggle`.
-        # Bridge-side flip (file + globals) runs unconditionally so guardrails
-        # take effect immediately. If the firmware MCP dispatch fails, return
-        # ok=False with an error so the dashboard surfaces the desync —
-        # otherwise the LED + on-device toggle pip would silently stay stale.
+        """Flip kid_mode bit + push the LED pip to the firmware. Guardrails
+        used to live in the bridge's voice path; post-#36 kid_mode is just
+        a stored bit + LED — the actual content-filtering lives in
+        custom-providers/textUtils.py and the persona prompts."""
         _write_kid_mode(enabled)
         _apply_kid_mode(enabled)
         ok = await _dispatch_set_toggle("", "kid_mode", enabled)
         if not ok:
             return {
                 "ok": False,
-                "error": "firmware did not acknowledge — LED + on-device toggle stale; bridge guardrails are flipped",
+                "error": "firmware did not acknowledge — LED + on-device toggle stale; bridge state is flipped",
             }
         return {"ok": True}
 
@@ -2278,11 +612,11 @@ if _configure_dashboard is not None:
         """Fire-and-forget POST to xiaozhi-server's admin abort route."""
         if not _XIAOZHI_HOST:
             return {"ok": False, "error": "XIAOZHI_HOST not set"}
-
         url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/abort"
         payload: dict = {}
         if device_id:
             payload["device_id"] = device_id
+
         def _post() -> dict:
             try:
                 r = requests.post(url, json=payload, timeout=3)
@@ -2293,19 +627,20 @@ if _configure_dashboard is not None:
                 return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
             except Exception as exc:
                 return {"ok": False, "error": str(exc)}
+
         return await asyncio.to_thread(_post)
 
     async def _dashboard_inject_to_device(*, text: str, device_id: str = "") -> dict:
-        """Fire-and-forget POST to xiaozhi-server's admin route so the
-        named (or first-available) device runs the text through its
-        normal post-ASR pipeline — intent detection, MCP tools, TTS."""
+        """POST to xiaozhi-server's /admin/inject-text so the named (or
+        first-available) device runs the text through its post-ASR
+        pipeline — intent detection, MCP tools, TTS."""
         if not _XIAOZHI_HOST:
             return {"ok": False, "error": "XIAOZHI_HOST not set"}
-
         url = f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/inject-text"
         payload = {"text": text}
         if device_id:
             payload["device_id"] = device_id
+
         def _post() -> dict:
             try:
                 r = requests.post(url, json=payload, timeout=3)
@@ -2316,48 +651,17 @@ if _configure_dashboard is not None:
                 return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
             except Exception as exc:
                 return {"ok": False, "error": str(exc)}
+
         return await asyncio.to_thread(_post)
-
-    def _dashboard_state_getter() -> str:
-        """Return Dotty's current State. With the perception bus moved to
-        dotty-behaviour in the #36 cutover, the bridge no longer tracks
-        per-device state — fall through to 'idle' so the dashboard renders
-        safely."""
-        return "idle"
-
-    def _dashboard_perception_state_getter() -> dict:
-        """Empty perception snapshot — dotty-behaviour owns the live bus
-        post-#36; bridge.py's in-memory state was ripped in #111."""
-        return {}
-
-    def _dashboard_perception_recent_getter(device_id: str, limit: int | None = None) -> list[dict]:
-        """Empty recent-events ring — dotty-behaviour owns the live bus."""
-        return []
-
-    def _dashboard_last_user_line_getter(device_id: str) -> dict | None:
-        """Empty — voice-turn transcripts now flow through dotty-pi."""
-        return None
-
-    def _dashboard_sound_balance_series() -> list[float]:
-        """Empty sound-balance series — sound_event handling moved with
-        the rest of the perception bus."""
-        return []
-
-    def _dashboard_vision_failures_last_hour() -> dict[str, int]:
-        """Empty vision-failure counters — VLM dispatch moved to dotty-behaviour
-        (commit 3 of the #111 rip moves the bridge-side mirrors)."""
-        return {}
 
     async def _dashboard_set_state(state: str) -> dict:
         ok = await _dispatch_set_state("", state)
         return {"ok": ok}
 
     async def _dashboard_set_smart_mode(enabled: bool) -> dict:
-        # smart_mode owns voice-daemon model selection. ON → SMART_MODEL,
-        # OFF → DEFAULT_MODEL. Under DOTTY_VOICE_PROVIDER=tier1slim, the swap
-        # is a sub-second hot-mutation of the live Tier1Slim provider via
-        # the xiaozhi admin endpoint (no restart). Otherwise we fall through
-        # to the legacy ZeroClaw config.toml rewrite + daemon restart.
+        """Flip smart_mode + push the LED pip + hot-swap the live
+        Tier1Slim provider's model via /xiaozhi/admin/set-tier1slim-model.
+        The pre-#36 ZeroClaw config.toml-rewrite path is gone."""
         _write_smart_mode(enabled)
         dispatch_ok = await _dispatch_set_toggle("", "smart_mode", enabled)
         swap_err: str | None = None
@@ -2367,16 +671,11 @@ if _configure_dashboard is not None:
             if not ok:
                 swap_err = f"tier1slim hot-swap to {t_model!r} failed"
         else:
-            target_model = SMART_MODEL if enabled else DEFAULT_MODEL
-            try:
-                _apply_model_swap("voice", target_model)
-                _admin_schedule_restart(_ADMIN_DAEMON_CFG["voice"][1])
-            except Exception as exc:
-                logging.getLogger("zeroclaw-bridge").exception(
-                    "smart_mode flip succeeded but model swap/restart to %r failed",
-                    target_model,
-                )
-                swap_err = f"model swap/restart to {target_model!r} failed: {exc}"
+            log.warning(
+                "smart_mode flip: DOTTY_VOICE_PROVIDER=%r is not 'tier1slim' — "
+                "no model swap performed",
+                DOTTY_VOICE_PROVIDER,
+            )
         errors: list[str] = []
         if not dispatch_ok:
             errors.append("firmware did not acknowledge set_toggle (LED pip stale)")
@@ -2385,14 +684,6 @@ if _configure_dashboard is not None:
         if errors:
             return {"ok": False, "error": "; ".join(errors)}
         return {"ok": True}
-
-    def _identity_display_name(identity: str) -> str | None:
-        """Resolve a household person_id to its display_name. With the
-        HouseholdRegistry loader moved to dotty-behaviour in #111, this
-        returns None on the bridge side — name resolution happens in
-        dotty-behaviour's consumers before the event lands in the
-        dashboard pipe (currently unwired)."""
-        return None
 
     async def _dashboard_memory_records() -> list[dict]:
         """All per-person memory rows (approved + pending) for /ui/memory."""
@@ -2407,6 +698,9 @@ if _configure_dashboard is not None:
         return {"ok": ok}
 
     _configure_dashboard(
+        # send_message is unused by dashboard.py post-#111 (voice turns
+        # now go through dotty-pi); kept None so configure() stays
+        # idempotent if the dashboard module gains a reference later.
         send_message=None,
         vision_cache=_vision_cache,
         audio_cache=_audio_cache,
@@ -2434,59 +728,27 @@ if _configure_dashboard is not None:
 
 
 # ---------------------------------------------------------------------------
-# /admin/* — runtime configuration mutations. Localhost-only so only same-host
-# callers can hit them. Useful when an external agent (e.g. a separate ZeroClaw
-# daemon or operator script) needs to flip kid-mode, swap models, edit a
-# persona file, or amend the MCP tool allowlist without an SSH session.
-#
-# Paths and systemd unit names are env-configurable (defaults match the
-# documented ZeroClaw host layout):
-#   ZEROCLAW_VOICE_CFG       - voice daemon config.toml
-#   ZEROCLAW_VOICE_UNIT      - voice daemon's systemd unit (the bridge)
-#   ZEROCLAW_DISCORD_CFG     - optional secondary daemon config.toml
-#   ZEROCLAW_DISCORD_UNIT    - optional secondary daemon's systemd unit
-#   ZEROCLAW_WORKSPACE       - workspace dir holding SOUL.md / IDENTITY.md / ...
+# /admin/* — localhost-only runtime configuration mutations
 # ---------------------------------------------------------------------------
-from fastapi import APIRouter, Depends, HTTPException
+# Editable from same-host operator scripts. The dashboard uses the
+# bridge.dashboard /ui/actions/* routes (which call into _dashboard_*
+# above), not these — these are the back-channel for ad-hoc CLI flips.
+# Paths/units are env-configurable; defaults are placeholders since the
+# zeroclaw daemon they used to point at is gone.
 
 _ADMIN_ALLOWED_PERSONA_FILES = {
     "SOUL.md", "IDENTITY.md", "USER.md", "AGENTS.md",
     "TOOLS.md", "BOOTSTRAP.md", "HEARTBEAT.md", "MEMORY.md",
 }
 _ADMIN_WORKSPACE_DIR = Path(
-    os.environ.get("ZEROCLAW_WORKSPACE", "/root/.zeroclaw/workspace")
+    os.environ.get("DOTTY_PERSONA_DIR", os.environ.get("ZEROCLAW_WORKSPACE", "/root/.zeroclaw/workspace"))
 )
-_ADMIN_DAEMON_CFG = {
-    "voice": (
-        os.environ.get("ZEROCLAW_VOICE_CFG", "/root/.zeroclaw/config.toml"),
-        os.environ.get("ZEROCLAW_VOICE_UNIT", "zeroclaw-bridge"),
-    ),
-    "discord": (
-        os.environ.get("ZEROCLAW_DISCORD_CFG", "/root/.zeroclaw-discord/config.toml"),
-        os.environ.get("ZEROCLAW_DISCORD_UNIT", "zeroclaw-discord"),
-    ),
-}
 
 
 def _admin_require_localhost(request: Request) -> None:
     host = request.client.host if request.client else ""
     if host not in ("127.0.0.1", "::1", "localhost"):
         raise HTTPException(status_code=403, detail="admin endpoints are localhost-only")
-
-
-def _admin_schedule_restart(unit: str, delay: float = 2.0) -> None:
-    """Spawn detached `sleep N && systemctl restart UNIT` so the HTTP
-    response can flush before the bridge SIGTERMs itself. start_new_session
-    detaches the child from the parent's process group so it survives the
-    SIGTERM cascade."""
-    import subprocess
-    subprocess.Popen(
-        ["bash", "-c", f"sleep {delay} && systemctl restart {unit}"],
-        start_new_session=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
 
 
 class _AdminKidModeIn(BaseModel):
@@ -2509,11 +771,6 @@ class _AdminPersonaIn(BaseModel):
     content: str
 
 
-class _AdminModelIn(BaseModel):
-    daemon: str
-    model: str
-
-
 class _AdminSafetyIn(BaseModel):
     action: str
     tool: str
@@ -2526,10 +783,6 @@ _admin_router = APIRouter(
 
 @_admin_router.post("/kid-mode")
 async def _admin_kid_mode(payload: _AdminKidModeIn) -> dict:
-    # kid_mode is guardrails only (content sandwich, denied tools, persona)
-    # — model selection lives on smart_mode. Hot-reloaded in-process via
-    # `_apply_kid_mode` so no daemon restart is needed; the firmware pip
-    # update is pushed live by `_dispatch_set_toggle`.
     _write_kid_mode(payload.enabled)
     _apply_kid_mode(payload.enabled)
     pushed = await _dispatch_set_toggle(
@@ -2544,13 +797,8 @@ async def _admin_kid_mode(payload: _AdminKidModeIn) -> dict:
 
 @_admin_router.post("/smart-mode")
 async def _admin_smart_mode(payload: _AdminSmartModeIn) -> dict:
-    """Flip smart_mode toggle. Owns voice-daemon model selection: ON →
-    SMART_MODEL (claude-sonnet-4-6), OFF → DEFAULT_MODEL (local). Under
-    DOTTY_VOICE_PROVIDER=tier1slim, this is a sub-second hot-mutation of
-    the live Tier1Slim provider in xiaozhi-server via /xiaozhi/admin/
-    set-tier1slim-model — no restart. Otherwise the legacy ZeroClaw
-    config.toml rewrite + systemctl restart applies. Pip update is pushed
-    via /xiaozhi/admin/set-toggle so it lands live in either case."""
+    """Flip smart_mode + push the LED pip + hot-swap the live Tier1Slim
+    provider. Pre-#36 zeroclaw config.toml-rewrite path is gone."""
     _write_smart_mode(payload.enabled)
     pushed = await _dispatch_set_toggle(
         payload.device_id, "smart_mode", payload.enabled,
@@ -2562,21 +810,17 @@ async def _admin_smart_mode(payload: _AdminSmartModeIn) -> dict:
             "ok": True, "enabled": payload.enabled, "device_pushed": pushed,
             "model": t_model, "swap_ok": swap_ok, "provider": "tier1slim",
         }
-    target_model = SMART_MODEL if payload.enabled else DEFAULT_MODEL
-    cfg_path, unit = _apply_model_swap("voice", target_model)
-    _admin_schedule_restart(unit)
     return {
         "ok": True, "enabled": payload.enabled, "device_pushed": pushed,
-        "model": target_model, "config": cfg_path, "restart": unit,
+        "provider": DOTTY_VOICE_PROVIDER,
+        "warning": "DOTTY_VOICE_PROVIDER is not 'tier1slim' — no model swap performed",
     }
 
 
 @_admin_router.post("/state")
 async def _admin_state(payload: _AdminStateIn) -> dict:
-    """Phase 4 — dashboard / external trigger to set Dotty's high-level state.
-    Valid: idle / talk / story_time / security / sleep / dance. Pushes
-    self.robot.set_state MCP via the xiaozhi-server relay; the firmware
-    StateManager handles the transition. No daemon restart."""
+    """Dashboard / external trigger to set Dotty's high-level state.
+    Valid: idle / talk / story_time / security / sleep / dance."""
     valid = ("idle", "talk", "story_time", "security", "sleep", "dance")
     if payload.state not in valid:
         raise HTTPException(
@@ -2589,6 +833,12 @@ async def _admin_state(payload: _AdminStateIn) -> dict:
 
 @_admin_router.post("/persona")
 async def _admin_persona(payload: _AdminPersonaIn) -> dict:
+    """Write a persona-file under the configured workspace dir. Edits
+    used to take effect on the next zeroclaw restart; with the voice
+    path moved to dotty-pi, the receiving end depends on
+    DOTTY_PERSONA_DIR being aimed at a dir dotty-pi reads. Kept on the
+    bridge so external operator scripts have a single localhost-only
+    surface for hot-editing persona files."""
     if payload.file not in _ADMIN_ALLOWED_PERSONA_FILES:
         raise HTTPException(
             status_code=400,
@@ -2606,218 +856,13 @@ async def _admin_persona(payload: _AdminPersonaIn) -> dict:
     }
 
 
-def _read_voice_model_from_cfg() -> str | None:
-    """Return the current `model = "..."` value of the voice daemon's
-    active provider profile, or None if the file/section is missing.
-
-    In multi-profile mode (VOICE_LOCAL_PROFILE_KEY set), the active
-    profile is whichever `[providers].fallback` points at. In legacy
-    mode, it's the only `custom:URL` section."""
-    cfg_path, _ = _ADMIN_DAEMON_CFG["voice"]
-    cfg_p = Path(cfg_path)
-    if not cfg_p.exists():
-        return None
-    try:
-        src = cfg_p.read_text()
-    except OSError:
-        return None
-
-    if VOICE_LOCAL_PROFILE_KEY:
-        fb = re.search(r'^fallback = "([^"]+)"$', src, flags=re.MULTILINE)
-        if fb is None:
-            return None
-        active_key = fb.group(1)
-        section_pat = f'[providers.models."{active_key}"]'
-        sec_start = src.find(section_pat)
-        if sec_start < 0:
-            return None
-    else:
-        section_re = re.compile(r'\[providers\.models\."custom:[^"]+"\]')
-        m = section_re.search(src)
-        if not m:
-            return None
-        sec_start = m.start()
-    sec_end = src.find("\n[", sec_start + 1)
-    if sec_end == -1:
-        sec_end = len(src)
-    section = src[sec_start:sec_end]
-    cur = re.search(r'^model = "([^"]+)"$', section, flags=re.MULTILINE)
-    return cur.group(1) if cur else None
-
-
-def _reconcile_voice_model_at_startup() -> None:
-    """Bridge owns the source of truth for which model the voice daemon runs
-    on (smart_mode state file → DEFAULT_MODEL or SMART_MODEL). On startup,
-    push the desired state at the live provider so the next turn lands on
-    the right model.
-
-    Under DOTTY_VOICE_PROVIDER=tier1slim, fire one POST at the xiaozhi
-    admin endpoint — covers both bridge-restart-after-flip and
-    xiaozhi-restart-which-reverted-to-yaml cases. Best-effort: failures are
-    logged but don't block startup, and the next dashboard flip will
-    re-attempt anyway. Otherwise (legacy ZeroClaw path), if config.toml
-    drifts, rewrite + schedule a daemon restart."""
-    smart = _read_smart_mode()
-    if DOTTY_VOICE_PROVIDER == "tier1slim":
-        t_model, t_url, t_api = _tier1slim_target_for_smart_mode(smart)
-
-        async def _push() -> None:
-            ok = await _dispatch_set_tier1slim_model(t_model, t_url, t_api)
-            if ok:
-                log.info(
-                    "startup tier1slim reconcile: pushed model=%r (smart_mode=%s)",
-                    t_model, smart,
-                )
-            else:
-                log.warning(
-                    "startup tier1slim reconcile failed: model=%r (smart_mode=%s) "
-                    "— next dashboard flip will retry",
-                    t_model, smart,
-                )
-
-        try:
-            asyncio.get_running_loop().create_task(_push())
-        except RuntimeError:
-            # Called outside an event loop (early lifespan path) — schedule
-            # via run_until_complete fallback. asyncio.run isn't safe here
-            # because lifespan owns the loop; just log and move on, the
-            # first smart-mode flip will fix it.
-            log.warning(
-                "startup tier1slim reconcile: no running loop, deferring to first flip",
-            )
-        return
-
-    target = SMART_MODEL if smart else DEFAULT_MODEL
-    current = _read_voice_model_from_cfg()
-    if current is None:
-        log.warning(
-            "startup model reconcile: voice config.toml unreadable — skipping",
-        )
-        return
-    if current == target:
-        log.info(
-            "startup model reconcile: voice daemon already on %r (smart_mode=%s)",
-            target, smart,
-        )
-        return
-    try:
-        _, unit = _apply_model_swap("voice", target)
-        _admin_schedule_restart(unit)
-        log.info(
-            "startup model reconcile: voice daemon %r -> %r (smart_mode=%s, restart scheduled)",
-            current, target, smart,
-        )
-    except Exception:
-        log.exception("startup model reconcile failed")
-
-
-def _voice_profile_for_model(model: str) -> str | None:
-    """Map a target model to the voice config profile that should own it.
-    Returns None when multi-profile mode is not configured (caller falls
-    back to legacy single-section behavior).
-
-    In multi-profile mode, DEFAULT_MODEL routes to the local profile and
-    everything else (including SMART_MODEL) routes to the cloud profile.
-    Cloud is the safe default for unknown IDs since cloud providers
-    (OpenRouter) accept arbitrary model strings; Ollama would 404."""
-    if not VOICE_LOCAL_PROFILE_KEY:
-        return None
-    if model == DEFAULT_MODEL:
-        return VOICE_LOCAL_PROFILE_KEY
-    return VOICE_CLOUD_PROFILE_KEY
-
-
-def _apply_model_swap(daemon: str, model: str) -> tuple[str, str]:
-    """Rewrite the `model = "..."` line inside the appropriate provider
-    section of the named daemon's config.toml. Returns (cfg_path, unit).
-    Caller is responsible for scheduling the systemctl restart.
-
-    Voice daemon supports multi-profile mode: when VOICE_LOCAL_PROFILE_KEY
-    is set, the function picks the right `[providers.models.<KEY>]`
-    section by model name AND repoints `[providers].fallback` at it.
-    Without the env var, falls back to legacy single-section behavior."""
-    if daemon not in _ADMIN_DAEMON_CFG:
-        raise HTTPException(
-            status_code=400,
-            detail=f"daemon must be one of {sorted(_ADMIN_DAEMON_CFG)}",
-        )
-    if not re.fullmatch(r"[A-Za-z0-9./:_-]+", model):
-        raise HTTPException(status_code=400, detail="model id has invalid chars")
-    cfg_path, unit = _ADMIN_DAEMON_CFG[daemon]
-    cfg_p = Path(cfg_path)
-    if not cfg_p.exists():
-        raise HTTPException(status_code=404, detail=f"config not found: {cfg_path}")
-    src = cfg_p.read_text()
-
-    profile_key = _voice_profile_for_model(model) if daemon == "voice" else None
-    if profile_key:
-        section_pat = f'[providers.models."{profile_key}"]'
-        sec_start = src.find(section_pat)
-        if sec_start < 0:
-            raise HTTPException(
-                status_code=500,
-                detail=f"profile section not found: {section_pat}",
-            )
-        sec_end = src.find("\n[", sec_start + 1)
-        if sec_end == -1:
-            sec_end = len(src)
-        section = src[sec_start:sec_end]
-        new_section, n = re.subn(
-            r'^model = ".*"$',
-            f'model = "{model}"',
-            section, count=1, flags=re.MULTILINE,
-        )
-        if n == 0:
-            raise HTTPException(
-                status_code=500,
-                detail=f"model line not found in profile {profile_key!r}",
-            )
-        src = src[:sec_start] + new_section + src[sec_end:]
-        src, fb_n = re.subn(
-            r'^fallback = "[^"]+"$',
-            f'fallback = "{profile_key}"',
-            src, count=1, flags=re.MULTILINE,
-        )
-        if fb_n == 0:
-            raise HTTPException(
-                status_code=500,
-                detail="[providers].fallback line not found",
-            )
-        cfg_p.write_text(src)
-        return (cfg_path, unit)
-
-    section_re = re.compile(r'\[providers\.models\."custom:[^"]+"\]')
-    m = section_re.search(src)
-    if not m:
-        raise HTTPException(status_code=500, detail="provider section not found")
-    sec_start = m.start()
-    sec_end = src.find("\n[", sec_start + 1)
-    if sec_end == -1:
-        sec_end = len(src)
-    section = src[sec_start:sec_end]
-    new_section, n = re.subn(
-        r'^model = ".*"$',
-        f'model = "{model}"',
-        section, count=1, flags=re.MULTILINE,
-    )
-    if n == 0:
-        raise HTTPException(status_code=500, detail="model line not found")
-    cfg_p.write_text(src[:sec_start] + new_section + src[sec_end:])
-    return (cfg_path, unit)
-
-
-@_admin_router.post("/model")
-async def _admin_model(payload: _AdminModelIn) -> dict:
-    cfg_path, unit = _apply_model_swap(payload.daemon, payload.model)
-    _admin_schedule_restart(unit)
-    return {
-        "ok": True, "daemon": payload.daemon, "model": payload.model,
-        "config": cfg_path, "restart": unit,
-    }
-
-
 @_admin_router.post("/safety")
 async def _admin_safety(payload: _AdminSafetyIn) -> dict:
+    """Add / remove a tool from MCP_TOOL_ALLOWLIST. Edits the literal in
+    place between the ADMIN_ALLOWLIST markers so the change persists
+    across restarts. Note: the voice/MCP path that read this list lived
+    in ZeroClaw and is gone — this endpoint is now a static-edit surface
+    rather than a live policy mutation."""
     if payload.action not in ("add", "remove"):
         raise HTTPException(status_code=400, detail="action must be 'add' or 'remove'")
     if not re.fullmatch(r"[A-Za-z0-9._]+", payload.tool):
@@ -2856,13 +901,11 @@ async def _admin_safety(payload: _AdminSafetyIn) -> dict:
         new_path.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail=f"py_compile failed: {exc}")
     new_path.replace(self_path)
-    _admin_schedule_restart(_ADMIN_DAEMON_CFG["voice"][1])
     return {
         "ok": True, "action": payload.action, "tool": payload.tool,
         "size_before": before_size, "size_after": len(new_items),
-        "restart": _ADMIN_DAEMON_CFG["voice"][1],
+        "note": "bridge.py allowlist updated; restart bridge to pick up the new value in-process",
     }
 
 
 app.include_router(_admin_router)
-
