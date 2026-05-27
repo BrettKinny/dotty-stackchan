@@ -8,6 +8,9 @@ venv/
 
 # Claude Code session artifacts (lock files, local settings)
 .claude/
+# …but custom slash commands are project tools — commit them
+!.claude/commands/
+!.claude/commands/**
 
 # Secrets / credentials — never commit
 .env
