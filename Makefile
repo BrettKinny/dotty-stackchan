@@ -18,7 +18,7 @@ BOLD   := \033[1m
 RESET  := \033[0m
 
 # ── Targets ──────────────────────────────────────────────────────────
-.PHONY: help setup fetch-models doctor audit up down logs status voice-list voice-install sbom verify-firmware test lint check bench-video _preflight-compose _preflight-rendered
+.PHONY: help setup fetch-models doctor audit up down logs status voice-list voice-install sbom verify-firmware test lint check _preflight-compose _preflight-rendered
 
 # ─────────────────────────────────────────────────────────────────────
 # _preflight-compose — fail fast if Docker Compose v2 plugin is missing
@@ -364,12 +364,6 @@ doctor: ## Run health checks on config, models, and services
 	 echo -e "$(BOLD)Results: $$PASS passed, $$FAIL failed.$(RESET)"; \
 	 echo ""; \
 	 if [ $$FAIL -gt 0 ]; then exit 1; fi
-
-# ─────────────────────────────────────────────────────────────────────
-# bench-video — close the video loop in bench testing
-# ─────────────────────────────────────────────────────────────────────
-bench-video: ## Tail logs + record test video → Gemini visual analysis (DOTTY_HOST required)
-	@bash scripts/bench-video.sh $(filter-out $@,$(MAKECMDGOALS))
 
 # ─────────────────────────────────────────────────────────────────────
 # audit — verify "local except LLM" network claim
