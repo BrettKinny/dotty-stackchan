@@ -30,10 +30,11 @@ Symptom-first lookup table covering common and obscure failure modes. Pair with 
 **Cause:** The LLM (Qwen3) is ignoring the system prompt's language constraint. This is a known weakness — Qwen3 tends to leak Chinese on long-context English-only prompts, especially mid-session.
 
 **Fix:**
-1. Confirm the bridge's per-turn sandwich enforcement is active. Static system prompts alone are not enough — the bridge must wrap every turn with explicit English+emoji instructions. This is the `_build_sandwich_prompt` logic in `bridge.py`.
-2. Check that the bridge is actually being called (not bypassed). Tail the bridge logs while testing.
-3. If the leak happens on the first turn, check the persona file (`personas/dotty_voice.md`) for any non-English text.
-4. As a last resort, the ASR may be mis-transcribing English as another language. Check the `ASR.FunASR.language` key in `data/.config.yaml` is set to `en` (not `auto`).
+1. Confirm the per-turn sandwich enforcement is active on the live `PiVoiceLLM` path. Static system prompts alone are not enough — every turn is wrapped with an explicit English+emoji suffix. This is `build_turn_suffix()` in `custom-providers/textUtils.py`, applied by `custom-providers/pi_voice/pi_voice.py` (`_wrap_with_sandwich`). (The old `bridge.py::_build_sandwich_prompt` was part of the retired ZeroClaw bridge and no longer exists — the bridge is not in the voice path.)
+2. Confirm the persona prompt reinforces English-only: check `personas/dotty_voice.md` (loaded by the `dotty-pi` agent) and the top-level `prompt:` block in `data/.config.yaml`.
+3. Watch the actual voice path while testing — tail the `dotty-pi` container logs (`docker logs -f dotty-pi`) and the xiaozhi-server logs, not the bridge.
+4. If the leak happens on the first turn, check the persona file (`personas/dotty_voice.md`) for any non-English text.
+5. As a last resort, the ASR may be mis-transcribing English as another language. Check the `ASR.FunASR.language` key in `data/.config.yaml` is set to `en` (not `auto`).
 
 ---
 
