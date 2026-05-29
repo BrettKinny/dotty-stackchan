@@ -845,19 +845,16 @@ async def vision_large(request: Request) -> Any:
     return templates.TemplateResponse(request, "vision_large.html", ctx)
 
 
-# Voice-daemon model selection is owned by smart_mode. Mirrors bridge.py
-# defaults so the dashboard reflects what the bridge actually loaded.
+# Smart-mode model-swap is v2 scope (docs/cutover-behaviour.md). These names
+# describe the *intended* default/smart models for when the swap is wired;
+# the Tier1Slim rollback provider that used to perform a live hot-swap was
+# removed in the 2026-05-29 alignment pass, so today smart_mode is a
+# toggle-only control (LED pip + flag) and the voice model is always the
+# local PiVoiceLLM brain.
 DEFAULT_MODEL_NAME = os.environ.get(
     "DOTTY_DEFAULT_MODEL", "mistralai/mistral-small-3.2-24b-instruct",
 )
 SMART_MODEL_NAME = os.environ.get("SMART_MODEL", "anthropic/claude-sonnet-4-6")
-# smart_mode's model-swap only fires on the tier1slim rollback provider
-# (bridge.py::_dashboard_set_smart_mode). On the default PiVoiceLLM path
-# the swap is v2 scope (docs/cutover-behaviour.md) — toggling smart_mode
-# only lights the robot's smart-mode LED pip + persists the flag. Mirror
-# bridge.py's env so the card describes what actually happens.
-VOICE_PROVIDER = os.environ.get("DOTTY_VOICE_PROVIDER", "pivoice")
-MODEL_SWAP_ACTIVE = VOICE_PROVIDER == "tier1slim"
 
 
 def _short_model(name: str) -> str:
@@ -865,6 +862,15 @@ def _short_model(name: str) -> str:
     if not name:
         return ""
     return name.split("/", 1)[1] if "/" in name else name
+
+
+def _host_detail_llm_label(smart_on: bool | None = None) -> str:
+    """The 'LLM' row for host-detail modals. The live voice path is
+    PiVoiceLLM (the brain runs in the dotty-pi container). smart_mode does
+    NOT swap the backend model — that is v2 scope (docs/cutover-behaviour.md);
+    the Tier1Slim rollback provider that used to do the swap was removed in
+    the 2026-05-29 alignment pass. Mirrors smart_mode.html."""
+    return "PiVoiceLLM · model-swap pending (v2)"
 
 
 @router.get("/kid-mode", response_class=HTMLResponse, include_in_schema=False)
@@ -1114,7 +1120,10 @@ async def smart_mode_partial(request: Request) -> Any:
         {"enabled": enabled, "available": getter is not None,
          "smart_model": _short_model(SMART_MODEL_NAME),
          "default_model": _short_model(DEFAULT_MODEL_NAME),
-         "model_swap_active": MODEL_SWAP_ACTIVE},
+         # Tier1Slim (the only provider that hot-swapped the voice model)
+         # was removed in the 2026-05-29 alignment pass. smart_mode is now
+         # toggle-only on the live PiVoiceLLM path; model-swap is v2 scope.
+         "model_swap_active": False},
     )
 
 
@@ -2187,19 +2196,14 @@ async def host_detail(request: Request, slug: str) -> Any:
         cpu_c = _cpu_temp_c()
         mem = _read_memory_mb()
         disk = _disk_usage_root()
-        # Two orthogonal toggles + one active LLM. smart_mode owns model
-        # selection (off → DEFAULT_MODEL, on → SMART_MODEL); kid_mode is
-        # guardrails only.
+        # Two orthogonal toggles + one active LLM. kid_mode is guardrails
+        # only; the LLM row is honest about whether a model swap actually
+        # happens (see _host_detail_llm_label).
         kid_getter = _state.get("kid_mode_getter")
         smart_getter = _state.get("smart_mode_getter")
         kid_on = bool(kid_getter()) if kid_getter else None
         smart_on = bool(smart_getter()) if smart_getter else None
-        if smart_on is True:
-            active_llm = _short_model(SMART_MODEL_NAME) or "(unset)"
-        elif smart_on is False:
-            active_llm = _short_model(DEFAULT_MODEL_NAME) or "(unset)"
-        else:
-            active_llm = "unknown"
+        active_llm = _host_detail_llm_label(smart_on)
         facts = [
             ("Device",     "Raspberry Pi"),
             ("Status",     "online"),
@@ -2234,15 +2238,11 @@ async def host_detail(request: Request, slug: str) -> Any:
             _tcp_reachable(XIAOZHI_HOST, XIAOZHI_WS_PORT),
         )
         n = await _xiaozhi_device_count()
-        # smart_mode owns model selection; kid_mode is guardrails only.
+        # The LLM row is honest about whether a model swap actually
+        # happens (see _host_detail_llm_label); kid_mode is guardrails only.
         smart_getter = _state.get("smart_mode_getter")
         smart_on = bool(smart_getter()) if smart_getter else None
-        if smart_on is True:
-            current_llm = _short_model(SMART_MODEL_NAME) or "(unset)"
-        elif smart_on is False:
-            current_llm = _short_model(DEFAULT_MODEL_NAME) or "(unset)"
-        else:
-            current_llm = "unknown"
+        current_llm = _host_detail_llm_label(smart_on)
         # Voice-channel state — derived from the firmware state getter
         # the dashboard already reads. talk / story_time mean active.
         st_getter = _state.get("state_getter")

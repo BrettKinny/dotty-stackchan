@@ -1,9 +1,9 @@
 """PiVoiceLLM — xiaozhi-server LLM provider that routes voice turns
 through the dotty-pi container instead of bridge.py.
 
-The Tier1Slim provider parses OpenAI-style `tool_calls` and dispatches
-each one xiaozhi-side. PiVoiceLLM doesn't do that: pi itself owns the
-agent loop and the tool dispatch happens inside the dotty-pi-ext
+Unlike a plain OpenAI-style provider that parses `tool_calls` and
+dispatches each one xiaozhi-side, PiVoiceLLM doesn't do that: pi itself
+owns the agent loop and the tool dispatch happens inside the dotty-pi-ext
 extension. From xiaozhi's perspective this provider is a much simpler
 shape — translate the dialogue into a single pi prompt, stream pi's
 user-visible text chunks back to TTS, done.
@@ -53,8 +53,8 @@ except ImportError:  # pragma: no cover — only on dev workstation
         return logging.getLogger("pi_voice")
 
 
-# textUtils.build_turn_suffix is the source of truth — bridge.py,
-# tier1_slim, and zeroclaw all import from it via the xiaozhi-container
+# textUtils.build_turn_suffix is the source of truth — pi_voice and
+# openai_compat import from it via the xiaozhi-container
 # bind mount at `core.utils.textUtils`. On the dev workstation the file
 # lives at `custom-providers/textUtils.py` (the dash in the dir name
 # makes it unimportable as a package), so we fall back to loading it
@@ -92,8 +92,8 @@ def _last_user_text(dialogue: list[dict]) -> str:
 
 
 def _wrap_with_sandwich(user_text: str, kid_mode: bool) -> str:
-    """Append the HARD CONSTRAINTS suffix to the user's text. Same
-    contract as Tier1Slim's per-turn suffix injection — emoji-prefix
+    """Append the HARD CONSTRAINTS suffix to the user's text via the shared
+    textUtils.build_turn_suffix contract — emoji-prefix
     rule, English-only, length caps, kid-mode topic filtering. Without
     this Dotty drifts into Chinese, multi-paragraph replies, and (in
     kid_mode) unsafe topics, since qwen3.5:4b's base behaviour doesn't
@@ -108,9 +108,9 @@ class LLMProvider(LLMProviderBase):
         self._container = config.get("container_name") or os.environ.get(
             "DOTTY_PI_CONTAINER", "dotty-pi",
         )
-        # KID_MODE is a process-start snapshot — same convention as
-        # tier1_slim. Toggling kid_mode requires a container restart,
-        # which already happens via the bridge's existing restart path.
+        # KID_MODE is a process-start snapshot. Toggling kid_mode requires
+        # a container restart, which already happens via the bridge's
+        # existing restart path.
         self._kid_mode = _read_kid_mode()
         # `client` is injected by tests; production passes None to get
         # the env-configured default.

@@ -1,6 +1,7 @@
 """pi_voice — xiaozhi-server custom LLM provider that routes voice turns
-through the dotty-pi container per #36. Replaces zeroclaw / tier1_slim
-once the cutover lands.
+through the dotty-pi container per #36. It is the live default voice path:
+it replaced the retired ZeroClaw voice provider in the #36 cutover, and the
+Tier1Slim two-tier provider was removed in the 2026-05-29 alignment pass.
 
 Public surface:
 - LLMProvider — implements xiaozhi's LLMProviderBase response() generator.

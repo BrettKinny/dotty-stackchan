@@ -15,7 +15,6 @@ selected_module:
   VAD: SileroVAD
   ASR: <ASR_MODULE>       # WhisperLocal (CUDA) or FunASR (CPU fallback)
   LLM: PiVoiceLLM         # default: agent loop hosted in the dotty-pi container (requires the sibling dotty-pi service)
-  # LLM: Tier1Slim         # <-- alternate: small/fast LLM, direct to llama-swap (rollback path; tool escalation degraded — see docs/tier1slim.md)
   # LLM: OpenAICompat      # <-- alternate: direct OpenAI-compatible LLM
   TTS: LocalPiper
   Memory: nomem
@@ -111,23 +110,6 @@ LLM:
   PiVoiceLLM:
     type: pi_voice
     container_name: dotty-pi
-
-  # Tier 1 slim — direct to llama-swap or any OpenAI-compatible endpoint with
-  # OpenAI function-calling-style tool escalation. A rollback path from
-  # PiVoiceLLM: plain conversational turns work directly against llama-swap.
-  # Tool escalation POSTs to BRIDGE_URL /api/voice/escalate — but that path
-  # ultimately depended on ZeroClaw, retired 2026-05-19, so tool calls are
-  # currently non-functional on this provider. See docs/tier1slim.md and
-  # custom-providers/tier1_slim/tier1_slim.py.
-  Tier1Slim:
-    type: tier1_slim
-    url: <LLAMA_SWAP_URL>      # e.g. http://192.168.1.67:8080/v1
-    api_key: <LLAMA_SWAP_KEY>  # any string; llama-swap doesn't enforce auth
-    model: <LLAMA_SWAP_MODEL>  # e.g. qwen3.5:4b
-    persona_file: personas/dotty_voice.md
-    timeout: 60
-    max_tokens: 256
-    temperature: 0.7
 
   # Generic OpenAI-compatible provider — works with OpenAI, OpenRouter,
   # Ollama (http://host:11434/v1), LM Studio, vLLM, etc.
