@@ -277,7 +277,7 @@ Server-side HTTP is split across two services. All payloads are JSON unless note
 }
 ```
 
-Response: `{"ok": true}`. dotty-behaviour broadcasts the event to all perception listeners and updates per-device state. See [architecture.md](./architecture.md#perception-event-bus) for the 9 ambient consumers.
+Response: `{"ok": true}`. dotty-behaviour broadcasts the event to all perception listeners and updates per-device state (`dotty-behaviour/perception/state.py`). See [architecture.md](./architecture.md#perception-event-bus) for the 11 consumer classes (the running set is config-gated).
 
 ### bridge.py — dashboard and admin (:8081)
 

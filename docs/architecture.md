@@ -65,7 +65,7 @@ Solid arrows are per-turn data flow; dotted arrows are cloud / conditional. All 
 | **xiaozhi-esp32-server** | Docker host | VAD → ASR → LLM (proxy) → TTS pipeline, emotion dispatch, OTA, admin surface | Docker container |
 | **PiVoiceLLM custom provider** | Docker host (inside xiaozhi container) | Default LLM provider — translates each voice turn into a pi RPC request, streams TTS-bound text back | Python, mounted via volume |
 | **dotty-pi** | Docker host | The voice-tool brain — pi coding agent with the `dotty-pi-ext` extension; owns the agent loop and tool dispatch | Docker container (`dotty-pi`) |
-| **dotty-behaviour** | Docker host | Perception event bus, 9 ambient consumers, vision/audio explain endpoints, proactive greeter, calendar context | FastAPI container, port 8090 |
+| **dotty-behaviour** | Docker host | Perception event bus, 11 consumer classes (the running set is config-gated), vision/audio explain endpoints, proactive greeter, calendar context | FastAPI container, port 8090 |
 | **bridge.py** | Docker host | Admin dashboard service (`/ui`, port 8081). Voice and perception roles were retired in #36; dashboard port to dotty-behaviour is pending. | FastAPI container, port 8081 |
 | **llama-swap** | Same host or LAN GPU host | Routes OpenAI-compatible requests to per-model llama-server children; co-loads `qwen3.5:4b` (pi outer loop) and `qwen3.6:27b-think` (`think_hard` target) | Docker container (`ghcr.io/mostlygeek/llama-swap:cuda`) |
 | **OpenRouter** | Cloud | Routes cloud LLM calls (smart_mode `claude-sonnet-4-6`, VLM `gemini-2.0-flash`, audio caption `gemini-2.5-flash`) | External |
@@ -203,17 +203,21 @@ Firmware-resident producers emit JSON `event` frames over the xiaozhi WebSocket:
 {"type":"event","name":"sound_event","data":{"direction":"left","balance":0.997,"energy":1807933247}}
 ```
 
-The xiaozhi-server's `EventTextMessageHandler` (`custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py`) POSTs each frame to `dotty-behaviour`'s `POST /api/perception/event`. dotty-behaviour maintains the pub/sub bus and runs 9 ambient consumer tasks against it:
+The xiaozhi-server's `EventTextMessageHandler` (`custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py`) POSTs each frame to `dotty-behaviour`'s `POST /api/perception/event`. dotty-behaviour maintains the pub/sub bus (`dotty-behaviour/perception/state.py`) and runs 11 consumer classes against it (`dotty-behaviour/consumers/`); the actually-running set is env-gated at runtime:
 
 | Consumer | What it does |
 |---|---|
-| `_perception_face_greeter` | "Hi!" greeting (via `/xiaozhi/admin/inject-text`) on first face detection after a cooldown window. |
-| `_perception_sound_turner` | Head-turn (via `/xiaozhi/admin/set-head-angles`) toward sound direction. |
-| `_perception_face_lost_aborter` | Aborts an in-flight TTS turn (via `/xiaozhi/admin/abort`) when the audience walks away. |
-| `_perception_wake_word_turner` | Head-turn toward the speaker on wake-word event. |
-| `_perception_face_identified_refresher` | Re-asserts the face-identified pixel every ~3 s so the firmware's 4 s timeout doesn't drop it. |
-| `_perception_purr_player` | Plays an idle purr asset when conditions match. |
-| (and 3 additional consumers in dotty-behaviour) | Vision narrative, audio caption, idle photographer. |
+| `FaceGreeter` | "Hi!" greeting (via `/xiaozhi/admin/inject-text`) on first face detection after a cooldown window. |
+| `SoundTurner` | Head-turn (via `/xiaozhi/admin/set-head-angles`) toward sound direction. |
+| `FaceLostAborter` | Aborts an in-flight TTS turn (via `/xiaozhi/admin/abort`) when the audience walks away. |
+| `WakeWordTurner` | Head-turn toward the speaker on wake-word event. |
+| `FaceIdentifiedRefresher` | Re-asserts the face-identified pixel every ~3 s so the firmware's 4 s timeout doesn't drop it. |
+| `PurrPlayer` | Plays an idle purr asset when conditions match. |
+| `SceneSynthesis` | Ambient vision narrative + audio caption synthesis loop. |
+| `IdlePhotographer` | Periodic idle-state camera capture for scene context. |
+| `SleepDreamer` | Sleep-state ambient consumer. |
+| `DanceReflector` | Reflects dance start/stop events into behaviour. |
+| `SecurityCycle` | Security-state surveillance scaffolding (Phase 8 PENDING — not a live capture path). |
 
 WebSocket lifecycle gotcha: xiaozhi only opens the WS during a conversation. Firmware-side perception producers must call `OpenAudioChannel()` first, or events from idle silently drop.
 
