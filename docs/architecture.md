@@ -9,7 +9,7 @@ description: Single-host architecture and message flow for the self-hosted voice
 
 - Two hosts: **robot** (StackChan on your desk) and a **single Docker host** (`<XIAOZHI_HOST>`) that runs all four server-side services.
 - Audio goes robot → xiaozhi-server → (text) → dotty-pi → (response text) → xiaozhi-server → (audio) → robot. The Docker host never sends audio to the robot — xiaozhi-server handles that.
-- The default voice provider is **`PiVoiceLLM`**, selected via `selected_module.LLM` in `.config.yaml`. Two documented alternates exist (`Tier1Slim`, `OpenAICompat`) — see [llm-backends.md](./llm-backends.md).
+- The default voice provider is **`PiVoiceLLM`**, selected via `selected_module.LLM` in `.config.yaml`. One documented alternate exists (`OpenAICompat`) — see [llm-backends.md](./llm-backends.md).
 - Everything is LAN-local **except** cloud-routed LLM calls (smart-mode, VLM, audio caption). EdgeTTS is cloud when selected; Piper is fully local.
 - The robot speaks the **Xiaozhi WebSocket protocol** (see [protocols.md](./protocols.md)). It has no knowledge of the services running on the Docker host.
 
@@ -241,7 +241,6 @@ The canonical working copies live in this repo.
 | `bridge.py` | Docker host (bridge.py container) | Admin dashboard FastAPI service |
 | `bridge/requirements.txt` | bridge.py container | Pinned Python deps |
 | `custom-providers/pi_voice/` | xiaozhi container `core/providers/llm/pi_voice/` | PiVoiceLLM + PiClient |
-| `custom-providers/tier1_slim/` | xiaozhi container `core/providers/llm/tier1_slim/` | Tier1Slim alternate provider |
 | `custom-providers/openai_compat/` | xiaozhi container `core/providers/llm/openai_compat/` | OpenAICompat alternate provider |
 | `custom-providers/edge_stream/` | xiaozhi container `core/providers/tts/` | Streaming EdgeTTS provider |
 | `custom-providers/piper_local/` | xiaozhi container `core/providers/tts/` | Local Piper TTS provider |
@@ -260,6 +259,6 @@ Volume mounts (xiaozhi-server) are listed in [quickstart.md](./quickstart.md#dep
 - [brain.md](./brain.md) — the pi agent, model matrix, and dotty-pi-ext tools.
 - [protocols.md](./protocols.md) — what's on the wire (pi RPC mode, `/api/perception/event`).
 - [quickstart.md](./quickstart.md) — deployment placeholders, volume mounts, common ops.
-- [llm-backends.md](./llm-backends.md) — choosing between PiVoiceLLM, Tier1Slim, OpenAICompat.
+- [llm-backends.md](./llm-backends.md) — choosing between PiVoiceLLM and OpenAICompat.
 
 Last verified: 2026-05-22.

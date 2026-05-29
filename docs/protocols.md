@@ -286,16 +286,15 @@ Response: `{"ok": true}`. dotty-behaviour broadcasts the event to all perception
 | Endpoint | Purpose |
 |---|---|
 | `GET /ui` | Admin dashboard web UI |
-| `POST /admin/*` | Admin mutations (toggle, kid-mode, smart-mode, set-tier1slim-model, play-asset, etc.) |
+| `POST /admin/*` | Admin mutations (toggle, kid-mode, smart-mode, play-asset, etc.) |
 | `GET /health` | Liveness probe; returns `{"ok": true}` |
 
-`POST /api/voice/escalate` (used by the `Tier1Slim` alternate provider) is also defined on bridge.py but is non-functional in the current stack — the ZeroClaw voice dispatch layer it depended on was retired in #36. See [docs/cutover-behaviour.md](./cutover-behaviour.md) for the historical runbook.
+`POST /api/voice/escalate` is also defined on bridge.py but is non-functional in the current stack — the ZeroClaw voice dispatch layer it depended on was retired in #36, and the only consumer (the Tier1Slim provider) was removed in the 2026-05-29 alignment pass. See [docs/cutover-behaviour.md](./cutover-behaviour.md) for the historical runbook.
 
 ## See also
 
 - [hardware.md](./hardware.md) — what emits the device-side frames.
 - [voice-pipeline.md](./voice-pipeline.md) — what xiaozhi-server does between frames.
-- [tier1slim.md](./tier1slim.md) — the Tier1Slim alternate provider and its (now non-functional) escalation wire format.
 - [brain.md](./brain.md) — the dotty-pi agent and its tool set.
 - [architecture.md](./architecture.md#perception-event-bus) — the perception bus consumers.
 - [references.md](./references.md#protocols) — all protocol spec links.

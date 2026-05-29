@@ -6,7 +6,7 @@ Your self-hosted StackChan robot assistant. A fully self-hosted voice stack for 
 
 ## Architecture
 
-The voice path runs through a single LLM provider — `PiVoiceLLM`, selected via `selected_module.LLM` in `data/.config.yaml`. Two alternate providers ship for fallback (`Tier1Slim`, `OpenAICompat`).
+The voice path runs through a single LLM provider — `PiVoiceLLM`, selected via `selected_module.LLM` in `data/.config.yaml`. One alternate provider ships as a fallback (`OpenAICompat`). (The former `Tier1Slim` two-tier provider was removed in the 2026-05-29 alignment pass — its tool escalation depended on the retired ZeroClaw bridge.)
 
 ```
                  StackChan hardware → configured persona
@@ -21,12 +21,12 @@ The voice path runs through a single LLM provider — `PiVoiceLLM`, selected via
                         ▼
                  dotty-pi container — the pi coding agent (the brain)
                    ├─ outer loop: qwen3.5:4b on llama-swap
-                   └─ dotty-pi-ext extension → 5 voice tools:
-                        memory_lookup · remember · think_hard (→ qwen3.6:27b-think) · take_photo · play_song
+                   └─ dotty-pi-ext extension → 7 voice tools:
+                        memory_lookup · remember · recall_person · remember_person · think_hard (→ qwen3.6:27b-think) · take_photo · play_song
                    only TTS-bound text streams back to xiaozhi-server
 
   Perception + ambient behaviour:  firmware `event` frames → xiaozhi relay → dotty-behaviour (FastAPI, :8090)
-  Admin dashboard:                 bridge.py (FastAPI, :8080, served at /ui)
+  Admin dashboard:                 bridge.py (FastAPI, :8081, served at /ui)
 ```
 
 All four server-side services — xiaozhi-server, `dotty-pi`, `dotty-behaviour`, and the `bridge.py` dashboard — run as Docker containers on a single Docker host.
@@ -67,15 +67,14 @@ This repo uses placeholders (`<XIAOZHI_HOST>`, `<XIAOZHI_USER>`, `<XIAOZHI_PATH>
 
 - `.config.yaml` (repo root; deployed to the Docker host as `data/.config.yaml`) — the xiaozhi-server override config. Never overwrite wholesale on upgrades; merge keys.
 - `custom-providers/pi_voice/` — the **`PiVoiceLLM` provider** + `PiClient`, the default voice path. xiaozhi-server's LLM call is translated into a pi RPC request and run inside the `dotty-pi` container via `docker exec -i dotty-pi pi --mode rpc …`; pi owns the agent loop and tools, and only TTS-bound text streams back. Selected when `selected_module.LLM = PiVoiceLLM`. Requires the host docker socket bind-mounted into the xiaozhi container — see `custom-providers/pi_voice/README.md`.
-- `custom-providers/tier1_slim/tier1_slim.py` — **Tier1Slim**, a two-tier voice LLM provider and the pre-`PiVoiceLLM` default (added in `b73f583`). Runs a small/fast model (`qwen3.5:4b` against llama-swap) for inner-loop chitchat and escalates tool calls via `POST /api/voice/escalate`. That escalation endpoint was served by the ZeroClaw bridge, so post-#36 escalation is non-functional — Tier1Slim is now a chitchat-only rollback path. Selected when `selected_module.LLM = Tier1Slim`.
 - `custom-providers/edge_stream/edge_stream.py` — custom streaming TTS provider. Mounted similarly.
-- `custom-providers/openai_compat/openai_compat.py` — OpenAI-compatible LLM provider (alternative to PiVoiceLLM / Tier1Slim).
+- `custom-providers/openai_compat/openai_compat.py` — OpenAI-compatible LLM provider; the alternate voice backend to `PiVoiceLLM` (point it at a local llama-swap endpoint or any OpenAI-compatible API). Selected when `selected_module.LLM = OpenAICompat`.
 - `custom-providers/piper_local/piper_local.py` — local Piper TTS provider (offline alternative to EdgeTTS).
 - `custom-providers/asr/fun_local.py` — patched FunASR provider. Adds a `language` config key (upstream hardcodes `"auto"`, which mis-detects Korean/Japanese on unclear English). Mounted as a file-level override over the upstream provider.
-- `custom-providers/xiaozhi-patches/{http_server,websocket_server,portal_bridge}.py` — drop-in overrides against upstream xiaozhi-server. Add the `/xiaozhi/admin/*` admin routes (toggle, kid-mode, smart-mode, set-tier1slim-model, play-asset, songs catalogue, inject-text/tts) and the `shared_llm` singleton that lets admin routes mutate the running LLM provider's runtime config.
-- `bridge.py` — the **admin dashboard** service (FastAPI, port 8081, served at `/ui`); runs as a container on the Docker host (build via `bridge/Dockerfile`, deploy via `scripts/deploy-bridge-unraid.sh`). Its former voice and perception-bus roles were retired in #36 — the dashboard port to `dotty-behaviour` is still pending. Supporting modules live under `bridge/`.
+- `custom-providers/xiaozhi-patches/{http_server,websocket_server,portal_bridge}.py` — drop-in overrides against upstream xiaozhi-server. Add the `/xiaozhi/admin/*` admin routes (inject-text, abort, set-state, set-toggle, set-head-angles, take-photo, play-asset, songs catalogue, say) and the `active_connections` registry that lets admin routes reach a live device WS. (The `set-tier1slim-model` route and `shared_llm` singleton were removed with Tier1Slim in the 2026-05-29 alignment pass.)
+- `bridge.py` — the **admin dashboard** service (FastAPI, port 8081, served at `/ui`); runs as a container on the Docker host (build via `bridge/Dockerfile`, deploy via `scripts/deploy-bridge-unraid.sh`). Its former voice and perception-bus roles were retired in #36; the dashboard now pulls its perception/vision/audio cards from `dotty-behaviour` (#115 series). Supporting modules live under `bridge/`.
 - `dotty-pi/` — Docker image + compose for the pi agent container (the brain). See `dotty-pi/README.md`.
-- `dotty-pi-ext/` — pi extension providing the five voice tools (`memory_lookup`, `remember`, `think_hard`, `take_photo`, `play_song`), loaded into the `dotty-pi` agent.
+- `dotty-pi-ext/` — pi extension providing the **seven** voice tools (`memory_lookup`, `remember`, `recall_person`, `remember_person`, `think_hard`, `take_photo`, `play_song`), loaded into the `dotty-pi` agent. (`recall_person`/`remember_person` were added in #53.)
 - `dotty-behaviour/` — FastAPI service (port 8090): the perception event bus, ambient consumers, vision/audio explain endpoints, the proactive greeter, and calendar context. Successor to the bridge's perception role. See `dotty-behaviour/README.md`.
 - `personas/default.md` — default robot persona prompt (swappable).
 - `session-prompt.md` — Claude Code session prompt for infrastructure setup.

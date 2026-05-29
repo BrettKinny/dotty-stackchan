@@ -243,7 +243,7 @@ reasoning-on models). For Qwen3-family models you can also pass
 
 ## See also
 
-- [llm-backends.md](../llm-backends.md) — picking among `PiVoiceLLM`, `Tier1Slim`, `OpenAICompat`, and other LLM providers at the xiaozhi-server slot.
+- [llm-backends.md](../llm-backends.md) — picking among `PiVoiceLLM`, `OpenAICompat`, and other LLM providers at the xiaozhi-server slot.
 - [run-fully-local.md](./run-fully-local.md) — single-model local setup
   via the Ollama compose override.
 - [llama-swap upstream README](https://github.com/mostlygeek/llama-swap)

@@ -70,9 +70,8 @@ supports multiple resident models). See
 
 The shipped `.config.yaml` selects `PiVoiceLLM` as the default LLM
 provider, which runs the `dotty-pi` container (the pi coding agent)
-on the same Docker host. Alternate providers — `Tier1Slim` (small
-model inner loop, no agent overhead) and `OpenAICompat` (any
-OpenAI-compatible cloud endpoint) — are available via
+on the same Docker host. One alternate provider — `OpenAICompat`
+(any OpenAI-compatible cloud or local endpoint) — is available via
 `selected_module.LLM` in `data/.config.yaml`.
 
 ## 4. Run setup
@@ -190,7 +189,7 @@ Container volume mounts for `xiaozhi-esp32-server`:
 | `models/piper/` | `/opt/xiaozhi-esp32-server/models/piper/` | Piper TTS voice models (`.onnx` + `.json`) |
 | `tmp/` | `/opt/xiaozhi-esp32-server/tmp/` | Scratch |
 | `custom-providers/pi_voice/` | `/opt/xiaozhi-esp32-server/core/providers/llm/pi_voice/` | PiVoiceLLM provider (directory mount) |
-| `custom-providers/tier1_slim/` | `/opt/xiaozhi-esp32-server/core/providers/llm/tier1_slim/` | Tier1Slim alternate provider |
+| `custom-providers/openai_compat/` | `/opt/xiaozhi-esp32-server/core/providers/llm/openai_compat/` | OpenAICompat alternate provider |
 | `custom-providers/edge_stream/edge_stream.py` | `/opt/xiaozhi-esp32-server/core/providers/tts/edge_stream.py` | Streaming EdgeTTS provider (file mount) |
 | `custom-providers/piper_local/piper_local.py` | `/opt/xiaozhi-esp32-server/core/providers/tts/piper_local.py` | Local Piper TTS provider (file mount) |
 | `custom-providers/asr/fun_local.py` | `/opt/xiaozhi-esp32-server/core/providers/asr/fun_local.py` | Patched FunASR — adds `language` config key so SenseVoiceSmall can be pinned to English |
@@ -247,13 +246,13 @@ curl http://<XIAOZHI_HOST>:8081/health
 The default TTS is `LocalPiper` (offline, runs inside the container). To change the Piper voice, edit `TTS.LocalPiper.voice` and the corresponding `model_path` / `config_path` in `data/.config.yaml`. To switch to cloud EdgeTTS instead, set `selected_module.TTS: EdgeTTS` and edit `TTS.EdgeTTS.voice` (any Microsoft Edge Neural voice ID works, e.g. `en-US-AvaNeural`). Restart the container after changes.
 
 ### Changing persona (the robot's personality)
-Edit `personas/dotty_voice.md` (for the `PiVoiceLLM` / `Tier1Slim` paths) and restart the relevant container. The `prompt:` key in `data/.config.yaml` is also injected as a secondary system message. Full instructions: [cookbook/change-persona.md](cookbook/change-persona.md).
+Edit `personas/dotty_voice.md` (loaded by the pi agent on the `PiVoiceLLM` path) and restart the relevant container. The `prompt:` key in `data/.config.yaml` is also injected as a secondary system message. Full instructions: [cookbook/change-persona.md](cookbook/change-persona.md).
 
 ### Changing VAD sensitivity
 `VAD.SileroVAD.min_silence_duration_ms` in `data/.config.yaml`. Default: 700 ms. Lower = cuts off quicker. Higher = waits longer for slow speakers.
 
 ### Changing the LLM model
-For the `PiVoiceLLM` path (default): see [dotty-pi/README.md](../dotty-pi/README.md) for the model selection rules — in particular, the llama-swap matrix DSL constraint that prevents the voice-model set from being evicted. For the `Tier1Slim` path: edit `LLM.Tier1Slim.model` (or repoint `url` / `api_key`) in `data/.config.yaml` and `docker compose restart`. Or for in-flight swaps, use the bridge's `/admin/smart-mode` toggle — it calls `/xiaozhi/admin/set-tier1slim-model` to hot-swap without a restart (see [tier1slim.md](tier1slim.md)).
+For the `PiVoiceLLM` path (default): see [dotty-pi/README.md](../dotty-pi/README.md) for the model selection rules — in particular, the llama-swap matrix DSL constraint that prevents the voice-model set from being evicted. For the `OpenAICompat` path: edit `LLM.OpenAICompat.model` (or repoint `url` / `api_key`) in `data/.config.yaml` and `docker compose restart`. Note: there is no live in-flight model-swap on either path — smart-mode model-swap is v2 scope and not wired (the instant hot-swap once provided by the removed Tier1Slim provider is gone).
 
 ---
 

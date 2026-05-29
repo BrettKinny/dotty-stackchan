@@ -8,7 +8,7 @@ description: xiaozhi-esp32-server pipeline stages -- VAD, ASR, LLM proxy, and TT
 ## TL;DR
 
 - **Server** is `xinnan-tech/xiaozhi-esp32-server` running in Docker on a Linux host. Plugin-based: each of VAD, ASR, LLM, TTS, Memory, Intent is a swappable provider picked via `data/.config.yaml`'s `selected_module:` block.
-- Our live pipeline: **SileroVAD** (speech-end) → **FunASR SenseVoiceSmall** or **WhisperLocal** (ASR, pinned to English) → **PiVoiceLLM** custom provider (current default — `docker exec -i dotty-pi pi --mode rpc` over stdio, brain is the `dotty-pi` container) or **Tier1Slim** (alternate — talks directly to llama-swap, escalates tool calls to the bridge) → **LocalPiper** en_GB-cori-medium (TTS; EdgeTTS / StreamingEdgeTTS as alternates).
+- Our live pipeline: **SileroVAD** (speech-end) → **FunASR SenseVoiceSmall** or **WhisperLocal** (ASR, pinned to English) → **PiVoiceLLM** custom provider (current default — `docker exec -i dotty-pi pi --mode rpc` over stdio, brain is the `dotty-pi` container) or **OpenAICompat** (alternate — points straight at any OpenAI-compatible endpoint) → **LocalPiper** en_GB-cori-medium (TTS; EdgeTTS / StreamingEdgeTTS as alternates).
 - The xiaozhi container also runs a perception relay (`EventTextMessageHandler`) that forwards firmware `face_detected` / `face_lost` / `sound_event` / `state_changed` frames to `dotty-behaviour`'s `/api/perception/event`.
 - **Emotion** is not a pipeline stage — it's extracted post-hoc from the LLM's emoji prefix and emitted as a separate WS frame. See [protocols.md](./protocols.md#emotion-protocol).
 - Custom providers are mounted into the container via Docker volumes at `/opt/xiaozhi-esp32-server/core/providers/{asr,tts,llm}/…`. They override the baked-in files at module-import time.
@@ -65,15 +65,15 @@ Deployment: mounted as a file-level override at `/opt/xiaozhi-esp32-server/core/
 
 ### LLM — provider selected at a time
 
-Pick one via `selected_module.LLM` in `.config.yaml`. The default is `PiVoiceLLM`; `Tier1Slim` and `OpenAICompat` are alternates. See [llm-backends.md](./llm-backends.md) for the full comparison.
+Pick one via `selected_module.LLM` in `.config.yaml`. The default is `PiVoiceLLM`; `OpenAICompat` is the alternate. See [llm-backends.md](./llm-backends.md) for the full comparison.
 
 #### `PiVoiceLLM` (default)
 
 Custom provider at `custom-providers/pi_voice/` (mounted into `/opt/xiaozhi-esp32-server/core/providers/llm/pi_voice/`). It doesn't run a model itself — it hands each voice turn to the **`dotty-pi` container** by running `docker exec -i dotty-pi pi --mode rpc` and exchanging JSONL messages over stdio. The pi agent owns the conversation loop (`qwen3.5:4b` on local llama-swap) and the five `dotty-pi-ext` voice tools (`memory_lookup`, `remember`, `think_hard`, `take_photo`, `play_song`); only TTS-bound text streams back. See [brain.md](./brain.md).
 
-#### `Tier1Slim` (alternate)
+#### `OpenAICompat` (alternate)
 
-Custom provider at `custom-providers/tier1_slim/tier1_slim.py`. Talks directly to a local llama-swap endpoint; plain conversational turns are answered by the small inner-loop model (`qwen3.5:4b`) in well under 1 s warm. When the model emits structured `tool_calls`, the provider POSTs them to `/api/voice/escalate` — but that endpoint was served by the retired ZeroClaw bridge, so tool escalation is non-functional post-#36. Tier1Slim is now a chitchat-only rollback path. See [tier1slim.md](./tier1slim.md).
+Custom provider at `custom-providers/openai_compat/openai_compat.py`. Talks directly to any OpenAI-compatible `/v1/chat/completions` endpoint — a cloud provider (OpenAI, OpenRouter) or a local llama-swap instance. Stateless and tool-less: no memory and no voice tools, so it's a chitchat-only alternate to the full `PiVoiceLLM` path. See [llm-backends.md](./llm-backends.md).
 
 ### Perception relay (xiaozhi → dotty-behaviour)
 
@@ -125,7 +125,6 @@ The TTS provider receives text **with the emoji already stripped**. The device r
 
 - [protocols.md](./protocols.md#xiaozhi-websocket) — how audio gets in and out (and the `/api/perception/event` wire format).
 - [brain.md](./brain.md) — the pi agent, model matrix, and dotty-pi-ext voice tools.
-- [tier1slim.md](./tier1slim.md) — the Tier1Slim alternate provider in detail.
 - [latent-capabilities.md](./latent-capabilities.md#voice-pipeline-unused) — unused upstream features.
 - [references.md](./references.md#voice) — all upstream voice-stack links.
 

@@ -20,8 +20,7 @@ See [hardware-support.md](./hardware-support.md) for the full spec table and sup
 Yes. The LLM is pluggable via `selected_module.LLM` in `data/.config.yaml`:
 
 1. **`PiVoiceLLM` (the default)** routes voice turns to the `dotty-pi` container — the pi agent — which runs a local model on llama-swap. To change the model, see [dotty-pi/README.md](../dotty-pi/README.md) for the model-selection rules.
-2. **`Tier1Slim`** runs a small/fast model directly against any OpenAI-compatible endpoint.
-3. **`OpenAICompat`** points straight at OpenAI, OpenRouter, Ollama, or any OpenAI-compatible API.
+2. **`OpenAICompat`** points straight at OpenAI, OpenRouter, Ollama, or any OpenAI-compatible API.
 
 See [llm-backends.md](./llm-backends.md) for the full comparison. Any model that handles English well and can follow emoji-prefix instructions will work. Larger models give better persona adherence; smaller models respond faster.
 

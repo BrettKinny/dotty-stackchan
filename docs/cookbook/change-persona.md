@@ -12,7 +12,7 @@ Three personas ship in `personas/`:
 | File | Style | Used by |
 |---|---|---|
 | `default.md` | Cheerful, curious desktop robot. The general-purpose persona for generic providers. | `OpenAICompat` |
-| `dotty_voice.md` | Voice-tuned variant of `default.md` — same character but pruned for short replies, with the tool catalogue and `[REMEMBER: ...]` markers baked in. | `PiVoiceLLM`, `Tier1Slim` |
+| `dotty_voice.md` | Voice-tuned variant of `default.md` — same character but pruned for short replies, with the tool catalogue and `[REMEMBER: ...]` markers baked in. | `PiVoiceLLM` |
 | `smart.md` | More capable, allowed longer answers — for when `smart_mode` is on and the cloud model is doing the heavy lifting. | optional override |
 
 ## Which file controls the persona?
@@ -22,7 +22,6 @@ Check `selected_module.LLM` in `.config.yaml`, then read the matching block:
 | Provider | Persona source |
 |---|---|
 | `PiVoiceLLM` (current default) | The persona file configured in the pi agent's extension (`dotty-pi-ext`). Defaults to `personas/dotty_voice.md`. |
-| `Tier1Slim` | `LLM.Tier1Slim.persona_file` in `.config.yaml`. Defaults to `personas/dotty_voice.md`. |
 | `OpenAICompat` (and similar generic providers) | `LLM.OpenAICompat.persona_file` in `.config.yaml`. |
 
 ## Switch to a different shipped persona
@@ -31,8 +30,8 @@ Check `selected_module.LLM` in `.config.yaml`, then read the matching block:
 
    ```yaml
    LLM:
-     Tier1Slim:
-       persona_file: personas/smart.md   # was personas/dotty_voice.md
+     OpenAICompat:
+       persona_file: personas/smart.md   # was personas/default.md
    ```
 
 2. Restart: `docker compose restart xiaozhi-server`.
@@ -45,10 +44,9 @@ Check `selected_module.LLM` in `.config.yaml`, then read the matching block:
 
 ## Quick inline edit (no file swap)
 
-Edit the top-level `prompt:` block in `.config.yaml` directly. This is the xiaozhi-server system prompt; it gets injected alongside the persona file for most providers. Note: `Tier1Slim` deliberately **discards** the top-level prompt when a `persona_file` is set (the 4 B chat template only honours one system message). For `Tier1Slim`, edit the persona file instead.
+Edit the top-level `prompt:` block in `.config.yaml` directly. This is the xiaozhi-server system prompt; it gets injected alongside the persona file for most providers. On the `PiVoiceLLM` path the pi agent's own persona file (in `dotty-pi-ext`) is the primary source — edit that for substantive personality changes.
 
 ## Notes
 
 - Always keep the emoji-leader rule in any persona — removing it breaks face animations. The persona prompt and the xiaozhi-server system prompt are the two enforcement layers.
-- See [tier1slim.md](../tier1slim.md) for why Tier1Slim treats persona files differently from other providers.
 - See [protocols.md](../protocols.md) for the emoji → face frame mapping.
