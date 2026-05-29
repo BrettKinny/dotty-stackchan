@@ -264,10 +264,10 @@ MCP_TOOL_ALLOWLIST: set[str] = {
 # tools. The dashboard's /ui/memory page lists every per-person row
 # (approved + pending review) and exposes approve / redact actions. The
 # bridge does NOT write to brain.db — it's a read + lifecycle-mutate
-# surface for the dashboard. See bridge/MEMORY-INDEX.md / brain-db-fts-only.md.
-
+# surface for the dashboard. Set VOICE_MEMORY_DB to the path where the
+# dotty-pi agent's brain.db is reachable from the bridge container.
 _VOICE_MEMORY_DB = Path(os.environ.get(
-    "VOICE_MEMORY_DB", "/root/.zeroclaw/workspace/memory/brain.db",
+    "VOICE_MEMORY_DB", "/var/lib/dotty-bridge/state/brain.db",
 ))
 
 
@@ -762,7 +762,7 @@ _ADMIN_ALLOWED_PERSONA_FILES = {
     "TOOLS.md", "BOOTSTRAP.md", "HEARTBEAT.md", "MEMORY.md",
 }
 _ADMIN_WORKSPACE_DIR = Path(
-    os.environ.get("DOTTY_PERSONA_DIR", os.environ.get("ZEROCLAW_WORKSPACE", "/root/.zeroclaw/workspace"))
+    os.environ.get("DOTTY_PERSONA_DIR", "/var/lib/dotty-bridge/persona")
 )
 
 

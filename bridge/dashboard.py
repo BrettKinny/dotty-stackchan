@@ -290,7 +290,7 @@ router = APIRouter(
 XIAOZHI_HOST = os.environ.get("XIAOZHI_HOST", "")
 XIAOZHI_OTA_PORT = int(os.environ.get("XIAOZHI_OTA_PORT", "8003"))
 XIAOZHI_WS_PORT = int(os.environ.get("XIAOZHI_WS_PORT", "8000"))
-LOG_DIR = Path(os.environ.get("CONVO_LOG_DIR", "/root/zeroclaw-bridge/logs"))
+LOG_DIR = Path(os.environ.get("CONVO_LOG_DIR", "/var/lib/dotty-bridge/logs"))
 VOICE_CHANNELS = ("dotty", "stackchan")
 
 _START_TIME = time.time()
