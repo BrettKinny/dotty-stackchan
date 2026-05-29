@@ -47,7 +47,8 @@ if [[ ${#FILES[@]} -eq 0 ]]; then
     echo "ERROR: no tracked bridge files at HEAD" >&2
     exit 1
 fi
-echo "Deploy set: ${#FILES[@]} files (HEAD $(git rev-parse --short HEAD))"
+DEPLOY_SHA="$(git rev-parse --short HEAD)"
+echo "Deploy set: ${#FILES[@]} files (HEAD $DEPLOY_SHA)"
 
 # 2. SSH preflight — fail fast on bad creds.
 ssh -o BatchMode=yes -o ConnectTimeout=5 "$BRIDGE_HOST" true \
@@ -79,7 +80,7 @@ ssh "$BRIDGE_HOST" "
     tar -xzf /tmp/dotty-bridge.tgz -C $REMOTE_DIR
     rm -f /tmp/dotty-bridge.tgz
     cd $REMOTE_DIR
-    docker build -t $IMAGE_TAG -f bridge/Dockerfile .
+    docker build --build-arg BRIDGE_VERSION=$DEPLOY_SHA -t $IMAGE_TAG -f bridge/Dockerfile .
     cd $REMOTE_DIR/bridge
     docker compose up -d --force-recreate
 "

@@ -4,6 +4,8 @@
         class="flex items-center justify-between gap-3">
     <div class="min-w-0 flex-1">
       <div class="font-semibold text-sm">Smart Mode</div>
+      {% if model_swap_active %}
+      {# tier1slim rollback path — smart_mode hot-swaps the voice model. #}
       <div class="text-xs leading-tight mt-0.5 space-y-0.5">
         <div class="truncate {% if enabled %}font-semibold text-base-content/80{% else %}text-base-content/40{% endif %}"
              title="on: {{ smart_model or '(unset)' }}">
@@ -14,6 +16,14 @@
           off: <span class="font-mono">{{ default_model }}</span>
         </div>
       </div>
+      {% else %}
+      {# Default PiVoiceLLM path — no model swap yet (v2 scope). Smart_mode
+         currently just lights the robot's smart-mode LED + sets the flag. #}
+      <div class="text-xs text-base-content/60 mt-0.5">
+        Robot smart-mode pip {{ "on" if enabled else "off" }}
+        <span class="text-base-content/40">· model-swap pending (v2)</span>
+      </div>
+      {% endif %}
     </div>
     <input type="hidden" name="enabled" value="{{ 'false' if enabled else 'true' }}">
     <label class="flex items-center gap-2 cursor-pointer">

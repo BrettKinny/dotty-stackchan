@@ -34,6 +34,12 @@ COPY bridge.py ./bridge.py
 COPY bridge ./bridge
 COPY custom-providers ./custom-providers
 
+# Stamp the deployed git SHA so the dashboard version chip reads it
+# (the image has no .git checkout, so dashboard.py's git fallback can't
+# resolve a version). deploy-bridge-unraid.sh passes the HEAD short SHA.
+ARG BRIDGE_VERSION=unknown
+RUN printf '%s' "$BRIDGE_VERSION" > /app/.bridge-version
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=8081

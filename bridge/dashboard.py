@@ -292,9 +292,6 @@ XIAOZHI_OTA_PORT = int(os.environ.get("XIAOZHI_OTA_PORT", "8003"))
 XIAOZHI_WS_PORT = int(os.environ.get("XIAOZHI_WS_PORT", "8000"))
 LOG_DIR = Path(os.environ.get("CONVO_LOG_DIR", "/root/zeroclaw-bridge/logs"))
 VOICE_CHANNELS = ("dotty", "stackchan")
-# #64 — the zeroclaw-discord daemon's systemd unit. It runs on the same
-# RPi as the bridge, so its status is a local `systemctl` query.
-DISCORD_UNIT = os.environ.get("ZEROCLAW_DISCORD_UNIT", "zeroclaw-discord")
 
 _START_TIME = time.time()
 
@@ -854,6 +851,13 @@ DEFAULT_MODEL_NAME = os.environ.get(
     "DOTTY_DEFAULT_MODEL", "mistralai/mistral-small-3.2-24b-instruct",
 )
 SMART_MODEL_NAME = os.environ.get("SMART_MODEL", "anthropic/claude-sonnet-4-6")
+# smart_mode's model-swap only fires on the tier1slim rollback provider
+# (bridge.py::_dashboard_set_smart_mode). On the default PiVoiceLLM path
+# the swap is v2 scope (docs/cutover-behaviour.md) — toggling smart_mode
+# only lights the robot's smart-mode LED pip + persists the flag. Mirror
+# bridge.py's env so the card describes what actually happens.
+VOICE_PROVIDER = os.environ.get("DOTTY_VOICE_PROVIDER", "pivoice")
+MODEL_SWAP_ACTIVE = VOICE_PROVIDER == "tier1slim"
 
 
 def _short_model(name: str) -> str:
@@ -951,49 +955,6 @@ async def state_partial(request: Request) -> Any:
             "sound_spark": _sound_balance_sparkline(),
         },
     )
-
-
-def _discord_unit_status() -> dict[str, Any]:
-    """#64 — query the zeroclaw-discord systemd unit. The Discord daemon
-    runs on the same RPi as the bridge, so `systemctl` is a local call
-    with no SSH. Read-only `systemctl show` — works without root."""
-    import subprocess
-    ctx: dict[str, Any] = {"unit": DISCORD_UNIT, "available": False}
-    try:
-        out = subprocess.run(
-            ["systemctl", "show", DISCORD_UNIT, "--no-pager",
-             "--property=LoadState,ActiveState,SubState,ActiveEnterTimestamp"],
-            capture_output=True, text=True, timeout=3,
-        )
-    except Exception:
-        return ctx
-    if out.returncode != 0:
-        return ctx
-    props: dict[str, str] = {}
-    for line in out.stdout.splitlines():
-        if "=" in line:
-            key, val = line.split("=", 1)
-            props[key] = val
-    if props.get("LoadState") == "not-found":
-        ctx["not_found"] = True
-        return ctx
-    active = props.get("ActiveState", "unknown")
-    ctx.update({
-        "available": True,
-        "active_state": active,
-        "sub_state": props.get("SubState", ""),
-        "since": props.get("ActiveEnterTimestamp", ""),
-        "running": active == "active",
-        "failed": active == "failed",
-    })
-    return ctx
-
-
-@router.get("/discord", response_class=HTMLResponse, include_in_schema=False)
-async def discord_partial(request: Request) -> Any:
-    """zeroclaw-discord daemon health card (#64)."""
-    ctx = await asyncio.to_thread(_discord_unit_status)
-    return templates.TemplateResponse(request, "discord.html", ctx)
 
 
 # #65 tier 1 — voice tool inventory. Hardcoded list of the tools shipped
@@ -1152,7 +1113,8 @@ async def smart_mode_partial(request: Request) -> Any:
         request, "smart_mode.html",
         {"enabled": enabled, "available": getter is not None,
          "smart_model": _short_model(SMART_MODEL_NAME),
-         "default_model": _short_model(DEFAULT_MODEL_NAME)},
+         "default_model": _short_model(DEFAULT_MODEL_NAME),
+         "model_swap_active": MODEL_SWAP_ACTIVE},
     )
 
 
@@ -2126,7 +2088,10 @@ async def status_strip(request: Request, placement: str = "header") -> Any:
                 did for did, s in pstate.items()
                 if s and s.get("sensor_stale")
             ]
-            any_dev = bool(pstate)
+            fresh_devs = [
+                did for did, s in pstate.items()
+                if s and not s.get("sensor_stale")
+            ]
             if stale_devs and sc_status in ("ok", "unknown"):
                 sc_status = "warn"
                 sc_tip = (
@@ -2134,10 +2099,13 @@ async def status_strip(request: Request, placement: str = "header") -> Any:
                     f"({len(stale_devs)}/{len(pstate)} dev) — "
                     f"firmware bus may be hung"
                 )
-            elif not any_dev and sc_status == "unknown":
-                # Same fall-through: no events ever — don't override the
-                # "no voice activity today" tip; just leave it.
-                pass
+            elif fresh_devs and sc_status == "unknown":
+                # The robot is connected and streaming fresh perception
+                # events even though there's been no voice turn today.
+                # Voice idleness is normal; perception liveness is the
+                # real "robot is online" signal — so don't show grey.
+                sc_status = "ok"
+                sc_tip = "Dotty: online — perception active, no voice yet today"
 
         if not XIAOZHI_HOST:
             xz_status, xz_tip = "unknown", "unraid: XIAOZHI_HOST env not set"
