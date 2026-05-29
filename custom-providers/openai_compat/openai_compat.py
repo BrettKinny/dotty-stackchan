@@ -48,16 +48,6 @@ def _load_persona(path):
         return ""
 
 
-def _ensure_emoji_prefix(text):
-    """Guarantee the response starts with a recognized emoji."""
-    if not text:
-        return f"{FALLBACK_EMOJI} (no response)"
-    stripped = text.lstrip()
-    if any(stripped.startswith(e) for e in ALLOWED_EMOJIS):
-        return text
-    return f"{FALLBACK_EMOJI} {text}"
-
-
 class LLMProvider(LLMProviderBase):
     """OpenAI-compatible Chat Completions provider for xiaozhi-server.
 

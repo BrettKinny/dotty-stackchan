@@ -53,7 +53,7 @@ async def perception_event(
     Producers: xiaozhi-server's textMessageHandlerRegistry relays
     firmware `event` frames (face_detected, face_lost, sound_event,
     state_changed, chat_status, dance_started/ended,
-    head_pet_started). Server-side classifiers may add more.
+    head_pet_started, head_pet_ended). Server-side classifiers may add more.
 
     Updates per-device state, then fans the event to all bus
     subscribers (the 9 consumers + dashboard SSE).

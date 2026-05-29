@@ -69,7 +69,7 @@ Common tags in this repo: `yaml`, `bash`, `python`, `json`.
 
 ## Links
 
-- Use **relative paths**: `[protocols.md](../protocols.md)`, not absolute URLs.
+- Use **relative paths**: `[protocols.md](./protocols.md)`, not absolute URLs.
 - Link to other docs pages, not to GitHub blob URLs.
 - External links (upstream repos, specs) are fine as full URLs.
 

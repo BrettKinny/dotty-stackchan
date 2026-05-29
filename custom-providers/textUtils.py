@@ -8,16 +8,15 @@ if TYPE_CHECKING:
 TAG = __name__
 
 # Canonical definitions for safety/format constants. Imported by:
-#   - bridge.py (via sys.path insert of custom-providers/)
+#   - custom-providers/pi_voice/ (the live voice path)
 #   - custom-providers/openai_compat/openai_compat.py (via core.utils.textUtils
 #     bind-mount in xiaozhi container)
-#   - custom-providers/zeroclaw/zeroclaw.py (same path)
 # bridge/dashboard.py keeps its own _ALLOWED_EMOJIS copy intentionally — it's
 # the admin-UI safety check, decoupled from the LLM enforcement path.
 ALLOWED_EMOJIS = ("😊", "😆", "😢", "😮", "🤔", "😠", "😐", "😍", "😴")
 FALLBACK_EMOJI = "😐"
 
-# Sentence boundary regex used by truncation logic in bridge.py + zeroclaw.py.
+# Sentence boundary regex used by truncation logic.
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?。！？])\s+")
 
 # Hardened HARD CONSTRAINTS suffix used at the end of every voice prompt.

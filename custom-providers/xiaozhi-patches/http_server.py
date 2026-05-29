@@ -30,15 +30,6 @@ class SimpleHttpServer:
         self.ota_handler = OTAHandler(config)
         self.vision_handler = VisionHandler(config)
 
-    def _get_websocket_url(self, local_ip: str, port: int) -> str:
-        """获取websocket地址"""
-        server_config = self.config["server"]
-        websocket_config = server_config.get("websocket")
-        if websocket_config and "你" not in websocket_config:
-            return websocket_config
-        else:
-            return f"ws://{local_ip}:{port}/xiaozhi/v1/"
-
     # DOTTY-PATCH ------------------------------------------------------------
     async def _dotty_inject_text(self, request: "web.Request") -> "web.Response":
         """POST /xiaozhi/admin/inject-text
