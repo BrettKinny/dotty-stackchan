@@ -64,6 +64,41 @@ client = TestClient(bridge_app.app)
 
 
 # ---------------------------------------------------------------------------
+# Dashboard render fixes (#128) — dead-card removal + honest smart-mode card
+# ---------------------------------------------------------------------------
+
+
+class DashboardRenderFixTests(unittest.TestCase):
+    """Guards the #128 'busted render' repairs against regression.
+
+    The zeroclaw-discord daemon card was removed (ZeroClaw retired in #36;
+    the local `systemctl` query could never work inside the Unraid
+    container), so its partial route must now 404. The Smart Mode card was
+    relabelled to be honest about the live PiVoiceLLM path, which performs
+    no model swap (Tier1Slim — the only provider that hot-swapped — was
+    removed in the 2026-05-29 alignment pass; the swap is v2 scope). The
+    card must render and say so rather than naming a defunct model.
+    """
+
+    def test_discord_partial_removed(self):
+        # The dead /ui/discord partial route was deleted in #128.
+        self.assertEqual(client.get("/ui/discord").status_code, 404)
+
+    def test_smart_mode_partial_renders(self):
+        # Route survives and renders its card chrome even with no
+        # smart_mode_getter wired (available=False path).
+        r = client.get("/ui/smart-mode")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Smart Mode", r.text)
+
+    def test_smart_mode_card_is_honest_about_no_swap(self):
+        # On the live PiVoiceLLM path there is no model swap, so the card
+        # must describe the pending-v2 state, not name a defunct model.
+        body = client.get("/ui/smart-mode").text
+        self.assertIn("model-swap pending", body)
+
+
+# ---------------------------------------------------------------------------
 # /health
 # ---------------------------------------------------------------------------
 
