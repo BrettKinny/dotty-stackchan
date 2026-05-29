@@ -2,16 +2,17 @@
 """dotty doctor — health-check CLI for the Dotty/StackChan stack.
 
 Runs the same checks as `make doctor` but as a portable Python script
-that can be invoked on any host (workstation, ZeroClaw host, CI) without make.
+that can be invoked on any host (workstation, Docker host, CI) without make.
 
 Usage:
     python scripts/dotty_doctor.py [options]
 
 Options:
-    --config PATH   Path to .config.yaml (default: auto-discovered)
-    --bridge-url U  Override bridge health URL
-    --server-url U  Override xiaozhi server URL
-    --timeout N     HTTP timeout in seconds (default: 5)
+    --config PATH     Path to .config.yaml (default: auto-discovered)
+    --bridge-url U    Override dashboard (bridge.py :8081) health URL
+    --server-url U    Override xiaozhi server OTA URL
+    --behaviour-url U Override dotty-behaviour (:8090) health URL
+    --timeout N       HTTP timeout in seconds (default: 5)
     --json          Output results as JSON to stdout
 """
 from __future__ import annotations
@@ -91,11 +92,6 @@ def _extract_xiaozhi_host(config_text: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
-def _extract_zeroclaw_host(config_text: str) -> Optional[str]:
-    m = re.search(r"url:\s*http://([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)", config_text)
-    return m.group(1) if m else None
-
-
 # ── Individual checks ─────────────────────────────────────────────────────────
 
 def check_config_exists(config_path: Optional[Path]) -> Result:
@@ -159,6 +155,7 @@ def run_checks(
     config_path: Optional[Path],
     bridge_url: Optional[str],
     server_url: Optional[str],
+    behaviour_url: Optional[str],
     timeout: int,
 ) -> list[Result]:
     results: list[Result] = []
@@ -169,29 +166,39 @@ def run_checks(
     results.append(check_models_piper(config_path))
 
     config_text = config_path.read_text() if config_path else ""
+    # The dashboard (bridge.py :8081) and dotty-behaviour (:8090) run as
+    # containers on the same Docker host as xiaozhi-server, so derive their
+    # health URLs from the same ws:// host the config already carries.
+    xiaozhi_host = _extract_xiaozhi_host(config_text)
 
-    if bridge_url is None:
-        zeroclaw_host = _extract_zeroclaw_host(config_text)
-        if zeroclaw_host:
-            bridge_url = f"http://{zeroclaw_host}:8080/health"
-    if bridge_url:
-        results.append(check_http("Bridge /health reachable", bridge_url, timeout))
-    else:
-        results.append(Result(
-            "Bridge /health reachable", "skip",
-            "pass --bridge-url or ensure config has 'url: http://<ZEROCLAW_HOST>:8080'",
-        ))
-
-    if server_url is None:
-        xiaozhi_host = _extract_xiaozhi_host(config_text)
-        if xiaozhi_host:
-            server_url = f"http://{xiaozhi_host}:8003/xiaozhi/ota/"
+    if server_url is None and xiaozhi_host:
+        server_url = f"http://{xiaozhi_host}:8003/xiaozhi/ota/"
     if server_url:
         results.append(check_http("Xiaozhi OTA endpoint reachable", server_url, timeout))
     else:
         results.append(Result(
             "Xiaozhi OTA endpoint reachable", "skip",
             "pass --server-url or ensure config has ws://<XIAOZHI_HOST>:8000",
+        ))
+
+    if bridge_url is None and xiaozhi_host:
+        bridge_url = f"http://{xiaozhi_host}:8081/health"
+    if bridge_url:
+        results.append(check_http("Dashboard /health reachable", bridge_url, timeout))
+    else:
+        results.append(Result(
+            "Dashboard /health reachable", "skip",
+            "pass --bridge-url or ensure config has ws://<XIAOZHI_HOST>:8000",
+        ))
+
+    if behaviour_url is None and xiaozhi_host:
+        behaviour_url = f"http://{xiaozhi_host}:8090/health"
+    if behaviour_url:
+        results.append(check_http("dotty-behaviour /health reachable", behaviour_url, timeout))
+    else:
+        results.append(Result(
+            "dotty-behaviour /health reachable", "skip",
+            "pass --behaviour-url or ensure config has ws://<XIAOZHI_HOST>:8000",
         ))
 
     return results
@@ -207,9 +214,11 @@ def main() -> int:
     parser.add_argument("--config", metavar="PATH",
                         help="Path to .config.yaml (auto-discovered if omitted)")
     parser.add_argument("--bridge-url", metavar="URL",
-                        help="Bridge health URL, e.g. http://192.168.1.20:8080/health")
+                        help="Dashboard health URL, e.g. http://192.168.1.10:8081/health")
     parser.add_argument("--server-url", metavar="URL",
                         help="Xiaozhi OTA URL, e.g. http://192.168.1.10:8003/xiaozhi/ota/")
+    parser.add_argument("--behaviour-url", metavar="URL",
+                        help="dotty-behaviour health URL, e.g. http://192.168.1.10:8090/health")
     parser.add_argument("--timeout", metavar="N", type=int, default=5,
                         help="HTTP timeout in seconds (default: 5)")
     parser.add_argument("--json", action="store_true",
@@ -225,6 +234,7 @@ def main() -> int:
         config_path=config_path,
         bridge_url=args.bridge_url,
         server_url=args.server_url,
+        behaviour_url=args.behaviour_url,
         timeout=args.timeout,
     )
 
