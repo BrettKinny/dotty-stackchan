@@ -25,9 +25,9 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(thinkHardTool);
   pi.registerTool(playSongTool);
   pi.registerTool(takePhotoTool);
-  // Per-turn conversation auto-log — mirrors bridge.py /api/voice/memory_log,
-  // fired by Tier1Slim today. Lives here so the PiVoiceLLM cutover can
-  // retire that bridge endpoint.
+  // Per-turn conversation auto-log. This is the live write path on the
+  // PiVoiceLLM voice path (the old bridge.py /api/voice/memory_log endpoint
+  // was retired with the #36 cutover).
   pi.on("agent_end", logTurnEnd);
   // set_led is intentionally absent: the LED ring is reserved for
   // mode/state indication, not voice-driven; see README.md "Not a tool".

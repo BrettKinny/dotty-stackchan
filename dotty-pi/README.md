@@ -17,9 +17,9 @@ The runtime contract is:
 - **PiVoiceLLM / PiClient** translates each turn into a pi RPC request.
 - **pi** (this container) runs the prompt against llama-swap on the same
   host (`http://localhost:8080/v1`, model `qwen3.6:27b` by default), with
-  the [`dotty-pi-ext`](../dotty-pi-ext/) extension loaded for the five
-  voice tools (`memory_lookup`, `think_hard`, `take_photo`, `play_song`,
-  `set_led`).
+  the [`dotty-pi-ext`](../dotty-pi-ext/) extension loaded for the seven
+  voice tools (`memory_lookup`, `remember`, `recall_person`,
+  `remember_person`, `think_hard`, `take_photo`, `play_song`).
 
 ## Build + run on Unraid
 

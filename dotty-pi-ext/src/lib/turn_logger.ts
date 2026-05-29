@@ -2,9 +2,10 @@
 // (once per user prompt) and writes a `category=conversation` row to
 // brain.db, mirroring bridge.py's /api/voice/memory_log handler.
 //
-// Pre-cutover this code is dormant — Tier1Slim still posts to bridge.py
-// directly. Post-cutover, when xiaozhi flips to PiVoiceLLM, this is the
-// last write path that needs to survive the bridge retirement.
+// The #36 cutover executed 2026-05-19 — xiaozhi now runs PiVoiceLLM, so
+// this is the LIVE conversation write path. It took over from bridge.py's
+// retired /api/voice/memory_log endpoint and is the sole surviving write
+// path after the bridge's voice role was removed.
 
 import type {
   AgentEndEvent,
