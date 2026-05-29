@@ -77,11 +77,15 @@ def _safe_metric(fn, *args, **kwargs) -> None:
 # Kid-mode + smart-mode state files
 # ---------------------------------------------------------------------------
 
+# These MUST resolve to the same files the xiaozhi container reads (see
+# receiveAudioHandle.py). The container deploy sets both env vars to the
+# shared /var/lib/dotty-bridge/state mount; the default below matches that
+# dir — NOT the retired /root/zeroclaw-bridge RPi path.
 _KID_STATE_FILE = Path(
-    os.environ.get("DOTTY_KID_MODE_STATE", "/root/zeroclaw-bridge/state/kid-mode")
+    os.environ.get("DOTTY_KID_MODE_STATE", "/var/lib/dotty-bridge/state/kid-mode")
 )
 _SMART_STATE_FILE = Path(
-    os.environ.get("DOTTY_SMART_MODE_STATE", "/root/zeroclaw-bridge/state/smart-mode")
+    os.environ.get("DOTTY_SMART_MODE_STATE", "/var/lib/dotty-bridge/state/smart-mode")
 )
 
 

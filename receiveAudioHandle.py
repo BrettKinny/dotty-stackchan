@@ -24,11 +24,18 @@ MIN_UTTERANCE_CHARS = int(os.environ.get("MIN_UTTERANCE_CHARS", "2"))
 # orange for smart_mode). The bridge dispatches `self.robot.set_toggle` MCP
 # calls on phrase triggers, dashboard flips, and once-per-connection sync.
 # State files persist the toggles across daemon restarts and reboots.
+#
+# These MUST resolve to the same files the bridge dashboard writes. In the
+# container deploy DOTTY_KID_MODE_STATE / DOTTY_SMART_MODE_STATE are set (see
+# docker-compose.yml.template) to the shared /var/lib/dotty-bridge/state mount.
+# The default below matches the bridge container's state dir — NOT the retired
+# /root/zeroclaw-bridge RPi path — so the toggles stay in sync even if the env
+# vars are missing.
 _KID_MODE_STATE_FILE = os.environ.get(
-    "DOTTY_KID_MODE_STATE", "/root/zeroclaw-bridge/state/kid-mode",
+    "DOTTY_KID_MODE_STATE", "/var/lib/dotty-bridge/state/kid-mode",
 )
 _SMART_MODE_STATE_FILE = os.environ.get(
-    "DOTTY_SMART_MODE_STATE", "/root/zeroclaw-bridge/state/smart-mode",
+    "DOTTY_SMART_MODE_STATE", "/var/lib/dotty-bridge/state/smart-mode",
 )
 
 
