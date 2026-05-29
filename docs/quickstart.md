@@ -161,7 +161,7 @@ This repo uses placeholders in place of real IPs, usernames, and filesystem path
 | `<YOUR_NAME>` | Your name / org, used in the persona prompt in `.config.yaml`. |
 | `<ROBOT_NAME>` | Name the robot introduces itself as, referenced in the persona prompt in `.config.yaml`. Any string — pick whatever you want. The default example uses the hardware name ("StackChan"). |
 
-Port numbers (`8000`, `8003`, `8080`, `8090`) are product-generic and should not be changed unless you also reconfigure the respective services.
+Port numbers (`8000`, `8003`, `8081`, `8090`) are product-generic and should not be changed unless you also reconfigure the respective services.
 
 Files you will definitely need to edit before first run:
 
@@ -207,7 +207,7 @@ The full file inventory lives in [architecture.md](./architecture.md#deployment-
 | WebSocket | `ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/` | The robot after OTA handshake |
 | Perception / ambient events | `http://<XIAOZHI_HOST>:8090` | xiaozhi-server → dotty-behaviour |
 | Admin dashboard | `http://<XIAOZHI_HOST>:8081/ui` | Humans (LAN-only HTMX UI) |
-| Bridge health | `http://<XIAOZHI_HOST>:8080/health` | Humans, monitoring |
+| Bridge health | `http://<XIAOZHI_HOST>:8081/health` | Humans, monitoring |
 
 ---
 
@@ -240,7 +240,7 @@ ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'cd <XIAOZHI_PATH> && docker compose restart'
 open http://<XIAOZHI_HOST>:8081/ui
 
 # Bridge health
-curl http://<XIAOZHI_HOST>:8080/health
+curl http://<XIAOZHI_HOST>:8081/health
 ```
 
 ### Changing voice

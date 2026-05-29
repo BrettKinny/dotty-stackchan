@@ -59,7 +59,7 @@ compatibility matrix"). When adopted, the plan is:
 2. **Back up before upgrading.** Run `scripts/backup.sh` (or the equivalent
    manual steps) to snapshot config, persona files, and bridge state.
 3. **Upgrade one component at a time.** Validate with a health check
-   (`curl http://<XIAOZHI_HOST>:8090/health` and `:8080/health`) plus a live
+   (`curl http://<XIAOZHI_HOST>:8090/health` and `:8081/health`) plus a live
    voice turn before moving to the next component.
 4. **Tail logs during validation.** Watch both the xiaozhi-server container
    logs and the bridge journal simultaneously to catch mismatches early.

@@ -20,7 +20,7 @@ second or two:
 curl -s http://<XIAOZHI_HOST>:8003/xiaozhi/ota/
 # Expect:  OTA接口运行正常，向设备发送的websocket地址是：ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/
 
-curl -s http://<XIAOZHI_HOST>:8080/health
+curl -s http://<XIAOZHI_HOST>:8081/health
 # Expect:  {"status":"ok", ...}
 
 curl -s http://<XIAOZHI_HOST>:8090/health
@@ -241,5 +241,5 @@ It just isn't what M5Stack ships today.
 - **Tail voice pipeline**: `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs -f xiaozhi-esp32-server'`
 - **Tail brain container**: `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs -f dotty-pi'`
 - **Tail perception/behaviour**: `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs -f dotty-behaviour'`
-- **Admin dashboard**: open `http://<XIAOZHI_HOST>:8080/ui` in a browser.
-- **Dashboard health**: `curl http://<XIAOZHI_HOST>:8080/health`
+- **Admin dashboard**: open `http://<XIAOZHI_HOST>:8081/ui` in a browser.
+- **Dashboard health**: `curl http://<XIAOZHI_HOST>:8081/health`
