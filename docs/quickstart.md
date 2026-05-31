@@ -14,8 +14,34 @@ alternative configurations.
 | Item | Notes |
 |------|-------|
 | **M5Stack CoreS3 + StackChan servo kit** | The robot. See [hardware-support.md](hardware-support.md) for details. |
-| **Linux or macOS host with Docker** | Runs all four server-side containers. Any distro works. |
+| **Linux or macOS host with Docker** | Runs all four server-side containers. Any distro works. **No GPU required** for the default stack — see [Server hardware](#server-hardware) below. |
 | **2.4 GHz WiFi** | The ESP32-S3 does not support 5 GHz. |
+
+### Server hardware
+
+The default stack is **CPU-only — no GPU is required.** The voice pipeline
+ships with [FunASR](https://github.com/modelscope/FunASR) SenseVoiceSmall for
+ASR and [Piper](https://github.com/rhasspy/piper) (`LocalPiper`) for TTS, both
+of which run comfortably on a modern multi-core x86-64 or Apple Silicon CPU.
+
+| Scenario | Needs a GPU? | Notes |
+|----------|--------------|-------|
+| **Default** (FunASR ASR + LocalPiper TTS + a **cloud** LLM via OpenRouter/OpenAI-compatible key) | No | Any 64-bit Linux/macOS host with Docker and ~4 GB free RAM. This is the Quickstart happy path. |
+| `WhisperLocal` ASR instead of FunASR | Yes | `faster-whisper` float16 needs CUDA. This is the *only* reason the Quickstart compose file carries a `runtime: nvidia` block. |
+| **Self-hosting the LLM** locally (Ollama / llama-swap instead of a cloud key) | Recommended | VRAM scales with the model — roughly ~5 GB for an 8B model, ~18 GB for a 30B. See [run-fully-local.md](cookbook/run-fully-local.md) and [llama-swap-concurrent-models.md](cookbook/llama-swap-concurrent-models.md). CPU-only inference works but is slow. |
+
+**You do not have to touch the GPU config manually.** `make setup` (step 4)
+auto-detects the NVIDIA Docker runtime: if it's present, setup selects
+`WhisperLocal` on the GPU; if it's absent, setup selects `FunASR` on the CPU
+**and strips the `runtime: nvidia` / `NVIDIA_*` blocks** out of the rendered
+`docker-compose.yml`. The `# --- BEGIN/END CUDA BLOCK ---` markers in
+`docker-compose.yml.template` exist for exactly this.
+
+> If you render the compose file by hand instead of running `make setup`,
+> delete the two marked sections (`# --- BEGIN CUDA BLOCK ---` … `# --- END
+> CUDA BLOCK ---` and `# --- BEGIN CUDA ENV ---` … `# --- END CUDA ENV ---`)
+> on a host without `nvidia-container-toolkit`. Leaving them in is what
+> produces the `could not select device driver "nvidia"` error from Docker.
 
 ## 1. Flash the firmware
 
