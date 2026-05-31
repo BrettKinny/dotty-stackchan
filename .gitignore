@@ -9,6 +9,9 @@ venv/
 # Claude Code session artifacts (lock files, local settings)
 .claude/
 
+# learn-tutor progress + transcripts (per-project tutor state)
+.learn-tutor/
+
 # Secrets / credentials — never commit
 .env
 .env.*
