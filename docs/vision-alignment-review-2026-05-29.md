@@ -1,3 +1,8 @@
+---
+title: Vision & Alignment Review (2026-05-29)
+description: Whole-repo vision and alignment snapshot reconciling README, CLAUDE.md, docs, ROADMAP, CHANGELOG, all four service trees, firmware, scripts, and tests after the post-#36 / #115 drift.
+---
+
 # Dotty — Whole-Repo Vision & Alignment Review
 
 *Snapshot: 2026-05-29 · Branch `main` · Reconciles `README.md`, `CLAUDE.md`, `docs/*`, `ROADMAP.md`, `CHANGELOG.md`, all four service trees, firmware, scripts, and tests.*
