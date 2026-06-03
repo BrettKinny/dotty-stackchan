@@ -7,17 +7,4 @@
   <a href="{{ installed_href }}" target="_blank" rel="noopener noreferrer"
      class="hover:text-base-content"
      title="{{ installed_title }}">{{ installed_display }}</a>
-  {% if update_available and update_display %}
-  <span aria-hidden="true" style="display:inline-block;width:1px;height:0.75rem;background:currentColor;opacity:.3;margin:0 0.125rem;"></span>
-  <button type="button"
-          class="inline-flex items-center gap-1 text-success hover:bg-base-300 rounded-full px-1"
-          aria-label="{{ update_title }}"
-          title="{{ update_title }}"
-          hx-post="/ui/actions/preview-update"
-          hx-target="#update-modal-content" hx-swap="innerHTML"
-          hx-disabled-elt="this"
-          hx-on::after-request="document.getElementById('update-modal').showModal()">
-    <span aria-hidden="true">⬇</span><span>{{ update_display }}</span>
-  </button>
-  {% endif %}
 </span>

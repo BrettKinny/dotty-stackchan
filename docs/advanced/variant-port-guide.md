@@ -180,12 +180,12 @@ Once the device connects, run through:
 
 1. **WebSocket handshake** — `tools/list` in the server logs should list all advertised MCP tools.
 2. **Voice round-trip** — speak a simple phrase and confirm ASR → LLM → TTS returns audio to the device.
-3. **MCP tool call** — send a test instruction through the bridge:
-   ```bash
-   curl -X POST http://<XIAOZHI_HOST>:8080/api/message \
-     -H 'Content-Type: application/json' \
-     -d '{"content":"Turn your head to the right"}'
-   ```
+3. **MCP tool call** — exercise an MCP tool by speaking an instruction
+   ("Turn your head to the right") and confirming the firmware acts on it.
+   The bridge no longer offers a text-injection endpoint for this: the old
+   `POST /api/message` route was retired in the #36 cutover (the `PiVoiceLLM`
+   voice path doesn't use it), and `bridge.py` is now dashboard-only at
+   `:8081` (`/ui`, `/admin/*`, `/health`, `/metrics`).
 4. **LED feedback** — confirm the three-state pattern (listening / thinking / speaking) works on your LED hardware.
 
 ---

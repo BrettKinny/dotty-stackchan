@@ -14,8 +14,34 @@ alternative configurations.
 | Item | Notes |
 |------|-------|
 | **M5Stack CoreS3 + StackChan servo kit** | The robot. See [hardware-support.md](hardware-support.md) for details. |
-| **Linux or macOS host with Docker** | Runs all four server-side containers. Any distro works. |
+| **Linux or macOS host with Docker** | Runs all four server-side containers. Any distro works. **No GPU required** for the default stack — see [Server hardware](#server-hardware) below. |
 | **2.4 GHz WiFi** | The ESP32-S3 does not support 5 GHz. |
+
+### Server hardware
+
+The default stack is **CPU-only — no GPU is required.** The voice pipeline
+ships with [FunASR](https://github.com/modelscope/FunASR) SenseVoiceSmall for
+ASR and [Piper](https://github.com/rhasspy/piper) (`LocalPiper`) for TTS, both
+of which run comfortably on a modern multi-core x86-64 or Apple Silicon CPU.
+
+| Scenario | Needs a GPU? | Notes |
+|----------|--------------|-------|
+| **Default** (FunASR ASR + LocalPiper TTS + a **cloud** LLM via OpenRouter/OpenAI-compatible key) | No | Any 64-bit Linux/macOS host with Docker and ~4 GB free RAM. This is the Quickstart happy path. |
+| `WhisperLocal` ASR instead of FunASR | Yes | `faster-whisper` float16 needs CUDA. This is the *only* reason the Quickstart compose file carries a `runtime: nvidia` block. |
+| **Self-hosting the LLM** locally (Ollama / llama-swap instead of a cloud key) | Recommended | VRAM scales with the model — roughly ~5 GB for an 8B model, ~18 GB for a 30B. See [run-fully-local.md](cookbook/run-fully-local.md) and [llama-swap-concurrent-models.md](cookbook/llama-swap-concurrent-models.md). CPU-only inference works but is slow. |
+
+**You do not have to touch the GPU config manually.** `make setup` (step 4)
+auto-detects the NVIDIA Docker runtime: if it's present, setup selects
+`WhisperLocal` on the GPU; if it's absent, setup selects `FunASR` on the CPU
+**and strips the `runtime: nvidia` / `NVIDIA_*` blocks** out of the rendered
+`docker-compose.yml`. The `# --- BEGIN/END CUDA BLOCK ---` markers in
+`docker-compose.yml.template` exist for exactly this.
+
+> If you render the compose file by hand instead of running `make setup`,
+> delete the two marked sections (`# --- BEGIN CUDA BLOCK ---` … `# --- END
+> CUDA BLOCK ---` and `# --- BEGIN CUDA ENV ---` … `# --- END CUDA ENV ---`)
+> on a host without `nvidia-container-toolkit`. Leaving them in is what
+> produces the `could not select device driver "nvidia"` error from Docker.
 
 ## 1. Flash the firmware
 
@@ -70,9 +96,8 @@ supports multiple resident models). See
 
 The shipped `.config.yaml` selects `PiVoiceLLM` as the default LLM
 provider, which runs the `dotty-pi` container (the pi coding agent)
-on the same Docker host. Alternate providers — `Tier1Slim` (small
-model inner loop, no agent overhead) and `OpenAICompat` (any
-OpenAI-compatible cloud endpoint) — are available via
+on the same Docker host. One alternate provider — `OpenAICompat`
+(any OpenAI-compatible cloud or local endpoint) — is available via
 `selected_module.LLM` in `data/.config.yaml`.
 
 ## 4. Run setup
@@ -161,7 +186,7 @@ This repo uses placeholders in place of real IPs, usernames, and filesystem path
 | `<YOUR_NAME>` | Your name / org, used in the persona prompt in `.config.yaml`. |
 | `<ROBOT_NAME>` | Name the robot introduces itself as, referenced in the persona prompt in `.config.yaml`. Any string — pick whatever you want. The default example uses the hardware name ("StackChan"). |
 
-Port numbers (`8000`, `8003`, `8080`, `8090`) are product-generic and should not be changed unless you also reconfigure the respective services.
+Port numbers (`8000`, `8003`, `8081`, `8090`) are product-generic and should not be changed unless you also reconfigure the respective services.
 
 Files you will definitely need to edit before first run:
 
@@ -190,7 +215,7 @@ Container volume mounts for `xiaozhi-esp32-server`:
 | `models/piper/` | `/opt/xiaozhi-esp32-server/models/piper/` | Piper TTS voice models (`.onnx` + `.json`) |
 | `tmp/` | `/opt/xiaozhi-esp32-server/tmp/` | Scratch |
 | `custom-providers/pi_voice/` | `/opt/xiaozhi-esp32-server/core/providers/llm/pi_voice/` | PiVoiceLLM provider (directory mount) |
-| `custom-providers/tier1_slim/` | `/opt/xiaozhi-esp32-server/core/providers/llm/tier1_slim/` | Tier1Slim alternate provider |
+| `custom-providers/openai_compat/` | `/opt/xiaozhi-esp32-server/core/providers/llm/openai_compat/` | OpenAICompat alternate provider |
 | `custom-providers/edge_stream/edge_stream.py` | `/opt/xiaozhi-esp32-server/core/providers/tts/edge_stream.py` | Streaming EdgeTTS provider (file mount) |
 | `custom-providers/piper_local/piper_local.py` | `/opt/xiaozhi-esp32-server/core/providers/tts/piper_local.py` | Local Piper TTS provider (file mount) |
 | `custom-providers/asr/fun_local.py` | `/opt/xiaozhi-esp32-server/core/providers/asr/fun_local.py` | Patched FunASR — adds `language` config key so SenseVoiceSmall can be pinned to English |
@@ -207,7 +232,7 @@ The full file inventory lives in [architecture.md](./architecture.md#deployment-
 | WebSocket | `ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/` | The robot after OTA handshake |
 | Perception / ambient events | `http://<XIAOZHI_HOST>:8090` | xiaozhi-server → dotty-behaviour |
 | Admin dashboard | `http://<XIAOZHI_HOST>:8081/ui` | Humans (LAN-only HTMX UI) |
-| Bridge health | `http://<XIAOZHI_HOST>:8080/health` | Humans, monitoring |
+| Bridge health | `http://<XIAOZHI_HOST>:8081/health` | Humans, monitoring |
 
 ---
 
@@ -240,20 +265,20 @@ ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'cd <XIAOZHI_PATH> && docker compose restart'
 open http://<XIAOZHI_HOST>:8081/ui
 
 # Bridge health
-curl http://<XIAOZHI_HOST>:8080/health
+curl http://<XIAOZHI_HOST>:8081/health
 ```
 
 ### Changing voice
 The default TTS is `LocalPiper` (offline, runs inside the container). To change the Piper voice, edit `TTS.LocalPiper.voice` and the corresponding `model_path` / `config_path` in `data/.config.yaml`. To switch to cloud EdgeTTS instead, set `selected_module.TTS: EdgeTTS` and edit `TTS.EdgeTTS.voice` (any Microsoft Edge Neural voice ID works, e.g. `en-US-AvaNeural`). Restart the container after changes.
 
 ### Changing persona (the robot's personality)
-Edit `personas/dotty_voice.md` (for the `PiVoiceLLM` / `Tier1Slim` paths) and restart the relevant container. The `prompt:` key in `data/.config.yaml` is also injected as a secondary system message. Full instructions: [cookbook/change-persona.md](cookbook/change-persona.md).
+Edit `personas/dotty_voice.md` (loaded by the pi agent on the `PiVoiceLLM` path) and restart the relevant container. The `prompt:` key in `data/.config.yaml` is also injected as a secondary system message. Full instructions: [cookbook/change-persona.md](cookbook/change-persona.md).
 
 ### Changing VAD sensitivity
 `VAD.SileroVAD.min_silence_duration_ms` in `data/.config.yaml`. Default: 700 ms. Lower = cuts off quicker. Higher = waits longer for slow speakers.
 
 ### Changing the LLM model
-For the `PiVoiceLLM` path (default): see [dotty-pi/README.md](../dotty-pi/README.md) for the model selection rules — in particular, the llama-swap matrix DSL constraint that prevents the voice-model set from being evicted. For the `Tier1Slim` path: edit `LLM.Tier1Slim.model` (or repoint `url` / `api_key`) in `data/.config.yaml` and `docker compose restart`. Or for in-flight swaps, use the bridge's `/admin/smart-mode` toggle — it calls `/xiaozhi/admin/set-tier1slim-model` to hot-swap without a restart (see [tier1slim.md](tier1slim.md)).
+For the `PiVoiceLLM` path (default): see [dotty-pi/README.md](../dotty-pi/README.md) for the model selection rules — in particular, the llama-swap matrix DSL constraint that prevents the voice-model set from being evicted. For the `OpenAICompat` path: edit `LLM.OpenAICompat.model` (or repoint `url` / `api_key`) in `data/.config.yaml` and `docker compose restart`. Note: there is no live in-flight model-swap on either path — smart-mode model-swap is v2 scope and not wired (the instant hot-swap once provided by the removed Tier1Slim provider is gone).
 
 ---
 

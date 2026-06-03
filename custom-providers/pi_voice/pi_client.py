@@ -7,7 +7,7 @@ multiplexes turns over its stdin/stdout. Per #36 Step-5 invariants:
      turn and reused across all subsequent turns. Between turns we
      issue `new_session` to clear state without re-spawning — that
      recovers the per-turn startup tax (1.2-1.8 s warm spawn in the
-     spike report) that bridge.py's tier1_slim path didn't have to pay.
+     spike report) that an in-process HTTP provider wouldn't have paid.
 
   2. **Auto-cancel `extension_ui_request`.** Dialog methods (`select`,
      `confirm`, `input`, `editor`) block pi until the client sends

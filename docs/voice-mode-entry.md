@@ -19,11 +19,11 @@ The classic path. The mic is always sampling at low cost (AFE + WakeNet9 INT8 on
 
 Cross-link: [wake-word.md](./wake-word.md) covers the whole stack — current model, the five-minute switch to a different prebuilt, and the long-term branded "Hey Dotty" microWakeWord roadmap.
 
-### 2. Face detection — firmware → bridge
+### 2. Face detection — firmware → dotty-behaviour
 
-The on-device face tracker (PSRAM-mounted ESP-WHO model in `firmware/firmware/main/stackchan/modifiers/face_tracking.cpp`) emits a `face_detected` perception event when a human face enters the camera's field of view. The xiaozhi-server-side relay forwards that event to the bridge, where `_perception_face_greeter` (in `bridge.py`) injects the configured greeting (`FACE_GREET_TEXT`, default "Hi!") via the xiaozhi `/admin/inject-text` route. xiaozhi speaks the greeting and opens the mic for the reply.
+The on-device face tracker (PSRAM-mounted ESP-WHO model in `firmware/firmware/main/stackchan/modifiers/face_tracking.cpp`) emits a `face_detected` perception event when a human face enters the camera's field of view. The xiaozhi-server-side relay forwards that event to `dotty-behaviour`'s `/api/perception/event` bus, where the `face_greeter` consumer (`dotty-behaviour/consumers/face_greeter.py`) injects the configured greeting (`FACE_GREET_TEXT`, default "Hi!") via the xiaozhi `/xiaozhi/admin/inject-text` route. xiaozhi speaks the greeting and opens the mic for the reply.
 
-Per-device cooldown stops a stationary user from re-triggering on every blink of the tracker. Set `FACE_GREET_TEXT=""` to suppress the verbal greeting and just open the mic silently — see the env block in `bridge.py` for the full set of knobs.
+A per-device minimum interval (`FACE_GREET_MIN_INTERVAL_SEC`, default 30 s) stops a stationary user from re-triggering on every blink of the tracker. Set `FACE_GREET_TEXT=""` to suppress the verbal greeting and just open the mic silently — these knobs live in `dotty-behaviour/config.py`.
 
 **Requires line of sight.** Useless in the dark or when the camera is occluded.
 
@@ -35,11 +35,11 @@ Shipped in firmware commit `e8370d2`. The head-pet handler distinguishes a quick
 
 This is the **dark-room friendly** entry point: works with no light, no line of sight, no spoken phrase. Brett's primary use case is morning interactions before the lights are up.
 
-### 4. `/admin/inject-text` — server-side LAN admin
+### 4. `/xiaozhi/admin/inject-text` — server-side LAN admin
 
-> **`curl -XPOST http://<bridge>/admin/inject-text -d '{"text":"...","device_id":"..."}'`**
+> **`curl -XPOST http://<XIAOZHI_HOST>:8000/xiaozhi/admin/inject-text -d '{"text":"...","device_id":"..."}'`**
 
-This is the path the Discord daemon and the portal "Greet" button use. Strictly speaking it doesn't enter voice mode — it bypasses the listen pipeline entirely and inserts text directly into the LLM turn, skipping wake-word + ASR. Useful when you want Dotty to say something **without anyone needing to be physically present**: scheduled greetings, DM-style admin messages, automation hooks. Not exposed to the public internet.
+This is the path the portal "Greet" button and `dotty-behaviour` consumers (e.g. `face_greeter`) use. Strictly speaking it doesn't enter voice mode — it bypasses the listen pipeline entirely and inserts text directly into the LLM turn, skipping wake-word + ASR. Useful when you want Dotty to say something **without anyone needing to be physically present**: scheduled greetings, DM-style admin messages, automation hooks. Not exposed to the public internet.
 
 ## Comparison
 

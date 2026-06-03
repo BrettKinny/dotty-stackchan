@@ -20,7 +20,6 @@ re-verify claims against the canonical specs rather than trusting our paraphrase
 | Know what the physical robot can do | [hardware.md](./hardware.md) |
 | Understand the voice pipeline (ASR/TTS/VAD) | [voice-pipeline.md](./voice-pipeline.md) |
 | Understand the brain (the pi agent + model matrix) | [brain.md](./brain.md) |
-| Understand the Tier1Slim voice LLM (alternate backend) | [tier1slim.md](./tier1slim.md) |
 | Know what's on the wire between components | [protocols.md](./protocols.md) |
 | See every cross-layer signal at a glance | [interaction-map.md](./interaction-map.md) |
 | Know what mode the robot is in (and what the LEDs mean) | [modes.md](./modes.md) |
@@ -37,7 +36,6 @@ docs/
 ├── hardware.md              ← M5Stack StackChan body + firmware lineage + MCP tool catalog
 ├── voice-pipeline.md        ← xiaozhi-esp32-server, FunASR/Whisper, VAD, Piper/EdgeTTS
 ├── brain.md                 ← the pi agent runtime + model matrix + dashboard service
-├── tier1slim.md             ← Tier1Slim voice LLM provider (alternate) + escalation contract
 ├── protocols.md             ← Xiaozhi WebSocket, MCP-over-WS, pi RPC, emotion
 ├── interaction-map.md       ← every cross-layer signal: source, dest, protocol, notes
 ├── modes.md                 ← behavioural mode taxonomy + LED contract + transitions

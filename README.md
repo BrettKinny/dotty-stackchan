@@ -4,15 +4,15 @@
 
 # Dotty
 
-**Your self-hosted [StackChan](https://github.com/m5stack/StackChan) robot assistant — kid-safe by default, hackable by design, private by architecture.**
+**Your self-hosted [StackChan](https://github.com/m5stack/StackChan) robot assistant — kid-minded by default, hackable by design, private by architecture.**
 
-> ⚠️ **Heads up: this is not a stable project yet.** Dotty is buggy, frequently broken, and actively changing day-to-day. End-to-end behaviour works on the maintainer's hardware but regressions land all the time, the API and config surface shifts without notice, and a fresh deploy on someone else's gear has not been verified. Treat this as a hobby-grade work-in-progress, not a polished product. Bugs, PRs, and "this didn't work for me" issues all very welcome. 🍺☕ If you do try a fresh end-to-end deploy, please get in touch — I'll buy you a beer or a coffee. The best place to ask questions, get help, or show off a build is the [Dotty community Discord](https://discord.gg/7sKE5c6A).
+> ⚠️ **Heads up: this is not a stable project yet.** Dotty is buggy, frequently broken, and actively changing day-to-day. End-to-end behaviour works on the maintainer's hardware but regressions land all the time, the API and config surface shifts without notice, and a fresh deploy on someone else's gear has not been verified. Treat this as a hobby-grade work-in-progress, not a polished product. Bugs, PRs, and "this didn't work for me" issues all very welcome. 🍺☕ If you do try a fresh end-to-end deploy, please get in touch — I'll buy you a beer or a coffee. The best place to ask questions, get help, or show off a build is the [Dotty community Discord](https://discord.gg/SVnkfkH4Gh).
 >
 > **Known rough edges:** face emoji rendering is missing visual differentiation for 4 of 9 emotions (sad / surprise / love / laughing); sound-direction localizer has a hardware-AEC-related left-bias on M5Stack CoreS3 (energy detection works, direction is unreliable); kid-voice ASR accuracy on SenseVoice has a kid-speech gap that whisper.cpp will close in a follow-up.
 
 Dotty is a fully self-hosted voice stack for the M5Stack StackChan desktop robot. Open-source firmware on the robot, [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) for voice I/O, and a local **pi** coding agent as the brain. ASR, TTS, and session state all run on your own hardware. The LLM is pluggable — the shipped default runs a small fast model for plain conversation and escalates hard questions to a more capable model, with [llama-swap](./docs/cookbook/llama-swap-concurrent-models.md) as the recommended local backend. Swap in [Ollama](./docs/cookbook/run-fully-local.md) for the simpler single-binary option, or point at OpenRouter / any OpenAI-compatible API if you'd rather use the cloud.
 
-Out of the box, Dotty ships in **Kid Mode** — age-appropriate language, safety guardrails, and content filtering are on by default. Disable Kid Mode for a general-purpose assistant.
+Out of the box, Dotty ships in **Kid Mode** — the persona plus a per-turn prompt sandwich keep responses age-appropriate and on-topic. This is prompt-level steering, **not** an output content filter (a blocked-words filter is planned — see [#138](https://github.com/BrettKinny/dotty-stackchan/issues/138)), and it's no substitute for supervision. Disable Kid Mode for a general-purpose assistant.
 
 ## Why I built this
 
@@ -22,7 +22,7 @@ So Dotty is the version that passes: every component runs on hardware I own, eve
 
 ## Features
 
-- **Kid Mode (on by default)** — age-appropriate responses, content filtering, and safety guardrails. Toggle off for general-purpose use. See [`docs/kid-mode.md`](./docs/kid-mode.md).
+- **Kid Mode (on by default)** — age-appropriate responses via persona + per-turn prompt steering. An output content filter is planned, not yet shipped ([#138](https://github.com/BrettKinny/dotty-stackchan/issues/138)); Kid Mode is not a substitute for supervision. Toggle off for general-purpose use. See [`docs/kid-mode.md`](./docs/kid-mode.md).
 - **Local ASR** — FunASR SenseVoiceSmall runs on your hardware, no cloud transcription.
 - **Local or cloud TTS** — Piper (offline) or EdgeTTS (cloud). Swap with a config change.
 - **Streaming responses** — the bridge streams LLM output to the voice pipeline for lower perceived latency.
@@ -97,7 +97,6 @@ For what the stack *is* underneath — hardware specs, protocol docs, model fact
 - [docs/architecture.md](./docs/architecture.md) — end-to-end data flow, topology, deployment files, admin surface, perception bus, threat model.
 - [docs/hardware.md](./docs/hardware.md) — M5Stack StackChan body + firmware lineage + on-device MCP tool catalog.
 - [docs/voice-pipeline.md](./docs/voice-pipeline.md) — xiaozhi-esp32-server internals, FunASR/SenseVoice, VAD, TTS.
-- [docs/tier1slim.md](./docs/tier1slim.md) — the Tier1Slim two-tier voice LLM provider (an alternate backend), escalation contract, hot-swap.
 - [docs/brain.md](./docs/brain.md) — model matrix, the pi agent runtime, and how voice turns reach it.
 - [docs/protocols.md](./docs/protocols.md) — Xiaozhi WS framing, MCP-over-WS, pi RPC, the dashboard HTTP API, emotion channel.
 - [docs/modes.md](./docs/modes.md) — behavioural mode taxonomy + LED contract + transition diagram (with shipped-vs-planned breakdown).

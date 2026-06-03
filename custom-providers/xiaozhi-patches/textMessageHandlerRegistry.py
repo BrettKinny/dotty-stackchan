@@ -1,7 +1,8 @@
 """Dotty override of upstream core/handle/textMessageHandlerRegistry.py.
 
 Adds an `EventTextMessageHandler` that relays ambient perception
-events from the firmware to the zeroclaw-bridge over HTTP. Inline
+event frames from the firmware to dotty-behaviour's
+`/api/perception/event` endpoint (:8090) over HTTP. Inline
 duck-type sidesteps an additional override of textMessageType.py.
 
 All other handlers and registry behaviour are preserved verbatim.

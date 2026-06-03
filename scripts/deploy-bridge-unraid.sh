@@ -6,12 +6,13 @@
 # per-deploy backup of the previous source tree, md5 round-trip
 # verification, /health poll instead of a fixed sleep.
 #
-# This is the post-#36 Unraid-targeted replacement for the legacy
-# scripts/deploy-bridge.sh (which still targets the retired RPi at
-# /root/zeroclaw-bridge/ + systemd zeroclaw-bridge.service). The old
-# script is intentionally left in place for archive purposes until
-# its surrounding tooling (dotty-deploy-bridge skill, install-bridge.sh)
-# is reaped in a follow-up.
+# This is the post-#36 Unraid-targeted deploy for the bridge dashboard.
+# The legacy scripts/deploy-bridge.sh + install-bridge.sh (which targeted
+# the retired RPi at /root/zeroclaw-bridge/ + the systemd
+# zeroclaw-bridge.service) have been removed. NOTE: the `dotty-deploy-bridge`
+# Claude skill is also stale — it still pushes to dietpi@<ZEROCLAW_HOST> and
+# restarts zeroclaw-bridge; use THIS script for bridge deploys until that
+# skill is retired/rewritten.
 #
 # Usage:
 #   BRIDGE_HOST=root@<UNRAID_HOST> bash scripts/deploy-bridge-unraid.sh
@@ -47,7 +48,8 @@ if [[ ${#FILES[@]} -eq 0 ]]; then
     echo "ERROR: no tracked bridge files at HEAD" >&2
     exit 1
 fi
-echo "Deploy set: ${#FILES[@]} files (HEAD $(git rev-parse --short HEAD))"
+DEPLOY_SHA="$(git rev-parse --short HEAD)"
+echo "Deploy set: ${#FILES[@]} files (HEAD $DEPLOY_SHA)"
 
 # 2. SSH preflight — fail fast on bad creds.
 ssh -o BatchMode=yes -o ConnectTimeout=5 "$BRIDGE_HOST" true \
@@ -79,7 +81,7 @@ ssh "$BRIDGE_HOST" "
     tar -xzf /tmp/dotty-bridge.tgz -C $REMOTE_DIR
     rm -f /tmp/dotty-bridge.tgz
     cd $REMOTE_DIR
-    docker build -t $IMAGE_TAG -f bridge/Dockerfile .
+    docker build --build-arg BRIDGE_VERSION=$DEPLOY_SHA -t $IMAGE_TAG -f bridge/Dockerfile .
     cd $REMOTE_DIR/bridge
     docker compose up -d --force-recreate
 "

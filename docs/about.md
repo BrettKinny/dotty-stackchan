@@ -7,13 +7,13 @@ description: What Dotty is and why it exists.
 
 ## What is this?
 
-Dotty is a self-hosted voice assistant built on the M5Stack [StackChan](https://github.com/m5stack/StackChan) desktop robot. You talk to the robot, it talks back -- speech recognition, language model, and text-to-speech all run on your own hardware. Kid Mode is enabled by default, making it safe for young children out of the box. Disable Kid Mode and Dotty becomes a general-purpose voice assistant.
+Dotty is a self-hosted voice assistant built on the M5Stack [StackChan](https://github.com/m5stack/StackChan) desktop robot. You talk to the robot, it talks back -- speech recognition, language model, and text-to-speech all run on your own hardware. Kid Mode is enabled by default, steering responses to be age-appropriate -- prompt-level steering, not an output content filter (see the [FAQ](./faq.md)), and no substitute for supervision. Disable Kid Mode and Dotty becomes a general-purpose voice assistant.
 
 Every component in the pipeline is swappable: the LLM, the TTS engine, the ASR provider, and the persona. The reference config uses Qwen via OpenRouter, but you can swap in Ollama + Piper + FunASR for a fully local deployment with no code changes and no data leaving your network.
 
 ## Features
 
-- **Kid-safe by default.** Kid Mode is on out of the box. Per-turn sandwich enforcement in the bridge layer keeps the LLM age-appropriate and on-topic. Disable it for a general-purpose assistant.
+- **Kid-minded by default.** Kid Mode is on out of the box. Per-turn sandwich enforcement keeps the LLM age-appropriate and on-topic -- prompt-level steering, not an output content filter (planned, not yet shipped: [#138](https://github.com/BrettKinny/dotty-stackchan/issues/138)), and no substitute for supervision. Disable it for a general-purpose assistant.
 - **Fully swappable pipeline.** Every component -- LLM, TTS, ASR, persona -- is a config-level choice. Bring your own models, your own agent framework, or your own personality.
 - **Local speech recognition.** FunASR SenseVoiceSmall runs on your server. Audio never leaves your LAN.
 - **Pluggable LLM.** The reference config uses Qwen via OpenRouter. Swap in any OpenAI-compatible API or Ollama for fully local inference.
@@ -26,14 +26,14 @@ Every component in the pipeline is swappable: the LLM, the TTS engine, the ASR p
 - **Makers and tinkerers** who want a hackable voice robot they control end-to-end. You own the hardware, the config, the prompts, and the code. If something doesn't work the way you want, you change it.
 - **Privacy-conscious users** who don't want their voice data flowing to someone else's cloud. Everything runs on your hardware. The only outbound call in the default config is the LLM, and that's replaceable with a local model.
 - **StackChan community members** looking for a batteries-included voice stack for the M5Stack StackChan hardware -- ASR, LLM, TTS, expressions, and persona all wired together and documented.
-- **Parents** who want a controllable, inspectable voice assistant for their kids. Kid Mode is enabled by default. You can read every prompt, every log, and every response.
+- **Parents** who want a controllable, inspectable voice assistant for their kids. Kid Mode (age-appropriate prompt steering) is enabled by default -- though it's not an output content filter and not a substitute for supervision. You can read every prompt, every log, and every response.
 
 This is a hackable starting point, not a product. There are no releases, no installer, no support channel. You deploy it by reading the README, editing config files, and running Docker commands.
 
 ## What makes it different
 
 - **Everything is swappable.** LLM, TTS, ASR, and persona are all config-level choices. The custom provider architecture means you can drop in a new component without touching the rest of the pipeline.
-- **Kid-safe by default.** Kid Mode ships enabled. Per-turn prompt enforcement keeps responses age-appropriate. Disable it with a config toggle for general-purpose use.
+- **Kid-minded by default.** Kid Mode ships enabled. Per-turn prompt enforcement keeps responses age-appropriate -- prompt-level steering, not an output content filter. Disable it with a config toggle for general-purpose use.
 - **No mandatory cloud.** The default config makes one outbound LLM call. Replace it with Ollama and every byte stays on your LAN.
 - **Infrastructure-as-config.** Docker Compose files, systemd units, custom providers, and config templates with placeholders. Clone, substitute your values, deploy.
 

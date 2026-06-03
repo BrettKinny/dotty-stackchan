@@ -6,7 +6,7 @@
 #   - xiaozhi-esp32-server  — voice I/O           ← this file
 #   - dotty-pi              — the pi agent brain  ← dotty-pi/docker-compose.yml
 #   - dotty-behaviour       — perception+greeter  ← dotty-behaviour/docker-compose.yml
-#   - bridge.py             — the admin dashboard (port 8080)
+#   - bridge.py             — the admin dashboard (port 8081)
 #
 # This file brings up xiaozhi-esp32-server only. Bring up the brain and
 # behaviour containers from their own compose files — see dotty-pi/README.md

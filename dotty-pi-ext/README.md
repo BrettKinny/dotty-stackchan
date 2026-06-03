@@ -5,23 +5,27 @@ runtime. Installed inside the [`dotty-pi`](../dotty-pi/) container at
 `/root/.pi/extensions/dotty-pi-ext/`, surfaced to the agent via pi's
 extension manifest.
 
-**Status: 5 of 5 tools ported.** `take_photo` reads from the new
-`dotty-behaviour` daemon (`GET /api/voice/take_photo`); the other
-four are unchanged. Bridge.py is still the source of truth in
-production until the dotty-behaviour cutover (#36) flips
-xiaozhi-server's `VISION_BRIDGE_URL` to point at port 8090.
+**Status: 7 of 7 tools live.** The original five (`memory_lookup`,
+`remember`, `think_hard`, `take_photo`, `play_song`) plus the two
+person-memory tools added in #53 (`recall_person`, `remember_person`).
+`take_photo` reads from the `dotty-behaviour` daemon
+(`GET /api/voice/take_photo`). The #36 cutover executed on 2026-05-19;
+PiVoiceLLM is the live default voice path and this extension is the
+production source of truth for these tools.
 
-## The five voice tools
+## The seven voice tools
 
-These are the tools that voice turns invoke during conversation. Each
-replicates the semantics of the matching `_voice_tool_*` handler (or
-matching `/api/voice/*` endpoint) in `bridge.py` (port the function
-bodies; the contracts below summarise them).
+These are the tools that voice turns invoke during conversation. The
+original five replicate the semantics of the matching `_voice_tool_*`
+handler (or `/api/voice/*` endpoint) in `bridge.py`; `recall_person` /
+`remember_person` are pi-native, added in #53.
 
 | Tool | What it does | Source-of-truth handler |
 |---|---|---|
 | `memory_lookup(query)` | FTS5 search against `brain.db`; returns top-3 snippets pipe-joined, ≤200 chars each. | `bridge.py::_voice_tool_memory_lookup` |
 | `remember(fact)` | Stores a durable fact (≤300 codepoints, trimmed) into the `memories` table with `category=core`, `importance=0.7`. Mirrors bridge.py's `/api/voice/remember` HTTP endpoint, but called as a tool from inside the agent loop rather than as a side-channel POST. | `bridge.py::voice_remember` (`/api/voice/remember`) |
+| `recall_person(name)` | Reads up to 6 approved per-person facts from the `person:<id>` namespace in `brain.db` (case-insensitive name match), each ≤200 chars, pipe-joined. The pi runtime has no system-prompt-injection seam, so per-person memory is surfaced as a tool rather than bridge.py's injected `[Person memory]` block. | pi-native (#53) |
+| `remember_person(name, fact)` | Stores a ≤300-char fact about a named household member. Asks dotty-behaviour's `/api/voice/person_review_status` classifier first; facts about minors are held in `person_pending:<id>` for human review, adults go straight to `person:<id>`. | pi-native (#53) |
 | `think_hard(question)` | Direct POST to llama-swap `qwen3.6:27b-think` with `enable_thinking=false`, 200-token cap, terse 1-2 sentence answer. | `bridge.py::_voice_tool_think_hard` |
 | `take_photo()` | GET to dotty-behaviour `/api/voice/take_photo` — returns the latest cached vision description if ≤30 s old, otherwise a "can't see" reply. v2 will actively fire the take_photo MCP and await fresh capture. | `dotty-behaviour::routes/voice.py` (lift of `bridge.py::_voice_tool_take_photo`) |
 | `play_song(name)` | Resolves free-form name against xiaozhi's `/xiaozhi/admin/songs` catalogue (60 s cache), then POSTs `/xiaozhi/admin/play-asset`. | `bridge.py::_voice_tool_play_song` |
@@ -30,9 +34,10 @@ bodies; the contracts below summarise them).
 
 After each completed user prompt, an `agent_end` handler in
 `src/lib/turn_logger.ts` writes a `category=conversation`,
-`importance=0.3` row to `brain.db` summarising the turn. Mirrors
-bridge.py's `/api/voice/memory_log` HTTP endpoint that Tier1Slim
-calls today. Lives as an event subscription rather than a tool
+`importance=0.3` row to `brain.db` summarising the turn. This is the
+live conversation write path on the PiVoiceLLM voice path (it took
+over from bridge.py's retired `/api/voice/memory_log` endpoint at the
+#36 cutover). Lives as an event subscription rather than a tool
 because the agent doesn't decide to log — every successful prompt
 gets recorded automatically.
 
@@ -75,23 +80,28 @@ These are PiClient-side responsibilities (see
 but extension authors should be aware so tool-result framing matches
 what gets filtered through to xiaozhi.
 
-## Layout (planned)
+## Layout
 
 ```
 dotty-pi-ext/
 ├── README.md             # this file
 ├── package.json          # pi extension manifest
 ├── src/
-│   ├── index.ts          # entry: registers tools, wires deps
+│   ├── index.ts          # entry: registers the 7 tools, wires the agent_end logger
 │   ├── tools/
 │   │   ├── memory_lookup.ts
+│   │   ├── remember.ts
+│   │   ├── recall_person.ts
+│   │   ├── remember_person.ts
 │   │   ├── think_hard.ts
 │   │   ├── take_photo.ts
-│   │   ├── play_song.ts
-│   │   └── set_led.ts
+│   │   └── play_song.ts
 │   └── lib/
-│       ├── brain_db.ts   # FTS5 client (sqlite3, opened against /root/.pi/memory/brain.db)
-│       └── xiaozhi.ts    # admin-endpoint client (songs catalogue, play-asset, MCP dispatch)
+│       ├── brain_db.ts        # FTS5 client (sqlite3, opened against /root/.pi/memory/brain.db)
+│       ├── dotty_behaviour.ts # dotty-behaviour client (person-review classifier, take_photo)
+│       ├── llama_swap.ts      # llama-swap client (think_hard escalation)
+│       ├── turn_logger.ts     # agent_end per-turn conversation auto-log
+│       └── xiaozhi_admin.ts   # admin-endpoint client (songs catalogue, play-asset, MCP dispatch)
 └── tests/                # per-tool contract tests against the bridge.py reference
 ```
 

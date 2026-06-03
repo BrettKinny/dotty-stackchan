@@ -9,7 +9,7 @@ description: Single-host architecture and message flow for the self-hosted voice
 
 - Two hosts: **robot** (StackChan on your desk) and a **single Docker host** (`<XIAOZHI_HOST>`) that runs all four server-side services.
 - Audio goes robot → xiaozhi-server → (text) → dotty-pi → (response text) → xiaozhi-server → (audio) → robot. The Docker host never sends audio to the robot — xiaozhi-server handles that.
-- The default voice provider is **`PiVoiceLLM`**, selected via `selected_module.LLM` in `.config.yaml`. Two documented alternates exist (`Tier1Slim`, `OpenAICompat`) — see [llm-backends.md](./llm-backends.md).
+- The default voice provider is **`PiVoiceLLM`**, selected via `selected_module.LLM` in `.config.yaml`. One documented alternate exists (`OpenAICompat`) — see [llm-backends.md](./llm-backends.md).
 - Everything is LAN-local **except** cloud-routed LLM calls (smart-mode, VLM, audio caption). EdgeTTS is cloud when selected; Piper is fully local.
 - The robot speaks the **Xiaozhi WebSocket protocol** (see [protocols.md](./protocols.md)). It has no knowledge of the services running on the Docker host.
 
@@ -65,7 +65,7 @@ Solid arrows are per-turn data flow; dotted arrows are cloud / conditional. All 
 | **xiaozhi-esp32-server** | Docker host | VAD → ASR → LLM (proxy) → TTS pipeline, emotion dispatch, OTA, admin surface | Docker container |
 | **PiVoiceLLM custom provider** | Docker host (inside xiaozhi container) | Default LLM provider — translates each voice turn into a pi RPC request, streams TTS-bound text back | Python, mounted via volume |
 | **dotty-pi** | Docker host | The voice-tool brain — pi coding agent with the `dotty-pi-ext` extension; owns the agent loop and tool dispatch | Docker container (`dotty-pi`) |
-| **dotty-behaviour** | Docker host | Perception event bus, 9 ambient consumers, vision/audio explain endpoints, proactive greeter, calendar context | FastAPI container, port 8090 |
+| **dotty-behaviour** | Docker host | Perception event bus, 11 consumer classes (the running set is config-gated), vision/audio explain endpoints, proactive greeter, calendar context | FastAPI container, port 8090 |
 | **bridge.py** | Docker host | Admin dashboard service (`/ui`, port 8081). Voice and perception roles were retired in #36; dashboard port to dotty-behaviour is pending. | FastAPI container, port 8081 |
 | **llama-swap** | Same host or LAN GPU host | Routes OpenAI-compatible requests to per-model llama-server children; co-loads `qwen3.5:4b` (pi outer loop) and `qwen3.6:27b-think` (`think_hard` target) | Docker container (`ghcr.io/mostlygeek/llama-swap:cuda`) |
 | **OpenRouter** | Cloud | Routes cloud LLM calls (smart_mode `claude-sonnet-4-6`, VLM `gemini-2.0-flash`, audio caption `gemini-2.5-flash`) | External |
@@ -203,17 +203,21 @@ Firmware-resident producers emit JSON `event` frames over the xiaozhi WebSocket:
 {"type":"event","name":"sound_event","data":{"direction":"left","balance":0.997,"energy":1807933247}}
 ```
 
-The xiaozhi-server's `EventTextMessageHandler` (`custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py`) POSTs each frame to `dotty-behaviour`'s `POST /api/perception/event`. dotty-behaviour maintains the pub/sub bus and runs 9 ambient consumer tasks against it:
+The xiaozhi-server's `EventTextMessageHandler` (`custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py`) POSTs each frame to `dotty-behaviour`'s `POST /api/perception/event`. dotty-behaviour maintains the pub/sub bus (`dotty-behaviour/perception/state.py`) and runs 11 consumer classes against it (`dotty-behaviour/consumers/`); the actually-running set is env-gated at runtime:
 
 | Consumer | What it does |
 |---|---|
-| `_perception_face_greeter` | "Hi!" greeting (via `/xiaozhi/admin/inject-text`) on first face detection after a cooldown window. |
-| `_perception_sound_turner` | Head-turn (via `/xiaozhi/admin/set-head-angles`) toward sound direction. |
-| `_perception_face_lost_aborter` | Aborts an in-flight TTS turn (via `/xiaozhi/admin/abort`) when the audience walks away. |
-| `_perception_wake_word_turner` | Head-turn toward the speaker on wake-word event. |
-| `_perception_face_identified_refresher` | Re-asserts the face-identified pixel every ~3 s so the firmware's 4 s timeout doesn't drop it. |
-| `_perception_purr_player` | Plays an idle purr asset when conditions match. |
-| (and 3 additional consumers in dotty-behaviour) | Vision narrative, audio caption, idle photographer. |
+| `FaceGreeter` | "Hi!" greeting (via `/xiaozhi/admin/inject-text`) on first face detection after a cooldown window. |
+| `SoundTurner` | Head-turn (via `/xiaozhi/admin/set-head-angles`) toward sound direction. |
+| `FaceLostAborter` | Aborts an in-flight TTS turn (via `/xiaozhi/admin/abort`) when the audience walks away. |
+| `WakeWordTurner` | Head-turn toward the speaker on wake-word event. |
+| `FaceIdentifiedRefresher` | Re-asserts the face-identified pixel every ~3 s so the firmware's 4 s timeout doesn't drop it. |
+| `PurrPlayer` | Plays an idle purr asset when conditions match. |
+| `SceneSynthesis` | Ambient vision narrative + audio caption synthesis loop. |
+| `IdlePhotographer` | Periodic idle-state camera capture for scene context. |
+| `SleepDreamer` | Sleep-state ambient consumer. |
+| `DanceReflector` | Reflects dance start/stop events into behaviour. |
+| `SecurityCycle` | Security-state surveillance scaffolding (Phase 8 PENDING — not a live capture path). |
 
 WebSocket lifecycle gotcha: xiaozhi only opens the WS during a conversation. Firmware-side perception producers must call `OpenAudioChannel()` first, or events from idle silently drop.
 
@@ -237,7 +241,6 @@ The canonical working copies live in this repo.
 | `bridge.py` | Docker host (bridge.py container) | Admin dashboard FastAPI service |
 | `bridge/requirements.txt` | bridge.py container | Pinned Python deps |
 | `custom-providers/pi_voice/` | xiaozhi container `core/providers/llm/pi_voice/` | PiVoiceLLM + PiClient |
-| `custom-providers/tier1_slim/` | xiaozhi container `core/providers/llm/tier1_slim/` | Tier1Slim alternate provider |
 | `custom-providers/openai_compat/` | xiaozhi container `core/providers/llm/openai_compat/` | OpenAICompat alternate provider |
 | `custom-providers/edge_stream/` | xiaozhi container `core/providers/tts/` | Streaming EdgeTTS provider |
 | `custom-providers/piper_local/` | xiaozhi container `core/providers/tts/` | Local Piper TTS provider |
@@ -256,6 +259,6 @@ Volume mounts (xiaozhi-server) are listed in [quickstart.md](./quickstart.md#dep
 - [brain.md](./brain.md) — the pi agent, model matrix, and dotty-pi-ext tools.
 - [protocols.md](./protocols.md) — what's on the wire (pi RPC mode, `/api/perception/event`).
 - [quickstart.md](./quickstart.md) — deployment placeholders, volume mounts, common ops.
-- [llm-backends.md](./llm-backends.md) — choosing between PiVoiceLLM, Tier1Slim, OpenAICompat.
+- [llm-backends.md](./llm-backends.md) — choosing between PiVoiceLLM and OpenAICompat.
 
 Last verified: 2026-05-22.

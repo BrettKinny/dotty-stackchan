@@ -1,8 +1,8 @@
 """Household registry — the source of truth for "who lives here."
 
-Loaded from a single YAML file (default `~/.zeroclaw/household.yaml`,
+Loaded from a single YAML file (default `STATE_DIR/household.yaml`,
 overridable via `HOUSEHOLD_YAML_PATH`). The registry powers identity-
-aware behaviour across the bridge:
+aware behaviour across dotty-behaviour:
 
   - the speaker resolver (self-ID phrases, time-of-day priors, calendar
     prefix mapping)
@@ -16,10 +16,10 @@ LLM verbatim. Structured fields (`birthdate`, `calendar_prefix`,
 
 Reload semantics: the registry stat-checks the YAML file on every
 public access. If mtime has moved, it re-parses. Cheap; lets you edit
-household.yaml on the running ZeroClaw host without a bridge restart.
+household.yaml on the running host without a dotty-behaviour restart.
 
 If PyYAML is missing or the file is unreadable/malformed, the registry
-starts empty rather than crashing the bridge. An empty registry is a
+starts empty rather than crashing dotty-behaviour. An empty registry is a
 valid state — it means everyone resolves to `_household`, exactly like
 today.
 """

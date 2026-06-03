@@ -10,8 +10,9 @@ dependency (the LLM call).
 
 This is the **simple single-binary path** — pick Ollama when you only
 need one model resident at a time and want the easiest setup. If you
-need to run multiple models concurrently (e.g. the Tier1Slim two-tier
-default where `qwen3.5:4b` and `qwen3.6:27b-think` share VRAM), use
+need to run multiple models concurrently (e.g. the default `PiVoiceLLM`
+brain, where `qwen3.5:4b` for the pi outer loop and `qwen3.6:27b-think`
+for `think_hard` share VRAM), use
 [llama-swap](./llama-swap-concurrent-models.md) instead — it solves the
 multi-model serving problem Ollama doesn't.
 

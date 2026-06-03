@@ -25,7 +25,6 @@ ignore = [
 source = [
     "bridge",
     "custom-providers/pi_voice",
-    "custom-providers/tier1_slim",
     "dotty-behaviour",
 ]
 omit = [

@@ -1,9 +1,12 @@
 # dotty-behaviour
 
 Unraid-resident successor to the RPi-hosted `zeroclaw-bridge`. Hosts
-the perception event bus, the 9 ambient-perception consumers, vision
-and audio explain endpoints, the admin dashboard, the proactive
-greeter, and the per-device caches consumed by all of the above.
+the perception event bus, the 11 ambient-perception consumers (running
+set is env-gated), vision and audio explain endpoints, the proactive
+greeter, and the per-device caches consumed by all of the above. It
+**serves** the perception / vision / audio data endpoints that the
+`bridge.py` admin dashboard (port 8081, `/ui`) consumes — it does not
+host the dashboard itself; that stays in `bridge.py` per #115.
 
 Sibling of [`dotty-pi`](../dotty-pi/) — together they replaced the RPi
 bridge. Cutover executed and RPi powered off **2026-05-19** under
@@ -77,10 +80,9 @@ Subsequent slices land:
 | Slice                       | What it adds                                          |
 |-----------------------------|-------------------------------------------------------|
 | Outbound dispatchers        | `dispatch/xiaozhi.py` (admin client) + `dispatch/llm.py` (llama-swap narrative) |
-| 9 consumers                 | `consumers/{face_greeter,wake_word_turner,face_lost_aborter,purr_player,security_cycle,scene_synthesis,idle_photographer,sleep_dreamer,dance_reflector}.py` |
+| 11 consumers                | `consumers/{face_greeter,wake_word_turner,sound_turner,face_lost_aborter,face_identified_refresher,purr_player,security_cycle,scene_synthesis,idle_photographer,sleep_dreamer,dance_reflector}.py` (running set env-gated) |
 | Vision / audio explain      | `routes/vision.py` + `routes/audio.py` + OpenRouter VLM/ASR clients |
 | Greeter + household         | `greeter/` + `household/` (ported from `bridge/`)     |
-| Dashboard                   | `dashboard/` + templates + static (ported from `bridge/dashboard.py`) |
 | Calendar + weather          | `routes/calendar.py` + cache loops                     |
 | State files                 | kid-mode / smart-mode toggle files                    |
 | NDJSON writers              | `logs/` package (scene-synth, dreams, dances, idle-perception, security) |

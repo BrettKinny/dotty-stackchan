@@ -1,7 +1,7 @@
 {
   "name": "dotty-pi-ext",
   "version": "0.1.0",
-  "description": "Pi extension exposing Dotty's voice tools (memory_lookup, remember, think_hard, take_photo, play_song). Ports bridge.py's _voice_tool_* handlers per #36.",
+  "description": "Pi extension exposing Dotty's seven voice tools (memory_lookup, remember, recall_person, remember_person, think_hard, take_photo, play_song). Ports bridge.py's _voice_tool_* handlers per #36; recall_person/remember_person added per #53.",
   "type": "module",
   "private": true,
   "pi": {

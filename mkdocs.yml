@@ -39,6 +39,7 @@ plugins:
 nav:
   - Home: README.md
   - Getting Started: SETUP.md
+  - Quickstart: quickstart.md
   - Architecture: architecture.md
   - Hardware:
       - Hardware: hardware.md
@@ -46,6 +47,9 @@ nav:
   - Voice Pipeline: voice-pipeline.md
   - Voice Mode Entry: voice-mode-entry.md
   - Voice Catalog: voice-catalog.md
+  - Wake Word: wake-word.md
+  - Modes: modes.md
+  - Proactive Greetings: proactive-greetings.md
   - Brain: brain.md
   - Protocols: protocols.md
   - OTA Verification: ota-verification.md
@@ -58,6 +62,7 @@ nav:
       - Run Fully Local: cookbook/run-fully-local.md
       - Add Emoji: cookbook/add-emoji.md
       - Disable Kid Mode: cookbook/disable-kid-mode.md
+      - Concurrent Models (llama-swap): cookbook/llama-swap-concurrent-models.md
   - Advanced:
       - Variant port guide: advanced/variant-port-guide.md
   - Reference:

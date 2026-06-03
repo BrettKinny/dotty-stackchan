@@ -290,11 +290,8 @@ router = APIRouter(
 XIAOZHI_HOST = os.environ.get("XIAOZHI_HOST", "")
 XIAOZHI_OTA_PORT = int(os.environ.get("XIAOZHI_OTA_PORT", "8003"))
 XIAOZHI_WS_PORT = int(os.environ.get("XIAOZHI_WS_PORT", "8000"))
-LOG_DIR = Path(os.environ.get("CONVO_LOG_DIR", "/root/zeroclaw-bridge/logs"))
+LOG_DIR = Path(os.environ.get("CONVO_LOG_DIR", "/var/lib/dotty-bridge/logs"))
 VOICE_CHANNELS = ("dotty", "stackchan")
-# #64 — the zeroclaw-discord daemon's systemd unit. It runs on the same
-# RPi as the bridge, so its status is a local `systemctl` query.
-DISCORD_UNIT = os.environ.get("ZEROCLAW_DISCORD_UNIT", "zeroclaw-discord")
 
 _START_TIME = time.time()
 
@@ -403,13 +400,12 @@ def _stackchan_last_seen() -> float | None:
 
 @router.get("", response_class=HTMLResponse, include_in_schema=False)
 async def dashboard(request: Request) -> Any:
-    chip_ctx = await asyncio.to_thread(_build_chip_context)
     return templates.TemplateResponse(
         request, "dashboard.html",
         {
             "version": BRIDGE_VERSION,
             "csrf_token": getattr(request.state, "csrf_token", ""),
-            **chip_ctx,
+            **_static_chip_context(),
         },
     )
 
@@ -848,8 +844,12 @@ async def vision_large(request: Request) -> Any:
     return templates.TemplateResponse(request, "vision_large.html", ctx)
 
 
-# Voice-daemon model selection is owned by smart_mode. Mirrors bridge.py
-# defaults so the dashboard reflects what the bridge actually loaded.
+# Smart-mode model-swap is v2 scope (docs/cutover-behaviour.md). These names
+# describe the *intended* default/smart models for when the swap is wired;
+# the Tier1Slim rollback provider that used to perform a live hot-swap was
+# removed in the 2026-05-29 alignment pass, so today smart_mode is a
+# toggle-only control (LED pip + flag) and the voice model is always the
+# local PiVoiceLLM brain.
 DEFAULT_MODEL_NAME = os.environ.get(
     "DOTTY_DEFAULT_MODEL", "mistralai/mistral-small-3.2-24b-instruct",
 )
@@ -861,6 +861,15 @@ def _short_model(name: str) -> str:
     if not name:
         return ""
     return name.split("/", 1)[1] if "/" in name else name
+
+
+def _host_detail_llm_label(smart_on: bool | None = None) -> str:
+    """The 'LLM' row for host-detail modals. The live voice path is
+    PiVoiceLLM (the brain runs in the dotty-pi container). smart_mode does
+    NOT swap the backend model — that is v2 scope (docs/cutover-behaviour.md);
+    the Tier1Slim rollback provider that used to do the swap was removed in
+    the 2026-05-29 alignment pass. Mirrors smart_mode.html."""
+    return "PiVoiceLLM · model-swap pending (v2)"
 
 
 @router.get("/kid-mode", response_class=HTMLResponse, include_in_schema=False)
@@ -951,49 +960,6 @@ async def state_partial(request: Request) -> Any:
             "sound_spark": _sound_balance_sparkline(),
         },
     )
-
-
-def _discord_unit_status() -> dict[str, Any]:
-    """#64 — query the zeroclaw-discord systemd unit. The Discord daemon
-    runs on the same RPi as the bridge, so `systemctl` is a local call
-    with no SSH. Read-only `systemctl show` — works without root."""
-    import subprocess
-    ctx: dict[str, Any] = {"unit": DISCORD_UNIT, "available": False}
-    try:
-        out = subprocess.run(
-            ["systemctl", "show", DISCORD_UNIT, "--no-pager",
-             "--property=LoadState,ActiveState,SubState,ActiveEnterTimestamp"],
-            capture_output=True, text=True, timeout=3,
-        )
-    except Exception:
-        return ctx
-    if out.returncode != 0:
-        return ctx
-    props: dict[str, str] = {}
-    for line in out.stdout.splitlines():
-        if "=" in line:
-            key, val = line.split("=", 1)
-            props[key] = val
-    if props.get("LoadState") == "not-found":
-        ctx["not_found"] = True
-        return ctx
-    active = props.get("ActiveState", "unknown")
-    ctx.update({
-        "available": True,
-        "active_state": active,
-        "sub_state": props.get("SubState", ""),
-        "since": props.get("ActiveEnterTimestamp", ""),
-        "running": active == "active",
-        "failed": active == "failed",
-    })
-    return ctx
-
-
-@router.get("/discord", response_class=HTMLResponse, include_in_schema=False)
-async def discord_partial(request: Request) -> Any:
-    """zeroclaw-discord daemon health card (#64)."""
-    ctx = await asyncio.to_thread(_discord_unit_status)
-    return templates.TemplateResponse(request, "discord.html", ctx)
 
 
 # #65 tier 1 — voice tool inventory. Hardcoded list of the tools shipped
@@ -1152,7 +1118,11 @@ async def smart_mode_partial(request: Request) -> Any:
         request, "smart_mode.html",
         {"enabled": enabled, "available": getter is not None,
          "smart_model": _short_model(SMART_MODEL_NAME),
-         "default_model": _short_model(DEFAULT_MODEL_NAME)},
+         "default_model": _short_model(DEFAULT_MODEL_NAME),
+         # Tier1Slim (the only provider that hot-swapped the voice model)
+         # was removed in the 2026-05-29 alignment pass. smart_mode is now
+         # toggle-only on the live PiVoiceLLM path; model-swap is v2 scope.
+         "model_swap_active": False},
     )
 
 
@@ -1463,484 +1433,50 @@ async def kid_mode_set(request: Request, enabled: str = Form("")) -> Any:
     )
 
 
-# --- P15: update bridge from GitHub --------------------------------------
+# --- Version chip (read-only) --------------------------------------------
 
 GITHUB_REPO = os.environ.get(
     "DOTTY_BRIDGE_REPO", "https://github.com/BrettKinny/dotty-stackchan.git"
 )
-BRIDGE_INSTALL_DIR = Path(
-    os.environ.get("DOTTY_BRIDGE_DIR", "/root/zeroclaw-bridge")
-)
 
 
-def _collect_update_preview() -> tuple[bool, dict[str, Any]]:
-    """F16: shallow-clone the repo to a tmpdir, gather the commit list
-    since the currently-deployed SHA. No filesystem mutation outside the
-    tmp clone — caller renders the result for review."""
-    import subprocess
-    import tempfile
-    import shutil
-    work = Path(tempfile.mkdtemp(prefix="dotty-preview-"))
-    try:
-        proc = subprocess.run(
-            ["git", "clone", "--depth", "30", "--branch", "main",
-             GITHUB_REPO, str(work)],
-            capture_output=True, text=True, timeout=60,
-        )
-        if proc.returncode != 0:
-            return False, {"error": f"git clone failed: {proc.stderr.strip()[:300]}"}
-        sha_proc = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=str(work), capture_output=True, text=True, timeout=5,
-        )
-        new_sha = sha_proc.stdout.strip() if sha_proc.returncode == 0 else ""
-        deployed = BRIDGE_VERSION if BRIDGE_VERSION != "unknown" else ""
-        commits: list[dict[str, str]] = []
-        used_range = False
-        if deployed:
-            log_proc = subprocess.run(
-                ["git", "log", "--oneline", "-30", f"{deployed}..HEAD"],
-                cwd=str(work), capture_output=True, text=True, timeout=5,
-            )
-            if log_proc.returncode == 0 and log_proc.stdout.strip():
-                used_range = True
-                for line in log_proc.stdout.strip().splitlines():
-                    parts = line.split(" ", 1)
-                    if len(parts) == 2:
-                        commits.append({"sha": parts[0], "msg": parts[1]})
-        if not commits and not used_range:
-            # Fallback: deployed SHA isn't in the shallow clone or unknown.
-            log_proc = subprocess.run(
-                ["git", "log", "--oneline", "-10"],
-                cwd=str(work), capture_output=True, text=True, timeout=5,
-            )
-            if log_proc.returncode == 0:
-                for line in log_proc.stdout.strip().splitlines():
-                    parts = line.split(" ", 1)
-                    if len(parts) == 2:
-                        commits.append({"sha": parts[0], "msg": parts[1]})
-        return True, {
-            "current_sha": deployed or "unknown",
-            "new_sha": new_sha or "unknown",
-            "commits": commits,
-            "used_range": used_range,
-            "up_to_date": bool(deployed) and deployed == new_sha,
-        }
-    except Exception as exc:
-        return False, {"error": f"preview error: {exc}"}
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
-
-
-@router.post("/actions/preview-update",
-             response_class=HTMLResponse, include_in_schema=False)
-async def preview_update(request: Request) -> Any:
-    """F16: render the incoming-commits review for the Update modal."""
-    ok, ctx = await asyncio.to_thread(_collect_update_preview)
-    return templates.TemplateResponse(
-        request, "update_preview.html",
-        {"ok": ok, **ctx},
-    )
-
-
-_LATEST_SHA_CACHE: dict[str, Any] = {"sha": None, "ts": 0.0}
-_LATEST_TAGS_CACHE: dict[str, Any] = {"tags": None, "ts": 0.0}
-_LATEST_REMOTE_TTL = 600.0  # 10 min — `git ls-remote` is cheap but no need to spam.
-
-_BRIDGE_TAG_PREFIX = "bridge-v"
-_TAG_VERSION_RE = re.compile(r"^bridge-v(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
-
-
-def _fetch_latest_remote_sha() -> str | None:
-    """Use `git ls-remote` to get the current HEAD of `main` on the public
-    repo without cloning. Cached for 10 min."""
-    import subprocess
-    now = time.time()
-    cached = _LATEST_SHA_CACHE.get("sha")
-    if cached and now - _LATEST_SHA_CACHE["ts"] < _LATEST_REMOTE_TTL:
-        return cached  # type: ignore[return-value]
-    try:
-        proc = subprocess.run(
-            ["git", "ls-remote", GITHUB_REPO, "refs/heads/main"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if proc.returncode == 0 and proc.stdout.strip():
-            full = proc.stdout.strip().split()[0]
-            if full:
-                _LATEST_SHA_CACHE["sha"] = full
-                _LATEST_SHA_CACHE["ts"] = now
-                return full
-    except Exception as exc:
-        log.debug("ls-remote failed: %s", exc)
-    return None
-
-
-def _fetch_remote_tags() -> dict[str, str]:
-    """Return {tag_name: commit_sha} for refs/tags/bridge-v* on origin.
-    Annotated tags are dereferenced to their target commit. Cached 10 min."""
-    import subprocess
-    now = time.time()
-    cached = _LATEST_TAGS_CACHE.get("tags")
-    if cached is not None and now - _LATEST_TAGS_CACHE["ts"] < _LATEST_REMOTE_TTL:
-        return cached  # type: ignore[return-value]
-    out: dict[str, str] = {}
-    try:
-        proc = subprocess.run(
-            ["git", "ls-remote", "--tags", GITHUB_REPO,
-             f"refs/tags/{_BRIDGE_TAG_PREFIX}*"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if proc.returncode != 0:
-            return out
-    except Exception as exc:
-        log.debug("ls-remote --tags failed: %s", exc)
-        return out
-    deref: dict[str, str] = {}
-    raw: dict[str, str] = {}
-    for line in proc.stdout.strip().splitlines():
-        parts = line.split()
-        if len(parts) != 2:
-            continue
-        sha, ref = parts
-        if not ref.startswith("refs/tags/"):
-            continue
-        name = ref[len("refs/tags/"):]
-        if name.endswith("^{}"):
-            deref[name[:-3]] = sha
-        else:
-            raw[name] = sha
-    # Annotated tags appear in both forms; the dereferenced ^{} line points
-    # at the commit (what we actually want). Lightweight tags only appear in
-    # `raw` and that line *is* the commit.
-    for name, sha in raw.items():
-        out[name] = deref.get(name, sha)
-    _LATEST_TAGS_CACHE["tags"] = out
-    _LATEST_TAGS_CACHE["ts"] = now
-    return out
-
-
-def _parse_tag_version(name: str) -> tuple[int, int, int] | None:
-    m = _TAG_VERSION_RE.match(name)
-    if not m:
-        return None
-    return int(m.group(1)), int(m.group(2)), int(m.group(3))
-
-
-def _build_chip_context() -> dict[str, Any]:
-    """Compute the version-chip rendering context. If the deployed SHA is
-    parked at a `bridge-v*` tag, compare against the highest tag (release
-    mode). Otherwise fall back to comparing against `main` HEAD (bleeding
-    edge). Returns keys consumed by version_chip.html."""
-    deployed = BRIDGE_VERSION
+def _static_chip_context() -> dict[str, Any]:
+    """Context for the read-only version chip: the running build linked to
+    its commit on GitHub. No update detection — see version_chip()."""
     repo_url = GITHUB_REPO.removesuffix(".git")
-
-    # ---- Tag mode probe -------------------------------------------------
-    tags = _fetch_remote_tags()
-    versioned: list[tuple[tuple[int, int, int], str, str]] = []
-    for name, sha in tags.items():
-        v = _parse_tag_version(name)
-        if v is not None:
-            versioned.append((v, name, sha))
-    versioned.sort()
-    latest_tag = versioned[-1] if versioned else None
-
-    installed_tag: str | None = None
-    if deployed and deployed != "unknown":
-        for _, name, sha in versioned:
-            if sha.startswith(deployed) or deployed.startswith(sha[:len(deployed)]):
-                installed_tag = name
-                break
-
-    if installed_tag and latest_tag:
-        latest_v, latest_name, _ = latest_tag
-        installed_v = _parse_tag_version(installed_tag) or (0, 0, 0)
-        update_available = latest_v > installed_v
-        installed_pretty = installed_tag[len(_BRIDGE_TAG_PREFIX):]
-        return {
-            "installed_display": f"v{installed_pretty}",
-            "installed_href": f"{repo_url}/releases/tag/{installed_tag}",
-            "installed_title": f"Bridge release v{installed_pretty}",
-            "update_available": update_available,
-            "update_display": (
-                f"v{latest_name[len(_BRIDGE_TAG_PREFIX):]}" if update_available else None
-            ),
-            "update_title": (
-                f"New release {latest_name[len(_BRIDGE_TAG_PREFIX):]} available — click to preview"
-                if update_available else None
-            ),
-        }
-
-    # ---- Bleeding-edge fallback ----------------------------------------
-    full = _fetch_latest_remote_sha()
-    short = full[:7] if full else None
-    update_available = False
-    if full and deployed and deployed != "unknown":
-        same = full.startswith(deployed) or deployed.startswith(full[:len(deployed)])
-        update_available = not same
-    installed_label = deployed if deployed and deployed != "unknown" else "unknown"
+    label = BRIDGE_VERSION if BRIDGE_VERSION and BRIDGE_VERSION != "unknown" else "unknown"
     return {
-        "installed_display": f"v{installed_label}",
+        "installed_display": f"v{label}",
         "installed_href": (
-            f"{repo_url}/commit/{installed_label}"
-            if installed_label != "unknown" else repo_url
+            f"{repo_url}/commit/{label}" if label != "unknown" else repo_url
         ),
         "installed_title": (
-            f"Bridge build {installed_label} — opens this commit on GitHub"
-            if installed_label != "unknown"
+            f"Bridge build {label} — opens this commit on GitHub"
+            if label != "unknown"
             else "Bridge build (unknown) — opens repo on GitHub"
         ),
-        "update_available": update_available,
-        "update_display": f"v{short}" if update_available and short else None,
-        "update_title": (
-            f"Newer commit {short} on main — click to preview"
-            if update_available and short else None
-        ),
+        "update_available": False,
+        "update_display": None,
+        "update_title": None,
     }
 
 
 @router.get("/version-chip",
             response_class=HTMLResponse, include_in_schema=False)
 async def version_chip(request: Request) -> Any:
-    """Render the GitHub/version/update chip. Polled by the dashboard
-    header so the update prompt appears without a page reload."""
-    ctx = await asyncio.to_thread(_build_chip_context)
-    return templates.TemplateResponse(
-        request, "version_chip.html", ctx,
-    )
+    """Render the static bridge-version label in the header.
 
-
-def _pull_and_install_bridge() -> tuple[bool, str]:
-    """git-clone the public repo into a tmpdir and copy bridge.py +
-    bridge/ over the install dir. Caller restarts the service."""
-    import subprocess
-    import tempfile
-    import shutil
-    work = Path(tempfile.mkdtemp(prefix="dotty-update-"))
-    try:
-        proc = subprocess.run(
-            ["git", "clone", "--depth", "1", "--branch", "main",
-             GITHUB_REPO, str(work)],
-            capture_output=True, text=True, timeout=60,
-        )
-        if proc.returncode != 0:
-            return False, f"git clone failed: {proc.stderr.strip()[:300]}"
-        src_bridge_py = work / "bridge.py"
-        src_bridge_dir = work / "bridge"
-        if not src_bridge_py.exists() or not src_bridge_dir.exists():
-            return False, "checkout missing bridge.py or bridge/ dir"
-        # Capture the SHA so the dashboard footer reflects what loaded.
-        sha = ""
-        try:
-            sha_proc = subprocess.run(
-                ["git", "rev-parse", "--short", "HEAD"],
-                cwd=str(work), capture_output=True, text=True, timeout=5,
-            )
-            if sha_proc.returncode == 0:
-                sha = sha_proc.stdout.strip()
-        except Exception:
-            pass
-        # Atomic-ish replace: rename current then copy new in.
-        dst_bridge_py = BRIDGE_INSTALL_DIR / "bridge.py"
-        dst_bridge_dir = BRIDGE_INSTALL_DIR / "bridge"
-        if dst_bridge_dir.exists():
-            backup = BRIDGE_INSTALL_DIR / "bridge.prev"
-            if backup.exists():
-                shutil.rmtree(backup)
-            shutil.move(str(dst_bridge_dir), str(backup))
-        shutil.copytree(str(src_bridge_dir), str(dst_bridge_dir))
-        if dst_bridge_py.exists():
-            dst_bridge_py.rename(BRIDGE_INSTALL_DIR / "bridge.py.prev")
-        shutil.copy2(str(src_bridge_py), str(dst_bridge_py))
-        if sha:
-            try:
-                (BRIDGE_INSTALL_DIR / ".bridge-version").write_text(sha)
-            except OSError:
-                pass
-        return True, f"Updated to {sha or 'main'}. Restarting…"
-    except Exception as exc:
-        return False, f"update error: {exc}"
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
-
-
-@router.post("/actions/update-bridge",
-             response_class=HTMLResponse, include_in_schema=False)
-async def update_bridge(request: Request) -> Any:
-    ok, msg = await asyncio.to_thread(_pull_and_install_bridge)
-    if not ok:
-        return templates.TemplateResponse(
-            request, "update_result.html",
-            {"ok": False, "message": msg},
-        )
-    # Spawn delayed restart so the response can return first.
-    import subprocess
-    try:
-        subprocess.Popen(
-            ["sh", "-c", "sleep 1 && systemctl restart zeroclaw-bridge"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-    except Exception as exc:
-        return templates.TemplateResponse(
-            request, "update_result.html",
-            {"ok": False, "message": f"updated but restart failed: {exc}"},
-        )
-    return templates.TemplateResponse(
-        request, "update_result.html",
-        {"ok": True, "message": msg},
-    )
-
-
-# --- P7: restart bridge ---------------------------------------------------
-
-@router.post("/actions/restart-bridge",
-             response_class=HTMLResponse, include_in_schema=False)
-async def restart_bridge(request: Request) -> Any:
-    """Spawn a delayed `systemctl restart` so the response can return
-    before SIGTERM hits."""
-    import subprocess
-    try:
-        subprocess.Popen(
-            ["sh", "-c", "sleep 1 && systemctl restart zeroclaw-bridge"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-    except Exception as exc:
-        log.exception("self-restart spawn failed")
-        return templates.TemplateResponse(
-            request, "kid_mode_result.html",
-            {"ok": False, "error": f"restart failed: {exc}"},
-        )
-    return templates.TemplateResponse(
-        request, "restart_result.html",
-        {"target": "bridge"},
-    )
-
-
-# --- Reboot-all: kebab-menu single-click full restart --------------------
-#
-# Combines the three component restarts (firmware / xiaozhi-server / bridge)
-# behind a single confirm-then-go button. The robot-side step is best-effort:
-# the firmware does not yet expose an MCP reboot tool, so we announce the
-# reboot through the existing inject-text pipeline (the kid hears Dotty say
-# what's happening). When a `self.system.reboot` MCP tool lands in the
-# firmware, swap the inject for that tool — the rest of the sequence stays.
-#
-# Auth-wise: the dashboard router this endpoint is registered on already
-# carries `Depends(_verify_dashboard_auth)`. The bridge.py top-level
-# `_admin_router` (the canonical /admin/* mount) is localhost-only and is
-# the right place for shell-level mutations triggered by external scripts;
-# this endpoint is intentionally exposed via /ui/actions so it inherits the
-# dashboard's HTTP Basic auth and is reachable from a phone on the LAN —
-# which is what the user-facing kebab needs.
-
-XIAOZHI_RESTART_USER = os.environ.get("DOTTY_XIAOZHI_SSH_USER", "root")
-XIAOZHI_COMPOSE_DIR = os.environ.get(
-    "DOTTY_XIAOZHI_COMPOSE_DIR", "/mnt/user/appdata/xiaozhi-server",
-)
-
-
-def _ssh_restart_xiaozhi() -> tuple[bool, str]:
-    """SSH from this host to the Unraid Docker host and `docker compose
-    restart` the xiaozhi-server container. Returns (ok, detail). Skips
-    silently with ok=False if SSH/keys aren't set up — caller logs and
-    continues so the reboot-all flow is partially-successful rather than
-    blocking on a single component."""
-    if not XIAOZHI_HOST:
-        return False, "XIAOZHI_HOST not set"
-    import subprocess
-    cmd = [
-        "ssh", "-o", "StrictHostKeyChecking=no",
-        "-o", "BatchMode=yes",  # don't prompt for password
-        "-o", "ConnectTimeout=5",
-        f"{XIAOZHI_RESTART_USER}@{XIAOZHI_HOST}",
-        f"cd {XIAOZHI_COMPOSE_DIR} && docker compose restart",
-    ]
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if proc.returncode == 0:
-            return True, "restart command dispatched"
-        return False, f"ssh exit {proc.returncode}: {proc.stderr.strip()[:200]}"
-    except subprocess.TimeoutExpired:
-        return False, "ssh timed out after 30s"
-    except FileNotFoundError:
-        return False, "ssh binary not found on bridge host"
-    except Exception as exc:  # noqa: BLE001
-        return False, f"{exc.__class__.__name__}: {exc}"
-
-
-@router.post("/actions/reboot-all",
-             response_class=HTMLResponse, include_in_schema=False)
-async def reboot_all(request: Request) -> Any:
-    """Combined firmware + xiaozhi-server + bridge restart sequence.
-
-    Sequence:
-      1. Firmware: announce the reboot via inject-text. (Will be swapped
-         to a real MCP reboot tool once the firmware exposes one.)
-      2. xiaozhi-server: SSH to Unraid and `docker compose restart`. Skipped
-         gracefully if SSH isn't keyed up.
-      3. Bridge self-restart with a 2s delay so this HTTP response can
-         flush before SIGTERM lands.
+    The self-update / preview / restart / reboot apparatus was removed in
+    the 2026-05-29 alignment pass (review decision F): it invoked a retired
+    `systemctl restart zeroclaw-bridge` unit that does not exist in the
+    container and git-pulled into the dead /root/zeroclaw-bridge install
+    dir, so the buttons no-op'd while reporting success. Deploys now go
+    through scripts/deploy-bridge-unraid.sh (build + `compose up -d`); the
+    container restart policy (`restart: unless-stopped`) handles restarts.
+    The chip is now a plain version label linking to the built commit.
     """
-    results: dict[str, dict[str, Any]] = {}
-
-    # 1. Firmware — announce + (eventual) tool call. Best-effort.
-    inject = _state.get("inject_to_device")
-    if inject is not None:
-        try:
-            inject_result = await inject(
-                text="I'm rebooting now — back in a moment.",
-            )
-            results["robot"] = {
-                "ok": bool(inject_result.get("ok")),
-                "detail": (
-                    "announce dispatched"
-                    if inject_result.get("ok")
-                    else inject_result.get("error", "inject failed")
-                ),
-                "note": (
-                    "firmware MCP reboot tool not yet implemented — "
-                    "device announces but does not actually reboot"
-                ),
-            }
-        except Exception as exc:  # noqa: BLE001
-            log.exception("reboot-all: robot inject failed")
-            results["robot"] = {
-                "ok": False,
-                "detail": f"{exc.__class__.__name__}: {exc}",
-            }
-    else:
-        results["robot"] = {
-            "ok": False, "detail": "inject path not configured",
-        }
-
-    # 2. xiaozhi-server — SSH to Unraid and docker compose restart.
-    xz_ok, xz_detail = await asyncio.to_thread(_ssh_restart_xiaozhi)
-    results["server"] = {"ok": xz_ok, "detail": xz_detail}
-    if not xz_ok:
-        log.warning(
-            "reboot-all: xiaozhi restart skipped — %s", xz_detail,
-        )
-
-    # 3. Bridge self-restart — delayed 2s so the response flushes.
-    import subprocess
-    bridge_ok = True
-    bridge_detail = "delayed 2s self-restart scheduled"
-    try:
-        subprocess.Popen(
-            ["bash", "-c", "sleep 2 && systemctl restart zeroclaw-bridge"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-    except Exception as exc:  # noqa: BLE001
-        log.exception("reboot-all: bridge self-restart spawn failed")
-        bridge_ok = False
-        bridge_detail = f"{exc.__class__.__name__}: {exc}"
-    results["bridge"] = {"ok": bridge_ok, "detail": bridge_detail}
-
     return templates.TemplateResponse(
-        request, "reboot_all_result.html",
-        {"results": results},
+        request, "version_chip.html", _static_chip_context(),
     )
 
 
@@ -2126,7 +1662,10 @@ async def status_strip(request: Request, placement: str = "header") -> Any:
                 did for did, s in pstate.items()
                 if s and s.get("sensor_stale")
             ]
-            any_dev = bool(pstate)
+            fresh_devs = [
+                did for did, s in pstate.items()
+                if s and not s.get("sensor_stale")
+            ]
             if stale_devs and sc_status in ("ok", "unknown"):
                 sc_status = "warn"
                 sc_tip = (
@@ -2134,10 +1673,13 @@ async def status_strip(request: Request, placement: str = "header") -> Any:
                     f"({len(stale_devs)}/{len(pstate)} dev) — "
                     f"firmware bus may be hung"
                 )
-            elif not any_dev and sc_status == "unknown":
-                # Same fall-through: no events ever — don't override the
-                # "no voice activity today" tip; just leave it.
-                pass
+            elif fresh_devs and sc_status == "unknown":
+                # The robot is connected and streaming fresh perception
+                # events even though there's been no voice turn today.
+                # Voice idleness is normal; perception liveness is the
+                # real "robot is online" signal — so don't show grey.
+                sc_status = "ok"
+                sc_tip = "Dotty: online — perception active, no voice yet today"
 
         if not XIAOZHI_HOST:
             xz_status, xz_tip = "unknown", "unraid: XIAOZHI_HOST env not set"
@@ -2219,19 +1761,14 @@ async def host_detail(request: Request, slug: str) -> Any:
         cpu_c = _cpu_temp_c()
         mem = _read_memory_mb()
         disk = _disk_usage_root()
-        # Two orthogonal toggles + one active LLM. smart_mode owns model
-        # selection (off → DEFAULT_MODEL, on → SMART_MODEL); kid_mode is
-        # guardrails only.
+        # Two orthogonal toggles + one active LLM. kid_mode is guardrails
+        # only; the LLM row is honest about whether a model swap actually
+        # happens (see _host_detail_llm_label).
         kid_getter = _state.get("kid_mode_getter")
         smart_getter = _state.get("smart_mode_getter")
         kid_on = bool(kid_getter()) if kid_getter else None
         smart_on = bool(smart_getter()) if smart_getter else None
-        if smart_on is True:
-            active_llm = _short_model(SMART_MODEL_NAME) or "(unset)"
-        elif smart_on is False:
-            active_llm = _short_model(DEFAULT_MODEL_NAME) or "(unset)"
-        else:
-            active_llm = "unknown"
+        active_llm = _host_detail_llm_label(smart_on)
         facts = [
             ("Device",     "Raspberry Pi"),
             ("Status",     "online"),
@@ -2266,15 +1803,11 @@ async def host_detail(request: Request, slug: str) -> Any:
             _tcp_reachable(XIAOZHI_HOST, XIAOZHI_WS_PORT),
         )
         n = await _xiaozhi_device_count()
-        # smart_mode owns model selection; kid_mode is guardrails only.
+        # The LLM row is honest about whether a model swap actually
+        # happens (see _host_detail_llm_label); kid_mode is guardrails only.
         smart_getter = _state.get("smart_mode_getter")
         smart_on = bool(smart_getter()) if smart_getter else None
-        if smart_on is True:
-            current_llm = _short_model(SMART_MODEL_NAME) or "(unset)"
-        elif smart_on is False:
-            current_llm = _short_model(DEFAULT_MODEL_NAME) or "(unset)"
-        else:
-            current_llm = "unknown"
+        current_llm = _host_detail_llm_label(smart_on)
         # Voice-channel state — derived from the firmware state getter
         # the dashboard already reads. talk / story_time mean active.
         st_getter = _state.get("state_getter")

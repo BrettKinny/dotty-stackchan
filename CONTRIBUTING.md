@@ -46,9 +46,9 @@ Changes tend to fall into one of these areas:
 
 | Area | Files | Notes |
 |---|---|---|
-| **Voice pipeline (xiaozhi-server)** | `docker-compose.yml`, `.config.yaml`, custom providers (`pi_voice/`, `tier1_slim/`, `edge_stream.py`, `fun_local.py`, `piper_local.py`) | These run inside the xiaozhi-server Docker container on the Docker host. |
+| **Voice pipeline (xiaozhi-server)** | `docker-compose.yml`, `.config.yaml`, custom providers (`pi_voice/`, `openai_compat/`, `edge_stream.py`, `fun_local.py`, `piper_local.py`) | These run inside the xiaozhi-server Docker container on the Docker host. |
 | **Brain / behaviour** | `dotty-pi/`, `dotty-pi-ext/`, `dotty-behaviour/` | Docker containers on the same host as xiaozhi-server. `dotty-pi` is the pi agent (voice brain); `dotty-behaviour` is the perception/greeter service. |
-| **Admin dashboard** | `bridge.py`, `bridge/` | FastAPI service on port 8080, running as a container on the Docker host. |
+| **Admin dashboard** | `bridge.py`, `bridge/` | FastAPI service on port 8081, running as a container on the Docker host. |
 | **Documentation** | `README.md`, `SETUP.md`, `docs/`, `session-prompt.md` | Docs under `docs/` follow conventions listed in `docs/README.md` (TL;DR at top, tables over prose, freshness footer). |
 | **CI** | `.github/workflows/` | Currently just the bridge Docker image build. |
 

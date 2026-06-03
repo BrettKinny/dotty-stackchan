@@ -17,7 +17,7 @@
         integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"
         crossorigin="anonymous" defer></script>
 <link href="/ui/static/tailwind.min.css" rel="stylesheet"
-      integrity="sha384-yk2TJ8R/9V08Y2LQeb55sLXFG/XC5nNWWh7BuhlsChfm8yVX7YIolzfVKUc94DpP"
+      integrity="sha384-EN+qoJQQ/S6PWqDSsLL/Q0nVNcadxFqQdluflTVYakNeAJTf3LdiB9arueL3wYdR"
       crossorigin="anonymous">
 <style>
   html, body { -webkit-tap-highlight-color: transparent; }
@@ -43,22 +43,20 @@
   .feed-rows[data-filter="turns"]  .feed-row[data-kind="event"] { display: none; }
   .feed-rows[data-filter="events"] .feed-row[data-kind="turn"]  { display: none; }
   .feed-rows[data-filter="errors"] .feed-row[data-error="false"] { display: none; }
-  /* Single-page layout. Body fills the viewport exactly; the feed section
-     grows to fill the leftover space and scrolls internally so it can
-     never push the footer off-screen. The bundled Tailwind here doesn't
-     ship `gap-6` reliably, so we set the section gap in plain CSS. */
-  html, body { height: 100%; }
-  body.dotty-body { display: flex; flex-direction: column; overflow: hidden; }
-  main.dotty-main {
-    flex: 1 1 auto; min-height: 0;
-    display: flex; flex-direction: column;
-    overflow: hidden;
-    gap: 1.5rem;
+  /* Natural document scroll. The whole page scrolls and the sticky header
+     stays pinned; cards are never clipped below an unreachable fold. The
+     activity feed grows with its content but is capped so a long feed
+     can't dominate the page — it scrolls internally past the cap. The
+     bundled Tailwind here doesn't ship `gap-6` reliably, so we set the
+     section gap in plain CSS. */
+  html { height: 100%; }
+  body.dotty-body { min-height: 100%; display: flex; flex-direction: column; }
+  main.dotty-main { display: flex; flex-direction: column; gap: 1.5rem; }
+  .dotty-feed-section > .card > .card-body { display: flex; flex-direction: column; }
+  .dotty-feed-scroll {
+    max-height: 70vh; min-height: 12rem;
+    overflow-y: auto; position: relative;
   }
-  .dotty-feed-section { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-  .dotty-feed-section > .card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-  .dotty-feed-section > .card > .card-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-  .dotty-feed-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; position: relative; }
   /* Empty-state hero is absolutely-positioned so it sits dead-centre in
      the feed regardless of how tall the feed is. JS removes it the moment
      the first row arrives. */
@@ -264,18 +262,6 @@
   </section>
 
   <section>
-    <div id="discord-card-body" class="card bg-base-100 shadow-sm overflow-hidden"
-         hx-get="/ui/discord"
-         hx-trigger="load, every 30s, dotty-refresh from:window"
-         hx-sync="this:drop"
-         hx-swap="innerHTML" hx-target="this">
-      <div class="card-body p-3 animate-pulse">
-        <div class="h-4 bg-base-300 rounded w-1/4"></div>
-      </div>
-    </div>
-  </section>
-
-  <section>
     <div id="safety-card-body" class="card bg-base-100 shadow-sm overflow-hidden"
          hx-get="/ui/safety/recent"
          hx-trigger="load, every 30s, dotty-refresh from:window"
@@ -368,16 +354,6 @@
   <form method="dialog" class="modal-backdrop"><button>close</button></form>
 </dialog>
 
-<dialog id="update-modal" class="modal">
-  <div class="modal-box max-w-2xl">
-    <div id="update-modal-content">
-      <div class="text-sm text-base-content/50">Loading update preview…</div>
-    </div>
-  </div>
-  <form method="dialog" class="modal-backdrop"><button>close</button></form>
-</dialog>
-
-<div id="restart-result" class="hidden"></div>
 
 <script>
   // CSRF: every htmx-driven POST/PUT/DELETE under /ui/ must echo the

@@ -28,7 +28,7 @@ Metrics are on by default once the bridge has its dependency installed:
 ```bash
 pip install -r bridge/requirements.txt   # picks up prometheus-client
 docker compose restart bridge            # or restart however you deployed it
-curl -s http://<XIAOZHI_HOST>:8080/metrics | head -20
+curl -s http://<XIAOZHI_HOST>:8081/metrics | head -20
 ```
 
 If `prometheus-client` is missing the bridge still serves traffic — it
@@ -45,7 +45,7 @@ scrape_configs:
     metrics_path: /metrics
     scrape_interval: 15s
     static_configs:
-      - targets: ["<XIAOZHI_HOST>:8080"]
+      - targets: ["<XIAOZHI_HOST>:8081"]
         labels:
           service: dotty-bridge
           env: home

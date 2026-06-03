@@ -81,8 +81,10 @@ class XiaozhiAdminClient:
         )
 
     # ------------------------------------------------------------------
-    # The 8 admin endpoints bridge.py dispatches to (set_tier1slim_model
-    # is intentionally dropped — Tier1Slim is offline post-cutover).
+    # The admin endpoints bridge.py dispatches to. (The former
+    # set-tier1slim-model endpoint was removed with Tier1Slim in the
+    # 2026-05-29 alignment pass — smart_mode is toggle-only on the live
+    # PiVoiceLLM path; model-swap is v2 scope.)
     # ------------------------------------------------------------------
 
     async def abort(self, device_id: str) -> bool:

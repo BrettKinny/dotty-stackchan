@@ -27,7 +27,7 @@ further because children become the audience:
 
 - The admin dashboard service (`bridge.py`) and its HTTP endpoints
 - The `dotty-pi` agent container and `dotty-behaviour` perception service
-- Custom xiaozhi-server providers (`pi_voice/`, `tier1_slim/`, `edge_stream.py`,
+- Custom xiaozhi-server providers (`pi_voice/`, `openai_compat/`, `edge_stream.py`,
   `fun_local.py`, `piper_local.py`)
 - Docker Compose configuration and container security (including the
   `/var/run/docker.sock` bind-mount used by `PiVoiceLLM`)

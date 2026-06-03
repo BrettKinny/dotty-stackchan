@@ -32,6 +32,14 @@ services:
       # Currently fixed to "default" — smart.md exists for manual swap when you
       # want an adult-framed persona on the smart-mode cloud path.
       - PERSONA=default
+      # kid_mode / smart_mode toggle state — receiveAudioHandle.py READS these
+      # to paint the firmware LED pips on reconnect; the bridge dashboard WRITES
+      # them. Both containers must point at the SAME files, so this path is
+      # bind-mounted (below, read-only) from the bridge's state dir. Without
+      # this the reader falls through to the dead /root/zeroclaw-bridge default
+      # and the firmware pips desync from the dashboard on every reconnect.
+      - DOTTY_KID_MODE_STATE=/var/lib/dotty-bridge/state/kid-mode
+      - DOTTY_SMART_MODE_STATE=/var/lib/dotty-bridge/state/smart-mode
     ports:
       - "8000:8000"
       - "8003:8003"
@@ -40,7 +48,6 @@ services:
       - ./models/SenseVoiceSmall:/opt/xiaozhi-esp32-server/models/SenseVoiceSmall
       - ./tmp:/opt/xiaozhi-esp32-server/tmp
       - ./custom-providers/openai_compat:/opt/xiaozhi-esp32-server/core/providers/llm/openai_compat
-      - ./custom-providers/tier1_slim:/opt/xiaozhi-esp32-server/core/providers/llm/tier1_slim
       - ./custom-providers/pi_voice:/opt/xiaozhi-esp32-server/core/providers/llm/pi_voice
       # PiVoiceLLM shells out to `docker exec -i dotty-pi pi --mode rpc ...`,
       # so this container needs the docker CLI binary AND the host docker
@@ -48,7 +55,7 @@ services:
       # effective root on the docker host (it can `docker run --privileged
       # anything`). Acceptable for a single-purpose self-hosted appliance;
       # do not enable on a multi-tenant host. Required for `selected_module.LLM:
-      # PiVoiceLLM` — comment both lines out if running Tier1Slim / OpenAICompat.
+      # PiVoiceLLM` — comment both lines out if running OpenAICompat.
       - /var/run/docker.sock:/var/run/docker.sock
       - /usr/bin/docker:/usr/bin/docker:ro
       - ./personas:/opt/xiaozhi-esp32-server/personas:ro
@@ -76,3 +83,9 @@ services:
       # OTA artifact directory — drop m5stack-stack-chan_<version>.bin here
       # and the device polls + self-flashes on next boot. See docs/ota-verification.md.
       - ./data/bin:/opt/xiaozhi-esp32-server/data/bin
+      # Shared kid/smart-mode toggle state (READ-ONLY here — the bridge
+      # dashboard owns writes). Host path MUST match the bridge container's
+      # state mount (bridge/docker-compose.yml → /var/lib/dotty-bridge/state).
+      # Override DOTTY_STATE_DIR if your bridge writes elsewhere. Keeps the
+      # firmware kid/smart LED pips in sync with the dashboard across reconnects.
+      - ${DOTTY_STATE_DIR:-/mnt/user/appdata/dotty-bridge/state}:/var/lib/dotty-bridge/state:ro

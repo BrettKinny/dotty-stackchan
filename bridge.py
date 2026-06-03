@@ -77,11 +77,15 @@ def _safe_metric(fn, *args, **kwargs) -> None:
 # Kid-mode + smart-mode state files
 # ---------------------------------------------------------------------------
 
+# These MUST resolve to the same files the xiaozhi container reads (see
+# receiveAudioHandle.py). The container deploy sets both env vars to the
+# shared /var/lib/dotty-bridge/state mount; the default below matches that
+# dir — NOT the retired /root/zeroclaw-bridge RPi path.
 _KID_STATE_FILE = Path(
-    os.environ.get("DOTTY_KID_MODE_STATE", "/root/zeroclaw-bridge/state/kid-mode")
+    os.environ.get("DOTTY_KID_MODE_STATE", "/var/lib/dotty-bridge/state/kid-mode")
 )
 _SMART_STATE_FILE = Path(
-    os.environ.get("DOTTY_SMART_MODE_STATE", "/root/zeroclaw-bridge/state/smart-mode")
+    os.environ.get("DOTTY_SMART_MODE_STATE", "/var/lib/dotty-bridge/state/smart-mode")
 )
 
 
@@ -145,36 +149,12 @@ def _write_smart_mode(enabled: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tier1Slim hot-swap env (smart-mode flip target on the live xiaozhi-server)
+# smart_mode (toggle-only)
 # ---------------------------------------------------------------------------
-# DOTTY_VOICE_PROVIDER=tier1slim is the post-#36 voice provider; smart_mode
-# flips its model/url/api_key via /xiaozhi/admin/set-tier1slim-model rather
-# than restarting a daemon. Legacy "zeroclaw" config.toml-rewrite path was
-# retired with the rest of the ZeroClaw stack — keep the helper for parity
-# but the only live target is tier1slim.
-
-SMART_MODEL = os.environ.get("SMART_MODEL", "anthropic/claude-sonnet-4-6")
-DOTTY_VOICE_PROVIDER = os.environ.get("DOTTY_VOICE_PROVIDER", "tier1slim").strip().lower()
-
-TIER1SLIM_LOCAL_URL = os.environ.get(
-    "TIER1SLIM_LOCAL_URL", "http://localhost:8080/v1",
-)
-TIER1SLIM_LOCAL_API_KEY = os.environ.get("TIER1SLIM_LOCAL_API_KEY", "dotty-voice")
-TIER1SLIM_LOCAL_MODEL = os.environ.get("TIER1SLIM_LOCAL_MODEL", "qwen3.5:4b")
-TIER1SLIM_CLOUD_URL = os.environ.get(
-    "TIER1SLIM_CLOUD_URL", "https://openrouter.ai/api/v1",
-)
-TIER1SLIM_CLOUD_API_KEY = os.environ.get(
-    "TIER1SLIM_CLOUD_API_KEY", os.environ.get("OPENROUTER_API_KEY", ""),
-)
-
-
-def _tier1slim_target_for_smart_mode(enabled: bool) -> tuple[str, str, str]:
-    """Return (model, url, api_key) for the Tier1Slim runtime swap given
-    the desired smart_mode state. ON → cloud, OFF → local llama-swap."""
-    if enabled:
-        return (SMART_MODEL, TIER1SLIM_CLOUD_URL, TIER1SLIM_CLOUD_API_KEY)
-    return (TIER1SLIM_LOCAL_MODEL, TIER1SLIM_LOCAL_URL, TIER1SLIM_LOCAL_API_KEY)
+# Tier1Slim was removed in the 2026-05-29 alignment pass. On the live
+# PiVoiceLLM path smart_mode does NOT swap the backend model — model-swap is
+# v2 scope (docs/cutover-behaviour.md). The dashboard/admin flip now only
+# persists the flag and lights the firmware smart-mode LED pip.
 
 
 # ---------------------------------------------------------------------------
@@ -253,38 +233,6 @@ async def _dispatch_set_toggle(device_id: str, name: str, enabled: bool) -> bool
     return await asyncio.to_thread(_post)
 
 
-async def _dispatch_set_tier1slim_model(
-    model: str, url: str = "", api_key: str = "",
-) -> bool:
-    """Hot-swap the running Tier1Slim provider's model (and optionally url /
-    api_key) via the xiaozhi-server admin endpoint. Used by smart_mode flip.
-    Returns True on 2xx."""
-    if not _XIAOZHI_HOST:
-        log.warning("set_tier1slim_model: XIAOZHI_HOST not set")
-        return False
-    url_endpoint = (
-        f"http://{_XIAOZHI_HOST}:{_XIAOZHI_HTTP_PORT}/xiaozhi/admin/set-tier1slim-model"
-    )
-    payload: dict[str, str] = {"model": model}
-    if url:
-        payload["url"] = url
-    if api_key:
-        payload["api_key"] = api_key
-
-    def _post() -> bool:
-        try:
-            r = requests.post(url_endpoint, json=payload, timeout=3)
-            if r.status_code >= 400:
-                log.warning("set_tier1slim_model %s: %s", r.status_code, r.text[:200])
-                return False
-            return True
-        except Exception as exc:
-            log.warning("set_tier1slim_model failed: %s", exc)
-            return False
-
-    return await asyncio.to_thread(_post)
-
-
 # ---------------------------------------------------------------------------
 # MCP tool permission policy — edited by /admin/safety
 # ---------------------------------------------------------------------------
@@ -316,10 +264,10 @@ MCP_TOOL_ALLOWLIST: set[str] = {
 # tools. The dashboard's /ui/memory page lists every per-person row
 # (approved + pending review) and exposes approve / redact actions. The
 # bridge does NOT write to brain.db — it's a read + lifecycle-mutate
-# surface for the dashboard. See bridge/MEMORY-INDEX.md / brain-db-fts-only.md.
-
+# surface for the dashboard. Set VOICE_MEMORY_DB to the path where the
+# dotty-pi agent's brain.db is reachable from the bridge container.
 _VOICE_MEMORY_DB = Path(os.environ.get(
-    "VOICE_MEMORY_DB", "/root/.zeroclaw/workspace/memory/brain.db",
+    "VOICE_MEMORY_DB", "/var/lib/dotty-bridge/state/brain.db",
 ))
 
 
@@ -422,47 +370,17 @@ log = logging.getLogger("dotty-bridge")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifespan slimmed to dashboard-only on the #111 rip.
+    """Lifespan slimmed to dashboard-only.
 
     The voice / perception / VLM machinery that used to spin up here moved
     to dotty-pi and dotty-behaviour in the #36 cutover; PR #109 then
     containerized this file, and #111 ripped the dormant code paths so the
-    container doesn't double-fire consumers. Today the only startup work is
-    reconciling the live xiaozhi-server's Tier1Slim provider against the
-    persisted smart_mode bit so the bridge owns the source of truth.
+    container doesn't double-fire consumers. The startup voice-model
+    reconcile was dropped in the 2026-05-29 alignment pass along with
+    Tier1Slim — the live PiVoiceLLM path has no runtime model swap (v2
+    scope), so there is no startup work left to do.
     """
-    try:
-        await _reconcile_voice_model_at_startup()
-    except Exception:
-        log.exception("startup voice-model reconcile raised — continuing anyway")
     yield
-
-
-async def _reconcile_voice_model_at_startup() -> None:
-    """Bridge owns the source of truth for which model the voice provider
-    runs on (smart_mode state file → DEFAULT vs SMART). Push the desired
-    state at the live Tier1Slim provider so the next turn lands on the
-    right model. Best-effort: failures are logged, not fatal."""
-    if DOTTY_VOICE_PROVIDER != "tier1slim":
-        log.info(
-            "startup reconcile: DOTTY_VOICE_PROVIDER=%r ≠ 'tier1slim' — skipping",
-            DOTTY_VOICE_PROVIDER,
-        )
-        return
-    smart = _read_smart_mode()
-    t_model, t_url, t_api = _tier1slim_target_for_smart_mode(smart)
-    ok = await _dispatch_set_tier1slim_model(t_model, t_url, t_api)
-    if ok:
-        log.info(
-            "startup tier1slim reconcile: pushed model=%r (smart_mode=%s)",
-            t_model, smart,
-        )
-    else:
-        log.warning(
-            "startup tier1slim reconcile failed: model=%r (smart_mode=%s) "
-            "— next dashboard flip will retry",
-            t_model, smart,
-        )
 
 
 app = FastAPI(title="Dotty Bridge", lifespan=lifespan)
@@ -775,30 +693,17 @@ if _configure_dashboard is not None:
         return {"ok": ok}
 
     async def _dashboard_set_smart_mode(enabled: bool) -> dict:
-        """Flip smart_mode + push the LED pip + hot-swap the live
-        Tier1Slim provider's model via /xiaozhi/admin/set-tier1slim-model.
-        The pre-#36 ZeroClaw config.toml-rewrite path is gone."""
+        """Persist smart_mode + push the firmware LED pip. On the live
+        PiVoiceLLM path there is no backend model swap (v2 scope) — the
+        Tier1Slim hot-swap path was removed in the 2026-05-29 alignment
+        pass."""
         _write_smart_mode(enabled)
         dispatch_ok = await _dispatch_set_toggle("", "smart_mode", enabled)
-        swap_err: str | None = None
-        if DOTTY_VOICE_PROVIDER == "tier1slim":
-            t_model, t_url, t_api = _tier1slim_target_for_smart_mode(enabled)
-            ok = await _dispatch_set_tier1slim_model(t_model, t_url, t_api)
-            if not ok:
-                swap_err = f"tier1slim hot-swap to {t_model!r} failed"
-        else:
-            log.warning(
-                "smart_mode flip: DOTTY_VOICE_PROVIDER=%r is not 'tier1slim' — "
-                "no model swap performed",
-                DOTTY_VOICE_PROVIDER,
-            )
-        errors: list[str] = []
         if not dispatch_ok:
-            errors.append("firmware did not acknowledge set_toggle (LED pip stale)")
-        if swap_err:
-            errors.append(swap_err)
-        if errors:
-            return {"ok": False, "error": "; ".join(errors)}
+            return {
+                "ok": False,
+                "error": "firmware did not acknowledge set_toggle (LED pip stale)",
+            }
         return {"ok": True}
 
     async def _dashboard_memory_records() -> list[dict]:
@@ -857,7 +762,7 @@ _ADMIN_ALLOWED_PERSONA_FILES = {
     "TOOLS.md", "BOOTSTRAP.md", "HEARTBEAT.md", "MEMORY.md",
 }
 _ADMIN_WORKSPACE_DIR = Path(
-    os.environ.get("DOTTY_PERSONA_DIR", os.environ.get("ZEROCLAW_WORKSPACE", "/root/.zeroclaw/workspace"))
+    os.environ.get("DOTTY_PERSONA_DIR", "/var/lib/dotty-bridge/persona")
 )
 
 
@@ -913,23 +818,15 @@ async def _admin_kid_mode(payload: _AdminKidModeIn) -> dict:
 
 @_admin_router.post("/smart-mode")
 async def _admin_smart_mode(payload: _AdminSmartModeIn) -> dict:
-    """Flip smart_mode + push the LED pip + hot-swap the live Tier1Slim
-    provider. Pre-#36 zeroclaw config.toml-rewrite path is gone."""
+    """Persist smart_mode + push the firmware LED pip. On the live
+    PiVoiceLLM path there is no backend model swap (v2 scope) — the
+    Tier1Slim hot-swap path was removed in the 2026-05-29 alignment pass."""
     _write_smart_mode(payload.enabled)
     pushed = await _dispatch_set_toggle(
         payload.device_id, "smart_mode", payload.enabled,
     )
-    if DOTTY_VOICE_PROVIDER == "tier1slim":
-        t_model, t_url, t_api = _tier1slim_target_for_smart_mode(payload.enabled)
-        swap_ok = await _dispatch_set_tier1slim_model(t_model, t_url, t_api)
-        return {
-            "ok": True, "enabled": payload.enabled, "device_pushed": pushed,
-            "model": t_model, "swap_ok": swap_ok, "provider": "tier1slim",
-        }
     return {
         "ok": True, "enabled": payload.enabled, "device_pushed": pushed,
-        "provider": DOTTY_VOICE_PROVIDER,
-        "warning": "DOTTY_VOICE_PROVIDER is not 'tier1slim' — no model swap performed",
     }
 
 

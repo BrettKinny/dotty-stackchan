@@ -107,6 +107,7 @@ class ASRProvider(ASRProviderBase):
                 segments, _info = await asyncio.to_thread(
                     self._transcribe_blocking, audio
                 )
+                segments = list(segments)
 
                 content = "".join(seg.text for seg in segments).strip()
                 text = {"content": content}
@@ -114,6 +115,28 @@ class ASRProvider(ASRProviderBase):
                 logger.bind(tag=TAG).info(
                     f"语音识别耗时: {time.time() - start_time:.3f}s | 结果: {content}"
                 )
+
+                # #105 instrumentation — log signals that may separate real
+                # close-talk from ambient TV/podcast audio, so a reject gate can
+                # be tuned on measured distributions. Pure logging; no behaviour
+                # change. Strip once the gate thresholds are chosen.
+                try:
+                    dur = audio.size / 16000.0
+                    rms = float(np.sqrt(np.mean(np.square(audio)))) if audio.size else 0.0
+                    peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+                    if segments:
+                        nsp = sum(s.no_speech_prob for s in segments) / len(segments)
+                        alp = sum(s.avg_logprob for s in segments) / len(segments)
+                    else:
+                        nsp, alp = 1.0, 0.0
+                    lang_prob = getattr(_info, "language_probability", 0.0)
+                    logger.bind(tag=TAG).info(
+                        f"ASR-METRICS dur={dur:.2f}s rms={rms:.4f} peak={peak:.3f} "
+                        f"no_speech={nsp:.3f} avg_logprob={alp:.3f} "
+                        f"lang_prob={lang_prob:.3f} segs={len(segments)} | {content!r}"
+                    )
+                except Exception as _e:
+                    logger.bind(tag=TAG).warning(f"ASR-METRICS log failed (non-fatal): {_e}")
 
                 return text, artifacts.file_path
 

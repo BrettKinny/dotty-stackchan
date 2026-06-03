@@ -29,9 +29,9 @@ asks). Only the child-specific rules (4-9) are removed.
 
 ### Hot-reload (no daemon restart)
 
-Both the bridge's `POST /admin/kid-mode` endpoint and the dashboard toggle persist the new value and call `_apply_kid_mode(enabled)`, which atomically re-binds every kid-mode-derived module global (`KID_MODE`, `VISION_SYSTEM_PROMPT`, `MCP_TOOL_DENYLIST`, `VOICE_TURN_SUFFIX`, `VOICE_TURN_SUFFIX_SHORT`) in a single store-global pass. Readers see either the old or new value, never a torn intermediate, and the cost per turn is unchanged. **No daemon restart is required** to flip kid-mode at runtime.
+Both the bridge dashboard's `POST /admin/kid-mode` endpoint and the dashboard toggle persist the new value and call `_apply_kid_mode(enabled)`, which re-binds the dashboard's kid-mode globals (`KID_MODE`, `VOICE_TURN_SUFFIX` via `build_turn_suffix(enabled)`). **No dashboard restart is required** to flip the persisted value at runtime. (This is the dashboard's own state; the live voice path reads kid-mode independently — see below.)
 
-The xiaozhi-server side of kid-mode lives in the active LLM provider's persona / suffix. For `Tier1Slim`, `KID_MODE` is read at module import and baked into `_TURN_SUFFIX`; a flip there does currently require a container restart to take effect on Tier1Slim's side (the bridge side rebinds instantly, but the suffix already loaded into the live `Tier1Slim` instance is unchanged). For `PiVoiceLLM`, the persona is loaded per-session by the `dotty-pi` agent, so the flip lands on the very next turn with no restart at all.
+The xiaozhi-server side of kid-mode lives in the active LLM provider's persona / suffix. On the live `PiVoiceLLM` path, `pi_voice.py` reads kid-mode as a process-start snapshot and bakes it into the suffix produced by `build_turn_suffix(kid_mode)`; the persona is loaded per-session by the `dotty-pi` agent. A persona/topic change lands on the next turn, while flipping the kid-mode snapshot itself requires a container restart to re-read the value into the live provider instance.
 
 ## Guardrail details
 
@@ -46,9 +46,13 @@ Every voice turn passes through three independent layers before reaching the
 speaker. Each layer reinforces the same rules so that a failure in one layer
 is caught by the next.
 
-> **Provider-dependent layering.** The exact layering depends on which LLM provider is active:
-> - **`PiVoiceLLM`** (current default) — Layer 1 is `personas/dotty_voice.md` (loaded by the `dotty-pi` agent); Layer 2 is the `prompt:` block in `.config.yaml` injected by xiaozhi-server; Layer 3 enforcement (suffix sandwich, emoji fallback, content filter) was part of the retired ZeroClaw bridge and is not present on the `PiVoiceLLM` path — Layers 1 and 2 are load-bearing.
-> - **`Tier1Slim`** (alternate) — Layer 1 is `personas/dotty_voice.md`; Layer 2 is **skipped** (Tier1Slim deliberately discards xiaozhi's top-level `prompt:` because the 4 B chat template only honours one system message); Layer 3 is `_TURN_SUFFIX` appended per-turn by Tier1Slim itself (read from `build_turn_suffix(KID_MODE)` at module import). Layer 3b/3c only apply to escalated tool calls that pass through the bridge.
+> **Layering on the live `PiVoiceLLM` path:**
+> - **Layer 1** is `personas/dotty_voice.md` (loaded by the `dotty-pi` agent).
+> - **Layer 2** is the `prompt:` block in `.config.yaml` injected by xiaozhi-server.
+> - **Layer 3** is the per-turn **sandwich suffix** — `build_turn_suffix(kid_mode)` from `custom-providers/textUtils.py`, applied by `custom-providers/pi_voice/pi_voice.py` (`_wrap_with_sandwich`). This **ships on the live path** and includes the kid-mode topic constraints (rules below) when kid-mode is on.
+> - **Not present:** the post-generation **blocked-words content filter** (`content_filter()` / `_BLOCKED_WORDS_RE`) and the emoji-prefix fallback (`_ensure_emoji_prefix()`) existed only in the retired ZeroClaw bridge and exist in **no live code** today. So: the sandwich ships on the live path; the post-generation blocked-words content filter is absent (see [Known Gaps](#voice-red-team-pass) / #22).
+>
+> The `Tier1Slim` provider was removed entirely and is no longer a live or rollback option.
 
 ### Layer 1 -- Agent Persona Prompt (dotty-pi container)
 
@@ -73,64 +77,49 @@ prompt: |
     markdown, no code blocks.
 ```
 
-### Layer 3 -- Bridge Prefix + Suffix Sandwich (`bridge.py` / `Tier1Slim`)
+### Layer 3 -- Per-Turn Sandwich Suffix (`build_turn_suffix` in `textUtils.py`)
 
-> **Note:** This layer applied to the retired `ZeroClawLLM` path and the `Tier1Slim` alternate provider. On the current default `PiVoiceLLM` path, Layers 1 and 2 are the active enforcement layers.
-
-On the `Tier1Slim` path, every turn is wrapped in a prefix and a suffix before being sent to the LLM:
+On the live `PiVoiceLLM` path, every turn has a suffix appended before being
+sent to the LLM:
 
 ```
-VOICE_TURN_PREFIX + context + user_message + suffix
+user_message + build_turn_suffix(kid_mode)
 ```
 
-The suffix is placed at the very end of the prompt -- the position with the
-highest attention weight in transformer models. This means the hard
-constraints in the suffix are the last thing the model reads before
-generating its reply, making them the hardest to override.
-
-**Per-session suffix caching.** The full ~600-token suffix
-(`VOICE_TURN_SUFFIX`) is sent on the first turn of each session.
-Subsequent turns receive a shorter reminder
-(`VOICE_TURN_SUFFIX_SHORT`) that explicitly restates the English-only,
-emoji-leader, and child-safe constraints.
-This saves ~550 tokens per turn while the full rules remain in the LLM's
-conversation history from turn 0.
+The suffix is produced by `build_turn_suffix(kid_mode)` in
+`custom-providers/textUtils.py` and appended by
+`custom-providers/pi_voice/pi_voice.py` (`_wrap_with_sandwich`). It is placed
+at the very end of the prompt -- the position with the highest attention
+weight in transformer models. This means the hard constraints in the suffix
+are the last thing the model reads before generating its reply, making them
+the hardest to override. When `kid_mode` is true the suffix carries the full
+child-safe topic constraints (rules 4-9 below); when false, only the
+English-only / emoji-leader / length rules remain.
 
 **Why a suffix, not just a system prompt?** System prompts are seen once and
 can be diluted by long conversations. The suffix is re-injected on every
 single turn, and its position at the end of the context window gives it
 disproportionate influence on the model's output.
 
-### Layer 3b -- Emoji Fallback (`_ensure_emoji_prefix` in `bridge.py`)
+### No post-generation programmatic enforcement
 
-After the LLM responds, `bridge.py` checks whether the first non-whitespace
-character is one of the nine allowed emojis. If not, it prepends the neutral
-face (see "Emoji Enforcement" below). This is a programmatic
-post-check -- it does not depend on the LLM obeying instructions.
-
-### Layer 3c -- Content Filter (`_content_filter` in `bridge.py`)
-
-A compiled regex blocklist (`_BLOCKED_WORDS_RE`) catches egregious content
-that leaked through the prompt layer. The list covers unambiguous profanity,
-slurs, explicit sexual terms, graphic violence terms, and hard drug names.
-Word boundaries (`\b`) prevent false positives on innocent words containing
-blocked substrings (e.g. "class", "method", "seaweed").
-
-When the filter fires, the entire response is replaced with a safe canned
-reply and a WARNING-level log entry records the triggering pattern. In
-streaming mode, per-chunk filtering suppresses remaining chunks immediately;
-a final-text backstop catches any split-word misses from chunk-level
-filtering.
-
-Pipeline order: `raw LLM output` -> `_content_filter` -> `_ensure_emoji_prefix` -> `_clean_for_tts`.
+The retired ZeroClaw bridge had two programmatic post-LLM steps — an emoji
+fallback (`_ensure_emoji_prefix`) and a blocked-words content filter
+(`content_filter` / `_BLOCKED_WORDS_RE`). **Neither exists in any live code
+today.** The emoji prefix now relies entirely on the prompt layers (persona +
+`.config.yaml` `prompt:` + the suffix's rule 2). The blocked-words content
+filter has no live replacement — this is the open gap tracked as #22 (see
+[Known Gaps](#voice-red-team-pass)). The sandwich ships on the live path; the
+post-generation blocked-words content filter is absent.
 
 ---
 
-## Active Rules (VOICE_TURN_SUFFIX)
+## Active Rules (build_turn_suffix)
 
 The following rules are injected as the suffix on every turn. They are
 labelled "HARD CONSTRAINTS" and the model is told they "override everything
-else." Here is the full text, quoted from `bridge.py` lines 25-46:
+else." Here is the full text, produced by `build_turn_suffix(kid_mode=True)`
+in `custom-providers/textUtils.py`:
 
 ```
 HARD CONSTRAINTS for THIS reply (overrides everything else):
@@ -236,7 +225,11 @@ missing, the face stays blank. Three layers enforce it:
 1. **Agent persona prompt** (`personas/dotty_voice.md`, loaded by `dotty-pi`) -- tells the model to begin with an emoji.
 2. **xiaozhi-server system prompt** (`.config.yaml` `prompt:` block) --
    repeats the rule with the exact emoji set.
-3. **`_ensure_emoji_prefix` in `bridge.py`** -- programmatic fallback available on the `Tier1Slim` path. On the default `PiVoiceLLM` path, Layers 1 and 2 are load-bearing.
+3. **Per-turn suffix rule 2** (`build_turn_suffix` in `custom-providers/textUtils.py`) -- restates the exact emoji set at the end of every turn.
+
+There is **no programmatic emoji fallback** on the live path. The old
+`_ensure_emoji_prefix` was ZeroClaw-only and is gone; the three prompt layers
+above are load-bearing.
 
 Allowed emojis and their face mappings:
 
@@ -252,25 +245,22 @@ Allowed emojis and their face mappings:
 | 😍 | love |
 | 😴 | sleepy |
 
-The fallback emoji (`😐`) is also used in all error responses (timeout, crash,
-binary missing), so the robot always shows a face even when something goes
-wrong.
+Error responses on the live `PiVoiceLLM` path are plain text (e.g.
+`(brain offline — try again in a moment)` in `pi_voice.py`); they are not
+forced to carry an emoji, since the ZeroClaw fallback that prepended `😐` is
+gone.
 
 ---
 
 ## Fail-Safe-to-Safer Defaults
 
-When things go wrong, the system defaults to safe, neutral responses rather
-than exposing raw error text or going silent:
-
-| Failure mode | Response |
-|---|---|
-| LLM timeout | `😐 I'm thinking too slowly right now, try again.` |
-| dotty-pi container unavailable | `😐 My AI brain is offline.` |
-| Any other exception | `😐 Something went wrong, please try again.` |
-| Empty LLM response | `😐 (no response)` |
-
-These are hardcoded in `bridge.py` and do not depend on the LLM cooperating.
+When things go wrong, the system defaults to a safe canned reply rather than
+exposing raw error text or going silent. On the live `PiVoiceLLM` path the
+`dotty-pi`-unavailable case yields `(brain offline — try again in a moment)`
+(hardcoded in `custom-providers/pi_voice/pi_voice.py`), independent of LLM
+cooperation. The detailed per-failure-mode emoji-prefixed canned replies
+listed in earlier docs belonged to the retired ZeroClaw bridge and no longer
+apply.
 
 ---
 
@@ -294,18 +284,19 @@ inappropriate content through).
 
 ## Where the Code Lives
 
+The live `PiVoiceLLM` path layers the persona prompt and the per-turn sandwich
+suffix. There is no live bridge involvement.
+
 | Component | File | Symbol |
 |---|---|---|
-| Sandwich prefix/suffix constants | `bridge.py` | `VOICE_TURN_PREFIX`, `VOICE_TURN_SUFFIX`, `VOICE_TURN_SUFFIX_SHORT` |
-| Turn-aware sandwich wrapper | `bridge.py` | `_wrap_voice()` (full suffix on turn 0, short on turns 1+) |
-| Sandwich injection | `bridge.py` | `prepare=` callback on `ACPClient.prompt()`, called from both endpoint handlers |
-| Content filter (post-LLM) | `bridge.py` | `_content_filter()`, `_BLOCKED_WORDS_RE`, `_CONTENT_FILTER_REPLACEMENT` |
-| Emoji fallback (post-LLM) | `bridge.py` | `_ensure_emoji_prefix()` |
-| Streaming emoji + filter | `bridge.py` | `on_chunk()` inside `/api/message/stream` |
-| Fail-safe error responses | `bridge.py` | Exception handlers in both endpoint handlers |
-| Allowed emoji list | `bridge.py` | `ALLOWED_EMOJIS`, `FALLBACK_EMOJI` |
-| xiaozhi system prompt | `.config.yaml` | Top-level `prompt:` block |
-| LLM provider system prompt | `personas/dotty_voice.md` | loaded by `dotty-pi` agent |
+| Per-turn sandwich suffix (the live sandwich) | `custom-providers/textUtils.py` | `build_turn_suffix(kid_mode)` |
+| Sandwich injection on the voice path | `custom-providers/pi_voice/pi_voice.py` | `_wrap_with_sandwich()` (calls `build_turn_suffix`) |
+| Emoji → emotion lookup | `custom-providers/textUtils.py` | `EMOJI_MAP`, `get_emotion()` |
+| dotty-pi-unavailable canned reply | `custom-providers/pi_voice/pi_voice.py` | `(brain offline — try again in a moment)` |
+| xiaozhi system prompt | `data/.config.yaml` | Top-level `prompt:` block |
+| Agent persona prompt | `personas/dotty_voice.md` | loaded by the `dotty-pi` agent |
+| Blocked-words content filter | — | **Absent.** Was `content_filter()` / `_BLOCKED_WORDS_RE` in the retired ZeroClaw bridge; no live replacement (gap #22, decision C). |
+| Emoji-prefix fallback | — | **Absent.** Was `_ensure_emoji_prefix()` in the retired ZeroClaw bridge; prompt layers are now load-bearing. |
 
 ---
 
@@ -324,10 +315,14 @@ before firing.
 
 ### Voice Red-Team Pass
 
-The adversarial testing so far (8/8 prompts passed) was done via direct HTTP
-to the bridge, not through the live voice pipeline. Jailbreak attempts via
-voice (which go through ASR first and may be transcribed differently) have
-not been systematically tested.
+The adversarial testing so far (8/8 prompts passed) was done against the
+retired ZeroClaw bridge via direct HTTP, not through the live `PiVoiceLLM`
+voice pipeline. Two things remain open: (1) the post-generation blocked-words
+content filter that existed only in that retired bridge has **no live
+replacement** — the sandwich ships on the live path, but the content filter
+is absent; (2) jailbreak attempts via voice (which go through ASR first and
+may be transcribed differently) have not been systematically re-tested on the
+live path.
 
 ### Severity Tiers
 
@@ -348,23 +343,23 @@ is to route the `stackchan` channel to a model with stronger built-in safety
 
 ### Modifying the Topic Blocklist
 
-Edit `VOICE_TURN_SUFFIX` in `bridge.py` (lines 25-46) for the `Tier1Slim` path, or edit rule 5 in `personas/dotty_voice.md` for the `PiVoiceLLM` path. After editing, restart the relevant container.
+Edit the suffix text in `build_turn_suffix()` in `custom-providers/textUtils.py` (rule 5), and/or edit rule 5 in `personas/dotty_voice.md`. After editing, restart the xiaozhi-server container.
 
 ### Changing the Self-Harm Response
 
-Edit rule 6 in `VOICE_TURN_SUFFIX`. Be careful here -- the current
+Edit rule 6 in `build_turn_suffix()` (`custom-providers/textUtils.py`). Be careful here -- the current
 wording was chosen to acknowledge distress without attempting counseling.
 
 ### Adjusting the Emoji Set
 
-1. Update `ALLOWED_EMOJIS` in `bridge.py` (line 23) to add or remove emojis.
-2. Update rule 2 in `VOICE_TURN_SUFFIX` to match.
-3. Update the `prompt:` block in `.config.yaml` to match.
+1. Update rule 2 in `build_turn_suffix()` (`custom-providers/textUtils.py`) to add or remove emojis.
+2. Update `EMOJI_MAP` in `custom-providers/textUtils.py` so the new emoji maps to an emotion.
+3. Update the `prompt:` block in `data/.config.yaml` and the persona prompt to match.
 4. Confirm the StackChan firmware supports the face mapping for any new emoji.
 
 ### Changing the Age Range
 
-Edit rule 4 in `VOICE_TURN_SUFFIX`. The current target is "YOUNG CHILD
+Edit rule 4 in `build_turn_suffix()` (`custom-providers/textUtils.py`). The current target is "YOUNG CHILD
 (age 4-8)." Adjusting upward would allow more complex vocabulary and topics;
 adjusting downward would further simplify language.
 
@@ -372,16 +367,16 @@ adjusting downward would further simplify language.
 
 ## Design Principles
 
-- **Defense in depth.** No single layer is trusted alone. The system prompt,
-  per-turn suffix, and programmatic fallback each independently enforce
-  the core rules.
-- **Fail safe, not fail open.** Every error path produces a neutral,
-  child-safe response. No raw error text, stack traces, or model refusal
-  messages reach the speaker.
+- **Defense in depth.** No single layer is trusted alone. The persona prompt,
+  the xiaozhi system prompt, and the per-turn sandwich suffix each
+  independently restate the core rules.
+- **Fail safe, not fail open.** Error paths produce a safe canned reply rather
+  than raw error text or stack traces reaching the speaker.
 - **Suffix position is deliberate.** Placing the hard constraints at the end
   of the prompt exploits the recency bias in transformer attention. This is
   the strongest prompt-engineering position available.
 - **Honest about limitations.** Prompt-level enforcement is not a guarantee.
-  LLMs can leak. The content filter (Layer 3c) is the belt to the prompt's
-  suspenders -- a compiled regex blocklist that replaces egregious output
-  with a safe canned reply, independent of LLM cooperation.
+  LLMs can leak. On the live `PiVoiceLLM` path enforcement is **prompt-only** —
+  the compiled-regex blocked-words content filter that once backstopped the
+  prompt (in the retired ZeroClaw bridge) has no live replacement. Closing
+  that gap is tracked as #22.

@@ -26,8 +26,6 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-    networks:
-      - dotty
     deploy:
       resources:
         reservations:

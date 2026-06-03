@@ -10,8 +10,8 @@ description: The pi agent runtime (dotty-pi container), the model matrix, and th
 - The "brain" is the **`dotty-pi` Docker container** running the pi coding agent with the `dotty-pi-ext` extension.
 - **`PiVoiceLLM`** (the default xiaozhi LLM provider) translates each voice turn into a pi RPC request via `docker exec -i dotty-pi pi --mode rpc`. TTS-bound text streams back to xiaozhi-server; tool dispatch happens entirely inside the container.
 - The `dotty-pi-ext` extension exposes **five voice tools** to the agent loop: `memory_lookup`, `remember`, `think_hard`, `take_photo`, `play_song`.
-- **Which LLM runs which turn:** the pi outer loop targets `qwen3.5:4b` (local llama-swap, ~500 ms warm); `think_hard` escalates directly to `qwen3.6:27b-think` (co-resident on llama-swap). Smart-mode flips the inner-loop model to a cloud model.
-- Two documented alternate voice providers exist: **`Tier1Slim`** (handles plain turns directly against llama-swap, escalates tool calls via POST) and **`OpenAICompat`**. See [llm-backends.md](./llm-backends.md).
+- **Which LLM runs which turn:** the pi outer loop targets `qwen3.5:4b` (local llama-swap, ~500 ms warm); `think_hard` escalates directly to `qwen3.6:27b-think` (co-resident on llama-swap). **Smart-mode does NOT swap the backend model on the live `PiVoiceLLM` path** — it flips ambient/behaviour only; the inner-loop model-swap is v2 scope and not wired. (Instant in-process model-swap existed only on the now-removed `Tier1Slim` provider.)
+- One documented alternate voice provider exists: **`OpenAICompat`** (points straight at any OpenAI-compatible endpoint; stateless, no voice tools). See [llm-backends.md](./llm-backends.md).
 
 > **Cutover note (2026-05-19, issue #36):** The brain previously ran as the ZeroClaw Rust agent on a Raspberry Pi, fronted by a FastAPI bridge (`bridge.py`) under systemd. ZeroClaw and the RPi host are retired. `bridge.py` survives as the admin dashboard service (port 8081, `/ui`) on the Docker host; its voice and perception roles moved to `PiVoiceLLM`/`dotty-pi` and `dotty-behaviour` respectively.
 
@@ -24,11 +24,9 @@ description: The pi agent runtime (dotty-pi container), the model matrix, and th
 | pi tool: `memory_lookup` | (no LLM call — FTS5) | brain.db inside dotty-pi | `"do you remember…"` queries. |
 | pi tool: `take_photo` | `google/gemini-2.0-flash-001` (`VLM_MODEL`) | dotty-behaviour → OpenRouter | Camera describe. |
 | pi tool: `play_song` | (no LLM call) | Firmware via `/xiaozhi/admin/play-asset` | Song request. |
-| Smart-mode inner loop | `anthropic/claude-sonnet-4-6` (`SMART_MODEL`) | OpenRouter | Every conversational turn while smart_mode is on. |
+| Smart-mode inner loop (`SMART_MODEL`) | `anthropic/claude-sonnet-4-6` | OpenRouter | **Not wired on the live `PiVoiceLLM` path — v2 scope.** Smart-mode flips ambient/behaviour only; it does NOT swap the inner-loop model today. (`SMART_MODEL` is still consumed for dashboard-adjacent calls.) |
 | Vision narrative (security/scene synthesis) | `VISION_MODEL` (`google/gemini-2.0-flash-001`) | OpenRouter | dotty-behaviour internal — camera frame description. |
 | Audio captioning (security mode) | `AUDIO_CAPTION_MODEL` (`google/gemini-2.5-flash`) | OpenRouter | dotty-behaviour internal — ambient sound description. |
-| Tier1Slim inner loop (alternate provider, smart_mode OFF) | `qwen3.5:4b` | local llama-swap | Every plain turn when Tier1Slim is selected. |
-| Tier1Slim inner loop (alternate provider, smart_mode ON) | `anthropic/claude-sonnet-4-6` | OpenRouter | Every turn when Tier1Slim + smart_mode is on. |
 
 ## The pi agent runtime
 
@@ -100,7 +98,7 @@ Qwen3 is multilingual by training and occasionally **leaks Chinese mid-response*
 
 1. The pi agent persona (`persona/dotty_voice.md`) has English hard rules.
 2. xiaozhi-server's top-level `prompt:` in `data/.config.yaml` is also English-only.
-3. `custom-providers/textUtils.py` appends a per-turn English-only suffix (used by Tier1Slim and PiVoiceLLM).
+3. `custom-providers/textUtils.py` appends a per-turn English-only suffix (used by PiVoiceLLM).
 
 ### qwen3.5:4b (pi outer agent loop)
 
@@ -112,7 +110,7 @@ Local on the same llama-swap, separate alias. ~18 tok/s generation, ~30–50 s c
 
 ### Cloud models (smart_mode + visual + audio)
 
-- **Smart-mode inner loop:** `anthropic/claude-sonnet-4-6` (`SMART_MODEL` env var). Used when smart_mode is on.
+- **Smart-mode inner loop:** `anthropic/claude-sonnet-4-6` (`SMART_MODEL` env var). **Not wired on the live `PiVoiceLLM` path** — the inner-loop model-swap is v2 scope; smart-mode currently flips ambient/behaviour only. The env var is still read for dashboard-adjacent calls.
 - **VLM (`take_photo`, security camera frames):** `google/gemini-2.0-flash-001` (`VLM_MODEL`). Served by dotty-behaviour.
 - **Audio captioning (security mode):** `google/gemini-2.5-flash` (`AUDIO_CAPTION_MODEL`). Served by dotty-behaviour.
 
@@ -130,7 +128,7 @@ Observability OpenRouter itself offers (not currently surfaced in this stack):
 - [voice-pipeline.md](./voice-pipeline.md) — what xiaozhi-server runs.
 - [architecture.md](./architecture.md) — full topology and data-flow diagrams.
 - [protocols.md](./protocols.md) — pi RPC mode wire format, admin endpoints.
-- [llm-backends.md](./llm-backends.md) — choosing between PiVoiceLLM, Tier1Slim, OpenAICompat.
+- [llm-backends.md](./llm-backends.md) — choosing between PiVoiceLLM and OpenAICompat.
 - [latent-capabilities.md](./latent-capabilities.md) — streaming, session reuse, tool-use, MCP-server mode.
 - [references.md](./references.md) — Qwen3, OpenRouter, pi coding agent links.
 - [cutover-behaviour.md](./cutover-behaviour.md) — historical runbook for the #36 ZeroClaw → pi-agent cutover.

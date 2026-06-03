@@ -1,27 +1,27 @@
 ---
 title: Choose Your LLM Backend
-description: Side-by-side comparison of LLM backend options for Dotty — PiVoiceLLM (default), Tier1Slim, OpenAICompat, and llama-swap.
+description: Side-by-side comparison of LLM backend options for Dotty — PiVoiceLLM (default), OpenAICompat, and llama-swap.
 ---
 
 # Choose Your LLM Backend
 
-Four LLM backend options, from simplest to most capable. All plug into
+Three LLM backend options, from simplest to most capable. All plug into
 the same xiaozhi-server pipeline — you switch by changing `selected_module.LLM`
 and the matching block under `LLM:` in `.config.yaml`.
 
 ## Comparison
 
-| | OpenAI-compatible API | llama-swap (local, multi-model) | Tier1Slim (two-tier voice) | PiVoiceLLM (pi agent — default) |
-|---|---|---|---|---|
-| **Provider key** | `OpenAICompat` | `OpenAICompat` | `Tier1Slim` | `PiVoiceLLM` |
-| **Runs where** | Cloud (OpenRouter, OpenAI, etc.) | Local GPU host (Docker, llama.cpp) | Inner loop on llama-swap; tool escalation via bridge | dotty-pi container on the Docker host |
-| **Latency** | 300-800 ms (network-bound) | 200-600 ms (GPU-bound; `qwen3.5:4b` warm <500 ms) | <500 ms plain chat; +bridge round-trip on tool calls | 500-1500 ms (pi agent turn overhead) |
-| **Cost** | Pay-per-token | Free (electricity + hardware) | Free for inner loop; pay-per-token in smart mode | Free (electricity + hardware) |
-| **Privacy** | Tokens sent to cloud provider | Fully local, nothing leaves LAN | Fully local for plain turns; cloud only when smart_mode is on | Fully local |
-| **Setup complexity** | Low — API key + model name | Medium — GPU, Docker, GGUF download | Medium — llama-swap + Tier1Slim block | Medium — dotty-pi container + llama-swap |
-| **Memory / tools** | None | None | Chitchat-only post-cutover (escalation endpoint non-functional) | Yes — memory_lookup, remember, think_hard, take_photo, play_song |
-| **Hot-swappable** | Restart container | Restart container | **Yes** — `set_runtime()` mutates the live provider; smart-mode flip is instant | Restart container |
-| **Best for** | Quick start, best-in-class models | Privacy + concurrent multi-model serving | Chitchat-only fallback; no tool calls | **Default — snappy voice with full tool support** |
+| | OpenAI-compatible API | llama-swap (local, multi-model) | PiVoiceLLM (pi agent — default) |
+|---|---|---|---|
+| **Provider key** | `OpenAICompat` | `OpenAICompat` | `PiVoiceLLM` |
+| **Runs where** | Cloud (OpenRouter, OpenAI, etc.) | Local GPU host (Docker, llama.cpp) | dotty-pi container on the Docker host |
+| **Latency** | 300-800 ms (network-bound) | 200-600 ms (GPU-bound; `qwen3.5:4b` warm <500 ms) | 500-1500 ms (pi agent turn overhead) |
+| **Cost** | Pay-per-token | Free (electricity + hardware) | Free (electricity + hardware) |
+| **Privacy** | Tokens sent to cloud provider | Fully local, nothing leaves LAN | Fully local |
+| **Setup complexity** | Low — API key + model name | Medium — GPU, Docker, GGUF download | Medium — dotty-pi container + llama-swap |
+| **Memory / tools** | None | None | Yes — memory_lookup, remember, think_hard, take_photo, play_song |
+| **Hot-swappable** | Restart container | Restart container | Restart container |
+| **Best for** | Quick start, best-in-class models | Privacy + concurrent multi-model serving | **Default — snappy voice with full tool support** |
 
 ## 1. OpenAI-compatible API
 
@@ -128,41 +128,7 @@ LLM:
 - No memory between sessions — stateless like the cloud option.
 - If you don't need concurrent multi-model serving, Ollama is the simpler single-binary alternative.
 
-## 3. Tier1Slim (two-tier voice — alternate)
-
-An alternate voice backend. A small, fast model (`qwen3.5:4b` against llama-swap) handles every plain conversational turn without involving the bridge. When the model emits a structured `tool_call`, the provider escalates to `POST /api/voice/escalate` on the bridge.
-
-**Post-cutover caveat:** `POST /api/voice/escalate` was served by the ZeroClaw bridge voice path, which was retired in issue #36 (2026-05-19). The escalation endpoint is non-functional in the current stack. Tier1Slim is therefore a **chitchat-only rollback path** — plain conversational turns work, tool calls (`memory_lookup`, `think_hard`, `take_photo`, `play_song`) do not. Use `PiVoiceLLM` (the default) for full tool support.
-
-Smart-mode flips repoint the inner loop at a cloud model (default `anthropic/claude-sonnet-4-6`) via in-process `set_runtime()` — no docker restart.
-
-### `.config.yaml` snippet
-
-```yaml
-selected_module:
-  LLM: Tier1Slim
-
-LLM:
-  Tier1Slim:
-    type: tier1_slim
-    url: <LLAMA_SWAP_URL>                   # e.g. http://192.168.1.67:8080/v1
-    api_key: <LLAMA_SWAP_KEY>               # any string; llama-swap ignores
-    model: qwen3.5:4b
-    persona_file: personas/dotty_voice.md
-    max_tokens: 256
-    temperature: 0.7
-    timeout: 60
-```
-
-Full reference: [tier1slim.md](./tier1slim.md).
-
-### Notes
-
-- The inner loop bypasses the bridge entirely on plain turns, so chitchat works even if `bridge.py` is unreachable.
-- `set_runtime()` lets the bridge hot-swap the live provider — used for smart-mode flips.
-- Persona uses `personas/dotty_voice.md`; the top-level `prompt:` block is deliberately ignored because the 4 B chat template only honours one system message.
-
-## 4. PiVoiceLLM (pi agent — default)
+## 3. PiVoiceLLM (pi agent — default)
 
 The default in the shipped `.config.yaml`. The `PiVoiceLLM` provider routes each voice turn to the **dotty-pi container** — the pi coding agent running on the same Docker host as xiaozhi-server.
 
@@ -211,7 +177,6 @@ All `LLM:` blocks can coexist in the config; only the one named in `selected_mod
 
 ## See also
 
-- [tier1slim.md](./tier1slim.md) — Tier1Slim alternate voice path in detail.
 - [brain.md](./brain.md) — model matrix and dotty-pi agent architecture.
 - [voice-pipeline.md](./voice-pipeline.md) — ASR, TTS, and VAD modules.
 - [architecture.md](./architecture.md) — how the LLM slot fits into the full pipeline.
