@@ -25,7 +25,7 @@ TAG = __name__
 logger = setup_logging()
 
 KID_MODE = os.environ.get("DOTTY_KID_MODE", "true").lower() in ("1", "true", "yes")
-_TURN_SUFFIX = build_turn_suffix(KID_MODE)
+_TURN_SUFFIX = ""
 
 
 def _load_persona(path):
@@ -116,6 +116,8 @@ class LLMProvider(LLMProviderBase):
 
         for i, msg in enumerate(dialogue):
             role = msg.get("role", "user")
+            if role == "system":
+                continue
             content = msg.get("content", "")
             if i == last_user_idx:
                 content = content + _TURN_SUFFIX
@@ -155,6 +157,7 @@ class LLMProvider(LLMProviderBase):
 
     def _response_stream(self, messages):
         """POST to /v1/chat/completions with stream=true, yield chunks."""
+        logger.bind(tag=TAG).info(f"Sending messages to LLM: {json.dumps(messages, ensure_ascii=False)}")
         payload = {
             "model": self.model,
             "messages": messages,

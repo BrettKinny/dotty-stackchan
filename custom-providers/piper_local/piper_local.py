@@ -1,3 +1,4 @@
+import re
 import os
 import queue
 import traceback
@@ -133,6 +134,10 @@ class TTSProvider(TTSProviderBase):
         return None
 
     def text_to_speak(self, text, is_last):
+        # Strip emojis and other non-speakable Unicode (e.g. 🤔 rendered as ð¤)
+        text = re.sub(r'[^\x00-\x7F\u00A0-\u024F\u1E00-\u1EFF]', '', text).strip()
+        if not text:
+            return
         frame_bytes = int(
             self.opus_encoder.sample_rate
             * self.opus_encoder.channels

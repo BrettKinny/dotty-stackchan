@@ -46,6 +46,8 @@ services:
       - DOTTY_STATE_DIR=/var/lib/dotty-behaviour/state
       - HOUSEHOLD_YAML_PATH=/var/lib/dotty-behaviour/state/household.yaml
       - GREETER_STATE_PATH=/var/lib/dotty-behaviour/state/greeter_state.json
+      - SOUND_TURN_YAW_DEG=20
+      - WAKE_TURN_YAW_DEG=20
     volumes:
       - /mnt/user/appdata/dotty-behaviour/state:/var/lib/dotty-behaviour/state
       - /mnt/user/appdata/dotty-behaviour/logs:/var/lib/dotty-behaviour/logs

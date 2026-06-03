@@ -149,10 +149,10 @@ class EventTextMessageHandler(TextMessageHandler):
                     from core.handle.receiveAudioHandle import (
                         _capture_room_description_async,
                     )
-                    _spawn(
-                        _capture_room_description_async(conn),
-                        name="room_view_capture",
-                    )
+                    # _spawn(
+                    #     _capture_room_description_async(conn),
+                    #     name="room_view_capture",
+                    # )
             except Exception as exc:
                 conn.logger.bind(tag=TAG).warning(
                     f"room_view: failed to start capture: {exc}"
@@ -189,7 +189,7 @@ class EventTextMessageHandler(TextMessageHandler):
                     f"perception POST failed: {exc}"
                 )
 
-        _spawn(asyncio.to_thread(_post), name="perception_event_post")
+        # _spawn(asyncio.to_thread(_post), name="perception_event_post")
 
 
 class TextMessageHandlerRegistry:
