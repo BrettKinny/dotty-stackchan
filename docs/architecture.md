@@ -245,6 +245,7 @@ The canonical working copies live in this repo.
 | `custom-providers/edge_stream/` | xiaozhi container `core/providers/tts/` | Streaming EdgeTTS provider |
 | `custom-providers/piper_local/` | xiaozhi container `core/providers/tts/` | Local Piper TTS provider |
 | `custom-providers/asr/fun_local.py` | xiaozhi container `core/providers/asr/` | Patched FunASR provider (adds `language` config key) |
+| `custom-providers/asr/sensevoice_onnx.py` | xiaozhi container `core/providers/asr/` | int8 sherpa-onnx SenseVoice ASR provider (opt-in, no-torch alternative to FunASR; #135) |
 | `custom-providers/xiaozhi-patches/` | xiaozhi container (drop-in overrides) | Admin routes + shared_llm singleton |
 | `.config.yaml` | Docker host `data/.config.yaml` | xiaozhi-server config override |
 | `docker-compose.yml.template` | Docker host `<XIAOZHI_PATH>` | Container definition |

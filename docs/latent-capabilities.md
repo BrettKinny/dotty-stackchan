@@ -42,7 +42,7 @@ Features xiaozhi-esp32-server supports upstream that aren't turned on or surface
 | **SenseVoice Speech Emotion Recognition (SER)** | Use the *user's* vocal emotion as LLM context (not just the LLM's own emoji output) | High | **New-task candidate** |
 | **SenseVoice Audio Event Detection (AED)** | Detect bgm, applause, laughter, crying, coughing, sneezing — useful context for a kids' robot | Medium | **New-task candidate** |
 | **SenseVoice language-ID output** | Detect when the user actually spoke a non-English language; respond in kind or request clarification | Low | Cross-refs the English-pin patch `fun_local.py` |
-| **Sherpa-ONNX ASR** | Alternative to FunASR; fully offline, supports different languages | Low | **New-task candidate** |
+| **Sherpa-ONNX ASR** | Alternative to FunASR; fully offline, supports different languages | Low | **Implemented (opt-in, #135)** — `SenseVoiceOnnx` provider, no-torch int8 export |
 | **Custom wake word** | Replace/add to the stock wake word via ESP-SR MultiNet | Low | **New-task candidate** |
 | **Voiceprint speaker ID** | Distinguish family members; apply per-user persona/context | Medium | Cross-refs child-safety task (different guardrails for kids vs adults) |
 | **xiaozhi-server VLLM module** | Server-side "What's in this photo?" pipeline | Medium | Already covered by the bridge-side `take_photo` + VLM long-poll path described in [`modes.md`](./modes.md#vision); this row tracks the *upstream* xiaozhi-server VLLM module, which we don't enable. |

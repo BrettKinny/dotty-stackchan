@@ -8,7 +8,7 @@ description: xiaozhi-esp32-server pipeline stages -- VAD, ASR, LLM proxy, and TT
 ## TL;DR
 
 - **Server** is `xinnan-tech/xiaozhi-esp32-server` running in Docker on a Linux host. Plugin-based: each of VAD, ASR, LLM, TTS, Memory, Intent is a swappable provider picked via `data/.config.yaml`'s `selected_module:` block.
-- Our live pipeline: **SileroVAD** (speech-end) → **FunASR SenseVoiceSmall** or **WhisperLocal** (ASR, pinned to English) → **PiVoiceLLM** custom provider (current default — `docker exec -i dotty-pi pi --mode rpc` over stdio, brain is the `dotty-pi` container) or **OpenAICompat** (alternate — points straight at any OpenAI-compatible endpoint) → **LocalPiper** en_GB-cori-medium (TTS; EdgeTTS / StreamingEdgeTTS as alternates).
+- Our live pipeline: **SileroVAD** (speech-end) → **FunASR SenseVoiceSmall** (or **WhisperLocal**, or the opt-in no-torch **SenseVoiceOnnx**) (ASR, pinned to English) → **PiVoiceLLM** custom provider (current default — `docker exec -i dotty-pi pi --mode rpc` over stdio, brain is the `dotty-pi` container) or **OpenAICompat** (alternate — points straight at any OpenAI-compatible endpoint) → **LocalPiper** en_GB-cori-medium (TTS; EdgeTTS / StreamingEdgeTTS as alternates).
 - The xiaozhi container also runs a perception relay (`EventTextMessageHandler`) that forwards firmware `face_detected` / `face_lost` / `sound_event` / `state_changed` frames to `dotty-behaviour`'s `/api/perception/event`.
 - **Emotion** is not a pipeline stage — it's extracted post-hoc from the LLM's emoji prefix and emitted as a separate WS frame. See [protocols.md](./protocols.md#emotion-protocol).
 - Custom providers are mounted into the container via Docker volumes at `/opt/xiaozhi-esp32-server/core/providers/{asr,tts,llm}/…`. They override the baked-in files at module-import time.
@@ -21,7 +21,7 @@ From the `xinnan-tech/xiaozhi-esp32-server` README (see [references.md](./refere
 | Stage | Provider options |
 |---|---|
 | **VAD** | SileroVAD (local, free) |
-| **ASR (local)** | FunASR, SherpaASR |
+| **ASR (local)** | FunASR, SherpaASR, SenseVoiceOnnx (our opt-in no-torch int8 sherpa-onnx provider, #135) |
 | **ASR (cloud)** | FunASRServer, Volcano Engine, iFLYTEK, Tencent Cloud, Alibaba Cloud, Baidu Cloud, OpenAI |
 | **LLM** | OpenAI-compatible (Alibaba Bailian, Volcano, DeepSeek, Zhipu, Gemini, iFLYTEK), Ollama, Dify, FastGPT, Coze, Xinference, HomeAssistant |
 | **VLLM** (vision) | Alibaba Bailian, Zhipu ChatGLM |
@@ -64,6 +64,16 @@ Model: `FunAudioLLM/SenseVoiceSmall` on HuggingFace. From the model card:
 Deployment: mounted as a file-level override at `/opt/xiaozhi-esp32-server/core/providers/asr/fun_local.py`.
 
 **Model assets.** `make fetch-models` downloads the five files SenseVoiceSmall needs into `models/SenseVoiceSmall/`: `model.pt`, `config.yaml`, `configuration.json`, `am.mvn`, and the SentencePiece tokenizer `chn_jpn_yue_eng_ko_spectok.bpe.model`. The tokenizer asset is load-bearing — without it funasr fails to build with `sentencepiece … bpemodel=None` and the container crash-loops (issue #124). `make doctor` size-checks each of these.
+
+### ASR — SenseVoiceOnnx (sherpa-onnx int8, opt-in) (#135)
+
+Same SenseVoiceSmall model family as the FunASR provider above, but run through the **sherpa-onnx / ONNX Runtime** int8 export instead of FunASR's PyTorch path — **no `torch` dependency**, and the on-disk model is ~230 MB versus the ~900 MB `model.pt`. This makes it the better fit for Pi-class / low-RAM hosts. It coexists with FunASR, which stays the no-GPU default; flipping the default to this provider is a separate, benchmark-gated follow-up (#135).
+
+- **Select:** `selected_module.ASR: SenseVoiceOnnx` in `.config.yaml` (type `sensevoice_onnx`).
+- **Provider:** mounted as a file-level override at `/opt/xiaozhi-esp32-server/core/providers/asr/sensevoice_onnx.py`.
+- **Model assets:** `make fetch-models` downloads `model.int8.onnx` + `tokens.txt` into `models/SenseVoiceSmall-onnx/`; `make doctor` size-checks them.
+- **Language:** `language: en` is preserved — sherpa-onnx takes the language natively, so no English-pin patch is needed.
+- **RTF (CPU):** measured on the Docker host (Intel i5-3570, 4-core, 2012-era — *weaker* than the Pi-5 target, so a conservative floor) on a 7.15 s English utterance: **RTF ≈ 0.12 at `num_threads: 2`** (~8× real-time), 0.23 at 1 thread. Comfortably real-time without a GPU. (Transcript verified correct.) The Pi 5 / RK3588-class A76 number the issue targets (~0.05–0.10) is still pending and gates the eventual default-flip; the provider logs an `ASR-RTF` line per utterance so the on-target figure can be read straight from production logs after deploy.
 
 ### LLM — provider selected at a time
 

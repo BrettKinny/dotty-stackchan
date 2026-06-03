@@ -9,6 +9,9 @@ PIPER_JSON       := en_GB-cori-medium.onnx.json
 WHISPER_REPO     := https://huggingface.co/Systran/faster-whisper-small.en
 WHISPER_DIR      := models/whisper-small.en-ct2
 WHISPER_FILES    := config.json model.bin tokenizer.json vocabulary.txt
+SENSEVOICE_ONNX_REPO  := https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17
+SENSEVOICE_ONNX_DIR   := models/SenseVoiceSmall-onnx
+SENSEVOICE_ONNX_FILES := model.int8.onnx tokens.txt
 
 # ── Colours ──────────────────────────────────────────────────────────
 GREEN  := \033[0;32m
@@ -261,6 +264,18 @@ fetch-models: ## Download SenseVoiceSmall + Piper voice models
 	  fi; \
 	done
 	@echo ""
+	@# ── sherpa-onnx SenseVoice (int8, no PyTorch — issue #135) ──
+	@mkdir -p $(SENSEVOICE_ONNX_DIR)
+	@echo -e "$(BOLD)[sherpa-onnx SenseVoice int8]$(RESET)"
+	@$(DL_FILE); for f in $(SENSEVOICE_ONNX_FILES); do \
+	  if [ -f "$(SENSEVOICE_ONNX_DIR)/$$f" ]; then \
+	    echo -e "  $(GREEN)$$f — already exists, skipping$(RESET)"; \
+	  else \
+	    echo "  Downloading $$f ..."; \
+	    dl_file "$(SENSEVOICE_ONNX_REPO)/resolve/main/$$f" "$(SENSEVOICE_ONNX_DIR)/$$f" || exit 1; \
+	  fi; \
+	done
+	@echo ""
 	@echo -e "$(GREEN)All models ready.$(RESET)"
 
 # ─────────────────────────────────────────────────────────────────────
@@ -316,6 +331,8 @@ doctor: ## Run health checks on config, models, and services
 	 fi; \
 	 check "SenseVoiceSmall model.pt present (>200MB)" "[ $$(wc -c < $(SENSEVOICE_DIR)/model.pt 2>/dev/null || echo 0) -gt 209715200 ]"; \
 	 check "SenseVoiceSmall tokenizer (chn_jpn_yue_eng_ko_spectok.bpe.model) present" "[ -s $(SENSEVOICE_DIR)/chn_jpn_yue_eng_ko_spectok.bpe.model ]"; \
+	 check "sherpa-onnx model.int8.onnx present (>200MB)" "[ $$(wc -c < $(SENSEVOICE_ONNX_DIR)/model.int8.onnx 2>/dev/null || echo 0) -gt 209715200 ]"; \
+	 check "sherpa-onnx tokens.txt present" "[ -s $(SENSEVOICE_ONNX_DIR)/tokens.txt ]"; \
 	 check "models/piper/*.onnx exists" "ls $(PIPER_DIR)/*.onnx >/dev/null 2>&1"; \
 	 check "docker compose config validates" "docker compose config --quiet"; \
 	 XIAOZHI_HOST=$$(grep -oP 'ws://\K[0-9.]+' "$$CFG" 2>/dev/null | head -1); \

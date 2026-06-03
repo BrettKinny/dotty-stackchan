@@ -13,7 +13,7 @@ delete_audio: true
 
 selected_module:
   VAD: SileroVAD
-  ASR: <ASR_MODULE>       # WhisperLocal (CUDA) or FunASR (CPU fallback)
+  ASR: <ASR_MODULE>       # WhisperLocal (CUDA) / FunASR (CPU fallback) / SenseVoiceOnnx (int8, no-torch)
   LLM: PiVoiceLLM         # default: agent loop hosted in the dotty-pi container (requires the sibling dotty-pi service)
   # LLM: OpenAICompat      # <-- alternate: direct OpenAI-compatible LLM
   TTS: LocalPiper
@@ -82,6 +82,17 @@ ASR:
     # Optional decoder bias — short list of canonical phrases improves
     # recall on rare names. Keep under ~200 chars to avoid prompt bleed.
     initial_prompt: null
+  SenseVoiceOnnx:
+    # int8 sherpa-onnx SenseVoiceSmall — no PyTorch, lighter for Pi-class hosts
+    # (#135). Opt-in: set selected_module.ASR: SenseVoiceOnnx to use it.
+    # Requires `make fetch-models` (models/SenseVoiceSmall-onnx/) + the
+    # sensevoice_onnx.py mount in docker-compose.
+    type: sensevoice_onnx
+    model_dir: models/SenseVoiceSmall-onnx
+    output_dir: tmp/
+    language: en          # auto, zh, en, ja, ko, yue
+    num_threads: 2
+    use_itn: true
 
 TTS:
   EdgeTTS:

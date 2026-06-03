@@ -143,6 +143,30 @@ def check_models_sensevoice(config_path: Optional[Path]) -> Result:
     return Result(label, "pass", f"{len(SENSEVOICE_REQUIRED)} required files OK")
 
 
+SENSEVOICE_ONNX_REQUIRED = {
+    "model.int8.onnx": 200_000_000,  # ~228 MB int8 SenseVoice
+    "tokens.txt": 100_000,           # ~310 kB token table
+}
+
+
+def check_models_sensevoice_onnx(config_path: Optional[Path]) -> Result:
+    label = "sherpa-onnx SenseVoice (int8) model files present"
+    root = config_path.parent if config_path else Path.cwd()
+    model_dir = root / "models" / "SenseVoiceSmall-onnx"
+    if not model_dir.is_dir():
+        return Result(label, "skip", f"{model_dir} missing — optional (#135); run `make fetch-models` to enable")
+    problems = []
+    for name, min_size in SENSEVOICE_ONNX_REQUIRED.items():
+        f = model_dir / name
+        if not f.is_file():
+            problems.append(f"{name} missing")
+        elif f.stat().st_size < min_size:
+            problems.append(f"{name} only {f.stat().st_size} B (corrupt download?)")
+    if problems:
+        return Result(label, "fail", "; ".join(problems) + " — re-run `make fetch-models`")
+    return Result(label, "pass", f"{len(SENSEVOICE_ONNX_REQUIRED)} required files OK")
+
+
 def check_models_piper(config_path: Optional[Path]) -> Result:
     label = "Piper TTS model (*.onnx) present"
     root = config_path.parent if config_path else Path.cwd()
@@ -183,6 +207,7 @@ def run_checks(
     results.append(check_no_placeholders(config_path))
     results.append(check_models_sensevoice(config_path))
     results.append(check_models_piper(config_path))
+    results.append(check_models_sensevoice_onnx(config_path))
 
     config_text = config_path.read_text() if config_path else ""
     # The dashboard (bridge.py :8081) and dotty-behaviour (:8090) run as

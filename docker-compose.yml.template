@@ -65,6 +65,8 @@ services:
       - ./custom-providers/asr/fun_local.py:/opt/xiaozhi-esp32-server/core/providers/asr/fun_local.py:ro
       - ./custom-providers/asr/whisper_local.py:/opt/xiaozhi-esp32-server/core/providers/asr/whisper_local.py:ro
       - ./models/whisper-small.en-ct2:/opt/xiaozhi-esp32-server/models/whisper-small.en-ct2:ro
+      - ./custom-providers/asr/sensevoice_onnx.py:/opt/xiaozhi-esp32-server/core/providers/asr/sensevoice_onnx.py:ro
+      - ./models/SenseVoiceSmall-onnx:/opt/xiaozhi-esp32-server/models/SenseVoiceSmall-onnx:ro
       - ./receiveAudioHandle.py:/opt/xiaozhi-esp32-server/core/handle/receiveAudioHandle.py:ro
       - ./dances.py:/opt/xiaozhi-esp32-server/core/handle/dances.py:ro
       - ./custom-providers/textUtils.py:/opt/xiaozhi-esp32-server/core/utils/textUtils.py:ro
