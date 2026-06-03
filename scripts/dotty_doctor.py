@@ -112,16 +112,35 @@ def check_no_placeholders(config_path: Optional[Path]) -> Result:
     return Result(label, "pass")
 
 
+# Required SenseVoiceSmall assets and a sane minimum byte size for each. The size
+# floors catch corrupt/partial downloads — notably the 15-byte "Entry not found"
+# stubs that the pre-#124 `make fetch-models` saved silently when a filename 404'd
+# (which crash-looped the ASR container with `sentencepiece … bpemodel=None`).
+SENSEVOICE_REQUIRED = {
+    "model.pt": 200_000_000,                          # ~900 MB
+    "config.yaml": 500,
+    "configuration.json": 100,
+    "am.mvn": 1_000,
+    "chn_jpn_yue_eng_ko_spectok.bpe.model": 1_000,    # the BPE/sentencepiece tokenizer
+}
+
+
 def check_models_sensevoice(config_path: Optional[Path]) -> Result:
     label = "SenseVoiceSmall model files present"
     root = config_path.parent if config_path else Path.cwd()
     model_dir = root / "models" / "SenseVoiceSmall"
     if not model_dir.is_dir():
         return Result(label, "fail", f"{model_dir} missing — run `make fetch-models`")
-    files = list(model_dir.iterdir())
-    if not files:
-        return Result(label, "fail", f"{model_dir} is empty")
-    return Result(label, "pass", f"{len(files)} files")
+    problems = []
+    for name, min_size in SENSEVOICE_REQUIRED.items():
+        f = model_dir / name
+        if not f.is_file():
+            problems.append(f"{name} missing")
+        elif f.stat().st_size < min_size:
+            problems.append(f"{name} only {f.stat().st_size} B (corrupt download?)")
+    if problems:
+        return Result(label, "fail", "; ".join(problems) + " — re-run `make fetch-models`")
+    return Result(label, "pass", f"{len(SENSEVOICE_REQUIRED)} required files OK")
 
 
 def check_models_piper(config_path: Optional[Path]) -> Result:

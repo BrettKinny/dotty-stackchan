@@ -17,6 +17,14 @@ YELLOW := \033[0;33m
 BOLD   := \033[1m
 RESET  := \033[0m
 
+# ── Robust download helper (issue #124) ──────────────────────────────
+# Shell function injected at the head of each fetch block as `dl_file <url> <dest>`.
+# `-f` turns any HTTP >=400 into a non-zero exit (and suppresses saving the error
+# body), `--retry` rides out transient HF hiccups, the size floor rejects the
+# 15-byte "Entry not found" stubs that the old bare `curl -o` saved silently, and
+# every failure `rm`s the partial so the skip-if-exists guard can't "succeed" on it.
+DL_FILE = dl_file() { if curl -fL --retry 3 --retry-delay 1 --progress-bar -o "$$2" "$$1"; then _sz=$$(wc -c < "$$2" 2>/dev/null || echo 0); if [ "$$_sz" -lt 100 ]; then echo -e "  $(RED)$$2: only $$_sz bytes — treating as a failed download$(RESET)"; rm -f "$$2"; return 1; fi; else echo -e "  $(RED)Failed to download $$1$(RESET)"; rm -f "$$2"; return 1; fi; }
+
 # ── Targets ──────────────────────────────────────────────────────────
 .PHONY: help setup fetch-models doctor audit up down logs status voice-list voice-install sbom verify-firmware test lint check _preflight-compose _preflight-rendered
 
@@ -203,7 +211,11 @@ setup: _preflight-compose ## Interactive first-run wizard (re-runnable; remember
 # ─────────────────────────────────────────────────────────────────────
 # fetch-models — download ASR + TTS model files
 # ─────────────────────────────────────────────────────────────────────
-SENSEVOICE_FILES := model.pt config.yaml tokens.json configuration.json am.mvn chn_jpn_yue_eng_ko_spectral.fbank.conf.yaml
+SENSEVOICE_FILES := model.pt config.yaml configuration.json am.mvn chn_jpn_yue_eng_ko_spectok.bpe.model
+# Stale filenames shipped before the #124 fix: `tokens.json` and
+# `chn_jpn_yue_eng_ko_spectral.fbank.conf.yaml` never existed in the HF repo and
+# downloaded as 15-byte "Entry not found" stubs. Removed on existing installs below.
+SENSEVOICE_STALE := tokens.json chn_jpn_yue_eng_ko_spectral.fbank.conf.yaml
 SENSEVOICE_DIR   := models/SenseVoiceSmall
 PIPER_DIR        := models/piper
 
@@ -214,48 +226,38 @@ fetch-models: ## Download SenseVoiceSmall + Piper voice models
 	@# ── SenseVoiceSmall ──
 	@mkdir -p $(SENSEVOICE_DIR)
 	@echo -e "$(BOLD)[SenseVoiceSmall]$(RESET)"
-	@for f in $(SENSEVOICE_FILES); do \
+	@# Purge pre-#124 stale stubs so the skip-if-exists guard re-fetches cleanly.
+	@for f in $(SENSEVOICE_STALE); do rm -f "$(SENSEVOICE_DIR)/$$f"; done
+	@$(DL_FILE); for f in $(SENSEVOICE_FILES); do \
 	  if [ -f "$(SENSEVOICE_DIR)/$$f" ]; then \
 	    echo -e "  $(GREEN)$$f — already exists, skipping$(RESET)"; \
 	  else \
 	    echo "  Downloading $$f ..."; \
-	    curl -# -L -o "$(SENSEVOICE_DIR)/$$f" \
-	      "$(SENSEVOICE_REPO)/resolve/main/$$f" || \
-	      { echo -e "  $(RED)Failed to download $$f$(RESET)"; exit 1; }; \
+	    dl_file "$(SENSEVOICE_REPO)/resolve/main/$$f" "$(SENSEVOICE_DIR)/$$f" || exit 1; \
 	  fi; \
 	done
 	@echo ""
 	@# ── Piper voice ──
 	@mkdir -p $(PIPER_DIR)
 	@echo -e "$(BOLD)[Piper TTS — $(PIPER_ONNX)]$(RESET)"
-	@if [ -f "$(PIPER_DIR)/$(PIPER_ONNX)" ]; then \
-	  echo -e "  $(GREEN)$(PIPER_ONNX) — already exists, skipping$(RESET)"; \
-	else \
-	  echo "  Downloading $(PIPER_ONNX) (this is ~75 MB)..."; \
-	  curl -# -L -o "$(PIPER_DIR)/$(PIPER_ONNX)" \
-	    "$(PIPER_BASE)/$(PIPER_ONNX)" || \
-	    { echo -e "  $(RED)Failed to download $(PIPER_ONNX)$(RESET)"; exit 1; }; \
-	fi
-	@if [ -f "$(PIPER_DIR)/$(PIPER_JSON)" ]; then \
-	  echo -e "  $(GREEN)$(PIPER_JSON) — already exists, skipping$(RESET)"; \
-	else \
-	  echo "  Downloading $(PIPER_JSON)..."; \
-	  curl -# -L -o "$(PIPER_DIR)/$(PIPER_JSON)" \
-	    "$(PIPER_BASE)/$(PIPER_JSON)" || \
-	    { echo -e "  $(RED)Failed to download $(PIPER_JSON)$(RESET)"; exit 1; }; \
-	fi
+	@$(DL_FILE); for f in $(PIPER_ONNX) $(PIPER_JSON); do \
+	  if [ -f "$(PIPER_DIR)/$$f" ]; then \
+	    echo -e "  $(GREEN)$$f — already exists, skipping$(RESET)"; \
+	  else \
+	    echo "  Downloading $$f ..."; \
+	    dl_file "$(PIPER_BASE)/$$f" "$(PIPER_DIR)/$$f" || exit 1; \
+	  fi; \
+	done
 	@echo ""
 	@# ── faster-whisper small.en (CTranslate2) ──
 	@mkdir -p $(WHISPER_DIR)
 	@echo -e "$(BOLD)[faster-whisper small.en]$(RESET)"
-	@for f in $(WHISPER_FILES); do \
+	@$(DL_FILE); for f in $(WHISPER_FILES); do \
 	  if [ -f "$(WHISPER_DIR)/$$f" ]; then \
 	    echo -e "  $(GREEN)$$f — already exists, skipping$(RESET)"; \
 	  else \
 	    echo "  Downloading $$f ..."; \
-	    curl -# -L -o "$(WHISPER_DIR)/$$f" \
-	      "$(WHISPER_REPO)/resolve/main/$$f" || \
-	      { echo -e "  $(RED)Failed to download $$f$(RESET)"; exit 1; }; \
+	    dl_file "$(WHISPER_REPO)/resolve/main/$$f" "$(WHISPER_DIR)/$$f" || exit 1; \
 	  fi; \
 	done
 	@echo ""
@@ -312,7 +314,8 @@ doctor: ## Run health checks on config, models, and services
 	   echo -e "  $(GREEN)PASS$(RESET)  $$CFG has no unsubstituted wizard placeholders"; \
 	   PASS=$$((PASS+1)); \
 	 fi; \
-	 check "models/SenseVoiceSmall/ has files" "ls $(SENSEVOICE_DIR)/*.pt >/dev/null 2>&1 || ls $(SENSEVOICE_DIR)/*.yaml >/dev/null 2>&1"; \
+	 check "SenseVoiceSmall model.pt present (>200MB)" "[ $$(wc -c < $(SENSEVOICE_DIR)/model.pt 2>/dev/null || echo 0) -gt 209715200 ]"; \
+	 check "SenseVoiceSmall tokenizer (chn_jpn_yue_eng_ko_spectok.bpe.model) present" "[ -s $(SENSEVOICE_DIR)/chn_jpn_yue_eng_ko_spectok.bpe.model ]"; \
 	 check "models/piper/*.onnx exists" "ls $(PIPER_DIR)/*.onnx >/dev/null 2>&1"; \
 	 check "docker compose config validates" "docker compose config --quiet"; \
 	 XIAOZHI_HOST=$$(grep -oP 'ws://\K[0-9.]+' "$$CFG" 2>/dev/null | head -1); \

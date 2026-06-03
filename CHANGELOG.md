@@ -20,6 +20,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`custom-providers/zeroclaw/`** — the `ZeroClawLLM` voice provider, dead since the #36 cutover.
 - **`docs/multi-daemon-split.md`, `docs/advanced/multi-host.md`** — both documented ZeroClaw-host topologies that no longer exist.
 
+### Fixed
+- **No-GPU ASR path no longer crash-loops on first run** (#124, #136) — `make fetch-models` was requesting two SenseVoiceSmall filenames that don't exist on Hugging Face (`tokens.json` and `chn_jpn_yue_eng_ko_spectral.fbank.conf.yaml`); the real SentencePiece tokenizer is `chn_jpn_yue_eng_ko_spectok.bpe.model`. Both 404s were silently saved as 15-byte "Entry not found" stubs (curl had no `--fail`), so funasr loaded with `bpemodel=None` and `xiaozhi-esp32-server` crash-looped on every GPU-less host. The file list is corrected; **all `fetch-models` downloads now fail loudly** (`curl --fail --retry` + a size floor + delete-on-failure) instead of saving junk; and **`make doctor` now size-checks the required SenseVoice assets** so a corrupt download FAILs instead of passing. Huge thanks to **[@miltieIV2](https://github.com/miltieIV2)** — a meticulous bug report *and* a self-driven root-cause that pinned it on the `HAS_CUDA=0` FunASR switch. A lighter int8 sherpa-onnx SenseVoice runtime (no PyTorch) for Pi-class hosts is tracked in #135.
+
 ## [server-v0.1.0] - 2026-05-17
 
 First git-tagged public release. Covers all server + firmware work shipped to `main` between project inception and 2026-05-17. The earlier `[0.1.0] - 2026-04-25` entry below describes a pre-tag internal milestone — retained for historical reference, but `server-v0.1.0` is the canonical first release.

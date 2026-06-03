@@ -63,6 +63,8 @@ Model: `FunAudioLLM/SenseVoiceSmall` on HuggingFace. From the model card:
 
 Deployment: mounted as a file-level override at `/opt/xiaozhi-esp32-server/core/providers/asr/fun_local.py`.
 
+**Model assets.** `make fetch-models` downloads the five files SenseVoiceSmall needs into `models/SenseVoiceSmall/`: `model.pt`, `config.yaml`, `configuration.json`, `am.mvn`, and the SentencePiece tokenizer `chn_jpn_yue_eng_ko_spectok.bpe.model`. The tokenizer asset is load-bearing — without it funasr fails to build with `sentencepiece … bpemodel=None` and the container crash-loops (issue #124). `make doctor` size-checks each of these.
+
 ### LLM — provider selected at a time
 
 Pick one via `selected_module.LLM` in `.config.yaml`. The default is `PiVoiceLLM`; `OpenAICompat` is the alternate. See [llm-backends.md](./llm-backends.md) for the full comparison.
