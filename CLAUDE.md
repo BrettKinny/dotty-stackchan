@@ -1,5 +1,22 @@
 # Dotty
 
+## AI transparency (binding on agents)
+
+This is a human-focused project, made by humans, for humans, that is **openly
+AI-assisted**. If you are an AI agent working here, the project's AI policy
+([`AI_TRANSPARENCY.md`](./AI_TRANSPARENCY.md)) is binding on you, not just
+descriptive. The core rule: **anything you author is acknowledged as such.** In
+practice:
+
+- **Keep the `Co-Authored-By:` trailer** naming your model on every commit you
+  help write (the global commit/PR conventions already require this — honour
+  them, never strip them).
+- **Note AI assistance** in PR bodies you draft, and mark substantial AI-drafted
+  docs as such.
+- **Never present agent work as unaided human work**, and never remove existing
+  attribution. Leave the human-accountability chain intact: you propose, a human
+  reviews and is accountable for what lands. Don't merge to `main` unattended.
+
 ## What This Is
 
 Your self-hosted StackChan robot assistant. A fully self-hosted voice stack for the M5Stack **StackChan** desktop robot. The default persona is "Dotty" (customizable via `make setup`). Voice I/O routes through a self-hosted xiaozhi-esp32-server; the brain is a **pi** coding agent running in the `dotty-pi` container. No cloud AI services — fully self-hosted except for the LLM call (replaceable with local Ollama).

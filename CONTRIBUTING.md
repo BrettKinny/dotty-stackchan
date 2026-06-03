@@ -88,6 +88,21 @@ When you add or rename a doc, prefer edits that work cleanly across versions
 (don't break links from older versions to ones that still exist). If a doc is
 only relevant for a future version, note that in the PR description.
 
+## AI-assisted contributions
+
+This project is openly AI-assisted, and your contributions can be too — using a
+coding agent on your PR is welcome and normal here. The one rule we hold
+ourselves (and you) to: **acknowledge it.** See
+[`AI_TRANSPARENCY.md`](./AI_TRANSPARENCY.md) for the full policy; the mechanics:
+
+- **Keep the attribution your tool adds.** If your agent writes a
+  `Co-Authored-By:` trailer naming the model, leave it in — don't strip it to
+  make the work look unaided.
+- **Note agent help in the PR description** when an AI drafted a substantial
+  part of the change.
+- **Review the output yourself before your name goes on it.** The AI proposes;
+  you decide and you're accountable. We don't merge work nobody understands.
+
 ## Safety-related changes
 
 The child-safety enforcement layer (persona prompt sandwich, audience framing
