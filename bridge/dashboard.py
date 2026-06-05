@@ -290,6 +290,13 @@ router = APIRouter(
 XIAOZHI_HOST = os.environ.get("XIAOZHI_HOST", "")
 XIAOZHI_OTA_PORT = int(os.environ.get("XIAOZHI_OTA_PORT", "8003"))
 XIAOZHI_WS_PORT = int(os.environ.get("XIAOZHI_WS_PORT", "8000"))
+_ADMIN_TOKEN = os.environ.get("DOTTY_ADMIN_TOKEN", "").strip()
+
+
+def _xiaozhi_admin_headers() -> dict[str, str]:
+    """X-Admin-Token header for /xiaozhi/admin/* requests when DOTTY_ADMIN_TOKEN
+    is set (matches the xiaozhi-server middleware); empty otherwise."""
+    return {"X-Admin-Token": _ADMIN_TOKEN} if _ADMIN_TOKEN else {}
 LOG_DIR = Path(os.environ.get("CONVO_LOG_DIR", "/var/lib/dotty-bridge/logs"))
 VOICE_CHANNELS = ("dotty", "stackchan")
 
@@ -440,7 +447,8 @@ async def _xiaozhi_device_count() -> int | None:
     import urllib.request
     def _fetch() -> int | None:
         try:
-            with urllib.request.urlopen(url, timeout=2) as r:
+            req = urllib.request.Request(url, headers=_xiaozhi_admin_headers())
+            with urllib.request.urlopen(req, timeout=2) as r:
                 if r.status != 200:
                     return None
                 data = json.loads(r.read())
@@ -598,7 +606,8 @@ async def _xiaozhi_list_songs() -> tuple[list[str], str | None]:
     import urllib.request
     def _fetch() -> tuple[list[str], str | None]:
         try:
-            with urllib.request.urlopen(url, timeout=2) as r:
+            req = urllib.request.Request(url, headers=_xiaozhi_admin_headers())
+            with urllib.request.urlopen(req, timeout=2) as r:
                 data = json.loads(r.read())
                 files = data.get("files") or []
                 return [f for f in files if isinstance(f, str)], None
@@ -638,7 +647,10 @@ async def play_song(request: Request, filename: str = Form(...)) -> Any:
     url = f"http://{XIAOZHI_HOST}:{XIAOZHI_OTA_PORT}/xiaozhi/admin/play-asset"
     def _post() -> dict:
         try:
-            r = requests.post(url, json={"asset": asset_path}, timeout=3)
+            r = requests.post(
+                url, json={"asset": asset_path},
+                headers=_xiaozhi_admin_headers(), timeout=3,
+            )
             if r.status_code == 200:
                 return {"ok": True, "sent": base, "response": f"playing {base}"}
             if r.status_code == 503 and "no device connected" in r.text:

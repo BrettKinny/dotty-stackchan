@@ -166,6 +166,14 @@ def _write_smart_mode(enabled: bool) -> None:
 
 _XIAOZHI_HOST = os.environ.get("XIAOZHI_HOST", "")
 _XIAOZHI_HTTP_PORT = int(os.environ.get("XIAOZHI_OTA_PORT", "8003"))
+_ADMIN_TOKEN = os.environ.get("DOTTY_ADMIN_TOKEN", "").strip()
+
+
+def _xiaozhi_admin_headers() -> dict:
+    """X-Admin-Token header for /xiaozhi/admin/* requests when DOTTY_ADMIN_TOKEN
+    is set (matches the xiaozhi-server middleware); empty dict otherwise, so the
+    bridge is a no-op until the coordinated enforcement flip."""
+    return {"X-Admin-Token": _ADMIN_TOKEN} if _ADMIN_TOKEN else {}
 
 
 async def _dispatch_abort(device_id: str) -> None:
@@ -177,7 +185,9 @@ async def _dispatch_abort(device_id: str) -> None:
 
     def _post() -> None:
         try:
-            r = requests.post(url, json=payload, timeout=3)
+            r = requests.post(
+                url, json=payload, headers=_xiaozhi_admin_headers(), timeout=3
+            )
             if r.status_code >= 400:
                 log.warning("abort %s: %s", r.status_code, r.text[:200])
         except Exception as exc:
@@ -198,7 +208,9 @@ async def _dispatch_set_state(device_id: str, state: str) -> bool:
 
     def _post() -> bool:
         try:
-            r = requests.post(url, json=payload, timeout=3)
+            r = requests.post(
+                url, json=payload, headers=_xiaozhi_admin_headers(), timeout=3
+            )
             if r.status_code >= 400:
                 log.warning("set_state %s: %s", r.status_code, r.text[:200])
                 return False
@@ -221,7 +233,9 @@ async def _dispatch_set_toggle(device_id: str, name: str, enabled: bool) -> bool
 
     def _post() -> bool:
         try:
-            r = requests.post(url, json=payload, timeout=3)
+            r = requests.post(
+                url, json=payload, headers=_xiaozhi_admin_headers(), timeout=3
+            )
             if r.status_code >= 400:
                 log.warning("set_toggle %s: %s", r.status_code, r.text[:200])
                 return False
@@ -653,7 +667,9 @@ if _configure_dashboard is not None:
 
         def _post() -> dict:
             try:
-                r = requests.post(url, json=payload, timeout=3)
+                r = requests.post(
+                    url, json=payload, headers=_xiaozhi_admin_headers(), timeout=3
+                )
                 if r.status_code == 200:
                     return {"ok": True, **r.json()}
                 if r.status_code == 503 and "no device connected" in r.text:
@@ -677,7 +693,9 @@ if _configure_dashboard is not None:
 
         def _post() -> dict:
             try:
-                r = requests.post(url, json=payload, timeout=3)
+                r = requests.post(
+                    url, json=payload, headers=_xiaozhi_admin_headers(), timeout=3
+                )
                 if r.status_code == 200:
                     return {"ok": True, **r.json()}
                 if r.status_code == 503 and "no device connected" in r.text:
