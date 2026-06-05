@@ -703,6 +703,27 @@ async def _inject_or_error(request: Request, text: str, label: str) -> Any:
             unsubscribe(queue)
 
 
+def _kid_blocked(text: str) -> bool:
+    """When kid-mode is on, run `text` through the shared content filter.
+
+    Returns True if the text is blocked — the hit (log + Prometheus + safety
+    ring) is recorded inside ``content_filter()`` as a side effect. Defaults to
+    kid-mode ON when the getter is unconfigured or errors (fail safe). The
+    operator `say`/`start-story` ingresses otherwise bypass the same filter that
+    guards the voice path, so an operator (or any LAN client when dashboard auth
+    is unset) could make Dotty speak arbitrary unfiltered text.
+    """
+    getter = _state.get("kid_mode_getter")
+    try:
+        kid_on = bool(getter()) if getter else True
+    except Exception:
+        kid_on = True
+    if not kid_on:
+        return False
+    from bridge.text import content_filter
+    return content_filter(text) is not None
+
+
 @router.post("/actions/say", response_class=HTMLResponse, include_in_schema=False)
 async def say(request: Request, text: str = Form(...)) -> Any:
     text = (text or "").strip()
@@ -725,6 +746,11 @@ async def say(request: Request, text: str = Form(...)) -> Any:
         return templates.TemplateResponse(
             request, "say_result.html",
             {"ok": False, "error": "Message was empty after sanitisation."},
+        )
+    if _kid_blocked(text):
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": "Blocked by the kid-mode content filter."},
         )
     return await _inject_or_error(request, text, label=text)
 
@@ -755,6 +781,13 @@ async def start_story(request: Request, text: str = Form(...)) -> Any:
         return templates.TemplateResponse(
             request, "say_result.html",
             {"ok": False, "error": "Seed was empty after sanitisation."},
+        )
+    if _kid_blocked(text):
+        # Block before flipping state — don't enter story_time for a seed the
+        # filter rejected.
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": "Blocked by the kid-mode content filter."},
         )
     # Flip into story_time first if we're not already there, so the seed
     # turn lands in the right narrative state. Best-effort: a setter
