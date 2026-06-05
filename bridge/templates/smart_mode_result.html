@@ -2,6 +2,9 @@
 <div class="alert alert-info dotty-alert"
      hx-get="/ui/smart-mode" hx-trigger="load delay:300ms" hx-swap="innerHTML" hx-target="#smart-card-body">
   Smart Mode → <span class="font-semibold">{{ "on" if new_state else "off" }}</span>
+  {% if device_pushed is defined and not device_pushed %}
+  <br><small>Saved, but Dotty didn&rsquo;t acknowledge &mdash; the on-device LED may be stale (is the device connected?).</small>
+  {% endif %}
 </div>
 <script>window.dispatchEvent(new CustomEvent('dotty-refresh'));</script>
 {% else %}

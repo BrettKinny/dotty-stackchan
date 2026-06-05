@@ -1425,9 +1425,10 @@ async def smart_mode_set(request: Request, enabled: str = Form("")) -> Any:
             request, "smart_mode_result.html",
             {"ok": False, "error": err or "Smart mode toggle failed."},
         )
+    device_pushed = result.get("device_pushed", True) if isinstance(result, dict) else True
     return templates.TemplateResponse(
         request, "smart_mode_result.html",
-        {"ok": True, "new_state": new_state},
+        {"ok": True, "new_state": new_state, "device_pushed": device_pushed},
     )
 
 
@@ -1460,9 +1461,10 @@ async def kid_mode_set(request: Request, enabled: str = Form("")) -> Any:
             request, "kid_mode_result.html",
             {"ok": False, "error": err or "Kid mode toggle failed."},
         )
+    device_pushed = result.get("device_pushed", True) if isinstance(result, dict) else True
     return templates.TemplateResponse(
         request, "kid_mode_result.html",
-        {"ok": True, "new_state": new_state},
+        {"ok": True, "new_state": new_state, "device_pushed": device_pushed},
     )
 
 

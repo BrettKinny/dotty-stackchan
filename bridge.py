@@ -634,13 +634,19 @@ if _configure_dashboard is not None:
         custom-providers/textUtils.py and the persona prompts."""
         _write_kid_mode(enabled)
         _apply_kid_mode(enabled)
-        ok = await _dispatch_set_toggle("", "kid_mode", enabled)
-        if not ok:
-            return {
-                "ok": False,
-                "error": "firmware did not acknowledge — LED + on-device toggle stale; bridge state is flipped",
-            }
-        return {"ok": True}
+        pushed = await _dispatch_set_toggle("", "kid_mode", enabled)
+        # Bridge state is already persisted + hot-applied; a firmware no-ack only
+        # means the on-device LED pip is stale, not that the toggle failed.
+        # Report ok:True with device_pushed:false (mirroring /admin/kid-mode) so
+        # the dashboard doesn't show "toggle failed" and the operator doesn't
+        # re-toggle into a kid-mode state ping-pong.
+        return {
+            "ok": True,
+            "device_pushed": pushed,
+            "warning": None if pushed else (
+                "firmware did not acknowledge — on-device LED pip may be stale"
+            ),
+        }
 
     async def _dashboard_abort_device(*, device_id: str = "") -> dict:
         """Fire-and-forget POST to xiaozhi-server's admin abort route."""
@@ -698,13 +704,16 @@ if _configure_dashboard is not None:
         Tier1Slim hot-swap path was removed in the 2026-05-29 alignment
         pass."""
         _write_smart_mode(enabled)
-        dispatch_ok = await _dispatch_set_toggle("", "smart_mode", enabled)
-        if not dispatch_ok:
-            return {
-                "ok": False,
-                "error": "firmware did not acknowledge set_toggle (LED pip stale)",
-            }
-        return {"ok": True}
+        pushed = await _dispatch_set_toggle("", "smart_mode", enabled)
+        # See _dashboard_set_kid_mode: state is persisted; a no-ack only means the
+        # LED pip is stale. ok:True + device_pushed:false avoids the ping-pong.
+        return {
+            "ok": True,
+            "device_pushed": pushed,
+            "warning": None if pushed else (
+                "firmware did not acknowledge — on-device LED pip may be stale"
+            ),
+        }
 
     async def _dashboard_memory_records() -> list[dict]:
         """All per-person memory rows (approved + pending) for /ui/memory."""
