@@ -10,10 +10,13 @@
 #
 # This file brings up xiaozhi-esp32-server only. Bring up the brain and
 # behaviour containers from their own compose files — see dotty-pi/README.md
-# and dotty-behaviour/README.md. For the fully-annotated xiaozhi-server
-# service (CUDA block, docker-socket mount, every xiaozhi-patch volume), use
-# docker-compose.yml.template — that is the canonical definition; this file
-# is the trimmed single-host convenience copy.
+# and dotty-behaviour/README.md. docker-compose.yml.template is the canonical
+# definition with the full annotations and the optional NVIDIA/CUDA block; this
+# file is the single-host convenience copy and MUST stay at volume/env parity
+# with it. The default PiVoiceLLM voice path and the perception relay depend on
+# the docker-socket mount and the xiaozhi-patch volumes below — omitting them
+# (as an earlier revision did) yields a container that boots but cannot reach
+# the brain and drops every perception event.
 #
 # ─── Prerequisites ──────────────────────────────────────────────────────
 #
@@ -56,6 +59,20 @@ services:
     environment:
       # EDIT: set to your local timezone
       - TZ=Australia/Brisbane
+      # EDIT: dotty-behaviour service URL — the target for vision intent AND the
+      # perception-event relay. Same host; use the host LAN IP, not loopback.
+      # Without it the relay logs "dropping perception event" and the whole
+      # dotty-behaviour consumer layer goes inert.
+      - VISION_BRIDGE_URL=http://<XIAOZHI_HOST>:8090
+      # Active persona file under ./personas/ (loaded by the LLM provider).
+      - PERSONA=default
+      # kid_mode / smart_mode toggle state — receiveAudioHandle.py READS these to
+      # paint the firmware LED pips on reconnect; the bridge dashboard WRITES
+      # them. Both containers MUST point at the same files (bind-mounted below,
+      # read-only). Without these the reader falls through to a dead default and
+      # the firmware pips desync from the dashboard on every reconnect.
+      - DOTTY_KID_MODE_STATE=/var/lib/dotty-bridge/state/kid-mode
+      - DOTTY_SMART_MODE_STATE=/var/lib/dotty-bridge/state/smart-mode
     ports:
       # 8000: WebSocket — StackChan connects here
       - "8000:8000"
@@ -65,15 +82,39 @@ services:
       - ./data/.config.yaml:/opt/xiaozhi-esp32-server/data/.config.yaml:ro
       - ./models/SenseVoiceSmall:/opt/xiaozhi-esp32-server/models/SenseVoiceSmall
       - ./tmp:/opt/xiaozhi-esp32-server/tmp
+      - ./custom-providers/openai_compat:/opt/xiaozhi-esp32-server/core/providers/llm/openai_compat
       - ./custom-providers/pi_voice:/opt/xiaozhi-esp32-server/core/providers/llm/pi_voice
+      # PiVoiceLLM (the default LLM) shells out to `docker exec -i dotty-pi pi`,
+      # so this container needs the docker CLI binary AND the host docker socket.
+      # WARNING: mounting /var/run/docker.sock gives this container effective
+      # root on the docker host. Acceptable for a single-purpose self-hosted
+      # appliance; do not enable on a multi-tenant host. Comment both lines out
+      # if you switch `selected_module.LLM` to OpenAICompat.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/bin/docker:ro
+      - ./personas:/opt/xiaozhi-esp32-server/personas:ro
       - ./custom-providers/edge_stream/edge_stream.py:/opt/xiaozhi-esp32-server/core/providers/tts/edge_stream.py:ro
       - ./custom-providers/piper_local/piper_local.py:/opt/xiaozhi-esp32-server/core/providers/tts/piper_local.py:ro
       - ./models/piper:/opt/xiaozhi-esp32-server/models/piper:ro
       - ./custom-providers/asr/fun_local.py:/opt/xiaozhi-esp32-server/core/providers/asr/fun_local.py:ro
       - ./custom-providers/asr/whisper_local.py:/opt/xiaozhi-esp32-server/core/providers/asr/whisper_local.py:ro
       - ./models/whisper-small.en-ct2:/opt/xiaozhi-esp32-server/models/whisper-small.en-ct2:ro
+      - ./receiveAudioHandle.py:/opt/xiaozhi-esp32-server/core/handle/receiveAudioHandle.py:ro
+      - ./dances.py:/opt/xiaozhi-esp32-server/core/handle/dances.py:ro
+      - ./custom-providers/textUtils.py:/opt/xiaozhi-esp32-server/core/utils/textUtils.py:ro
+      - ./songs:/opt/xiaozhi-esp32-server/config/assets/songs:ro
+      # DOTTY portal + admin routes + active-connection registry
+      - ./custom-providers/xiaozhi-patches/portal_bridge.py:/opt/xiaozhi-esp32-server/core/portal_bridge.py:ro
+      - ./custom-providers/xiaozhi-patches/websocket_server.py:/opt/xiaozhi-esp32-server/core/websocket_server.py:ro
+      - ./custom-providers/xiaozhi-patches/http_server.py:/opt/xiaozhi-esp32-server/core/http_server.py:ro
+      # DOTTY ambient perception: relay firmware "event" frames to dotty-behaviour
+      - ./custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py:/opt/xiaozhi-esp32-server/core/handle/textMessageHandlerRegistry.py:ro
       # OTA: patched ota_handler that composes firmware download URLs directly
       # (upstream's vision_url.replace path was a no-op when vision_explain
       # doesn't contain "/mcp/vision/explain"). See docs/ota-verification.md.
       - ./custom-providers/xiaozhi-patches/ota_handler.py:/opt/xiaozhi-esp32-server/core/api/ota_handler.py:ro
       - ./data/bin:/opt/xiaozhi-esp32-server/data/bin
+      # Shared kid/smart-mode toggle state (READ-ONLY here — the bridge dashboard
+      # owns writes). Host path MUST match the bridge container's state mount.
+      # Override DOTTY_STATE_DIR if your bridge writes elsewhere.
+      - ${DOTTY_STATE_DIR:-/mnt/user/appdata/dotty-bridge/state}:/var/lib/dotty-bridge/state:ro

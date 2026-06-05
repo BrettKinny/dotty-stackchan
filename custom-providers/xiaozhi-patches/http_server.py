@@ -23,6 +23,42 @@ def _spawn(coro, *, name: str | None = None):
     return t
 
 
+# DOTTY-PATCH: play-asset path confinement. /xiaozhi/admin/play-asset hands its
+# `asset` field straight to ffmpeg (via pydub). Unauthenticated on the LAN, so
+# without confinement a caller could point the decoder at any readable file in
+# the container (existence-probe via 404-vs-403, exercise libav demuxer CVEs).
+# Restrict to known asset roots + an audio-extension allowlist. Default roots:
+# the songs mount and the dotty-behaviour assets dir (purr / security tones).
+# Override with DOTTY_PLAY_ASSET_ROOTS (os.pathsep-separated absolute paths).
+import os as _os_mod
+
+_ASSET_OK_EXT = {".opus", ".ogg", ".wav", ".mp3"}
+_DEFAULT_ASSET_ROOTS = (
+    "/opt/xiaozhi-esp32-server/config/assets",
+    "/var/lib/dotty-behaviour/assets",
+)
+
+
+def _allowed_asset_roots() -> "list[str]":
+    env = _os_mod.environ.get("DOTTY_PLAY_ASSET_ROOTS", "").strip()
+    raw = env.split(_os_mod.pathsep) if env else list(_DEFAULT_ASSET_ROOTS)
+    return [_os_mod.path.realpath(r) for r in raw if r]
+
+
+def _resolve_play_asset(asset: str) -> "str | None":
+    """Canonicalise `asset` and confirm it sits under an allowed root with an
+    allowed audio extension. Returns the real (symlink-resolved) path, or None
+    if rejected. realpath collapses `..` and resolves symlinks, so traversal
+    and symlink-escape both fail the root check."""
+    real = _os_mod.path.realpath(asset)
+    if _os_mod.path.splitext(real)[1].lower() not in _ASSET_OK_EXT:
+        return None
+    for root in _allowed_asset_roots():
+        if real == root or real.startswith(root + _os_mod.sep):
+            return real
+    return None
+
+
 class SimpleHttpServer:
     def __init__(self, config: dict):
         self.config = config
@@ -378,6 +414,14 @@ class SimpleHttpServer:
         if not asset_path:
             return web.json_response({"error": "asset required"}, status=400)
         import os as _os
+        # DOTTY-PATCH: confine to allowed asset roots + audio extensions before
+        # the path ever reaches ffmpeg (see _resolve_play_asset above).
+        real_path = _resolve_play_asset(asset_path)
+        if real_path is None:
+            return web.json_response(
+                {"error": "asset not permitted", "asset": asset_path}, status=403
+            )
+        asset_path = real_path
         if not _os.path.exists(asset_path):
             return web.json_response(
                 {"error": f"asset not found: {asset_path}"}, status=404

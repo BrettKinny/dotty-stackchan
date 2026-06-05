@@ -85,6 +85,29 @@ class TestPlayAssetRoute(unittest.TestCase):
     def setUp(self):
         _mock_active.clear()
         self.srv = _make_server()
+        # Confine play-asset to a throwaway allowed root for the duration of
+        # each test (the real defaults are container paths that don't exist
+        # here). realpath both sides so symlinked temp dirs (e.g. macOS
+        # /var → /private/var) compare equal.
+        self.root = os.path.realpath(tempfile.mkdtemp())
+        self._prev_roots = os.environ.get("DOTTY_PLAY_ASSET_ROOTS")
+        os.environ["DOTTY_PLAY_ASSET_ROOTS"] = self.root
+
+    def tearDown(self):
+        _mock_active.clear()
+        if self._prev_roots is None:
+            os.environ.pop("DOTTY_PLAY_ASSET_ROOTS", None)
+        else:
+            os.environ["DOTTY_PLAY_ASSET_ROOTS"] = self._prev_roots
+        import shutil
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _asset(self, name="clip.wav"):
+        """Create an allowed asset file under the test root, return its path."""
+        path = os.path.join(self.root, name)
+        with open(path, "wb") as f:
+            f.write(b"\0")
+        return path
 
     # Validation ──────────────────────────────────────────────────────────────
 
@@ -101,26 +124,50 @@ class TestPlayAssetRoute(unittest.TestCase):
         self.assertIn("asset", _body(resp)["error"])
 
     def test_file_not_found_returns_404(self):
-        req = _FakeRequest(data={"asset": "/does/not/exist/purr.opus"})
+        # In-root, allowed extension, but missing → 404 (not 403).
+        req = _FakeRequest(data={"asset": os.path.join(self.root, "nope.opus")})
         resp = _run(self.srv._dotty_play_asset(req))
         self.assertEqual(resp.status, 404)
 
-    def test_no_device_returns_503(self):
+    # Path confinement ──────────────────────────────────────────────────────────
+
+    def test_path_outside_root_returns_403(self):
+        # Real, readable file, allowed extension, but outside any allowed root.
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            path = f.name
+            outside = f.name
         try:
-            req = _FakeRequest(data={"asset": path})
+            req = _FakeRequest(data={"asset": outside})
             resp = _run(self.srv._dotty_play_asset(req))
-            self.assertEqual(resp.status, 503)
-            self.assertIn("known", _body(resp))
+            self.assertEqual(resp.status, 403)
+            self.assertIn("not permitted", _body(resp)["error"])
         finally:
-            os.unlink(path)
+            os.unlink(outside)
+
+    def test_disallowed_extension_returns_403(self):
+        path = self._asset("secret.txt")
+        req = _FakeRequest(data={"asset": path})
+        resp = _run(self.srv._dotty_play_asset(req))
+        self.assertEqual(resp.status, 403)
+
+    def test_traversal_escape_returns_403(self):
+        # `..` out of the root resolves (via realpath) to /etc/passwd-style
+        # paths outside the allowlist → 403, even with an allowed extension.
+        escape = os.path.join(self.root, "..", "..", "etc", "shadow.wav")
+        req = _FakeRequest(data={"asset": escape})
+        resp = _run(self.srv._dotty_play_asset(req))
+        self.assertEqual(resp.status, 403)
+
+    def test_no_device_returns_503(self):
+        path = self._asset()
+        req = _FakeRequest(data={"asset": path})
+        resp = _run(self.srv._dotty_play_asset(req))
+        self.assertEqual(resp.status, 503)
+        self.assertIn("known", _body(resp))
 
     # Happy-path ───────────────────────────────────────────────────────────────
 
     def test_valid_request_fires_task_and_returns_200(self):
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            path = f.name
+        path = self._asset()
         conn = MagicMock()
         conn.headers = {"device-id": "dev1"}
         conn.sample_rate = 16000
@@ -130,53 +177,40 @@ class TestPlayAssetRoute(unittest.TestCase):
         conn.client_is_speaking = False
         conn.websocket.send = AsyncMock()
         _mock_active["dev1"] = conn
-        try:
-            with patch("asyncio.create_task") as mock_ct:
-                mock_ct.side_effect = lambda coro, **_kw: (coro.close() or MagicMock())
-                req = _FakeRequest(data={"asset": path, "device_id": "dev1"})
-                resp = _run(self.srv._dotty_play_asset(req))
-            self.assertEqual(resp.status, 200)
-            body = _body(resp)
-            self.assertTrue(body["ok"])
-            self.assertEqual(body["device_id"], "dev1")
-            self.assertEqual(body["asset"], path)
-            mock_ct.assert_called_once()
-        finally:
-            os.unlink(path)
-            _mock_active.clear()
+        with patch("asyncio.create_task") as mock_ct:
+            mock_ct.side_effect = lambda coro, **_kw: (coro.close() or MagicMock())
+            req = _FakeRequest(data={"asset": path, "device_id": "dev1"})
+            resp = _run(self.srv._dotty_play_asset(req))
+        self.assertEqual(resp.status, 200)
+        body = _body(resp)
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["device_id"], "dev1")
+        # Handler returns the canonicalised (realpath) asset.
+        self.assertEqual(body["asset"], os.path.realpath(path))
+        mock_ct.assert_called_once()
 
     def test_named_device_id_selects_correct_connection(self):
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            path = f.name
+        path = self._asset()
         conn_a = MagicMock()
         conn_a.headers = {"device-id": "dev-a"}
         conn_b = MagicMock()
         conn_b.headers = {"device-id": "dev-b"}
         _mock_active["dev-a"] = conn_a
         _mock_active["dev-b"] = conn_b
-        try:
-            with patch("asyncio.create_task") as mock_ct:
-                mock_ct.side_effect = lambda coro, **_kw: (coro.close() or MagicMock())
-                req = _FakeRequest(data={"asset": path, "device_id": "dev-b"})
-                resp = _run(self.srv._dotty_play_asset(req))
-            self.assertEqual(resp.status, 200)
-            self.assertEqual(_body(resp)["device_id"], "dev-b")
-        finally:
-            os.unlink(path)
-            _mock_active.clear()
+        with patch("asyncio.create_task") as mock_ct:
+            mock_ct.side_effect = lambda coro, **_kw: (coro.close() or MagicMock())
+            req = _FakeRequest(data={"asset": path, "device_id": "dev-b"})
+            resp = _run(self.srv._dotty_play_asset(req))
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(_body(resp)["device_id"], "dev-b")
 
     def test_unknown_device_id_returns_503(self):
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            path = f.name
+        path = self._asset()
         conn = MagicMock()
         _mock_active["dev-real"] = conn
-        try:
-            req = _FakeRequest(data={"asset": path, "device_id": "dev-ghost"})
-            resp = _run(self.srv._dotty_play_asset(req))
-            self.assertEqual(resp.status, 503)
-        finally:
-            os.unlink(path)
-            _mock_active.clear()
+        req = _FakeRequest(data={"asset": path, "device_id": "dev-ghost"})
+        resp = _run(self.srv._dotty_play_asset(req))
+        self.assertEqual(resp.status, 503)
 
 
 if __name__ == "__main__":
