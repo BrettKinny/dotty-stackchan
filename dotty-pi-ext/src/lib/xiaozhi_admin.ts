@@ -4,10 +4,10 @@
 // run on the Unraid host networked together, so the default URL is
 // localhost — env vars override for dev / tests.
 //
-// We don't replicate the bridge.py admin auth code path because the
-// current admin surface is unauthenticated on the loopback interface
-// (see architecture.md threat model). When the surface grows auth this
-// is the seam to update.
+// Admin auth: when DOTTY_ADMIN_TOKEN is set we attach an X-Admin-Token header
+// on every admin request, matching the xiaozhi-server /xiaozhi/admin/*
+// middleware. Unset = no header, so this is a no-op until the same token is
+// provisioned across all callers + the server. See architecture.md threat model.
 
 const DEFAULT_HOST =
   process.env.XIAOZHI_HOST ?? process.env._XIAOZHI_HOST ?? "localhost";
@@ -17,6 +17,7 @@ const DEFAULT_HTTP_PORT = Number(
 const DEFAULT_TIMEOUT_MS = Number(
   process.env.XIAOZHI_ADMIN_TIMEOUT_MS ?? "3000",
 );
+const ADMIN_TOKEN = process.env.DOTTY_ADMIN_TOKEN ?? "";
 
 export interface AdminOptions {
   host?: string;
@@ -38,8 +39,12 @@ async function adminFetch(
   const url = buildUrl(path, opts);
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  // Merge the admin token into any caller-supplied headers (e.g. content-type)
+  // when DOTTY_ADMIN_TOKEN is set; otherwise leave headers untouched.
+  const headers = new Headers(init.headers);
+  if (ADMIN_TOKEN) headers.set("X-Admin-Token", ADMIN_TOKEN);
   try {
-    return await fetch(url, { ...init, signal: ac.signal });
+    return await fetch(url, { ...init, headers, signal: ac.signal });
   } finally {
     clearTimeout(timer);
   }
