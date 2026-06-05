@@ -21,26 +21,35 @@ def _safe_basename(filename: str) -> str:
     return os.path.basename(filename)
 
 
-def _parse_version(ver: str) -> Tuple[int, ...]:
-    # conservative parser: split by non-digit, keep numeric parts
-    parts = re.findall(r"\d+", ver)
-    return tuple(int(p) for p in parts) if parts else (0,)
+def _parse_version(ver: str) -> Tuple:
+    """Comparison/sort key for a firmware version string.
+
+    Considers only the first three numeric segments (major.minor.patch). A
+    trailing pre-release / build suffix (anything after the numeric core, e.g.
+    ``-rc1``, ``-beta``, ``+build5``) ranks BELOW the corresponding release,
+    matching semver precedence — so a device on GA ``1.2.3`` is never offered a
+    stale ``1.2.3-rc1``. The naive ``re.findall(r"\\d+")`` parser this replaced
+    turned ``1.2.3-rc1`` into ``(1,2,3,1)`` and ranked it ABOVE GA.
+
+    The returned tuple is shaped ``(major, minor, patch, release_rank, suffix)``
+    where release_rank is 1 for a clean release and 0 for any suffixed build,
+    and suffix is compared lexically to order pre-releases deterministically
+    (``-alpha`` < ``-beta``). Element types are positionally consistent, so
+    these keys are safe to compare and sort.
+    """
+    s = ver.strip().lstrip("vV")
+    m = re.match(r"\d+(?:\.\d+)*", s)
+    core = m.group(0) if m else ""
+    nums = [int(p) for p in core.split(".") if p != ""]
+    nums = (nums + [0, 0, 0])[:3]
+    suffix = s[len(core):].lstrip(".-_+ ").strip()
+    release_rank = 1 if suffix == "" else 0
+    return (nums[0], nums[1], nums[2], release_rank, suffix)
 
 
 def _is_higher_version(a: str, b: str) -> bool:
-    """Return True if version string a > b (semver-like numeric compare)."""
-    ta = _parse_version(a)
-    tb = _parse_version(b)
-    # compare tuple lexicographically, but allow different lengths
-    maxlen = max(len(ta), len(tb))
-    for i in range(maxlen):
-        ai = ta[i] if i < len(ta) else 0
-        bi = tb[i] if i < len(tb) else 0
-        if ai > bi:
-            return True
-        if ai < bi:
-            return False
-    return False
+    """Return True if version string a > b (semver-like precedence)."""
+    return _parse_version(a) > _parse_version(b)
 
 
 class OTAHandler(BaseHandler):

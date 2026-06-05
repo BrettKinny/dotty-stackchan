@@ -438,6 +438,20 @@ class SimpleHttpServer:
             )
         resolved_id = (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id
 
+        # DOTTY-PATCH: don't clobber a live chat turn. play-asset is timer-driven
+        # on the first available device, so a purr/song landing mid-conversation
+        # would reset client_abort/client_is_speaking (below) and mark the device
+        # idle in its finally block while chat TTS is still streaming — cancelling
+        # the user's barge-in and corrupting the turn. Refuse instead; a dropped
+        # ambient asset is the correct outcome here.
+        if getattr(conn, "client_is_speaking", False) and not getattr(
+            conn, "client_abort", False
+        ):
+            return web.json_response(
+                {"error": "device busy (mid-turn)", "device_id": resolved_id},
+                status=409,
+            )
+
         async def _dispatch() -> None:
             import json as _json
             import numpy as _np
