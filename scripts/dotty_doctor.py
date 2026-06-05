@@ -92,6 +92,30 @@ def _extract_xiaozhi_host(config_text: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
+def _project_root(config_path: Optional[Path]) -> Path:
+    """Resolve the directory that contains `models/`.
+
+    Models are bind-mounted from the repo root (`./models/...` in
+    docker-compose), but in a standard deploy the config lives at
+    `<root>/data/.config.yaml` (and at `<root>/.config.yaml` in the legacy
+    layout). Anchoring naively to `config_path.parent` therefore looks for
+    `data/models/...` and FALSE-FAILs a healthy install. Prefer whichever
+    candidate actually has a `models/` dir; otherwise return the most likely
+    root so the "missing" message still points at the right place.
+    """
+    if config_path is None:
+        return Path.cwd()
+    parent = config_path.parent
+    # If config is under a `data/` dir, the repo root is one level up.
+    candidates = (
+        [parent.parent, parent] if parent.name == "data" else [parent, parent.parent]
+    )
+    for base in candidates:
+        if (base / "models").is_dir():
+            return base
+    return candidates[0]
+
+
 # ── Individual checks ─────────────────────────────────────────────────────────
 
 def check_config_exists(config_path: Optional[Path]) -> Result:
@@ -127,7 +151,7 @@ SENSEVOICE_REQUIRED = {
 
 def check_models_sensevoice(config_path: Optional[Path]) -> Result:
     label = "SenseVoiceSmall model files present"
-    root = config_path.parent if config_path else Path.cwd()
+    root = _project_root(config_path)
     model_dir = root / "models" / "SenseVoiceSmall"
     if not model_dir.is_dir():
         return Result(label, "fail", f"{model_dir} missing — run `make fetch-models`")
@@ -145,7 +169,7 @@ def check_models_sensevoice(config_path: Optional[Path]) -> Result:
 
 def check_models_piper(config_path: Optional[Path]) -> Result:
     label = "Piper TTS model (*.onnx) present"
-    root = config_path.parent if config_path else Path.cwd()
+    root = _project_root(config_path)
     piper_dir = root / "models" / "piper"
     if not piper_dir.is_dir():
         return Result(label, "fail", f"{piper_dir} missing — run `make fetch-models`")
