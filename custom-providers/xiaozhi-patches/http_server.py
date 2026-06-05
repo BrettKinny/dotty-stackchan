@@ -59,6 +59,31 @@ def _resolve_play_asset(asset: str) -> "str | None":
     return None
 
 
+# DOTTY-PATCH: admin-route authentication. The /xiaozhi/admin/* surface is
+# otherwise unauthenticated on the LAN — anyone reaching :8003 can drive the
+# robot (inject-text is a prompt-injection vector into the pi agent; set-state,
+# take-photo, play-asset, say all fire with no auth). Gate it behind a shared
+# secret: when DOTTY_ADMIN_TOKEN is set, every /xiaozhi/admin/* request must
+# carry a matching X-Admin-Token header (401 otherwise). When the env var is
+# UNSET, enforcement is off so this stays backward-compatible with deployments
+# that haven't provisioned a token yet — turn it on by setting the same secret
+# here AND in every caller (bridge, dotty-behaviour, dotty-pi-ext). OTA / WS /
+# vision paths are never gated (device-facing / separately authed).
+import hmac as _hmac
+
+_ADMIN_PREFIX = "/xiaozhi/admin/"
+
+
+@web.middleware
+async def _dotty_admin_auth_middleware(request, handler):
+    token = _os_mod.environ.get("DOTTY_ADMIN_TOKEN", "").strip()
+    if token and request.path.startswith(_ADMIN_PREFIX):
+        provided = request.headers.get("X-Admin-Token", "")
+        if not _hmac.compare_digest(provided, token):
+            return web.json_response({"error": "unauthorized"}, status=401)
+    return await handler(request)
+
+
 class SimpleHttpServer:
     def __init__(self, config: dict):
         self.config = config
@@ -641,7 +666,11 @@ class SimpleHttpServer:
             port = int(server_config.get("http_port", 8003))
 
             if port:
-                app = web.Application()
+                # DOTTY-PATCH: gate /xiaozhi/admin/* behind X-Admin-Token when
+                # DOTTY_ADMIN_TOKEN is set (no-op when unset).
+                app = web.Application(
+                    middlewares=[_dotty_admin_auth_middleware]
+                )
 
                 if not read_config_from_api:
                     app.add_routes(
