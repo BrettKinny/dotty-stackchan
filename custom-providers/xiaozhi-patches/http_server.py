@@ -78,8 +78,12 @@ _ADMIN_PREFIX = "/xiaozhi/admin/"
 async def _dotty_admin_auth_middleware(request, handler):
     token = _os_mod.environ.get("DOTTY_ADMIN_TOKEN", "").strip()
     if token and request.path.startswith(_ADMIN_PREFIX):
-        provided = request.headers.get("X-Admin-Token", "")
-        if not _hmac.compare_digest(provided, token):
+        provided = request.headers.get("X-Admin-Token", "").strip()
+        # Compare on bytes: compare_digest raises TypeError on a non-ASCII str,
+        # so a header with a latin-1 byte (>0x7f) would 500 instead of a clean
+        # 401. encode() both sides — also keeps the strip symmetric with the
+        # env token above so an incidentally-whitespaced secret still matches.
+        if not _hmac.compare_digest(provided.encode("utf-8"), token.encode("utf-8")):
             return web.json_response({"error": "unauthorized"}, status=401)
     return await handler(request)
 

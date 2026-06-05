@@ -85,6 +85,21 @@ class AdminAuthMiddlewareTests(unittest.TestCase):
         resp = _run(_Req("/xiaozhi/admin/set-state", token_header="nope"))
         self.assertEqual(resp.status, 401)
 
+    def test_non_ascii_header_is_401_not_crash(self):
+        # A latin-1 header byte (>0x7f) must not raise TypeError out of
+        # compare_digest (→ 500); it's just a wrong token → clean 401.
+        os.environ["DOTTY_ADMIN_TOKEN"] = "s3cret"
+        resp = _run(_Req("/xiaozhi/admin/say", token_header="caf\xe9"))
+        self.assertEqual(resp.status, 401)
+
+    def test_whitespace_padded_token_matches_symmetrically(self):
+        # Env token and header both carry incidental whitespace (e.g. a
+        # trailing newline from an env file) → still matches after strip.
+        os.environ["DOTTY_ADMIN_TOKEN"] = "  s3cret\n"
+        self.assertIs(
+            _run(_Req("/xiaozhi/admin/say", token_header="  s3cret\n")), _SENTINEL
+        )
+
     # ── non-admin paths are never gated ──────────────────────────────────────
 
     def test_set_token_does_not_gate_ota(self):
