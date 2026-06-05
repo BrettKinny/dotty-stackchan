@@ -164,6 +164,20 @@ class TestPlayAssetRoute(unittest.TestCase):
         self.assertEqual(resp.status, 503)
         self.assertIn("known", _body(resp))
 
+    def test_mid_turn_device_returns_409(self):
+        # Device actively speaking (chat TTS streaming) and not aborted → a
+        # timer-driven asset must not clobber the turn; refuse with 409.
+        path = self._asset()
+        conn = MagicMock()
+        conn.headers = {"device-id": "dev1"}
+        conn.client_is_speaking = True
+        conn.client_abort = False
+        _mock_active["dev1"] = conn
+        req = _FakeRequest(data={"asset": path, "device_id": "dev1"})
+        resp = _run(self.srv._dotty_play_asset(req))
+        self.assertEqual(resp.status, 409)
+        self.assertIn("busy", _body(resp)["error"])
+
     # Happy-path ───────────────────────────────────────────────────────────────
 
     def test_valid_request_fires_task_and_returns_200(self):
