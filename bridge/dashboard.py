@@ -1959,14 +1959,11 @@ async def host_robot_photo(device_id: str) -> Response:
 
 
 # --- "Scene context" panel for the Robot modal ---------------------------
-# Surfaces what Dotty has lately seen and heard. Composes three sources:
+# Surfaces what Dotty has lately seen and heard. Composes two sources:
 #   1. _vision_cache — most-recent VLM photo + description (room_view today,
 #      security_capture once the relays land).
 #   2. perception ring buffer — last ~20 face_detected/face_lost/sound_event/
 #      state_changed events, populated from bridge._perception_broadcast.
-#   3. security_watch.RECENT_CYCLES — last few security cycles (text-only;
-#      currently every cycle is errors=[photo_dispatch_failed,...] until the
-#      xiaozhi-server admin route lands).
 # Polled by the Robot modal every ~7 s via HTMX. Returns rendered HTML so
 # the panel can be hot-swapped without client-side JSON shuffling.
 
@@ -2037,9 +2034,8 @@ def _render_perception_event(ev: dict) -> dict:
 
 def _build_security_panel_ctx(device_id: str) -> dict:
     """Assemble the template context for security_panel.html. Pulls from
-    the vision cache getter, the perception ring (via the configured
-    getter), and bridge.security_watch.RECENT_CYCLES (filtered to
-    device_id)."""
+    the vision cache getter and the perception ring (via the configured
+    getter)."""
     cache = _vision_cache_snapshot()
     cache_entry = cache.get(device_id) or {}
 
@@ -2070,39 +2066,11 @@ def _build_security_panel_ctx(device_id: str) -> dict:
     audio_summary = _summarise_audio_from_perception(perception_events)
     perception_view = [_render_perception_event(e) for e in perception_events]
 
-    # Security cycles — pull text-only records from the existing ring buffer.
-    cycles_view: list[dict] = []
-    try:
-        from bridge import security_watch  # local import — avoid hard dep
-        all_cycles = security_watch.get_recent_cycles(limit=10)
-    except Exception:
-        all_cycles = []
-    for rec in all_cycles:
-        if rec.get("device") != device_id:
-            continue
-        # The ts on cycle records is an isoformat string from
-        # datetime.now(LOCAL_TZ); show its hh:mm:ss tail for the panel.
-        ts_iso = rec.get("ts") or ""
-        ts_short = ts_iso[11:19] if len(ts_iso) >= 19 else ts_iso
-        cycles_view.append({
-            "ts_short": ts_short,
-            "photo_desc": (rec.get("photo_desc") or "").strip(),
-            "audio_transcript": rec.get("audio_transcript") or "—",
-            "errors": rec.get("errors") or [],
-        })
-        if len(cycles_view) >= 5:
-            break
-
-    state_getter = _state.get("state_getter")
-    current_state = (state_getter() if state_getter else None) or "idle"
-
     return {
         "device_id": device_id,
-        "current_state": current_state,
         "latest_vision": latest_vision,
         "audio_summary": audio_summary,
         "perception_events": perception_view,
-        "cycles": cycles_view,
     }
 
 

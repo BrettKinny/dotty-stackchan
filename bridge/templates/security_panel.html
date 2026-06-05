@@ -1,8 +1,8 @@
-{# Scene context panel — Robot modal. Surfaces unique-to-the-modal
-   data: the recent perception event ring and the last 5 security
-   cycles. Photo + "Sees:" + "Hears:" + current state are all on the
-   dashboard's Perception card and are intentionally not duplicated
-   here. Polled every ~7 s by HTMX from /ui/security/recent/{device_id}. #}
+{# Scene context panel — Robot modal. Surfaces unique-to-the-modal data:
+   the recent perception event ring. Photo + "Sees:" + "Hears:" + current
+   state are all on the dashboard's Perception card and are intentionally
+   not duplicated here. Polled every ~7 s by HTMX from
+   /ui/security/recent/{device_id}. #}
 <div class="space-y-3 text-sm">
 
   {# Recent perception events — rolling list of face/sound/state events. #}
@@ -20,37 +20,6 @@
     </ul>
     {% else %}
     <div class="text-xs text-base-content/50">— no perception events yet</div>
-    {% endif %}
-  </div>
-
-  {# Security captures — last few cycles from security_watch. Will be
-     mostly empty / errored until the xiaozhi-server admin route lands. #}
-  <div>
-    <div class="text-xs text-base-content/60 mb-1">Security captures (last 5)</div>
-    {% if cycles %}
-    <ul class="text-xs space-y-1">
-      {% for c in cycles %}
-      <li class="rounded bg-base-200 px-2 py-1">
-        <div class="flex items-baseline gap-2">
-          <span class="font-mono text-base-content/50">{{ c.ts_short }}</span>
-          <span class="break-words flex-1">{{ c.photo_desc or "—" }}</span>
-        </div>
-        <div class="text-[11px] text-base-content/60 mt-0.5">
-          audio: <span class="font-mono">{{ c.audio_transcript }}</span>
-          {% if c.errors %}
-          <span class="ml-2 text-warning">
-            ({% for e in c.errors %}{{ e }}{% if not loop.last %}, {% endif %}{% endfor %})
-          </span>
-          {% endif %}
-        </div>
-      </li>
-      {% endfor %}
-    </ul>
-    {% else %}
-    <div class="text-xs text-base-content/50">
-      — no security cycles recorded
-      {% if current_state != "security" %}(security mode not active){% endif %}
-    </div>
     {% endif %}
   </div>
 
