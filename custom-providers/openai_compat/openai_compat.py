@@ -98,18 +98,28 @@ class LLMProvider(LLMProviderBase):
         if self._persona:
             messages.append({"role": "system", "content": self._persona})
 
-        # Copy the dialogue, appending the safety suffix to the last user turn.
+        # Append the safety/format suffix (emoji-prefix rule + kid-mode filter +
+        # length limits) to the final user turn. If the dialogue has no user
+        # turn — e.g. a greeter/system-only injection where the last message is
+        # system or assistant — fall back to the last message regardless of role
+        # so the constraints still reach the model; if the dialogue is empty,
+        # carry them in a standalone system message. Without this, a no-user-turn
+        # request runs completely unconstrained (no emoji, no kid-mode filter).
         last_user_idx = None
         for i, msg in enumerate(dialogue):
             if msg.get("role") == "user":
                 last_user_idx = i
+        suffix_idx = last_user_idx if last_user_idx is not None else len(dialogue) - 1
 
         for i, msg in enumerate(dialogue):
             role = msg.get("role", "user")
             content = msg.get("content", "")
-            if i == last_user_idx:
+            if i == suffix_idx:
                 content = content + _TURN_SUFFIX
             messages.append({"role": role, "content": content})
+
+        if suffix_idx < 0:  # empty dialogue — nothing to append to
+            messages.append({"role": "system", "content": _TURN_SUFFIX})
 
         return messages
 
@@ -216,15 +226,23 @@ class LLMProvider(LLMProviderBase):
                 full_text.append(content)
 
                 # Emoji prefix enforcement on the first non-whitespace content.
+                # Until we've seen non-whitespace, buffer rather than yield — a
+                # leading whitespace-only delta must never reach TTS/firmware
+                # before the emoji (the firmware parses the leading glyph into a
+                # face animation, so whitespace-first breaks the contract).
                 if not emoji_checked:
                     so_far = "".join(full_text).lstrip()
-                    if so_far:
-                        emoji_checked = True
-                        if not any(so_far.startswith(e) for e in ALLOWED_EMOJIS):
-                            # Prepend fallback emoji before yielding the first
-                            # chunk.  We yield the emoji + space as a separate
-                            # chunk so the face animation fires immediately.
-                            yield f"{FALLBACK_EMOJI} "
+                    if not so_far:
+                        continue  # still all whitespace — keep buffering
+                    emoji_checked = True
+                    if not any(so_far.startswith(e) for e in ALLOWED_EMOJIS):
+                        # Prepend fallback emoji + space as a separate chunk so
+                        # the face animation fires immediately.
+                        yield f"{FALLBACK_EMOJI} "
+                    # Flush the accumulated leading text (minus the meaningless
+                    # leading whitespace) as the first real chunk.
+                    yield so_far
+                    continue
 
                 yield content
 
