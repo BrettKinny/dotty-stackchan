@@ -21,9 +21,16 @@ class _Recorder:
     calls: list[dict[str, Any]] = field(default_factory=list)
     status_code: int = 200
     raise_exc: Exception | None = None
+    last_headers: dict[str, str] | None = None
 
-    def post(self, url: str, *, json: dict[str, Any], timeout: float) -> _FakeResponse:
+    def post(
+        self, url: str, *, json: dict[str, Any], timeout: float,
+        headers: dict[str, str] | None = None,
+    ) -> _FakeResponse:
+        # headers recorded separately so existing exact-match `calls` asserts
+        # (url/json/timeout) keep passing.
         self.calls.append({"url": url, "json": json, "timeout": timeout})
+        self.last_headers = headers
         if self.raise_exc:
             raise self.raise_exc
         return _FakeResponse(status_code=self.status_code, text="")
@@ -155,3 +162,41 @@ def test_network_exception_returns_false_not_raise() -> None:
     )
     ok = asyncio.run(client.abort("dev-1"))
     assert ok is False
+
+
+def test_admin_token_header_sent_when_set() -> None:
+    import os
+
+    import dispatch.xiaozhi as mod
+
+    rec = _Recorder()
+    mod.requests.post = rec.post
+    prev = os.environ.get("DOTTY_ADMIN_TOKEN")
+    os.environ["DOTTY_ADMIN_TOKEN"] = "s3cret"
+    try:
+        client = XiaozhiAdminClient("127.0.0.1", 8003)
+        asyncio.run(client.abort("dev-1"))
+        assert rec.last_headers == {"X-Admin-Token": "s3cret"}
+    finally:
+        if prev is None:
+            os.environ.pop("DOTTY_ADMIN_TOKEN", None)
+        else:
+            os.environ["DOTTY_ADMIN_TOKEN"] = prev
+
+
+def test_no_admin_token_header_when_unset() -> None:
+    import os
+
+    import dispatch.xiaozhi as mod
+
+    rec = _Recorder()
+    mod.requests.post = rec.post
+    prev = os.environ.get("DOTTY_ADMIN_TOKEN")
+    os.environ.pop("DOTTY_ADMIN_TOKEN", None)
+    try:
+        client = XiaozhiAdminClient("127.0.0.1", 8003)
+        asyncio.run(client.abort("dev-1"))
+        assert rec.last_headers == {}
+    finally:
+        if prev is not None:
+            os.environ["DOTTY_ADMIN_TOKEN"] = prev

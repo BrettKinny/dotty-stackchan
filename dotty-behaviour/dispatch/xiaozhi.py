@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any
 
 import requests
@@ -36,6 +37,10 @@ class XiaozhiAdminClient:
         self._host = host
         self._port = port
         self._timeout_s = timeout_s
+        # Admin-auth (see http_server.py middleware). Sent only when set; the
+        # server enforces only when its own DOTTY_ADMIN_TOKEN is set, so an
+        # unset token here is a no-op until the coordinated enforcement flip.
+        self._admin_token = os.environ.get("DOTTY_ADMIN_TOKEN", "").strip()
 
     @property
     def configured(self) -> bool:
@@ -46,6 +51,9 @@ class XiaozhiAdminClient:
     def _url(self, path: str) -> str:
         return f"http://{self._host}:{self._port}{path}"
 
+    def _headers(self) -> dict[str, str]:
+        return {"X-Admin-Token": self._admin_token} if self._admin_token else {}
+
     def _post_sync(
         self, url: str, payload: dict[str, Any], *, label: str
     ) -> bool:
@@ -55,7 +63,9 @@ class XiaozhiAdminClient:
         failure (network, 4xx, 5xx) but never raises.
         """
         try:
-            r = requests.post(url, json=payload, timeout=self._timeout_s)
+            r = requests.post(
+                url, json=payload, headers=self._headers(), timeout=self._timeout_s
+            )
             if r.status_code >= 400:
                 log.warning(
                     "%s %s: %s", label, r.status_code, r.text[:200]
