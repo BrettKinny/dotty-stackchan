@@ -6,7 +6,7 @@
 
 **Your self-hosted [StackChan](https://github.com/m5stack/StackChan) robot assistant — kid-minded by default, hackable by design, private by architecture.**
 
-> ⚠️ **Heads up: this is not a stable project yet.** Dotty is buggy, frequently broken, and actively changing day-to-day. End-to-end behaviour works on the maintainer's hardware but regressions land all the time, the API and config surface shifts without notice, and a fresh deploy on someone else's gear has not been verified. Treat this as a hobby-grade work-in-progress, not a polished product. Bugs, PRs, and "this didn't work for me" issues all very welcome. 🍺☕ If you do try a fresh end-to-end deploy, please get in touch — I'll buy you a beer or a coffee.
+> ⚠️ **Heads up: this is not a stable project yet.** Dotty is buggy, frequently broken, and actively changing day-to-day. End-to-end behaviour works on the maintainer's hardware but regressions land all the time, the API and config surface shifts without notice, and a fresh deploy on someone else's gear has not been verified. Treat this as a hobby-grade work-in-progress, not a polished product. Bugs, PRs, and "this didn't work for me" issues all very welcome.
 >
 > **Known rough edges:** face emoji rendering is missing visual differentiation for 4 of 9 emotions (sad / surprise / love / laughing); sound-direction localizer has a hardware-AEC-related left-bias on M5Stack CoreS3 (energy detection works, direction is unreliable); kid-voice ASR on the SenseVoice CPU default still garbles some short utterances (WhisperLocal, auto-selected on GPU hosts, handles high-pitched kid speech better).
 
