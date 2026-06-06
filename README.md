@@ -8,7 +8,7 @@
 
 > ⚠️ **Heads up: this is not a stable project yet.** Dotty is buggy, frequently broken, and actively changing day-to-day. End-to-end behaviour works on the maintainer's hardware but regressions land all the time, the API and config surface shifts without notice, and a fresh deploy on someone else's gear has not been verified. Treat this as a hobby-grade work-in-progress, not a polished product. Bugs, PRs, and "this didn't work for me" issues all very welcome. 🍺☕ If you do try a fresh end-to-end deploy, please get in touch — I'll buy you a beer or a coffee.
 >
-> **Known rough edges:** face emoji rendering is missing visual differentiation for 4 of 9 emotions (sad / surprise / love / laughing); sound-direction localizer has a hardware-AEC-related left-bias on M5Stack CoreS3 (energy detection works, direction is unreliable); kid-voice ASR accuracy on SenseVoice has a kid-speech gap that whisper.cpp will close in a follow-up.
+> **Known rough edges:** face emoji rendering is missing visual differentiation for 4 of 9 emotions (sad / surprise / love / laughing); sound-direction localizer has a hardware-AEC-related left-bias on M5Stack CoreS3 (energy detection works, direction is unreliable); kid-voice ASR on the SenseVoice CPU default still garbles some short utterances (WhisperLocal, auto-selected on GPU hosts, handles high-pitched kid speech better).
 
 Dotty is a fully self-hosted voice stack for the M5Stack StackChan desktop robot. Open-source firmware on the robot, [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) for voice I/O, and a local **pi** coding agent as the brain. ASR, TTS, and session state all run on your own hardware. The LLM is pluggable — the shipped default runs a small fast model for plain conversation and escalates hard questions to a more capable model, with [llama-swap](./docs/cookbook/llama-swap-concurrent-models.md) as the recommended local backend. Swap in [Ollama](./docs/cookbook/run-fully-local.md) for the simpler single-binary option, or point at OpenRouter / any OpenAI-compatible API if you'd rather use the cloud.
 
@@ -52,6 +52,8 @@ The 12-pixel LED ring shows the current state at a glance. **Left ring 0-5 is th
 | 🟣 | `dance` — rainbow sweep + choreography. |
 
 On the right ring, **indices 8-9 are toggle pips** for kid_mode (salmon pink) and smart_mode (orange), and **index 11 (bottom) lights red while you have the turn** (LISTENING). The `idle → talk` transition fires on `face_detected` from the firmware; VLM identity recognition runs in parallel and feeds the LLM context.
+
+> Heads up: that right-ring layout is the active-fork StateManager. On the firmware **submodule pinned in this repo**, pixels 6 and 11 instead drive the **privacy LEDs** — 6 = mic (green), 11 = camera (red) — and the StateManager pips arrive once the submodule catches up to the active fork.
 
 Full state taxonomy, colour palette, transition diagram, and per-state backing architecture: [`docs/modes.md`](./docs/modes.md).
 
