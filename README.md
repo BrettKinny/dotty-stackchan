@@ -90,6 +90,10 @@ Then:
 - [`docs/quickstart.md`](./docs/quickstart.md) — 15-minute happy path: flash, configure, first turn. Includes placeholder substitution table, deployment layout, endpoints, reboot survival, and common ops snippets.
 - [`docs/troubleshooting.md`](./docs/troubleshooting.md) — symptom-first lookup for common (and obscure) failure modes.
 
+## Support
+
+Questions, bugs, or "this didn't work for me" → [open a GitHub issue](https://github.com/BrettKinny/dotty-stackchan/issues). That's the best way to reach me. Occasional updates also go up on [r/stackchan](https://www.reddit.com/r/stackchan/).
+
 ## Deeper reference
 
 For what the stack *is* underneath — hardware specs, protocol docs, model facts, and features we aren't using — see [`docs/`](./docs/README.md):
