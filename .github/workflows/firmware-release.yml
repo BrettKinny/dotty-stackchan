@@ -142,16 +142,4 @@ jobs:
           fi
           payload=$(jq -cn --arg t ":x: *Firmware build failed* · \`${REPO}\` · \`${REF}\` — ${RUN_URL}" '{text: $t}')
           curl -fsS -X POST "$SLACK_WEBHOOK_URL" -H 'Content-Type: application/json' -d "$payload"
-      - name: Post Discord notification
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          REPO: ${{ github.repository }}
-          REF: ${{ github.ref_name }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
-            echo "DISCORD_WEBHOOK_URL not set, skipping Discord notification"
-            exit 0
-          fi
-          payload=$(jq -cn --arg c ":x: **Firmware build failed** · \`${REPO}\` · \`${REF}\` — ${RUN_URL}" '{content: $c}')
-          curl -fsS -X POST "$DISCORD_WEBHOOK_URL" -H 'Content-Type: application/json' -d "$payload"
+

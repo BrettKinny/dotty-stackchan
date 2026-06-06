@@ -157,7 +157,6 @@ jobs:
     if: failure()
     env:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       REPO: ${{ github.repository }}
       REF: ${{ github.ref_name }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -167,8 +166,4 @@ jobs:
         run: |
           payload=$(jq -cn --arg t ":x: *CI failed* · \`${REPO}\` · \`${REF}\` — ${RUN_URL}" '{text: $t}')
           curl -fsS -X POST "$SLACK_WEBHOOK_URL" -H 'Content-Type: application/json' -d "$payload"
-      - name: Post Discord notification
-        if: env.DISCORD_WEBHOOK_URL != ''
-        run: |
-          payload=$(jq -cn --arg c ":x: **CI failed** · \`${REPO}\` · \`${REF}\` — ${RUN_URL}" '{content: $c}')
-          curl -fsS -X POST "$DISCORD_WEBHOOK_URL" -H 'Content-Type: application/json' -d "$payload"
+
