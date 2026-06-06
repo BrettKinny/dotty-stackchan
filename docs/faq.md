@@ -11,7 +11,7 @@ description: Frequently asked questions about hardware, setup, and configuration
 
 The verified setup is an **M5Stack CoreS3** mounted in the **M5Stack StackChan servo kit** (2x feedback servos — yaw continuous-rotation + SCS0009 pitch — for pan/tilt, 12 RGB LEDs, 3D-printed chassis). You also need a Docker-capable host on your LAN (a spare PC or any Linux box with Docker) to run the voice and brain containers.
 
-See [hardware-support.md](./hardware-support.md) for the full spec table and support tiers.
+See [hardware.md](./hardware.md) for the full hardware spec.
 
 ---
 
@@ -95,14 +95,14 @@ It depends on what you mean by "StackChan variant":
 - **Original Stack-chan by Shinya Ishikawa** (`meganetaaan/stack-chan`): That's a different firmware (TypeScript on Moddable SDK). The server-side infrastructure doesn't care what firmware the device runs as long as it speaks the Xiaozhi WebSocket protocol. But the original Stack-chan firmware doesn't speak Xiaozhi — so no, not without porting the firmware.
 - **Other ESP32-S3 boards running `78/xiaozhi-esp32`**: The server side will work (same WebSocket protocol), but you won't get StackChan-specific features (servos, avatar, LEDs) without board-specific firmware work.
 
-See [hardware-support.md](./hardware-support.md) for the full support matrix.
+See [hardware.md](./hardware.md) for hardware details.
 
 ---
 
 ## See also
 
 - [about.md](./about.md) — what the project is and who it's for.
-- [hardware-support.md](./hardware-support.md) — hardware requirements and support tiers.
+- [hardware.md](./hardware.md) — hardware requirements.
 - [troubleshooting.md](./troubleshooting.md) — symptom-based debugging guide.
 - [SETUP.md](SETUP.md) — deployment guide.
 

@@ -41,9 +41,7 @@ nav:
   - Getting Started: SETUP.md
   - Quickstart: quickstart.md
   - Architecture: architecture.md
-  - Hardware:
-      - Hardware: hardware.md
-      - Hardware Support: hardware-support.md
+  - Hardware: hardware.md
   - Voice Pipeline: voice-pipeline.md
   - Voice Mode Entry: voice-mode-entry.md
   - Voice Catalog: voice-catalog.md
@@ -63,8 +61,6 @@ nav:
       - Add Emoji: cookbook/add-emoji.md
       - Disable Kid Mode: cookbook/disable-kid-mode.md
       - Concurrent Models (llama-swap): cookbook/llama-swap-concurrent-models.md
-  - Advanced:
-      - Variant port guide: advanced/variant-port-guide.md
   - Reference:
       - Emoji Mapping: emoji-mapping.md
       - Interaction Map: interaction-map.md
@@ -79,7 +75,6 @@ nav:
   - Security: SECURITY.md
   - Compatibility: COMPATIBILITY.md
   - SBOM: sbom.md
-  - Signed Releases: signed-releases.md
   - Reproducible Builds: reproducible-builds.md
   - Versioning: versioning.md
   - Changelog: CHANGELOG.md

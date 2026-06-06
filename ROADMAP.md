@@ -1,92 +1,27 @@
 # Roadmap
 
-> This is a living document. See [CONTRIBUTING.md](CONTRIBUTING.md) to get involved.
+Personal hobby project. Might ship, might not — no timeline, no guarantees. If you want something built, feel free to contribute or ask nicely.
 
-## Shipping now (v0.1)
+## What works today
 
-v0.1 is the first tagged release — early-feedback alpha. Everything in this list runs end-to-end on the maintainer's hardware. v1.0 is gated on real-world feedback from external users; see [Known issues](#known-issues-as-of-v01) below.
+The core voice loop runs end-to-end on a single Docker host:
 
-- **Kid Mode** -- opt-in child-safety guardrails: topic blocklist, self-harm redirect, content filter, age-appropriate vocabulary (on by default, disable with `DOTTY_KID_MODE=false`)
-- **Local ASR** -- FunASR SenseVoiceSmall, English-pinned, runs on your Docker host
-- **Local TTS** -- Piper voice synthesis, no cloud dependency
-- **Streaming LLM responses** -- NDJSON token-level streaming with first-token latency ~1.2s
-- **Emoji-driven expressions** -- LLM output prefixed with emoji; firmware maps to face animations
-- **Persona system** -- swappable persona files (`personas/*.md`), customizable via `make setup`
-- **MCP tool integration** -- 11 firmware-advertised tools (head servos, LEDs, camera, reminders, volume, brightness, screen theme)
-- **Photo-based vision** -- "What do you see?" triggers camera capture + vision model description
-- **Calendar context injection** -- Google Calendar events surfaced to the LLM for contextual reminders
-- **Length-aware brevity** -- default 1-2 short sentences, up to 6 for open-ended asks (story, explanation, list); cap enforced in code via `MAX_SENTENCES`
-- **ASR noise filtering** -- rejects punctuation-only / sub-threshold utterances
-- **Single-host deployment** -- all four server services (xiaozhi-server, dotty-pi, dotty-behaviour, bridge.py) run as Docker containers on one machine
-- **`make setup` wizard** -- interactive first-run: name your robot, fetch models, validate config
-- **MkDocs Material docs site** -- architecture, protocols, quickstart, troubleshooting, FAQ
-- **Kid Mode channel routing** -- voice channels are kid-safe by default; the kid-mode sandwich (English-pin, emoji prefix, topic blocklist, jailbreak resistance) only applies when the inbound `channel` is in `VOICE_CHANNELS`, so messaging-platform channels (Telegram, etc.) skip it automatically
-- **`/xiaozhi/admin/*` endpoints** -- live-session control surface on xiaozhi-server: `set-state`, `set-toggle`, `set-face-identified`, `set-head-angles`, `inject-text`, `abort`, `take-photo`, `play-asset`, `songs`, `say`, `devices`. See [`architecture.md`](https://brettkinny.github.io/dotty-stackchan/latest/architecture/#admin-surface-two-services-two-prefixes)
-- **Smart-mode** -- smart-mode flips ambient/behaviour only. The inner-loop **model-swap is v2 scope and not wired** on the live `PiVoiceLLM` path. (The instant in-process model-swap once provided by the now-removed `Tier1Slim` provider — added in `b73f583`, removed in the 2026-05-29 alignment pass — is gone.)
-- **llama-swap voice/coding matrix** -- `qwen3.5:4b` (voice inner loop) + `qwen3.6:27b-think` (think_hard target) co-resident under the `voice` matrix set; `qwen3.6:27b` for `pi` CLI runs alone under `coding`. See [`cookbook/llama-swap-concurrent-models.md`](https://brettkinny.github.io/dotty-stackchan/latest/cookbook/llama-swap-concurrent-models/)
-- **Perception event bus** -- firmware `face_detected` / `face_lost` / `sound_event` / `state_changed` frames relay through xiaozhi's `EventTextMessageHandler` to `dotty-behaviour`'s `/api/perception/event`, fanned out to 11 consumer classes (config-gated; includes face_greeter, sound_turner, face_lost_aborter, wake_word_turner, face_identified_refresher, purr_player)
-- **Fully-local backend support** -- `compose.local.override.yml` for Ollama (single binary, simple) plus llama-swap recipe for concurrent multi-model serving. Both shipped; choose based on whether you need multiple models resident at once
-- **Voice catalog + install helper** -- `docs/voice-catalog.md` (12 Piper + 6 EdgeTTS) + `make voice-install` -- shipped
-- **Versioned docs via `mike`** -- `/latest/`, `/v0.1/`, `/dev/` URL structure shipped
-- **Observability hooks** -- Prometheus `/metrics` + Grafana dashboard at `monitoring/grafana-dashboard.json` -- shipped
-- **Head-pet hold-to-listen wake** -- firmware fires `WakeWordInvoke("head_pet_hold")` after 2 s touch; works in the dark. Also emits `head_pet_started`/`_ended` perception events for purr consumer
+- Voice I/O through xiaozhi-esp32-server (ASR + TTS)
+- Brain via the `dotty-pi` container (pi coding agent with voice tools)
+- Perception events (face detection, sound events) through `dotty-behaviour`
+- Admin dashboard via `bridge.py`
+- Kid Mode, on by default — prompt-level steering for age-appropriate responses, **not** an output content filter, and no substitute for supervision
+- Local ASR (SenseVoiceSmall) and local TTS (Piper) — no cloud dependency
+- Streaming responses, emoji expressions, swappable personas
 
-## Known issues (as of v0.1)
+Rough edges: face emoji rendering misses 4 of 9 emotions visually; the sound-direction localizer has a left-bias on CoreS3 hardware.
 
-The 30+ planning docs accumulated during the v0.1 prep sprint surfaced these. None are blockers for trying Dotty out, but you should know about them:
+## Maybe someday
 
-- **Face emoji rendering** — only 5 of 9 enforced emotions render distinctly on the LCD. Sad clamps to a one-eye wink (rotation `-400` clamps to 0 on left eye), Surprise is byte-identical to Neutral (weight `120` clamps to `100`), Loving is a copy-paste of Happy, Laughing is an alias of Happy by design. Fix is queued (~25-40 LoC firmware patch).
-- **Sound-direction localizer always reads left.** I2S channel 1 on the M5Stack CoreS3 is the AEC speaker-loopback reference, not the right mic. Energy detection works; direction does not. Sound-driven head-turn behaves accordingly.
-- **Kid-voice ASR accuracy** — SenseVoiceSmall mangles short kid utterances ("macarena" → "maarna"). Post-ASR corrections + phrase boost help but have hit their ceiling. whisper.cpp / faster-whisper swap planned (Phase 1 CPU-only ships immediately, Phase 2 GPU once dual RTX 3060s arrive).
-- **Privacy-indicator LEDs not yet hardwired.** The camera streams DMA buffers permanently after init; mic + camera enable are software-controlled with no hardware-guaranteed indicator. **Hard prereq for face recognition / continuous vision; do not ship those features without it.**
-- **Smart Mode regression** (fixed in v0.1 itself) — between `434988d` and the v0.1 fix, every voice "smart mode" trigger silently fell back to the default model. If you're forking from before the v0.1 tag, pull the fix.
+No promises — just a few ideas I might get around to, roughly in order of interest:
 
-## In progress
+- Better wake word ("Hey Dotty" instead of the current "Hi, ESP")
+- Story Mode improvements (longer narratives, character voices)
+- Improve Security Mode
 
-Actively being worked on or partially complete. **Big push 2026-04-25 evening:** ~26 commits scaffolding much of what was previously "Planned" — see [CHANGELOG.md](CHANGELOG.md) `[Unreleased]` for the full inventory. Most items below have code on `main` but are not yet deployed live or fully wired.
-
-- **Phase 4 firmware StateManager bench checks** -- the on-device six-state mutex (`idle / talk / story_time / security / sleep / dance`) and 12-pixel LED contract shipped to the active firmware fork (commit `d78118b`, 2026-04-27) and end-to-end-verified autonomously. Visual / interactive bench checks on the live device pending in [#38](https://github.com/BrettKinny/dotty-stackchan/issues/38) (Phase 4 foundation), [#39](https://github.com/BrettKinny/dotty-stackchan/issues/39) (Phase 5 sleep behaviour), [#40](https://github.com/BrettKinny/dotty-stackchan/issues/40) (Phase 6 security behaviour). The `firmware/firmware/` submodule pin in this repo lags the active fork; bump (or build from the active fork) to flash a Phase 4+ build.
-- **CI pipeline** -- YAML lint, compose validation, config parse check, firmware dry-build, docs link check
-- **Firmware release workflow** -- GitHub Actions building `.bin` artifacts on tag push
-- **Quickstart improvements** -- linear "flash, clone, configure, talk" path assuming published firmware releases
-- **First-audio latency reduction** -- two-tier path lands inner-loop turns under 1 s warm; further improvements queued (escalation parallelism, llama.cpp MTP PR #22673 for ~1.5-2× on think_hard)
-- **ASR accuracy for children's speech** -- post-ASR corrections live; Whisper Phase 1 scaffold landed at v0.1; A/B verification pending
-- **Face detection + tracking** -- shipped firmware-side; smoother+faster tuning queued (EMA 0.5, speed 500, deadband, MSR thr 0.40). Flash + bench-test pending
-- **Layer 4 identity (description-based)** -- shipped + deployed. VLM (Gemini 2.0 Flash) returns a free-form description plus a roster name match against `household.yaml`'s `appearance:` field. No biometrics, no persistent identifiers. The earlier dlib biometric scaffold (`bridge/face_db.py` + `face_recognizer.py` + on-device `FaceRecognizer` + `ParentalGate` + 4 MCP tools) was removed — description-based covers the use case and biometrics conflicted with the no-storage identity posture
-- **Layer 6 proactive greetings** -- `bridge/proactive_greeter.py` + lifespan wiring shipped. Cooldown + time-of-day windowing + kid-safe sandwich + calendar-aware prompt + template fallback. Depends on Layer 4 for named greetings; works today with `face_detected` (unknown identity) for generic
-- **Layer 1 privacy-indicator LEDs** -- firmware scaffold drives mic/camera state via RAII peripheral guards. Camera `VIDIOC_STREAMOFF` wiring deferred (closes the always-streaming hole; queued)
-- **Wake word "Hey Dotty"** -- interim shipped: firmware default switched Chinese → English "Hi, ESP". Custom "Hey Dotty" microWakeWord roadmap documented (`docs/wake-word.md`); needs sample collection + Colab training (~2 weeks calendar)
-- **Purr-on-head-pet** -- server consumer shipped (`_perception_purr_player`); fires on `head_pet_started`. Asset path `bridge/assets/purr.opus` is a drop-in (asset itself not committed)
-- **Dancing mode** -- shipped at v0.1; karaoke + LLM-initiated dance + Phase 2 vocal singing remain
-- **Reproducible + signed firmware builds** -- SBOM + signed-releases scaffolds shipped. Maintainer GPG key + IDF Dockerfile SHA256 pin pending
-
-## Planned
-
-Designed but not yet started. Roughly in priority order.
-
-- **Improve Security Mode** -- expand beyond the current LED-flash + alert posture: configurable triggers, escalation rules, and richer notification surfaces
-- **Improve Story Mode** -- longer-form narrative pacing, character voices, save/resume, and child-led branching
-- **Easily configurable model profiles** -- first-class config surface for swapping the local / kid / smart models (and adding new ones) without hand-editing daemon `config.toml` files
-- **Improve Kid Mode -- configurable age band** -- per-child age setting that tunes vocabulary, topic blocklist strictness, and response length; today Kid Mode is one-size-fits-all
-- **Improve Dance Mode -- user song library** -- let users drop their own audio files into a song folder and have Dotty discover, list, and dance to them (current dance set is built-in only)
-- **Speech bubble sync** -- tie on-screen text bubble visibility to actual audio playback state (deferred at v0.1 — Brett says timing looks fine in practice)
-- **Singing mode** -- vocal synthesis or pitch-shifted TTS over backing tracks (Phase 2 of dance work)
-- **Runtime OTA provisioning** -- captive-portal WiFi + OTA URL setup on first boot (no rebuild to retarget)
-- **Layer 2.5 stereo mic + camera person tracking** -- sound-source localization + camera fusion for 360° awareness in idle mode
-- **Phase 3 continuous vision classifier** -- EfficientDet/YOLOX at 1Hz on the Docker host GPU once dual RTX 3060s land
-- **Sleep-mode "dream" memory compaction** -- while Dotty is in `sleep` state (idle, overnight), a background pass feeds the day's memory writes (perception events, conversation turns, declared facts, scene snapshots) to the smart model for compaction + summarisation. Two outputs: rewrite/prune the raw memory store (drop duplicates and low-signal perception spam, keep durable facts and notable events), and emit a separate human-readable daily summary that next-day turns can pull as "yesterday's context". Sleep-state-gated so the heavy LLM call never runs during interactive states. Pairs with the per-person memory and ambient scene memory work
-- **Variant board port guide** -- walkthrough for adding support for other ESP32-S3 boards
-
-## Community wishlist
-
-Ideas we would welcome help with. None are blockers.
-
-- **ESP Web Tools web flasher** -- one-click browser flash via `esptool.js` on GitHub Pages
-- **Voice catalog + install helper** -- curated Piper/EdgeTTS voices with a download script
-- **Versioned docs via `mike`** -- `/latest/` + `/v1.0/` so older firmware users see matching docs
-- **Observability hooks** -- Prometheus metrics on the bridge (latency, token counts, error rates) + starter Grafana dashboard
-- **Variant board port guide** -- walkthrough for adding support for other ESP32-S3 boards
-- **Face/emoji asset catalog** -- document the expression-id-to-emoji mapping; show how to add a new face
-- **Firmware/server compatibility matrix** -- pin which server versions work with which firmware versions
-- **`make audit` network verifier** -- user-runnable tool to confirm "local except LLM" claim against their own install
-- **Reproducible + signed firmware builds** -- toolchain-pinned `.bin` with GPG-signed release artifacts
+I'm not planning to build variant-board ports, firmware compatibility matrices, signed/reproducible builds, observability dashboards, or OTA provisioning flows myself. If any of those matter to you, PRs are welcome.

@@ -77,8 +77,8 @@ The `firmware-release.yml` workflow fires on `fw-v*` tags and:
    the flat binaries, then generates `SHA256SUMS.txt` over all six
 5. Attaches binaries + checksums to the GitHub Release
 
-GPG signing of release artifacts is scaffolded (see `docs/signed-releases.md`)
-and enabled once `GPG_PRIVATE_KEY` / `GPG_PASSPHRASE` repo secrets are set.
+Release artifacts are not GPG-signed; verification relies on the published
+`SHA256SUMS.txt` checksums above.
 
 ## Known non-determinism risks
 

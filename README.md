@@ -23,13 +23,14 @@ So Dotty is the version that passes: every component runs on hardware I own, eve
 ## Features
 
 - **Kid Mode (on by default)** — age-appropriate responses via persona + per-turn prompt steering. An output content filter is planned, not yet shipped ([#138](https://github.com/BrettKinny/dotty-stackchan/issues/138)); Kid Mode is not a substitute for supervision. Toggle off for general-purpose use. See [`docs/kid-mode.md`](./docs/kid-mode.md).
-- **Local ASR** — FunASR SenseVoiceSmall runs on your hardware, no cloud transcription.
+- **Local ASR** — FunASR SenseVoiceSmall by default, no cloud transcription. WhisperLocal auto-selects on GPU hosts (better kid-speech accuracy); SenseVoiceOnnx is a lighter low-RAM option.
 - **Local or cloud TTS** — Piper (offline) or EdgeTTS (cloud). Swap with a config change.
 - **Streaming responses** — the bridge streams LLM output to the voice pipeline for lower perceived latency.
 - **Emoji expressions** — every response starts with an emoji that the firmware maps to a face animation (smile, laugh, sad, surprise, thinking, angry, love, sleepy, neutral).
 - **Voice tools** — the pi agent can search its memory, escalate hard questions to a bigger model, take a photo, and play songs, all mid-conversation.
 - **States, toggles & LEDs** — a six-state mutex (`idle / talk / story_time / security / sleep / dance`) plus two orthogonal toggles (`kid_mode`, `smart_mode`), all owned by the firmware StateManager and surfaced on the 12-pixel LED ring. Shipped on the active firmware fork (commit `d78118b`, 2026-04-27); the `firmware/firmware/` submodule pin in this repo lags, so flash from the active fork to get it. See "States, Toggles & LEDs" below and [`docs/modes.md`](./docs/modes.md).
 - **Vision (camera)** — the robot's built-in camera can capture images for multimodal LLM queries.
+- **Privacy LEDs** — hardware-bound mic (green) and camera (red) indicators on the LED ring. They light from the codec/camera enable signals via RAII guards, so a misbehaving server or model can't capture with the lights off.
 - **Calendar context** — optional calendar integration feeds upcoming events into the conversation context.
 - **Hackable** — every seam is swappable: LLM, TTS, ASR, agent framework. Fork it, rip out what you don't want, wire in your own.
 

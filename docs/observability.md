@@ -5,15 +5,17 @@ description: Prometheus metrics and a starter Grafana dashboard for the bridge d
 
 # Observability
 
-The `bridge.py` dashboard service exposes a Prometheus exposition endpoint at `/metrics`
-covering first-audio latency, request rate / errors per endpoint,
-perception events, calendar health, and Kid Mode state.
-A starter Grafana dashboard lives at
+The `bridge.py` dashboard service exposes a Prometheus exposition endpoint at `/metrics`,
+and a starter Grafana dashboard lives at
 [`monitoring/grafana-dashboard.json`](https://github.com/BrettKinny/dotty-stackchan/blob/main/monitoring/grafana-dashboard.json).
 
-These metrics are the **measurement prerequisite** for the
-[first-audio latency reduction](ROADMAP.md) follow-up work. Numbers
-come first; you can't tune what you can't see.
+!!! note "Status: minimal"
+    This is a hobby project and observability isn't a focus. Today only two
+    metrics are actually recorded: **Kid Mode state** and **content-filter
+    hits**. The other metrics below are *defined* in `bridge/metrics.py` but
+    not yet wired into the request path, so most Grafana panels read 0. The
+    endpoint and dashboard are scaffolding to build on if you want them, not a
+    maintained monitoring setup.
 
 !!! warning "LAN-only — never expose `/metrics` to the internet"
     The bridge listener should live on your home LAN (or behind a
@@ -71,32 +73,27 @@ failure rate, and a Kid Mode single-stat toggle.
 
 ## What each metric means
 
+**Recorded today:**
+
 | Metric | Type | What it tells you |
 | --- | --- | --- |
-| `dotty_first_audio_latency_seconds` | Histogram | Bridge-side seconds from request received to first content chunk emitted. Tightly correlated with perceived robot responsiveness. |
-| `dotty_request_duration_seconds{endpoint}` | Histogram | End-to-end duration per endpoint (`message`, `message_stream`, `vision_explain`, `calendar_today`, `perception_event`). |
-| `dotty_request_errors_total{endpoint,kind}` | Counter | Errors partitioned by endpoint and `kind` (`timeout`, `binary_missing`, `exception`). |
-| `dotty_llm_tokens_total{kind,model}` | Counter | LLM token volume; reserved for future per-call accounting. |
-| `dotty_active_acp_sessions` | Gauge | Legacy metric from the retired ZeroClaw path — retained in the schema but always 0. |
-| `dotty_calendar_fetch_failures_total{kind}` | Counter | Google Calendar fetch errors partitioned by `kind` (`timeout`, `parse`, `other`, `orchestrator`). The cache backs off automatically; sustained failures mean look at the bridge log. A spike of `timeout` reads as a network/quota issue; `parse` usually means the upstream `gws` CLI changed shape. |
-| `dotty_smart_mode_invocations_total` | Counter | Smart-Mode requests (the `metadata.smart_mode` flag opted into the larger LLM). |
 | `dotty_kid_mode_active` | Gauge | `1` if Kid Mode guardrails are active, `0` otherwise. Flipped live by the portal admin endpoint. |
-| `dotty_perception_events_total{type}` | Counter | Ambient-perception events ingested, partitioned by `face_detected` / `face_lost` / `sound_event`. |
+| `dotty_content_filter_hits_total` | Counter | Times the content filter blocked or rewrote model output. |
 
-## Suggested alerts
+**Defined in `bridge/metrics.py` but not yet wired into the request path** —
+they exist so the endpoint schema is stable, but currently read 0:
+`dotty_first_audio_latency_seconds`, `dotty_request_duration_seconds`,
+`dotty_request_errors_total`, `dotty_llm_tokens_total`,
+`dotty_calendar_fetch_failures_total`, `dotty_smart_mode_invocations_total`,
+`dotty_perception_events_total`, and `dotty_active_acp_sessions` (a legacy
+ZeroClaw metric, always 0).
 
-Start small — these are the four signals worth paging on for a
-home-deployed robot:
+## Suggested alert
 
-- **First-audio latency P95 > 3 s for 10 minutes.**
-  `histogram_quantile(0.95, sum by (le) (rate(dotty_first_audio_latency_seconds_bucket[5m]))) > 3`
-- **Sustained error rate.**
-  `sum by (endpoint, kind) (rate(dotty_request_errors_total[5m])) > 0.05`
-- **Calendar fetch flatlined failing.**
-  `sum(rate(dotty_calendar_fetch_failures_total[15m])) > 0.005` for 30 m.
-- **Bridge target down.**
-  `up{job="dotty-bridge"} == 0` for 5 m. Catches the case where
-  Docker hasn't restarted the bridge container.
+Until the latency/error metrics are wired, only one signal is meaningful:
+
+- **Bridge target down.** `up{job="dotty-bridge"} == 0` for 5 m — catches the
+  case where Docker hasn't restarted the bridge container.
 
 ## Adding new metrics
 
