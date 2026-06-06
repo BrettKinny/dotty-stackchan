@@ -7,7 +7,7 @@ server-side components: xiaozhi-esp32-server, the `dotty-pi` agent container,
 dotty-behaviour, and the `bridge.py` dashboard service. It describes what each
 component exposes, what counts as a breaking change, and how to upgrade safely.
 
-For protocol wire formats see [protocols.md](https://brettkinny.github.io/dotty-stackchan/latest/protocols/).
+For protocol wire formats see `docs/protocols.md`.
 
 ## Compatibility matrix
 
@@ -92,14 +92,11 @@ Server and firmware are versioned independently:
 3. Commit with message: `release: server-vX.Y.Z` (or `release: fw-vX.Y.Z`).
 4. Create an annotated tag: `git tag -a server-vX.Y.Z -m "server-vX.Y.Z"`
 5. Push the tag: `git push origin server-vX.Y.Z`
-6. Deploy versioned docs (handled automatically by `.github/workflows/docs-deploy.yml`
-   on tag push; if you need to deploy manually, run
-   `mike deploy --push --update-aliases X.Y latest` from the repo root after
-   `pip install -r docs/requirements.txt`). See
-   [`versioning.md`](https://brettkinny.github.io/dotty-stackchan/latest/versioning/) for the full URL/alias model.
 
-GitHub Actions handles image builds, artifact publishing, and versioned doc
-deploys from the tag.
+The docs live as plain markdown under `docs/` and render on GitHub directly —
+there is no separate docs-site build to deploy.
+
+GitHub Actions handles image builds and artifact publishing from the tag.
 
 ### Compatibility matrix updates
 

@@ -22,9 +22,8 @@ repos:
       - id: end-of-file-fixer
         exclude: '^firmware/'
       - id: check-yaml
-        exclude: '^(mkdocs\.yml|\.github/workflows/.*\.yml|firmware/)'
-        # mkdocs.yml uses python tags (!!python/name:...) that PyYAML
-        # safe_load can't resolve; GHA workflows use the same. yamllint
+        exclude: '^(\.github/workflows/.*\.yml|firmware/)'
+        # GHA workflows use tags PyYAML safe_load can't resolve; yamllint
         # already lints them in CI.
       - id: check-json
         exclude: '^firmware/'

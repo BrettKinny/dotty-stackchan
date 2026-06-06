@@ -27,7 +27,8 @@ description: One-line summary of what this page covers.
 ---
 ```
 
-MkDocs Material uses these for the HTML `<title>` and search index.
+It's a concise, machine-readable summary of the page — handy for tooling and
+for readers skimming the raw file.
 
 ## Headings
 
@@ -40,7 +41,7 @@ MkDocs Material uses these for the HTML `<title>` and search index.
 
 1. Create the file in `docs/cookbook/` (e.g. `docs/cookbook/do-the-thing.md`).
 2. Add frontmatter (`title` + `description`).
-3. Add a nav entry in `mkdocs.yml` under the `Cookbook:` section.
+3. Link it from `docs/README.md` so it's discoverable.
 4. Keep it short — one task, one page. Link to reference docs for background.
 
 ## Decay annotations
@@ -87,4 +88,4 @@ IPs, hostnames, or API keys.
 ## Keep it short
 
 If a page is getting long, split it. One concept per page, one task per
-cookbook entry. The nav is cheap — use it.
+cookbook entry — then link the pieces together.

@@ -87,7 +87,6 @@ First git-tagged public release. Covers all server + firmware work shipped to `m
 - **Wake-word options doc** (`docs/wake-word.md`) — current architecture, 21 prebuilt English wake words, three paths to "Hey Dotty" (Path A interim shipped, Path B microWakeWord roadmap, Path C wakenet9 custom). Sample collection guide.
 - **SBOM scaffold** (`scripts/generate-sbom.sh`, `docs/sbom.md`) — CycloneDX-ish component+license inventory. `make sbom`.
 - **Signed releases scaffold** (`docs/signed-releases.md`, `KEYS.txt`) — GPG signing walkthrough + CI integration snippet (commented-out signing step ready to enable).
-- **Versioned docs via mike** (`mkdocs.yml`, `.github/workflows/docs-deploy.yml`, `docs/requirements.txt`, `docs/versioning.md`) — `/latest/`, `/v0.1/`, `/dev/` URL structure.
 
 ### Added — firmware (StackChan/dotty fork, 2026-04-25 sprint)
 - **Layer 1 privacy LEDs scaffold** — `PrivacyLeds` singleton drives right-ring index 6 (mic) + index 7 (camera). RAII `MicPeripheralGuard` + `CameraPeripheralGuard` tie LED state to peripheral enable codepath. New `self.robot.get_privacy_state` MCP tool. `set_led_multi` rejects indices 6/7.
