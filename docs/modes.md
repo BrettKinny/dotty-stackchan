@@ -78,6 +78,23 @@ The two toggles are orthogonal — they compose freely. `kid_mode = on` AND `sma
 
 ## LED contract (12-pixel ring)
 
+!!! warning "Two firmwares, two right-ring layouts"
+    The contract below describes the **active-fork Phase 4 StateManager**
+    (`BrettKinny/StackChan @ dotty`). The firmware **submodule pinned in this
+    repo** (`35f701a`) does **not** include StateManager — it ships the
+    **privacy-LED** layout instead, which claims two of the same right-ring
+    pixels for a different purpose:
+
+    - **pixel 6** = microphone indicator (green when the mic is open; pulsing
+      when audio is streaming to the server)
+    - **pixel 11** = camera indicator (red when the camera is capturing)
+
+    These are bound to the codec/camera hardware via RAII guards (see the
+    firmware's `main/stackchan/privacy/PRIVACY_LEDS.md`). So if you flash from
+    the submodule, **pixels 6 and 11 mean mic/camera — not face-state and
+    listening.** The face-state pip, toggle pips, and listening pip described
+    below arrive once StateManager lands in the submodule pin.
+
 ```
 LEFT RING (global 0–5)              RIGHT RING (global 6–11)
 ┌───────────────────┐               ┌────────────────────────────┐

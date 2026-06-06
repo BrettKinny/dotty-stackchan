@@ -13,7 +13,7 @@ alternative configurations.
 
 | Item | Notes |
 |------|-------|
-| **M5Stack CoreS3 + StackChan servo kit** | The robot. See [hardware-support.md](hardware-support.md) for details. |
+| **M5Stack CoreS3 + StackChan servo kit** | The robot. See [hardware.md](hardware.md) for details. |
 | **Linux or macOS host with Docker** | Runs all four server-side containers. Any distro works. **No GPU required** for the default stack — see [Server hardware](#server-hardware) below. |
 | **2.4 GHz WiFi** | The ESP32-S3 does not support 5 GHz. |
 

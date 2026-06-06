@@ -186,15 +186,12 @@ sequenceDiagram
 
 The firmware retries the OTA check up to 10 times with exponential backoff (starting at 10 s, doubling each retry) before giving up.
 
-## How firmware updates are triggered
-
-1. **On boot** — the firmware always calls `CheckVersion()` during startup. If the response contains a `firmware` section with a newer version (or `force: 1`), the device downloads and flashes the binary, then reboots.
-
-2. **Via MCP tool** — the device exposes a user-only MCP tool that triggers a reboot. After reboot, the normal OTA check runs again. There is no "check for update now" command that skips the reboot.
-
-3. **Server-side** — place a firmware binary at a URL accessible to the device. Configure the xiaozhi-server to include the `firmware` section in its OTA response with the new version and URL. The next device boot (or reboot) will pick it up.
-
-The firmware update uses ESP-IDF's `esp_https_ota` API with A/B partitioning (`ota_0` / `ota_1`). If the new firmware fails to boot, the bootloader rolls back to the previous partition automatically (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`).
+> **Firmware updates over OTA are not set up in this project.** This deployment
+> doesn't host firmware binaries, so the OTA response carries no `firmware`
+> section — the endpoint is used purely for WebSocket discovery + clock sync.
+> Flashing is done over USB-C (see the "Firmware iteration" section in
+> `CLAUDE.md`). The schema above documents the protocol the firmware *can*
+> parse, not a flow that's wired up here.
 
 ## Manual testing
 

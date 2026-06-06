@@ -78,29 +78,6 @@ jobs:
           echo "--- checksums ---"
           cat SHA256SUMS.txt
 
-      # ─── GPG signing (TODO: enable when GPG_PRIVATE_KEY secret is set) ───
-      # See docs/signed-releases.md for the full setup. Required repo secrets:
-      #   GPG_PRIVATE_KEY, GPG_PASSPHRASE, GPG_KEY_ID
-      # Add the *.asc files to the Release `files:` block below once enabled.
-      #
-      # - name: Import GPG signing key
-      #   if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
-      #   run: |
-      #     echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
-      #     echo "default-key ${GPG_KEY_ID}" >> ~/.gnupg/gpg.conf
-      #   env:
-      #     GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
-      #
-      # - name: Sign release artifacts
-      #   if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
-      #   working-directory: firmware/firmware/build
-      #   run: |
-      #     for f in bootloader.bin partition-table.bin ota_data_initial.bin stack-chan.bin generated_assets.bin human_face_detect.espdl SHA256SUMS.txt; do
-      #       gpg --batch --yes --pinentry-mode loopback \
-      #           --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
-      #           --detach-sign --armor "$f"
-      #     done
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -114,14 +91,6 @@ jobs:
             firmware/firmware/build/generated_assets.bin
             firmware/firmware/build/human_face_detect.espdl
             firmware/firmware/build/SHA256SUMS.txt
-            # Add once signing is enabled:
-            # firmware/firmware/build/bootloader.bin.asc
-            # firmware/firmware/build/partition-table.bin.asc
-            # firmware/firmware/build/ota_data_initial.bin.asc
-            # firmware/firmware/build/stack-chan.bin.asc
-            # firmware/firmware/build/generated_assets.bin.asc
-            # firmware/firmware/build/human_face_detect.espdl.asc
-            # firmware/firmware/build/SHA256SUMS.txt.asc
 
   notify-failure:
     name: Notify on Failure
