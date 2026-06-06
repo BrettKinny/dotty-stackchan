@@ -15,8 +15,9 @@
     "@earendil-works/pi-coding-agent": "^0.74.0"
   },
   "scripts": {
-    "test": "npm run test:memory && npm run test:recall && npm run test:remember && npm run test:rememberperson && npm run test:turnlog && npm run test:think && npm run test:play && npm run test:adminauth",
+    "test": "npm run test:memory && npm run test:memgate && npm run test:recall && npm run test:remember && npm run test:rememberperson && npm run test:turnlog && npm run test:think && npm run test:play && npm run test:adminauth",
     "test:memory": "node --experimental-strip-types tests/memory_lookup.test.ts",
+    "test:memgate": "node --experimental-strip-types tests/memory_gate.test.ts",
     "test:recall": "node --experimental-strip-types tests/recall_person.test.ts",
     "test:remember": "node --experimental-strip-types tests/remember.test.ts",
     "test:rememberperson": "node --experimental-strip-types tests/remember_person.test.ts",

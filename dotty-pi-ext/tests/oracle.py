@@ -23,8 +23,11 @@ import sys
 from pathlib import Path
 
 
-# Copied verbatim from bridge.py:_voice_memory_search_blocking (lines
-# ~3909-3942). Do NOT refactor — this is the spec.
+# Ported from the (now-removed, #111) bridge.py:_voice_memory_search_blocking
+# and kept as the spec the TS port must match. The ONE intentional change vs
+# the original is the `namespace NOT LIKE 'person_pending:%'` kid-safety gate
+# (#53) — added in both this oracle and brain_db.ts together. Don't otherwise
+# refactor; if the TS port diverges, fix the TS, not this.
 def _voice_memory_search_blocking(db: Path, query: str, limit: int = 5) -> list[dict]:
     if not db.exists():
         return []
@@ -37,11 +40,14 @@ def _voice_memory_search_blocking(db: Path, query: str, limit: int = 5) -> list[
         try:
             conn.row_factory = sqlite3.Row
             cur = conn.execute(
+                # Kid-safety gate (#53): exclude unreviewed person_pending:<id>
+                # facts about a minor from free-text search (mirrors brain_db.ts).
                 """
                 SELECT m.key, m.content, m.category, m.namespace, m.created_at
                 FROM memories_fts
                 JOIN memories m ON m.rowid = memories_fts.rowid
                 WHERE memories_fts MATCH ?
+                  AND m.namespace NOT LIKE 'person_pending:%'
                 ORDER BY rank
                 LIMIT ?
                 """,

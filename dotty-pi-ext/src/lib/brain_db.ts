@@ -79,11 +79,17 @@ export function searchMemories(
 
   try {
     const db = openReadOnly(path);
+    // Kid-safety gate (#53): never surface unreviewed `person_pending:<id>`
+    // facts about a minor through the free-text search — fetchPersonMemories
+    // is namespace-scoped to approved `person:<id>` for the same reason, but a
+    // bare FTS MATCH would otherwise leak a pending fact whenever a query
+    // phrase-matched it.
     const stmt = db.prepare(`
       SELECT m.key, m.content, m.category, m.namespace, m.created_at
       FROM memories_fts
       JOIN memories m ON m.rowid = memories_fts.rowid
       WHERE memories_fts MATCH ?
+        AND m.namespace NOT LIKE 'person_pending:%'
       ORDER BY rank
       LIMIT ?
     `);
