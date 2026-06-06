@@ -23,28 +23,41 @@ The runtime contract is:
 
 ## Build + run on Unraid
 
+Use the deploy script — it ships the build context, config, and extension
+source, builds the pinned image, recreates the container, and healthchecks:
+
 ```bash
-ssh root@<UNRAID_HOST> '
-  mkdir -p /mnt/user/appdata/dotty-pi-src &&
-  cd /mnt/user/appdata/dotty-pi-src &&
-  # copy Dockerfile + docker-compose.yml here, plus models.json into agent/
-  docker build -t dotty-pi:0.1.0 . &&
-  docker compose up -d
-'
+DOTTY_PI_HOST=root@<UNRAID_HOST> bash scripts/deploy-dotty-pi.sh
 ```
 
-First-time appdata layout:
+The script is the repeatable replacement for the old hand-run
+`docker build … && docker compose up -d`. It writes only the build context,
+`agent/models.json`, and `extensions/dotty-pi-ext/` — it never touches the
+live `memory/brain.db` or `persona/`, and it preserves the extension's
+hand-compiled `node_modules` (deps are unchanged; see
+[`scripts/deploy-dotty-pi.sh`](../scripts/deploy-dotty-pi.sh) for the full
+contract). A functional voice-tool smoke test is a manual post-deploy step
+(the script prints the reminder) — keep the agent loop on `qwen3.5:4b`.
+
+On-box layout (build context and live state are **separate** directories):
 
 ```
-/mnt/user/appdata/dotty-pi/
-├── agent/
-│   └── models.json          # provider config (this directory)
-├── sessions/                # pi session state (unused for now)
-├── persona/                 # Dotty persona — migrated from RPi
-├── memory/
-│   └── brain.db             # FTS5 store — migrated from RPi
-└── extensions/
-    └── dotty-pi-ext/        # voice-tool extension (../dotty-pi-ext/)
+/mnt/user/appdata/
+├── dotty-pi-src/                # build context (SRC_DIR)
+│   ├── Dockerfile
+│   └── docker-compose.yml
+└── dotty-pi/                    # bind-mount → /root/.pi (STATE_DIR)
+    ├── agent/
+    │   ├── models.json          # provider config (deployed)
+    │   ├── auth.json            # live — never touched by deploy
+    │   └── sessions/            # live — never touched by deploy
+    ├── persona/                 # Dotty persona — migrated from RPi (live)
+    ├── memory/
+    │   └── brain.db             # FTS5 store — migrated from RPi (live)
+    ├── sessions/                # pi session state (unused for now)
+    └── extensions/
+        └── dotty-pi-ext/        # voice-tool extension source (deployed)
+            └── node_modules/    # hand-compiled better-sqlite3 (preserved)
 ```
 
 ## Model selection — DO NOT use `qwen3.6:27b` here
