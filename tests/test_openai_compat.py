@@ -19,6 +19,25 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 # ── Stub container-only imports BEFORE loading the module ─────────────────────
+# These stubs are installed only long enough to exec the module under test;
+# they are torn down again after the import (see below) so they don't leak into
+# sibling test modules' sys.modules. In particular test_pi_voice.py imports
+# pi_voice.py, which probes `from core.utils.textUtils import build_turn_suffix`
+# and *depends on that raising ImportError* to reach its real by-path fallback —
+# a leaked stub here makes that probe succeed and binds the wrong suffix.
+_MISSING = object()
+_STUBBED_MODULES = (
+    "config",
+    "config.logger",
+    "core",
+    "core.providers",
+    "core.providers.llm",
+    "core.providers.llm.base",
+    "core.utils",
+    "core.utils.textUtils",
+)
+_saved_modules = {k: sys.modules.get(k, _MISSING) for k in _STUBBED_MODULES}
+
 sys.modules.setdefault("config", MagicMock())
 _logger_mod = types.ModuleType("config.logger")
 _logger_mod.setup_logging = lambda: MagicMock()  # type: ignore[attr-defined]
@@ -58,6 +77,16 @@ _OC_PY = (
 _spec = _ilu.spec_from_file_location("openai_compat_under_test", _OC_PY)
 _mod = _ilu.module_from_spec(_spec)  # type: ignore[arg-type]
 _spec.loader.exec_module(_mod)  # type: ignore[union-attr]
+
+# Tear the stubs back out. openai_compat.py bound the names it needs into `_mod`
+# at exec time (`from core.utils.textUtils import ...`), so it keeps working,
+# while sys.modules is returned to its pre-stub state — no leakage into sibling
+# test modules (e.g. test_pi_voice.py's ImportError-driven fallback).
+for _k, _v in _saved_modules.items():
+    if _v is _MISSING:
+        sys.modules.pop(_k, None)
+    else:
+        sys.modules[_k] = _v  # type: ignore[assignment]
 
 
 def _provider():
