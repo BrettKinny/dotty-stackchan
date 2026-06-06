@@ -42,8 +42,8 @@ changes get human red-team review regardless of who drafted them — see the
 
 ## Why we use AI this way
 
-We aim to use AI **responsibly: as a tool for good, in service of people.** The
-guardrails we put on ourselves:
+We aim to use AI responsibly, with people kept firmly in the loop. The
+guardrails we hold ourselves to:
 
 - **A human in the loop.** No unattended agent merges its own work to `main`.
 - **A name on every change.** Attribution over anonymity — for tools and people
@@ -73,5 +73,4 @@ leave the human-accountability chain intact.
 
 ---
 
-*This document was itself drafted with AI assistance and reviewed by a human —
-which is exactly the point.*
+*This document was itself drafted with AI assistance and reviewed by a human.*

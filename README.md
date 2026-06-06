@@ -22,9 +22,7 @@ So Dotty is the version that passes: every component runs on hardware I own, eve
 
 ## AI transparency
 
-**Yes — Dotty is built with AI assistance, and it says so out loud.** This is a human-focused project, made by humans, for humans. AI coding agents help write the code, draft the docs, and triage the issues — a deliberate choice, not a secret.
-
-The rule we hold ourselves to: **anything an AI agent authors is acknowledged as such.** Commits carry a `Co-Authored-By:` trailer naming the model, AI-assisted PRs say so in the body, and AI-drafted docs note it. A human reviews and is accountable for everything that lands — the AI proposes, a person decides. We aim to use AI responsibly: as a tool for good, in service of people, with a human in the loop and a name on every change.
+**Yes — Dotty is built with AI assistance, and it says so out loud.** Coding agents help write the code, draft the docs, and triage issues — a deliberate choice, not a secret. The rule: **anything an AI agent authors is acknowledged as such** (model-named `Co-Authored-By:` trailers, AI-assisted PR notes, marked AI-drafted docs), with a human reviewing and accountable for everything that lands.
 
 Full policy: [`AI_TRANSPARENCY.md`](./AI_TRANSPARENCY.md).
 

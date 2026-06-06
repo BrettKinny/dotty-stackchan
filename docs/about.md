@@ -51,10 +51,6 @@ This is a hackable starting point, not a product. There are no releases, no inst
 - Upstream firmware development. We build from `m5stack/StackChan` source but don't maintain firmware patches beyond what's needed for the voice integration.
 - Cloud hosting. This is designed for a LAN deployment. You could expose it to the internet, but that's your problem.
 
-## AI transparency
-
-Dotty is openly **AI-assisted**: coding agents help write the code, draft the docs, and triage issues. It's still a human-focused project — made by humans, for humans — and the rule is simple: **anything an AI agent authors is acknowledged as such** (model-named `Co-Authored-By:` commit trailers, AI-assisted PR notes, marked AI-drafted docs), with a human reviewing and accountable for everything that lands. Full policy: [AI Transparency](./AI_TRANSPARENCY.md).
-
 ## Privacy
 
 All audio processing (VAD, ASR) happens on your LAN. The LLM call is the only component that crosses your network boundary in the default config, and you choose where it goes. Swap in Ollama to keep everything on-premises -- zero outbound calls, zero cloud dependencies.
