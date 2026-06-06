@@ -142,4 +142,3 @@ jobs:
           fi
           payload=$(jq -cn --arg t ":x: *Firmware build failed* · \`${REPO}\` · \`${REF}\` — ${RUN_URL}" '{text: $t}')
           curl -fsS -X POST "$SLACK_WEBHOOK_URL" -H 'Content-Type: application/json' -d "$payload"
-

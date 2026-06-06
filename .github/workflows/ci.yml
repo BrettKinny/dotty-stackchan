@@ -166,4 +166,3 @@ jobs:
         run: |
           payload=$(jq -cn --arg t ":x: *CI failed* · \`${REPO}\` · \`${REF}\` — ${RUN_URL}" '{text: $t}')
           curl -fsS -X POST "$SLACK_WEBHOOK_URL" -H 'Content-Type: application/json' -d "$payload"
-
