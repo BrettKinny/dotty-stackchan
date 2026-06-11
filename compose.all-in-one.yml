@@ -73,6 +73,12 @@ services:
       # the firmware pips desync from the dashboard on every reconnect.
       - DOTTY_KID_MODE_STATE=/var/lib/dotty-bridge/state/kid-mode
       - DOTTY_SMART_MODE_STATE=/var/lib/dotty-bridge/state/smart-mode
+      # Shared admin-API secret (X-Admin-Token). Read from ./.env — `make
+      # setup` generates it. Unset/empty = permissive (admin routes open);
+      # set = this server enforces it AND every caller (bridge,
+      # dotty-behaviour, dotty-pi) must carry the same value in its own
+      # .env. See .env.example.
+      - DOTTY_ADMIN_TOKEN=${DOTTY_ADMIN_TOKEN:-}
     ports:
       # 8000: WebSocket — StackChan connects here
       - "8000:8000"

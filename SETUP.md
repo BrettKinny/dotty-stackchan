@@ -243,3 +243,28 @@ It just isn't what M5Stack ships today.
 - **Tail perception/behaviour**: `ssh <XIAOZHI_USER>@<XIAOZHI_HOST> 'docker logs -f dotty-behaviour'`
 - **Admin dashboard**: open `http://<XIAOZHI_HOST>:8081/ui` in a browser.
 - **Dashboard health**: `curl http://<XIAOZHI_HOST>:8081/health`
+
+---
+
+## 10. Lock down the admin API (recommended)
+
+The `/xiaozhi/admin/*` routes (inject-text, say, set-state, play-asset, …) let
+anyone who can reach port 8003 make the robot speak, move, and take photos.
+`make setup` generates a shared secret, `DOTTY_ADMIN_TOKEN`, into the repo-root
+`.env` — once set, xiaozhi-server rejects admin calls that don't carry it as an
+`X-Admin-Token` header.
+
+All callers read the **same variable**: copy the generated value into the
+deploy-dir `.env` of each sibling service —
+
+```bash
+# on the Docker host, same value in each:
+/mnt/user/appdata/dotty-bridge-src/.env       # bridge dashboard
+/mnt/user/appdata/dotty-behaviour-src/.env    # behaviour consumers
+<dotty-pi deploy dir>/.env                    # voice tools (adminFetch)
+```
+
+— then restart the four containers in the same window. Leaving the variable
+unset everywhere keeps the legacy permissive mode (admin routes open on the
+LAN); setting it on only some services 401s the ones missing it. See the
+"Admin API auth" section of `.env.example`.

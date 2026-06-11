@@ -16,6 +16,15 @@ services:
     container_name: dotty-pi
     network_mode: host
     restart: unless-stopped
+    # Optional host-resident .env in the deploy dir (kept out of the
+    # deploy tar; survives recreates). Use for DOTTY_ADMIN_TOKEN — the
+    # voice tools' adminFetch sends it as X-Admin-Token on
+    # /xiaozhi/admin/* calls (must match xiaozhi-server's value).
+    # Processes started via `docker exec` (how PiVoiceLLM invokes pi)
+    # inherit the container env, so this reaches the voice tools.
+    env_file:
+      - path: .env
+        required: false
     volumes:
       - /mnt/user/appdata/dotty-pi:/root/.pi
     command: ["sleep", "infinity"]

@@ -158,6 +158,22 @@ setup: _preflight-compose ## Interactive first-run wizard (re-runnable; remember
 	 } > $(WIZARD_ENV); \
 	 echo "  $(WIZARD_ENV) — done"; \
 	 echo ""; \
+	 echo -e "$(BOLD)Ensuring .env + admin-API token...$(RESET)"; \
+	 if [ ! -f .env ]; then \
+	   cp .env.example .env; \
+	   echo "  .env created from .env.example"; \
+	 fi; \
+	 if grep -q '^DOTTY_ADMIN_TOKEN=' .env; then \
+	   echo -e "  $(GREEN)DOTTY_ADMIN_TOKEN already present in .env — keeping it.$(RESET)"; \
+	 else \
+	   ADMIN_TOKEN=$$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'); \
+	   printf '\nDOTTY_ADMIN_TOKEN=%s\n' "$$ADMIN_TOKEN" >> .env; \
+	   echo "  generated DOTTY_ADMIN_TOKEN → .env (authenticates /xiaozhi/admin/*)"; \
+	   echo -e "  $(YELLOW)NOTE:$(RESET) set the SAME value in the bridge / dotty-behaviour /"; \
+	   echo "        dotty-pi deploy-dir .env files, or their admin calls will 401."; \
+	   echo "        See .env.example ('Admin API auth') for details."; \
+	 fi; \
+	 echo ""; \
 	 echo -e "$(BOLD)Rendering templates...$(RESET)"; \
 	 mkdir -p data; \
 	 if [ "$$HAS_CUDA" = "1" ]; then \

@@ -34,7 +34,9 @@ services:
     # /mnt/user/appdata/dotty-bridge-src/.env). Stays out of the deploy
     # tar (only tracked files ship) and survives recreates. Use for
     # OPENROUTER_API_KEY / VISION_API_KEY / VLM_API_KEY /
-    # AUDIO_CAPTION_API_KEY / CALENDAR_ID / etc.
+    # AUDIO_CAPTION_API_KEY / CALENDAR_ID / etc — and DOTTY_ADMIN_TOKEN
+    # (the shared X-Admin-Token secret for /xiaozhi/admin/* calls; must
+    # match xiaozhi-server's value or admin actions 401).
     env_file:
       - path: .env
         required: false
