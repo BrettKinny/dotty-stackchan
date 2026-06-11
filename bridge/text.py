@@ -25,7 +25,12 @@ _TEXTUTILS_DIR = str(Path(__file__).parent.parent / "custom-providers")
 if _TEXTUTILS_DIR not in sys.path:
     sys.path.insert(0, _TEXTUTILS_DIR)
 
-from textUtils import ALLOWED_EMOJIS, FALLBACK_EMOJI  # noqa: E402
+from textUtils import (  # noqa: E402
+    ALLOWED_EMOJIS,
+    CONTENT_FILTER_REPLACEMENT,
+    FALLBACK_EMOJI,
+    content_filter_match,
+)
 
 try:
     from bridge.metrics import dotty_content_filter_hits_total
@@ -90,39 +95,21 @@ def truncate_sentences(text: str, max_sentences: int = MAX_SENTENCES) -> str:
     return text
 
 
-# Content-filter severity tiers — all tiers return the same kid-safe
-# replacement so no information is leaked about WHY the filter fired. Tier
-# affects logging level and the Prometheus counter label, enabling
-# different alert thresholds:
+# Content-filter severity tiers — the regexes and the kid-safe replacement
+# live in the shared textUtils module (#157: single source of truth, also
+# consumed by the live voice providers). This wrapper layers on the
+# bridge-only side effects: logging level, the Prometheus counter label,
+# and the /ui/safety/recent ring. All tiers return the same replacement so
+# no information is leaked about WHY the filter fired:
 #
 #   redirect — common profanity / slurs             → log.warning
 #   log      — explicit sexual / graphic violence   → log.warning
 #   alert    — hard drugs                           → log.error  (alert on this label)
-_CF_TIER_REDIRECT_RE = re.compile(
-    r"\b(fuck\w*|shit\w*|bitch\w*|bastard|cunt|nigger|nigga|faggot|retard(?:ed)?)\b",
-    re.IGNORECASE,
-)
-_CF_TIER_LOG_RE = re.compile(
-    r"\b(penis|vagina|orgasm|porn\w*|hentai|decapitat\w*|dismember\w*|mutilat\w*)\b",
-    re.IGNORECASE,
-)
-_CF_TIER_ALERT_RE = re.compile(
-    r"\b(cocaine|heroin|methamphetamine|fentanyl|ecstasy)\b",
-    re.IGNORECASE,
-)
-
-CONTENT_FILTER_REPLACEMENT = (
-    f"{FALLBACK_EMOJI} Let's talk about something fun instead! "
-    "What's your favorite animal?"
-)
-
-# Ordered highest-severity first so the most serious match wins when
-# multiple tiers could fire on the same text.
-_CF_TIERS: list[tuple[re.Pattern, str, int]] = [
-    (_CF_TIER_ALERT_RE, "alert", logging.ERROR),
-    (_CF_TIER_LOG_RE, "log", logging.WARNING),
-    (_CF_TIER_REDIRECT_RE, "redirect", logging.WARNING),
-]
+_CF_TIER_LEVELS = {
+    "alert": logging.ERROR,
+    "log": logging.WARNING,
+    "redirect": logging.WARNING,
+}
 
 # #72 — in-memory ring of recent content-filter hits, surfaced at
 # /ui/safety/recent. In-memory ONLY: the ring is lost on restart and is
@@ -148,24 +135,24 @@ def content_filter(text: str) -> str | None:
     letting operators alert on ``tier="alert"`` without noising up
     lower-tier counts.
     """
-    for pattern, tier, level in _CF_TIERS:
-        match = pattern.search(text)
-        if match:
-            log.log(
-                level,
-                "content-filter-hit tier=%s pattern=%r pos=%d len=%d",
-                tier, match.group(), match.start(), len(text),
-            )
-            _cf_recent.append({
-                "ts": time.time(),
-                "tier": tier,
-                "rule": match.group(),
-                "prefix": text[:8],
-            })
-            if dotty_content_filter_hits_total is not None:
-                try:
-                    dotty_content_filter_hits_total.labels(tier=tier).inc()
-                except Exception:
-                    pass
-            return CONTENT_FILTER_REPLACEMENT
-    return None
+    hit = content_filter_match(text)
+    if hit is None:
+        return None
+    tier, match = hit
+    log.log(
+        _CF_TIER_LEVELS.get(tier, logging.WARNING),
+        "content-filter-hit tier=%s pattern=%r pos=%d len=%d",
+        tier, match.group(), match.start(), len(text),
+    )
+    _cf_recent.append({
+        "ts": time.time(),
+        "tier": tier,
+        "rule": match.group(),
+        "prefix": text[:8],
+    })
+    if dotty_content_filter_hits_total is not None:
+        try:
+            dotty_content_filter_hits_total.labels(tier=tier).inc()
+        except Exception:
+            pass
+    return CONTENT_FILTER_REPLACEMENT

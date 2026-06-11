@@ -65,6 +65,16 @@ _tu.ALLOWED_EMOJIS = _ALLOWED  # type: ignore[attr-defined]
 _tu.FALLBACK_EMOJI = _FALLBACK  # type: ignore[attr-defined]
 _tu._SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")  # type: ignore[attr-defined]
 _tu.build_turn_suffix = lambda kid_mode: _SUFFIX  # type: ignore[attr-defined]
+
+
+def _passthrough_filter(chunks, kid_mode, on_hit=None):
+    # The real sentence-buffered filter is exercised by
+    # test_voice_content_filter.py; these tests target _build_messages /
+    # _response_stream directly, so the stub stays transparent.
+    yield from chunks
+
+
+_tu.filter_tts_stream = _passthrough_filter  # type: ignore[attr-defined]
 sys.modules["core.utils.textUtils"] = _tu
 
 # ── Load the module under test by path ───────────────────────────────────────

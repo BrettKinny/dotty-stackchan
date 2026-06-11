@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import re
 from typing import TYPE_CHECKING
@@ -59,6 +61,113 @@ def build_turn_suffix(kid_mode: bool) -> str:
     KID_MODE at process start (their snapshot) and pass it in.
     """
     return _BASE_SUFFIX + (_KID_MODE_SUFFIX if kid_mode else "") + "Begin your reply now."
+
+
+# ── Kid-mode blocked-content filter — pure core (#157) ────────────────────
+# Single source of truth for the blocked-content tiers. bridge/text.py keeps
+# its side-effect wrapper (Prometheus counter, /ui/safety/recent ring,
+# structured logging) on top of this matcher; the live voice providers
+# (pi_voice, openai_compat) wrap their TTS-bound streams in
+# filter_tts_stream(). All tiers substitute the same replacement so nothing
+# is leaked about WHY the filter fired; the tier name only differentiates
+# the callers' logging/metrics:
+#
+#   redirect — common profanity / slurs
+#   log      — explicit sexual / graphic violence
+#   alert    — hard drugs
+#
+# Honest caveat (docs/faq.md): a blocked-words regex on LLM output is a
+# weak, bypassable layer. Prompt steering (build_turn_suffix above) remains
+# the primary defence; this closes the advertised-but-missing output gap,
+# it is not a content-safety guarantee.
+_CF_TIER_REDIRECT_RE = re.compile(
+    r"\b(fuck\w*|shit\w*|bitch\w*|bastard|cunt|nigger|nigga|faggot|retard(?:ed)?)\b",
+    re.IGNORECASE,
+)
+_CF_TIER_LOG_RE = re.compile(
+    r"\b(penis|vagina|orgasm|porn\w*|hentai|decapitat\w*|dismember\w*|mutilat\w*)\b",
+    re.IGNORECASE,
+)
+_CF_TIER_ALERT_RE = re.compile(
+    r"\b(cocaine|heroin|methamphetamine|fentanyl|ecstasy)\b",
+    re.IGNORECASE,
+)
+
+CONTENT_FILTER_REPLACEMENT = (
+    f"{FALLBACK_EMOJI} Let's talk about something fun instead! "
+    "What's your favorite animal?"
+)
+
+# Ordered highest-severity first so the most serious match wins when
+# multiple tiers could fire on the same text.
+_CF_TIERS = [
+    (_CF_TIER_ALERT_RE, "alert"),
+    (_CF_TIER_LOG_RE, "log"),
+    (_CF_TIER_REDIRECT_RE, "redirect"),
+]
+
+
+def content_filter_match(text: str) -> "tuple[str, re.Match] | None":
+    """Pure matcher: return (tier, match) for the highest-severity blocked
+    term in `text`, or None when clean. No logging, no metrics — callers
+    layer their own side effects on top."""
+    for pattern, tier in _CF_TIERS:
+        match = pattern.search(text)
+        if match:
+            return tier, match
+    return None
+
+
+def filter_tts_stream(chunks, kid_mode, on_hit=None):
+    """Wrap a TTS-bound text-chunk stream in the kid-mode content filter.
+
+    Buffers to _SENTENCE_BOUNDARY so no text is emitted before its full
+    sentence has been checked — the tier regexes are single-word patterns,
+    so a blocked term can never straddle a sentence boundary. Clean streams
+    pass through with identical total text, re-chunked at sentence
+    granularity (the TTS layer buffers to sentences anyway, so spoken
+    latency is unchanged).
+
+    On a hit: call on_hit(tier, match) if given, emit
+    CONTENT_FILTER_REPLACEMENT — minus its leading emoji when speech has
+    already gone out, preserving the one-emoji-per-reply contract — and end
+    the turn; the rest of the source stream is dropped.
+
+    kid_mode False → transparent passthrough, zero behaviour change.
+    """
+    if not kid_mode:
+        yield from chunks
+        return
+
+    def _blocked(piece: str, emitted: bool):
+        hit = content_filter_match(piece)
+        if hit is None:
+            return None
+        if on_hit is not None:
+            on_hit(*hit)
+        if emitted:
+            return CONTENT_FILTER_REPLACEMENT[len(FALLBACK_EMOJI):].lstrip()
+        return CONTENT_FILTER_REPLACEMENT
+
+    buf = ""
+    emitted = False
+    for chunk in chunks:
+        buf += chunk or ""
+        last_end = 0
+        for boundary in _SENTENCE_BOUNDARY.finditer(buf):
+            sentence = buf[last_end:boundary.end()]
+            replacement = _blocked(sentence, emitted)
+            if replacement is not None:
+                yield replacement
+                return
+            yield sentence
+            emitted = True
+            last_end = boundary.end()
+        if last_end:
+            buf = buf[last_end:]
+    if buf:
+        replacement = _blocked(buf, emitted)
+        yield replacement if replacement is not None else buf
 
 # Enforced subset (bridge.py ALLOWED_EMOJIS): 😊 😆 😢 😮 🤔 😠 😐 😍 😴
 EMOJI_MAP = {

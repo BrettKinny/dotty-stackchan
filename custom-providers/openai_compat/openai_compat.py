@@ -19,6 +19,7 @@ from core.utils.textUtils import (
     FALLBACK_EMOJI,
     _SENTENCE_BOUNDARY,
     build_turn_suffix,
+    filter_tts_stream,
 )
 
 TAG = __name__
@@ -259,10 +260,27 @@ class LLMProvider(LLMProviderBase):
     # public interface (called by xiaozhi-server)
     # ------------------------------------------------------------------
 
+    def _on_filter_hit(self, tier, match):
+        # Local logging only — the Prometheus counter / safety ring live in
+        # the bridge container, which this provider can't reach.
+        logger.bind(tag=TAG).warning(
+            f"OpenAICompat content-filter hit tier={tier} "
+            f"pattern={match.group()!r} — turn replaced"
+        )
+
     def response(self, session_id, dialogue, **kwargs):
         """Generate a response.  Yields string chunks.
 
         Uses streaming by default.  The interface matches LLMProviderBase.
+        #157: in kid mode the stream is wrapped in the shared blocked-content
+        filter (sentence-buffered, so nothing reaches TTS before its sentence
+        is checked; a hit replaces the rest of the turn). The emoji-prefix
+        enforcement inside _response_stream runs first, so the filter sees —
+        and preserves — the leading-emoji contract.
         """
         messages = self._build_messages(dialogue)
-        yield from self._response_stream(messages)
+        yield from filter_tts_stream(
+            self._response_stream(messages),
+            KID_MODE,
+            on_hit=self._on_filter_hit,
+        )

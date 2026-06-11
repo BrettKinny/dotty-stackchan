@@ -52,15 +52,16 @@ With Piper TTS and the default local model, nothing leaves your LAN. The trade-o
 
 ### Is it safe for kids?
 
-**Kid Mode is ON by default** (`DOTTY_KID_MODE=true`). It applies age-appropriate prompt steering (not an output content filter — see below). You can disable it with `DOTTY_KID_MODE=false` for general-purpose use.
+**Kid Mode is ON by default** (`DOTTY_KID_MODE=true`). It applies age-appropriate prompt steering plus a thin blocked-words filter on spoken output (see the honest caveat below). You can disable it with `DOTTY_KID_MODE=false` for general-purpose use.
 
 What Kid Mode enforces:
 - Per-turn sandwich enforcement forces the LLM to respond in English with an emoji prefix, which limits the scope of unexpected output.
 - The persona prompt (`personas/dotty_voice.md`) defines the robot's personality and boundaries with kid-safe defaults.
 - Content and tone are constrained to be age-appropriate.
+- A blocked-words filter runs on TTS-bound LLM output ([#157](https://github.com/BrettKinny/dotty-stackchan/issues/157)): if a reply matches the blocklist (profanity, explicit content, hard drugs), the turn is replaced with a cheerful redirect before it's spoken. The same blocklist guards the dashboard say/story ingresses.
 
 What Kid Mode does **not** do:
-- Content-filter the LLM's output. If the LLM says something inappropriate, the stack passes it through. (A blocked-words output filter is planned — see [#138](https://github.com/BrettKinny/dotty-stackchan/issues/138).)
+- Guarantee inappropriate output is caught. The output filter is a word-level blocklist — weak and bypassable by phrasing the same idea in clean words. Prompt steering remains the primary defence; the filter is a backstop, not a content-safety guarantee.
 - Prevent a determined child from asking adversarial questions.
 - Guarantee the LLM won't hallucinate inappropriate content (no model can).
 

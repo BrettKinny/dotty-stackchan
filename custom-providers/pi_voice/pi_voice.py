@@ -60,7 +60,10 @@ except ImportError:  # pragma: no cover — only on dev workstation
 # makes it unimportable as a package), so we fall back to loading it
 # by absolute path. Both code paths end up with the same module.
 try:
-    from core.utils.textUtils import build_turn_suffix  # type: ignore
+    from core.utils.textUtils import (  # type: ignore
+        build_turn_suffix,
+        filter_tts_stream,
+    )
 except ImportError:  # pragma: no cover — dev workstation fallback
     import importlib.util as _ilu
     from pathlib import Path as _Path
@@ -71,6 +74,7 @@ except ImportError:  # pragma: no cover — dev workstation fallback
     _tu = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_tu)
     build_turn_suffix = _tu.build_turn_suffix  # type: ignore[attr-defined]
+    filter_tts_stream = _tu.filter_tts_stream  # type: ignore[attr-defined]
 
 
 TAG = __name__
@@ -141,13 +145,29 @@ class LLMProvider(LLMProviderBase):
         self._first_turn = False
 
         try:
-            for chunk in self._client.iter_turn_text(prompt):
+            # #157: kid-mode blocked-content filter on TTS-bound output.
+            # Sentence-buffered — nothing reaches TTS before its sentence is
+            # checked; a hit replaces the rest of the turn. kid_mode off is a
+            # transparent passthrough.
+            for chunk in filter_tts_stream(
+                self._client.iter_turn_text(prompt),
+                self._kid_mode,
+                on_hit=self._on_filter_hit,
+            ):
                 yield chunk
         except PiClientError as exc:
             logger.error("PiVoiceLLM turn failed: %s", exc)
             for line in self._client.recent_stderr()[-5:]:
                 logger.error("  pi.stderr: %s", line)
             yield "(brain offline — try again in a moment)"
+
+    def _on_filter_hit(self, tier: str, match) -> None:
+        # Local logging only — the Prometheus counter / safety ring live in
+        # the bridge container, which this provider can't reach.
+        logger.warning(
+            "PiVoiceLLM content-filter hit tier=%s pattern=%r — turn replaced",
+            tier, match.group(),
+        )
 
     def close(self) -> None:
         """xiaozhi may call this on shutdown — make sure pi cleans up."""
