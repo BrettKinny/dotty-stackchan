@@ -13,6 +13,10 @@ from core.handle.abortHandle import handleAbortMessage
 from core.handle.intentHandler import handle_user_intent
 from core.utils.output_counter import check_device_output_limit
 from core.handle.sendAudioHandle import send_stt_message, SentenceType
+# DOTTY-PATCH: DeviceCommand seam — monotonic MCP request ids + the envelope
+# + per-conn serialized sends, shared with the admin routes in http_server.py
+# (mounted at core/utils/device_command.py).
+from core.utils.device_command import call_tool as _mcp_call_tool
 
 TAG = __name__
 
@@ -268,20 +272,9 @@ def _is_help_request(text: str) -> bool:
 
 async def _send_led_color(conn: "ConnectionHandler", r: int, g: int, b: int) -> None:
     try:
-        msg = json.dumps({
-            "session_id": conn.session_id,
-            "type": "mcp",
-            "payload": {
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "self.robot.set_led_color",
-                    "arguments": {"r": r, "g": g, "b": b},
-                },
-                "id": int(time.time() * 1000) % 0x7FFFFFFF,
-            },
-        })
-        await conn.websocket.send(msg)
+        await _mcp_call_tool(
+            conn, "self.robot.set_led_color", {"r": r, "g": g, "b": b},
+        )
     except Exception:
         pass
     # Phase 4 — kid_mode + smart_mode pips are firmware-owned (StateManager
@@ -306,20 +299,10 @@ async def _send_led_multi(
     so we don't noisily spam.
     """
     try:
-        msg = json.dumps({
-            "session_id": conn.session_id,
-            "type": "mcp",
-            "payload": {
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "self.robot.set_led_multi",
-                    "arguments": {"index": index, "r": r, "g": g, "b": b},
-                },
-                "id": int(time.time() * 1000) % 0x7FFFFFFF,
-            },
-        })
-        await conn.websocket.send(msg)
+        await _mcp_call_tool(
+            conn, "self.robot.set_led_multi",
+            {"index": index, "r": r, "g": g, "b": b},
+        )
     except Exception as exc:
         # The firmware may simply not support set_led_multi yet (old
         # build); log warn-once per connection so we know without
@@ -336,20 +319,10 @@ async def _send_led_multi(
 
 async def _send_head_angles(conn: "ConnectionHandler", yaw: int, pitch: int, speed: int = 150) -> None:
     try:
-        msg = json.dumps({
-            "session_id": conn.session_id,
-            "type": "mcp",
-            "payload": {
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "self.robot.set_head_angles",
-                    "arguments": {"yaw": yaw, "pitch": pitch, "speed": speed},
-                },
-                "id": int(time.time() * 1000) % 0x7FFFFFFF,
-            },
-        })
-        await conn.websocket.send(msg)
+        await _mcp_call_tool(
+            conn, "self.robot.set_head_angles",
+            {"yaw": yaw, "pitch": pitch, "speed": speed},
+        )
     except Exception:
         pass
 
@@ -360,20 +333,7 @@ async def _send_set_state(conn: "ConnectionHandler", state: str) -> None:
     StateManager handles the transition (pip update + idle profile + state_changed
     event back to the bridge)."""
     try:
-        msg = json.dumps({
-            "session_id": conn.session_id,
-            "type": "mcp",
-            "payload": {
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "self.robot.set_state",
-                    "arguments": {"state": state},
-                },
-                "id": int(time.time() * 1000) % 0x7FFFFFFF,
-            },
-        })
-        await conn.websocket.send(msg)
+        await _mcp_call_tool(conn, "self.robot.set_state", {"state": state})
     except Exception as exc:
         try:
             conn.logger.bind(tag=TAG).warning(f"set_state {state} failed: {exc}")
@@ -386,20 +346,9 @@ async def _send_set_toggle(conn: "ConnectionHandler", name: str, enabled: bool) 
     kid_mode (warm pink pip on right ring index 8) and smart_mode (orange pip
     on right ring index 9). Toggles compose freely with state."""
     try:
-        msg = json.dumps({
-            "session_id": conn.session_id,
-            "type": "mcp",
-            "payload": {
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "self.robot.set_toggle",
-                    "arguments": {"name": name, "enabled": enabled},
-                },
-                "id": int(time.time() * 1000) % 0x7FFFFFFF,
-            },
-        })
-        await conn.websocket.send(msg)
+        await _mcp_call_tool(
+            conn, "self.robot.set_toggle", {"name": name, "enabled": enabled},
+        )
     except Exception as exc:
         try:
             conn.logger.bind(tag=TAG).warning(f"set_toggle {name}={enabled} failed: {exc}")
@@ -443,20 +392,7 @@ async def _handle_vision(conn: "ConnectionHandler", text: str) -> str | None:
 
     device_id = conn.headers.get("device-id", "unknown")
 
-    mcp_call = json.dumps({
-        "session_id": conn.session_id,
-        "type": "mcp",
-        "payload": {
-            "jsonrpc": "2.0",
-            "method": "tools/call",
-            "params": {
-                "name": "self.camera.take_photo",
-                "arguments": {"question": text},
-            },
-            "id": int(time.time() * 1000) % 0x7FFFFFFF,
-        },
-    })
-    await conn.websocket.send(mcp_call)
+    await _mcp_call_tool(conn, "self.camera.take_photo", {"question": text})
     conn.logger.bind(tag=TAG).info(f"Vision: sent take_photo MCP call, device={device_id}")
 
     try:
@@ -546,20 +482,10 @@ async def _capture_room_description_async(
         # tasks.md §Layer 4 v1.5 for the full diagnosis.
         body: dict | None = None
         for attempt in range(3):
-            mcp_call = json.dumps({
-                "session_id": conn.session_id,
-                "type": "mcp",
-                "payload": {
-                    "jsonrpc": "2.0",
-                    "method": "tools/call",
-                    "params": {
-                        "name": "self.camera.take_photo",
-                        "arguments": {"question": _ROOM_VIEW_VLM_QUESTION},
-                    },
-                    "id": int(time.time() * 1000) % 0x7FFFFFFF,
-                },
-            })
-            await conn.websocket.send(mcp_call)
+            await _mcp_call_tool(
+                conn, "self.camera.take_photo",
+                {"question": _ROOM_VIEW_VLM_QUESTION},
+            )
             if attempt == 0:
                 conn.logger.bind(tag=TAG).info(
                     f"room_view: capture started device={device_id}"

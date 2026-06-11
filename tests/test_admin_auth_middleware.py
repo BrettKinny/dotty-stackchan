@@ -16,11 +16,24 @@ from unittest.mock import MagicMock
 
 for _n in (
     "config", "config.logger", "core", "core.api", "core.api.ota_handler",
-    "core.api.vision_handler", "core.portal_bridge",
+    "core.api.vision_handler", "core.portal_bridge", "core.utils",
 ):
     sys.modules.setdefault(_n, MagicMock())
 sys.modules["config.logger"].setup_logging = lambda: MagicMock()  # type: ignore[attr-defined]
 sys.modules["core.portal_bridge"].active_connections = {}  # type: ignore[attr-defined]
+
+# The DOTTY DeviceCommand seam is a real, dependency-free module — load it by
+# path and install it at its container import path so http_server.py binds the
+# real id/lock logic instead of a MagicMock attribute.
+_DC_PY = (
+    pathlib.Path(__file__).parent.parent
+    / "custom-providers" / "xiaozhi-patches" / "device_command.py"
+)
+_dc_spec = _ilu.spec_from_file_location("core.utils.device_command", _DC_PY)
+_dc_mod = _ilu.module_from_spec(_dc_spec)  # type: ignore[arg-type]
+_dc_spec.loader.exec_module(_dc_mod)  # type: ignore[union-attr]
+sys.modules["core.utils"].device_command = _dc_mod  # type: ignore[attr-defined]
+sys.modules["core.utils.device_command"] = _dc_mod
 
 _SERVER_PY = (
     pathlib.Path(__file__).parent.parent
