@@ -25,6 +25,7 @@ re-verify claims against the canonical specs rather than trusting our paraphrase
 | Know what mode the robot is in (and what the LEDs mean) | [modes.md](./modes.md) |
 | Find features we aren't using yet | [latent-capabilities.md](./latent-capabilities.md) |
 | Pick an LLM backend | [llm-backends.md](./llm-backends.md) |
+| Run a live-device bench verification session | [bench-runbook.md](./bench-runbook.md) |
 | Jump to an upstream repo or spec | [references.md](./references.md) |
 
 ## File map
@@ -41,6 +42,7 @@ docs/
 ├── modes.md                 ← behavioural mode taxonomy + LED contract + transitions
 ├── latent-capabilities.md   ← upstream features we could wire up (cross-refs ROADMAP.md)
 ├── llm-backends.md          ← side-by-side comparison of LLM backend options
+├── bench-runbook.md         ← ordered live-device bench session plan (epic #122)
 └── references.md            ← canonical URLs, licenses, model cards, spec docs
 ```
 
