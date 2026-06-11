@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
+from household import PersonResolver
 from vision.room_view import (
     ROOM_VIEW_MOODS,
     ROOM_VIEW_SENTINEL,
@@ -16,6 +17,7 @@ from vision.room_view import (
 
 @dataclass
 class _FakePerson:
+    id: str
     display_name: str
     appearance: Optional[str] = None
 
@@ -30,6 +32,14 @@ class _FakeRegistry:
 
     def iter(self):  # noqa: A003 — matches HouseholdRegistry's method
         return tuple(self.people)
+
+    def get(self, person_id: str):  # matches HouseholdRegistry's method
+        if not person_id:
+            return None
+        for p in self.people:
+            if p.id == person_id.lower():
+                return p
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -75,9 +85,9 @@ def test_build_question_substitutes_roster_and_name_choices() -> None:
     reg = _FakeRegistry(
         roster="  Brett: tall, dark hair\n  Hudson: small child, blond",
         people=(
-            _FakePerson("Brett", appearance="tall, dark hair"),
-            _FakePerson("Hudson", appearance="small child, blond"),
-            _FakePerson("Ghost", appearance=""),  # no appearance — excluded
+            _FakePerson("brett", "Brett", appearance="tall, dark hair"),
+            _FakePerson("hudson", "Hudson", appearance="small child, blond"),
+            _FakePerson("ghost", "Ghost", appearance=""),  # no appearance — excluded
         ),
     )
     q = build_room_view_question(reg)
@@ -106,23 +116,34 @@ def test_build_question_handles_render_raising() -> None:
 # ---------------------------------------------------------------------------
 
 
-_ROSTER = {"brett", "hudson"}
+# Roster deliberately includes:
+#   * dad — id != lowercased display name (the audit's silent-miss case)
+#   * maryanne — multi-word display name (the audit's 100%-miss case)
+_RESOLVER = PersonResolver(_FakeRegistry(  # type: ignore[arg-type]
+    roster="(unused)",
+    people=(
+        _FakePerson("brett", "Brett", appearance="tall"),
+        _FakePerson("hudson", "Hudson", appearance="small child"),
+        _FakePerson("dad", "Greg", appearance="grey beard"),
+        _FakePerson("maryanne", "Mary Anne", appearance="curly hair"),
+    ),
+))
 
 
 def test_parse_empty_string_returns_all_none() -> None:
-    assert parse_room_view_response("", _ROSTER) == (None, None, None)
+    assert parse_room_view_response("", _RESOLVER) == (None, None, None)
 
 
 def test_parse_whitespace_only_returns_all_none() -> None:
-    assert parse_room_view_response("   \n  ", _ROSTER) == (None, None, None)
+    assert parse_room_view_response("   \n  ", _RESOLVER) == (None, None, None)
 
 
 def test_parse_no_one_in_view_returns_all_none() -> None:
-    assert parse_room_view_response("no one in view", _ROSTER) == (
+    assert parse_room_view_response("no one in view", _RESOLVER) == (
         None, None, None,
     )
     # Case-insensitive + tolerates surrounding noise
-    assert parse_room_view_response("No one in view.", _ROSTER) == (
+    assert parse_room_view_response("No one in view.", _RESOLVER) == (
         None, None, None,
     )
 
@@ -132,10 +153,37 @@ def test_parse_valid_format_with_roster_match() -> None:
         "DESC: adult with goatee and dark sweater | "
         "NAME: Brett | MOOD: engaged"
     )
-    desc, pid, mood = parse_room_view_response(raw, _ROSTER)
+    desc, pid, mood = parse_room_view_response(raw, _RESOLVER)
     assert desc == "adult with goatee and dark sweater"
     assert pid == "brett"
     assert mood == "engaged"
+
+
+def test_parse_resolves_display_name_to_canonical_id() -> None:
+    # Audit 2026-06-06 (confirmed 3/3): the prompt vocabulary is display
+    # names but validation used ids, so id != display_name was a silent
+    # miss. The VLM says "Greg"; the canonical id is "dad".
+    raw = "DESC: adult with grey beard | NAME: Greg | MOOD: neutral"
+    desc, pid, mood = parse_room_view_response(raw, _RESOLVER)
+    assert desc == "adult with grey beard"
+    assert pid == "dad"
+    assert mood == "neutral"
+
+
+def test_parse_matches_multi_word_display_name() -> None:
+    # Audit 2026-06-06 (confirmed 3/3): the old single-token NAME regex
+    # could never match "Mary Anne".
+    raw = "DESC: woman with curly hair | NAME: Mary Anne | MOOD: excited"
+    desc, pid, mood = parse_room_view_response(raw, _RESOLVER)
+    assert desc == "woman with curly hair"
+    assert pid == "maryanne"
+    assert mood == "excited"
+
+
+def test_parse_name_match_is_case_insensitive() -> None:
+    raw = "DESC: small child | NAME: HUDSON | MOOD: engaged"
+    _, pid, _ = parse_room_view_response(raw, _RESOLVER)
+    assert pid == "hudson"
 
 
 def test_parse_valid_format_with_unknown_name_strips_identity() -> None:
@@ -143,7 +191,7 @@ def test_parse_valid_format_with_unknown_name_strips_identity() -> None:
         "DESC: stranger in a red jacket | "
         "NAME: unknown | MOOD: neutral"
     )
-    desc, pid, mood = parse_room_view_response(raw, _ROSTER)
+    desc, pid, mood = parse_room_view_response(raw, _RESOLVER)
     assert desc == "stranger in a red jacket"
     assert pid is None
     assert mood == "neutral"
@@ -154,7 +202,7 @@ def test_parse_valid_format_with_off_roster_name_strips_identity() -> None:
         "DESC: young woman with curly hair | "
         "NAME: Alice | MOOD: excited"
     )
-    desc, pid, mood = parse_room_view_response(raw, _ROSTER)
+    desc, pid, mood = parse_room_view_response(raw, _RESOLVER)
     assert desc == "young woman with curly hair"
     assert pid is None  # Alice not in roster
     assert mood == "excited"
@@ -162,7 +210,7 @@ def test_parse_valid_format_with_off_roster_name_strips_identity() -> None:
 
 def test_parse_format_mismatch_falls_back_to_description_only() -> None:
     raw = "I see a person sitting at a desk reading a book."
-    desc, pid, mood = parse_room_view_response(raw, _ROSTER)
+    desc, pid, mood = parse_room_view_response(raw, _RESOLVER)
     assert desc == "I see a person sitting at a desk reading a book."
     assert pid is None
     assert mood is None
@@ -170,7 +218,7 @@ def test_parse_format_mismatch_falls_back_to_description_only() -> None:
 
 def test_parse_invalid_mood_drops_mood_keeps_match() -> None:
     raw = "DESC: small child | NAME: Hudson | MOOD: chaotic"
-    desc, pid, mood = parse_room_view_response(raw, _ROSTER)
+    desc, pid, mood = parse_room_view_response(raw, _RESOLVER)
     assert desc == "small child"
     assert pid == "hudson"
     assert mood is None
@@ -179,7 +227,7 @@ def test_parse_invalid_mood_drops_mood_keeps_match() -> None:
 def test_parse_missing_mood_field_still_returns_match() -> None:
     # Older replies / non-conforming models may omit MOOD entirely.
     raw = "DESC: small child | NAME: Hudson"
-    desc, pid, mood = parse_room_view_response(raw, _ROSTER)
+    desc, pid, mood = parse_room_view_response(raw, _RESOLVER)
     assert desc == "small child"
     assert pid == "hudson"
     assert mood is None
@@ -191,7 +239,7 @@ def test_parse_trailing_punctuation_tolerated() -> None:
     # before ` | MOOD: ...`) is NOT supported; the comment in bridge.py
     # was wishful — keep the test honest.
     raw = "DESC: tall adult | NAME: Brett."
-    desc, pid, mood = parse_room_view_response(raw, _ROSTER)
+    desc, pid, mood = parse_room_view_response(raw, _RESOLVER)
     assert desc == "tall adult"
     assert pid == "brett"
     assert mood is None

@@ -23,6 +23,11 @@ class Event(TypedDict):
 
 
 _EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")
+
+
+def _fold_person_tag(value: str) -> str:
+    """Case/whitespace-fold a person tag for comparison."""
+    return " ".join((value or "").lower().split())
 _ISO_TS_RE = re.compile(
     r"\b\d{4}-\d{2}-\d{2}"
     r"(?:T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?\b"
@@ -54,7 +59,7 @@ def bucket_by_person(events: list[Event]) -> dict[str, list[Event]]:
 def summarize_for_prompt(
     events: list[Event],
     *,
-    person: str | None = None,
+    person: str | set[str] | None = None,
     include_household: bool = True,
     household_bucket: str = "_household",
 ) -> list[str]:
@@ -63,11 +68,25 @@ def summarize_for_prompt(
     Strips ISO timestamps, emails, calendar IDs. Emits only short
     `HH:MM summary` / `all-day summary` strings. Every prompt /
     response that surfaces calendar data MUST go through here.
+
+    `person` filters to one person's events. It accepts either a single
+    name or a set of equivalent tags (id, display name, calendar
+    prefix — see PersonResolver.calendar_tags). Matching is case- and
+    whitespace-insensitive: the event's person comes from a free-typed
+    `[Name]` title prefix, so `[Hudson]` must match identity `hudson`
+    (audit 2026-06-06: the old exact compare dropped a person's own
+    events from their greeting).
     """
+    if person is None:
+        wanted: set[str] | None = None
+    elif isinstance(person, str):
+        wanted = {_fold_person_tag(person)}
+    else:
+        wanted = {_fold_person_tag(p) for p in person}
     out: list[str] = []
     for ev in events:
-        if person is not None:
-            if ev["person"] != person and not (
+        if wanted is not None:
+            if _fold_person_tag(ev["person"]) not in wanted and not (
                 include_household and ev["person"] == household_bucket
             ):
                 continue
@@ -77,7 +96,7 @@ def summarize_for_prompt(
         clean_summary = " ".join(clean_summary.split())
         if not clean_summary:
             continue
-        if ev["person"] != household_bucket and person is None:
+        if ev["person"] != household_bucket and wanted is None:
             tag = f"[{ev['person']}] "
         else:
             tag = ""

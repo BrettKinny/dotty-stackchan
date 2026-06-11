@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 from zoneinfo import ZoneInfo
 
+from household import PersonResolver
 from perception import PerceptionEvent, PerceptionState
 
 log = logging.getLogger("dotty-behaviour.greeter")
@@ -80,6 +81,7 @@ class ProactiveGreeter:
         self._tts = tts_pusher
         self._kid_mode = kid_mode_provider
         self._household = household_registry
+        self._resolver = PersonResolver(household_registry)
         self._clock = clock
         tz_name = os.environ.get("TZ", "Australia/Brisbane")
         try:
@@ -255,8 +257,16 @@ class ProactiveGreeter:
         events_summary: list[str] = []
         try:
             events = self._calendar.get_events()
+            # `identity` is a canonical person id; calendar events carry
+            # the free-typed `[Name]` title prefix. The resolver expands
+            # the id to every tag that means this person (id, display
+            # name, configured calendar_prefix) so their own events
+            # survive the case/name-space gap (audit 2026-06-06).
+            person_tags = self._resolver.calendar_tags(identity)
             events_summary = self._calendar.summarize_for_prompt(
-                events, person=identity, include_household=True,
+                events,
+                person=person_tags or identity,
+                include_household=True,
             ) or []
         except Exception:
             log.warning(
@@ -326,16 +336,9 @@ class ProactiveGreeter:
         )
 
     def _lookup_person(self, identity: str) -> Any:
-        if not self._household or not identity or identity == "unknown":
-            return None
-        try:
-            return self._household.get(identity)
-        except Exception:
-            log.debug(
-                "greeter: household lookup failed for %s",
-                identity, exc_info=True,
-            )
-            return None
+        # PersonResolver owns the id lookup (case fold, unknown/empty
+        # handling, exception safety).
+        return self._resolver.resolve(identity)
 
     @staticmethod
     def _post_process(text: str) -> str:

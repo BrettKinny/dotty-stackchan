@@ -77,6 +77,25 @@ people:
         assert r.get_by_calendar_prefix("nobody") is None
 
 
+def test_lookup_by_calendar_prefix_bracketless_yaml() -> None:
+    # Audit 2026-06-06: `calendar_prefix: Brett` (no brackets) was stored
+    # bare but looked up bracketed, so it never matched. Both YAML forms
+    # must behave identically now.
+    with tempfile.TemporaryDirectory() as td:
+        path = _write_yaml(
+            Path(td),
+            """
+people:
+  brett:
+    display_name: Brett
+    calendar_prefix: Brett
+""",
+        )
+        r = HouseholdRegistry(path=path)
+        assert r.get_by_calendar_prefix("Brett").id == "brett"  # type: ignore[union-attr]
+        assert r.get_by_calendar_prefix("[Brett]").id == "brett"  # type: ignore[union-attr]
+
+
 def test_match_self_id_strips_leading_punct() -> None:
     with tempfile.TemporaryDirectory() as td:
         path = _write_yaml(

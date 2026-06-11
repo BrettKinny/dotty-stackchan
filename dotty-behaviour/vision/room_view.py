@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Iterable, Optional, Protocol
+from typing import Any, Iterable, Optional, Protocol
 
 log = logging.getLogger("dotty-behaviour.vision.room_view")
 
@@ -69,9 +69,12 @@ ROOM_VIEW_NO_PERSON = "no one in view"
 
 # Parser regex. Anchored at start, allows whitespace flexibility, and
 # tolerates trailing punctuation around the name (e.g. `NAME: Hudson.`).
+# The NAME group permits internal spaces/apostrophes — the prompt offers
+# display names, and "Mary Anne" must parse (audit 2026-06-06: the old
+# single-token pattern made multi-word members a 100% silent miss).
 _ROOM_VIEW_RESP_RE = re.compile(
     r"^\s*DESC:\s*(?P<desc>.+?)\s*"
-    r"\|\s*NAME:\s*(?P<name>[A-Za-z_][A-Za-z0-9_-]*)\s*"
+    r"\|\s*NAME:\s*(?P<name>[A-Za-z_][A-Za-z0-9_' -]*?)\s*"
     # Accept ANY single-word MOOD value here so an out-of-vocab reply
     # ("chaotic") still parses the desc + name cleanly — the parser
     # validates the vocab and drops invalid moods to None.
@@ -93,6 +96,13 @@ class _RegistryLike(Protocol):
     def render_roster_for_vlm(self, *, max_line_chars: int = ...) -> str: ...
 
     def iter(self) -> Iterable: ...  # noqa: A003 — matches registry method
+
+
+class _NameResolverLike(Protocol):
+    """Structural shape we need from household.PersonResolver — the one
+    method that maps a VLM NAME token back to a Person (or None)."""
+
+    def resolve_vlm_name(self, name: str) -> Optional[Any]: ...
 
 
 def build_room_view_question(
@@ -126,15 +136,23 @@ def build_room_view_question(
 
 def parse_room_view_response(
     raw: str,
-    roster_ids: set[str],
+    resolver: _NameResolverLike,
 ) -> tuple[Optional[str], Optional[str], Optional[str]]:
     """Parse the VLM's room_view reply into `(description, person_id, mood)`.
+
+    The returned person_id is CANONICAL (`Person.id`) — the NAME token
+    the VLM echoes back is a *display name* from the prompt vocabulary,
+    and `resolver.resolve_vlm_name()` owns the mapping back (case fold,
+    multi-word names, id-vs-display-name). The old set-membership check
+    compared display names against ids, so any member whose id differed
+    from their lowercased display name was a silent miss (audit
+    2026-06-06, confirmed 3/3).
 
     Behaviour:
       * Empty input  → (None, None, None)
       * "no one in view" sentinel → (None, None, None)
-      * Format match + name in roster → (desc, person_id, mood_or_None)
-      * Format match + name == "unknown" or off-roster → (desc, None, mood_or_None)
+      * Format match + name resolves → (desc, person_id, mood_or_None)
+      * Format match + name == "unknown" or unresolvable → (desc, None, mood_or_None)
       * Format mismatch → (raw_stripped, None, None) — graceful degrade
         to v1 behaviour so we never lose the description signal even
         when the model deviates from the requested format.
@@ -157,11 +175,18 @@ def parse_room_view_response(
         # v1 path so a botched format never costs us the description.
         return cleaned, None, None
     desc = m.group("desc").strip()
-    name = m.group("name").strip().lower()
+    name = m.group("name").strip()
     raw_mood = (m.group("mood") or "").strip().lower()
     mood = raw_mood if raw_mood in ROOM_VIEW_MOODS else None
     if not desc:
         desc = None
-    if name == "unknown" or name not in roster_ids:
+    if name.lower() == "unknown":
         return desc, None, mood
-    return desc, name, mood
+    try:
+        person = resolver.resolve_vlm_name(name)
+    except Exception:
+        log.exception("room_view: name resolution raised for %r", name)
+        person = None
+    if person is None:
+        return desc, None, mood
+    return desc, person.id, mood

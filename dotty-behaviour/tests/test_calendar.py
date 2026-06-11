@@ -99,6 +99,29 @@ def test_summarize_for_prompt_includes_household_for_person() -> None:
     assert any("brett thing" in line for line in out)
 
 
+def test_summarize_for_prompt_person_match_is_case_insensitive() -> None:
+    # Audit 2026-06-06: the event person comes from a free-typed
+    # `[Hudson]` title prefix while identities are lowercase ids — the
+    # old exact compare dropped a person's own events.
+    events = [_event(person="Hudson", summary="library day")]
+    out = summarize_for_prompt(events, person="hudson")
+    assert any("library day" in line for line in out)
+
+
+def test_summarize_for_prompt_accepts_tag_set() -> None:
+    # PersonResolver.calendar_tags hands over a set of equivalent tags
+    # (id, display name, calendar prefix) — any of them must match.
+    events = [
+        _event(person="Mum", summary="yoga"),
+        _event(person="hudson", summary="hudson thing"),
+    ]
+    out = summarize_for_prompt(
+        events, person={"maryanne", "mary anne", "mum"},
+    )
+    assert any("yoga" in line for line in out)
+    assert all("hudson thing" not in line for line in out)
+
+
 def test_summarize_for_prompt_skips_household_when_excluded() -> None:
     events = [
         _event(person="brett", summary="brett thing"),

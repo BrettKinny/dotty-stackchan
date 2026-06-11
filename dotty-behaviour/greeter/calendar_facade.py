@@ -32,7 +32,7 @@ class CalendarFacade:
         self,
         events: list[Any],
         *,
-        person: str | None = None,
+        person: str | set[str] | None = None,
         include_household: bool = True,
     ) -> list[str]:
         return summarize_for_prompt(

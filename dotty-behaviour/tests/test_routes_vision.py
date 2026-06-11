@@ -188,13 +188,19 @@ def test_unregister_vision_waiter_after_signal_is_idempotent() -> None:
 
 @dataclass
 class _FakePerson:
+    id: str
     display_name: str
     appearance: str = ""
 
 
 @dataclass
 class _FakeHousehold:
-    """Minimal HouseholdRegistry stand-in for room_view tests."""
+    """Minimal HouseholdRegistry stand-in for room_view tests.
+
+    Carries real `id` fields distinct from display names — the audit
+    found the previous fake derived ids as `display_name.lower()`,
+    which masked the id-vs-display-name parsing bug in production.
+    """
 
     people: list[_FakePerson] = field(default_factory=list)
 
@@ -207,10 +213,16 @@ class _FakeHousehold:
     def iter(self):  # noqa: A003 — matches HouseholdRegistry method
         return tuple(self.people)
 
+    def get(self, person_id: str):  # matches HouseholdRegistry method
+        if not person_id:
+            return None
+        for p in self.people:
+            if p.id == person_id.lower():
+                return p
+        return None
+
     def roster_ids_with_appearance(self) -> set[str]:
-        return {
-            p.display_name.lower() for p in self.people if p.appearance
-        }
+        return {p.id for p in self.people if p.appearance}
 
 
 def _override_household(client: TestClient, fake: _FakeHousehold) -> None:
@@ -230,8 +242,8 @@ def test_room_view_sentinel_matches_roster_and_broadcasts_face_recognized() -> N
         )
         _override_vlm(client, fake_vlm)
         _override_household(client, _FakeHousehold(people=[
-            _FakePerson("Brett", appearance="tall, dark hair, goatee"),
-            _FakePerson("Hudson", appearance="small child, blond"),
+            _FakePerson("brett", "Brett", appearance="tall, dark hair, goatee"),
+            _FakePerson("hudson", "Hudson", appearance="small child, blond"),
         ]))
 
         state = client.app.state.perception
@@ -293,7 +305,7 @@ def test_room_view_no_match_does_not_broadcast() -> None:
         )
         _override_vlm(client, fake_vlm)
         _override_household(client, _FakeHousehold(people=[
-            _FakePerson("Brett", appearance="tall, dark hair"),
+            _FakePerson("brett", "Brett", appearance="tall, dark hair"),
         ]))
 
         state = client.app.state.perception
@@ -330,7 +342,7 @@ def test_room_view_cooldown_blocks_second_call() -> None:
         )
         _override_vlm(client, fake_vlm)
         _override_household(client, _FakeHousehold(people=[
-            _FakePerson("Brett", appearance="tall, dark hair"),
+            _FakePerson("brett", "Brett", appearance="tall, dark hair"),
         ]))
 
         state = client.app.state.perception

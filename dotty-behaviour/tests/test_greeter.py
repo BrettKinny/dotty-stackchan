@@ -122,6 +122,54 @@ people:
     asyncio.run(go())
 
 
+def test_greeting_prompt_includes_own_calendar_events_despite_case() -> None:
+    # Audit 2026-06-06 (confirmed 2/3): identity is a lowercase person id
+    # ("hudson") but the calendar event's person tag comes from the
+    # `[Hudson]` title prefix uncased — the old exact compare dropped the
+    # person's own events from their greeting prompt.
+    async def go() -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tdp = Path(td)
+            household = _household_with(
+                tdp,
+                """
+people:
+  hudson:
+    display_name: Hudson
+""",
+            )
+            cache = CalendarCache()
+            cache.events = [
+                Event(
+                    person="Hudson", time="10:00", summary="library day",
+                    start_iso="2026-06-11T10:00:00", calendar_id="cal",
+                )
+            ]
+            llm, llm_calls = _llm_factory("Morning Hudson, library day!")
+            tts = _RecordingTTS()
+            g, state = _make(
+                tdp, llm=llm, tts=tts, household=household, cache=cache,
+            )
+
+            async def body() -> None:
+                state.broadcast(
+                    PerceptionEvent(
+                        device_id="dev-1",
+                        name="face_recognized",
+                        data={"identity": "hudson"},
+                        ts=time.time(),
+                    )
+                )
+                await let_consumer_settle()
+                await asyncio.sleep(0.02)
+                assert len(llm_calls) == 1
+                assert "library day" in llm_calls[0]
+
+            await _drive(g, body)
+
+    asyncio.run(go())
+
+
 def test_unknown_face_skipped_by_default() -> None:
     async def go() -> None:
         with tempfile.TemporaryDirectory() as td:

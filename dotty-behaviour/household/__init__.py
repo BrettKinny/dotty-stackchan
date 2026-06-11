@@ -10,10 +10,12 @@ from .registry import (
     HouseholdRegistry,
     Person,
 )
+from .resolver import PersonResolver
 
 __all__ = [
     "DEFAULT_HOUSEHOLD_PATH",
     "DEFAULT_PERSON_FALLBACK",
     "HouseholdRegistry",
     "Person",
+    "PersonResolver",
 ]

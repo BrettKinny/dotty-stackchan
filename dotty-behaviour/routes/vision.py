@@ -29,7 +29,7 @@ from fastapi.responses import JSONResponse, Response
 
 import config
 from dispatch import VLMClient
-from household import HouseholdRegistry
+from household import HouseholdRegistry, PersonResolver
 from perception import PerceptionEvent, PerceptionState
 from vision.room_view import (
     ROOM_VIEW_NO_PERSON,
@@ -188,18 +188,17 @@ async def vision_explain(
         state.state.setdefault(device_id, {})["last_room_view_capture_t"] = (
             now_wall
         )
-        roster_ids = (
-            household.roster_ids_with_appearance()
-            if household is not None else set()
-        )
         raw = await vlm.describe_image(
             b64_image,
             room_view_question,
             system_prompt=ROOM_VIEW_SYSTEM_PROMPT,
             timeout_s=config.VISION_TIMEOUT_SEC,
         )
+        # The VLM echoes back a *display name* from the prompt; the
+        # resolver maps it to the canonical Person.id that everything
+        # downstream (bus identity, registry.get, greeters) keys on.
         parsed_desc, room_match_person_id, parsed_mood = (
-            parse_room_view_response(raw, roster_ids)
+            parse_room_view_response(raw, PersonResolver(household))
         )
         description = parsed_desc or ROOM_VIEW_NO_PERSON
         effective_question = room_view_question

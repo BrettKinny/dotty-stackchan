@@ -189,13 +189,13 @@ class HouseholdRegistry:
 
     def get_by_calendar_prefix(self, prefix: str) -> Optional[Person]:
         """Look up a person by their `[Name]` calendar prefix.
-        Case-insensitive; brackets optional."""
+        Case-insensitive; brackets optional — in the query AND in the
+        YAML (`calendar_prefix: Brett` and `calendar_prefix: "[Brett]"`
+        both work; the old code only matched the bracketed form)."""
         self._reload_if_changed()
-        if not prefix:
+        key = _normalise_calendar_prefix(prefix)
+        if not key:
             return None
-        key = prefix.strip().lower()
-        if not key.startswith("["):
-            key = f"[{key}]"
         person_id = self._by_prefix.get(key)
         return self._people.get(person_id) if person_id else None
 
@@ -291,7 +291,9 @@ class HouseholdRegistry:
                 continue
             people[person.id] = person
             if person.calendar_prefix:
-                by_prefix[person.calendar_prefix.strip().lower()] = person.id
+                key = _normalise_calendar_prefix(person.calendar_prefix)
+                if key:
+                    by_prefix[key] = person.id
             for phrase in person.self_id_phrases:
                 norm = phrase.strip().lower()
                 if norm:
@@ -377,6 +379,16 @@ class HouseholdRegistry:
             calendar_prefix=_opt_str(entry.get("calendar_prefix")),
             voice_print_id=_opt_str(entry.get("voice_print_id")),
         )
+
+
+def _normalise_calendar_prefix(value: str) -> str:
+    """Canonical form for calendar-prefix keys: lowercase, trimmed,
+    brackets stripped. Used for both YAML storage and lookups so the
+    two can never disagree on bracket handling."""
+    key = (value or "").strip().lower()
+    if key.startswith("[") and key.endswith("]"):
+        key = key[1:-1].strip()
+    return key
 
 
 def _opt_str(v: Any) -> Optional[str]:
