@@ -7,6 +7,10 @@ from core.api.vision_handler import VisionHandler
 # and consumed by the /xiaozhi/admin/inject-text route below. Lets the
 # Dotty admin dashboard fire `startToChat` against an active device WS.
 from core.portal_bridge import active_connections as _dotty_active_connections
+# DOTTY-PATCH: DeviceCommand seam — monotonic MCP request ids + the
+# envelope + per-conn serialized sends live in one module shared with
+# receiveAudioHandle.py (mounted at core/utils/device_command.py).
+from core.utils import device_command as _dotty_device_command
 
 TAG = __name__
 
@@ -88,6 +92,27 @@ async def _dotty_admin_auth_middleware(request, handler):
     return await handler(request)
 
 
+# DOTTY-PATCH: shared conn resolution for every admin route. Named device
+# first, else the first available connection; (None, 503-response) when no
+# device is connected. Was copy-pasted into all eight handlers.
+def _dotty_resolve_conn(device_id: str):
+    if device_id:
+        conn = _dotty_active_connections.get(device_id)
+    else:
+        conn = next(iter(_dotty_active_connections.values()), None)
+    if conn is None:
+        return None, web.json_response(
+            {"error": "no device connected",
+             "known": list(_dotty_active_connections)},
+            status=503,
+        )
+    return conn, None
+
+
+def _dotty_conn_device_id(conn, fallback: str = "") -> str:
+    return (getattr(conn, "headers", {}) or {}).get("device-id", "") or fallback
+
+
 class SimpleHttpServer:
     def __init__(self, config: dict):
         self.config = config
@@ -114,21 +139,15 @@ class SimpleHttpServer:
         device_id = data.get("device_id", "") or ""
         if not text:
             return web.json_response({"error": "text required"}, status=400)
-        if device_id:
-            conn = _dotty_active_connections.get(device_id)
-        else:
-            conn = next(iter(_dotty_active_connections.values()), None)
-        if conn is None:
-            return web.json_response(
-                {"error": "no device connected", "known": list(_dotty_active_connections)},
-                status=503,
-            )
+        conn, err = _dotty_resolve_conn(device_id)
+        if err is not None:
+            return err
         # Lazy import to avoid pulling the chat pipeline at server startup.
         from core.handle.receiveAudioHandle import startToChat
         _spawn(startToChat(conn, text), name="inject_text_chat")
         return web.json_response({
             "ok": True,
-            "device_id": getattr(conn, "headers", {}).get("device-id", "") or device_id,
+            "device_id": _dotty_conn_device_id(conn, device_id),
         })
 
     async def _dotty_list_devices(self, request: "web.Request") -> "web.Response":
@@ -146,21 +165,14 @@ class SimpleHttpServer:
         except Exception:
             data = {}
         device_id = (data.get("device_id") or "").strip() if isinstance(data, dict) else ""
-        if device_id:
-            conn = _dotty_active_connections.get(device_id)
-        else:
-            conn = next(iter(_dotty_active_connections.values()), None)
-        if conn is None:
-            return web.json_response(
-                {"error": "no device connected",
-                 "known": list(_dotty_active_connections)},
-                status=503,
-            )
+        conn, err = _dotty_resolve_conn(device_id)
+        if err is not None:
+            return err
         from core.handle.abortHandle import handleAbortMessage
         _spawn(handleAbortMessage(conn), name="inject_abort")
         return web.json_response({
             "ok": True,
-            "device_id": (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id,
+            "device_id": _dotty_conn_device_id(conn, device_id),
         })
 
     async def _dotty_set_head_angles(self, request: "web.Request") -> "web.Response":
@@ -183,35 +195,19 @@ class SimpleHttpServer:
             speed = int(data.get("speed", 250))
         except (TypeError, ValueError):
             return web.json_response({"error": "yaw/pitch/speed must be ints"}, status=400)
-        if device_id:
-            conn = _dotty_active_connections.get(device_id)
-        else:
-            conn = next(iter(_dotty_active_connections.values()), None)
-        if conn is None:
-            return web.json_response(
-                {"error": "no device connected",
-                 "known": list(_dotty_active_connections)},
-                status=503,
-            )
-        import json
-        import time
-        msg = json.dumps({
-            "session_id": getattr(conn, "session_id", ""),
-            "type": "mcp",
-            "payload": {
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "self.robot.set_head_angles",
-                    "arguments": {"yaw": yaw, "pitch": pitch, "speed": speed},
-                },
-                "id": int(time.time() * 1000) % 0x7FFFFFFF,
-            },
-        })
-        _spawn(conn.websocket.send(msg), name="set_head_angles_send")
+        conn, err = _dotty_resolve_conn(device_id)
+        if err is not None:
+            return err
+        _spawn(
+            _dotty_device_command.call_tool(
+                conn, "self.robot.set_head_angles",
+                {"yaw": yaw, "pitch": pitch, "speed": speed},
+            ),
+            name="set_head_angles_send",
+        )
         return web.json_response({
             "ok": True,
-            "device_id": (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id,
+            "device_id": _dotty_conn_device_id(conn, device_id),
             "yaw": yaw, "pitch": pitch, "speed": speed,
         })
 
@@ -231,35 +227,18 @@ class SimpleHttpServer:
         state = (data.get("state") or "").strip()
         if state not in ("idle", "talk", "story_time", "security", "sleep", "dance"):
             return web.json_response({"error": f"unknown state: {state!r}"}, status=400)
-        if device_id:
-            conn = _dotty_active_connections.get(device_id)
-        else:
-            conn = next(iter(_dotty_active_connections.values()), None)
-        if conn is None:
-            return web.json_response(
-                {"error": "no device connected",
-                 "known": list(_dotty_active_connections)},
-                status=503,
-            )
-        import json
-        import time
-        msg = json.dumps({
-            "session_id": getattr(conn, "session_id", ""),
-            "type": "mcp",
-            "payload": {
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "self.robot.set_state",
-                    "arguments": {"state": state},
-                },
-                "id": int(time.time() * 1000) % 0x7FFFFFFF,
-            },
-        })
-        _spawn(conn.websocket.send(msg), name="set_state_send")
+        conn, err = _dotty_resolve_conn(device_id)
+        if err is not None:
+            return err
+        _spawn(
+            _dotty_device_command.call_tool(
+                conn, "self.robot.set_state", {"state": state},
+            ),
+            name="set_state_send",
+        )
         return web.json_response({
             "ok": True,
-            "device_id": (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id,
+            "device_id": _dotty_conn_device_id(conn, device_id),
             "state": state,
         })
 
@@ -279,35 +258,18 @@ class SimpleHttpServer:
         if name not in ("kid_mode", "smart_mode"):
             return web.json_response({"error": f"unknown toggle: {name!r}"}, status=400)
         enabled = bool(data.get("enabled"))
-        if device_id:
-            conn = _dotty_active_connections.get(device_id)
-        else:
-            conn = next(iter(_dotty_active_connections.values()), None)
-        if conn is None:
-            return web.json_response(
-                {"error": "no device connected",
-                 "known": list(_dotty_active_connections)},
-                status=503,
-            )
-        import json
-        import time
-        msg = json.dumps({
-            "session_id": getattr(conn, "session_id", ""),
-            "type": "mcp",
-            "payload": {
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "self.robot.set_toggle",
-                    "arguments": {"name": name, "enabled": enabled},
-                },
-                "id": int(time.time() * 1000) % 0x7FFFFFFF,
-            },
-        })
-        _spawn(conn.websocket.send(msg), name="set_toggle_send")
+        conn, err = _dotty_resolve_conn(device_id)
+        if err is not None:
+            return err
+        _spawn(
+            _dotty_device_command.call_tool(
+                conn, "self.robot.set_toggle", {"name": name, "enabled": enabled},
+            ),
+            name="set_toggle_send",
+        )
         return web.json_response({
             "ok": True,
-            "device_id": (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id,
+            "device_id": _dotty_conn_device_id(conn, device_id),
             "name": name, "enabled": enabled,
         })
 
@@ -325,35 +287,18 @@ class SimpleHttpServer:
         except Exception:
             data = {}
         device_id = (data.get("device_id") or "").strip()
-        if device_id:
-            conn = _dotty_active_connections.get(device_id)
-        else:
-            conn = next(iter(_dotty_active_connections.values()), None)
-        if conn is None:
-            return web.json_response(
-                {"error": "no device connected",
-                 "known": list(_dotty_active_connections)},
-                status=503,
-            )
-        import json
-        import time
-        msg = json.dumps({
-            "session_id": getattr(conn, "session_id", ""),
-            "type": "mcp",
-            "payload": {
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "self.robot.set_face_identified",
-                    "arguments": {},
-                },
-                "id": int(time.time() * 1000) % 0x7FFFFFFF,
-            },
-        })
-        _spawn(conn.websocket.send(msg), name="set_face_identified_send")
+        conn, err = _dotty_resolve_conn(device_id)
+        if err is not None:
+            return err
+        _spawn(
+            _dotty_device_command.call_tool(
+                conn, "self.robot.set_face_identified", {},
+            ),
+            name="set_face_identified_send",
+        )
         return web.json_response({
             "ok": True,
-            "device_id": (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id,
+            "device_id": _dotty_conn_device_id(conn, device_id),
         })
 
     async def _dotty_take_photo(self, request: "web.Request") -> "web.Response":
@@ -375,35 +320,18 @@ class SimpleHttpServer:
         question = (data.get("question") or "").strip()
         if not question:
             return web.json_response({"error": "question required"}, status=400)
-        if device_id:
-            conn = _dotty_active_connections.get(device_id)
-        else:
-            conn = next(iter(_dotty_active_connections.values()), None)
-        if conn is None:
-            return web.json_response(
-                {"error": "no device connected",
-                 "known": list(_dotty_active_connections)},
-                status=503,
-            )
-        import json
-        import time
-        msg = json.dumps({
-            "session_id": getattr(conn, "session_id", ""),
-            "type": "mcp",
-            "payload": {
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "self.camera.take_photo",
-                    "arguments": {"question": question},
-                },
-                "id": int(time.time() * 1000) % 0x7FFFFFFF,
-            },
-        })
-        _spawn(conn.websocket.send(msg), name="take_photo_send")
+        conn, err = _dotty_resolve_conn(device_id)
+        if err is not None:
+            return err
+        _spawn(
+            _dotty_device_command.call_tool(
+                conn, "self.camera.take_photo", {"question": question},
+            ),
+            name="take_photo_send",
+        )
         return web.json_response({
             "ok": True,
-            "device_id": (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id,
+            "device_id": _dotty_conn_device_id(conn, device_id),
             "question": question,
         })
 
@@ -455,17 +383,10 @@ class SimpleHttpServer:
             return web.json_response(
                 {"error": f"asset not found: {asset_path}"}, status=404
             )
-        if device_id:
-            conn = _dotty_active_connections.get(device_id)
-        else:
-            conn = next(iter(_dotty_active_connections.values()), None)
-        if conn is None:
-            return web.json_response(
-                {"error": "no device connected",
-                 "known": list(_dotty_active_connections)},
-                status=503,
-            )
-        resolved_id = (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id
+        conn, err = _dotty_resolve_conn(device_id)
+        if err is not None:
+            return err
+        resolved_id = _dotty_conn_device_id(conn, device_id)
 
         # DOTTY-PATCH: don't clobber a live chat turn. play-asset is timer-driven
         # on the first available device, so a purr/song landing mid-conversation
@@ -539,8 +460,12 @@ class SimpleHttpServer:
             conn.client_abort = False
             conn.client_is_speaking = True
             sent = 0
+            # DOTTY-PATCH: frame sends routed through the DeviceCommand
+            # per-conn send lock so a concurrent admin MCP call (e.g. a
+            # sound-turner head-turn) can't interleave mid-frame.
+            _send = _dotty_device_command.send_serialized
             try:
-                await conn.websocket.send(_json.dumps({
+                await _send(conn, _json.dumps({
                     "type": "tts",
                     "state": "sentence_start",
                     "text": "",
@@ -552,7 +477,7 @@ class SimpleHttpServer:
                             f"play-asset aborted after {sent}/{len(pkts)} packets"
                         )
                         break
-                    await conn.websocket.send(pkt)
+                    await _send(conn, pkt)
                     sent += 1
                     await asyncio.sleep(0.06)
             except Exception as exc:
@@ -560,7 +485,7 @@ class SimpleHttpServer:
             finally:
                 conn.client_is_speaking = False
                 try:
-                    await conn.websocket.send(_json.dumps({
+                    await _send(conn, _json.dumps({
                         "type": "tts",
                         "state": "stop",
                         "session_id": conn.session_id,
@@ -604,21 +529,14 @@ class SimpleHttpServer:
         device_id = (data.get("device_id") or "").strip()
         if not text:
             return web.json_response({"error": "text required"}, status=400)
-        if device_id:
-            conn = _dotty_active_connections.get(device_id)
-        else:
-            conn = next(iter(_dotty_active_connections.values()), None)
-        if conn is None:
-            return web.json_response(
-                {"error": "no device connected",
-                 "known": list(_dotty_active_connections)},
-                status=503,
-            )
+        conn, err = _dotty_resolve_conn(device_id)
+        if err is not None:
+            return err
         if not getattr(conn, "tts", None):
             return web.json_response(
                 {"error": "device has no tts provider"}, status=503,
             )
-        resolved_id = (getattr(conn, "headers", {}) or {}).get("device-id", "") or device_id
+        resolved_id = _dotty_conn_device_id(conn, device_id)
 
         # Lazy imports — keep module load cheap and the dependency on
         # xiaozhi-server's TTS DTO module local to this handler.

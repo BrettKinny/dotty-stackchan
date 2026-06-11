@@ -199,3 +199,17 @@ For hardware specs, protocol details, model internals, latent capabilities, and 
 - xiaozhi-esp32 firmware (upstream): https://github.com/78/xiaozhi-esp32
 - StackChan (hardware + firmware patches): https://github.com/m5stack/StackChan
 - Emotion protocol: https://xiaozhi.dev/en/docs/development/emotion/
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues on `BrettKinny/dotty-stackchan` (the `origin` remote), managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical triage roles use their default label strings (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), orthogonal to the existing `status:*` / `area:*` labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.

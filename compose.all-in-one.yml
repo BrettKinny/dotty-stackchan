@@ -102,6 +102,9 @@ services:
       - ./receiveAudioHandle.py:/opt/xiaozhi-esp32-server/core/handle/receiveAudioHandle.py:ro
       - ./dances.py:/opt/xiaozhi-esp32-server/core/handle/dances.py:ro
       - ./custom-providers/textUtils.py:/opt/xiaozhi-esp32-server/core/utils/textUtils.py:ro
+      # DOTTY DeviceCommand seam: MCP request ids + envelope + per-conn
+      # serialized sends, shared by http_server.py + receiveAudioHandle.py
+      - ./custom-providers/xiaozhi-patches/device_command.py:/opt/xiaozhi-esp32-server/core/utils/device_command.py:ro
       - ./songs:/opt/xiaozhi-esp32-server/config/assets/songs:ro
       # DOTTY portal + admin routes + active-connection registry
       - ./custom-providers/xiaozhi-patches/portal_bridge.py:/opt/xiaozhi-esp32-server/core/portal_bridge.py:ro
