@@ -51,6 +51,13 @@ To run the StackChan **fully self-hosted** (no phone-app account, no vendor clou
 your own xiaozhi-server as the endpoint), you need to **reflash the device
 with firmware built from the open source tree**.
 
+The StackChan's on-device Settings app has no **Advanced Options** or OTA URL
+editor. The similarly named **Advanced** tab documented by Xiaozhi belongs to
+its browser-based SoftAP captive portal and appears only when that provisioning
+mode is active. The current `fw-v1.3.3` prebuilt is compiled for the
+maintainer's LAN, so another self-hosted deployment must build from source with
+its own `CONFIG_OTA_URL` as shown below.
+
 The upstream firmware lives at **https://github.com/m5stack/StackChan**:
 - `firmware/` — M5Stack's patches + ESP-IDF project wrapper
 - `firmware/fetch_repos.py` — pulls `78/xiaozhi-esp32` as a dependency and
@@ -233,6 +240,9 @@ Some older xiaozhi builds expose a SoftAP captive portal on first boot:
 
 If you have a build where this works, it's the fastest provisioning flow.
 It just isn't what M5Stack ships today.
+
+This **Advanced** control is a tab in the browser portal at `192.168.4.1`, not
+an item in the StackChan's on-device Settings app.
 
 ---
 

@@ -51,6 +51,16 @@ Download the latest release from
 `bootloader.bin`, `partition-table.bin`, `ota_data_initial.bin`,
 `stack-chan.bin`, `generated_assets.bin`, and `human_face_detect.espdl`.
 
+> **Self-hosting note:** the current `fw-v1.3.3` prebuilt was compiled for
+> the maintainer's LAN (`CONFIG_OTA_URL` points at that deployment). It is a
+> reproducible release artifact, but it is not a portable binary for another
+> self-hosted server. There is no OTA/server editor in the StackChan's
+> on-device Settings app. For your own server, build from source with
+> `CONFIG_OTA_URL="http://<XIAOZHI_HOST>:8003/xiaozhi/ota/"` before flashing;
+> [SETUP.md](../SETUP.md#2-build-and-flash-open-firmware) has the reliable
+> procedure. A browser tab named **Advanced** exists only in the optional
+> Xiaozhi SoftAP captive portal, if that provisioning mode is active.
+
 Install esptool and flash over USB-C:
 
 ```bash
@@ -141,10 +151,21 @@ No separate host, no systemd bridge unit, no SSH to a second machine.
 
 ## 6. Connect the robot
 
-1. Power on the robot (USB-C or battery).
-2. On the device screen, navigate to **Settings > Advanced Options**.
-3. Enter the OTA URL: `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/`
-4. The robot connects via WebSocket and shows a face.
+1. Confirm the firmware was built with
+   `CONFIG_OTA_URL="http://<XIAOZHI_HOST>:8003/xiaozhi/ota/"` as described in
+   [SETUP.md](../SETUP.md#2-build-and-flash-open-firmware).
+2. Power on the robot (USB-C or battery).
+3. Provision its 2.4 GHz Wi-Fi connection using the setup flow shown by the
+   firmware.
+4. Watch `docker logs -f xiaozhi-esp32-server`. The robot should POST to the
+   configured OTA URL, receive the WebSocket endpoint, connect, and show a
+   face.
+
+The StackChan's on-device Settings app does **not** contain an Advanced
+Options or OTA URL field. If the firmware enters Xiaozhi SoftAP provisioning,
+join its temporary Wi-Fi network and open the browser portal shown on screen;
+that portal—not the robot Settings screen—has an **Advanced** tab that can
+persist an `ota_url` override.
 
 ## 7. First voice turn
 
