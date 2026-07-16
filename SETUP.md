@@ -48,8 +48,10 @@ There is **no SoftAP captive portal** in stock firmware (some older
 third-party xiaozhi builds had one; the shipped firmware does not).
 
 To run the StackChan **fully self-hosted** (no phone-app account, no vendor cloud,
-your own xiaozhi-server as the endpoint), you need to **reflash the device
-with firmware built from the open source tree**.
+your own xiaozhi-server as the endpoint), reflash it with Dotty's pinned
+`BrettKinny/StackChan@dotty` firmware fork. The official `m5stack/StackChan`
+tree is its upstream, but it does not contain Dotty's state, motion, LED, and
+perception changes.
 
 The StackChan's on-device Settings app has no **Advanced Options** or OTA URL
 editor. The similarly named **Advanced** tab documented by Xiaozhi belongs to
@@ -58,18 +60,13 @@ mode is active. The current `fw-v1.3.3` prebuilt is compiled for the
 maintainer's LAN, so another self-hosted deployment must build from source with
 its own `CONFIG_OTA_URL` as shown below.
 
-The upstream firmware lives at **https://github.com/m5stack/StackChan**:
-- `firmware/` — M5Stack's patches + ESP-IDF project wrapper
-- `firmware/fetch_repos.py` — pulls `78/xiaozhi-esp32` as a dependency and
-  applies StackChan-specific patches, adding the board target
-  `CONFIG_BOARD_TYPE_M5STACK_STACK_CHAN`
+The exact firmware source is the `firmware/` submodule of this repo. It pins
+`BrettKinny/StackChan@dotty`, whose `firmware/fetch_repos.py` pulls
+`78/xiaozhi-esp32` v2.2.4 and applies the StackChan integration patch.
 
 ---
 
 ## 2. Build and flash open firmware
-
-> **Note — build flow documented from first-pass session findings; not yet
-> end-to-end verified. Will be updated after a successful first flash.**
 
 Requires **ESP-IDF v5.5.4**. Easiest path: the official
 `espressif/idf:v5.5.4` Docker image.
@@ -77,12 +74,12 @@ Requires **ESP-IDF v5.5.4**. Easiest path: the official
 ### 2a. Clone and configure
 
 ```bash
-git clone https://github.com/m5stack/StackChan.git
-cd StackChan/firmware
+git clone --recursive https://github.com/BrettKinny/dotty-stackchan.git
+cd dotty-stackchan/firmware/firmware
 ```
 
 Point the firmware at your xiaozhi-server for OTA. Edit
-`firmware/sdkconfig.defaults` and add (or modify) the line:
+`sdkconfig.defaults` and add (or modify) the line:
 
 ```
 CONFIG_OTA_URL="http://<XIAOZHI_HOST>:8003/xiaozhi/ota/"
@@ -90,10 +87,20 @@ CONFIG_OTA_URL="http://<XIAOZHI_HOST>:8003/xiaozhi/ota/"
 
 Trailing slash matters — that's the path the server exposes.
 
+`sdkconfig.defaults` seeds a newly generated `sdkconfig`; it does not overwrite
+an existing one. On a repeat build, either make the same change through
+`idf.py menuconfig` (**Xiaozhi Assistant → Default OTA URL**) or remove the
+generated `sdkconfig` before rebuilding. Verify the effective value after
+configuration with:
+
+```bash
+grep '^CONFIG_OTA_URL=' sdkconfig
+```
+
 ### 2b. Build inside the IDF container
 
 ```bash
-docker run --rm -it -v "$PWD/..":/project -w /project/firmware \
+docker run --rm -it -v "$PWD":/project -w /project \
   espressif/idf:v5.5.4 \
   bash -c "python3 fetch_repos.py && idf.py build"
 ```
@@ -108,7 +115,7 @@ Linux (`/dev/cu.usbmodem*` on macOS — adapt the `--device` flag).
 
 ```bash
 docker run --rm -it --device=/dev/ttyACM0 \
-  -v "$PWD/..":/project -w /project/firmware \
+  -v "$PWD":/project -w /project \
   espressif/idf:v5.5.4 \
   idf.py -p /dev/ttyACM0 flash
 ```
@@ -118,14 +125,23 @@ flow), use that instead.
 
 ### 2d. First boot after flash
 
-- No pairing-code screen
-- No BLE provisioning step
-- The device boots, loads WiFi credentials compiled into the firmware
-  (or, if you left WiFi unconfigured, whatever fallback the upstream
-  build offers — consult the xiaozhi-esp32 README for the current default
-  behaviour)
-- It POSTs to `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/`, gets back the
-  WebSocket endpoint, and connects
+Seeing **“Welcome! Let's get started.” is expected on a fresh flash**. It is
+the StackChan app-configuration wizard, controlled by an NVS flag; it does not
+mean the compiled `CONFIG_OTA_URL` was ignored.
+
+For a self-hosted setup:
+
+1. Tap **Skip** on the welcome screen. This bypasses the M5Stack account/BLE
+   wizard for the current boot.
+2. If the launcher remains visible, open **SETUP**, then use its home control
+   to exit. Closing SETUP starts the Xiaozhi voice application.
+3. With no saved SSID, the pinned build enters its default Xiaozhi hotspot
+   provisioner. Join the temporary `Xiaozhi-*` Wi-Fi network and open the URL
+   shown on the robot (normally `http://192.168.4.1`).
+4. Select the robot's 2.4 GHz Wi-Fi network. The browser portal also has an
+   **Advanced** tab where you can confirm or override `ota_url`.
+5. After Wi-Fi connects, the device POSTs to the compiled/persisted OTA URL,
+   receives the WebSocket endpoint, and connects.
 
 Tail the server logs while the device boots so you can watch the
 handshake happen (see step 4 below).
@@ -134,18 +150,13 @@ handshake happen (see step 4 below).
 
 ## 3. WiFi credentials
 
-Two options, depending on what the upstream xiaozhi-esp32 build exposes at
-the version you pulled:
+The pinned firmware does **not** define `CONFIG_WIFI_SSID` or
+`CONFIG_WIFI_PASSWORD`; adding those names to `sdkconfig.defaults` has no
+effect. Wi-Fi credentials live in NVS and are supplied through the Xiaozhi
+hotspot portal described above (or retained from an earlier compatible
+provisioning).
 
-- **Compile-time WiFi credentials** — set `CONFIG_WIFI_SSID` and
-  `CONFIG_WIFI_PASSWORD` in `sdkconfig.defaults`. Simplest for a static
-  home setup; easy to forget they're in the binary.
-- **Fallback SoftAP or BLE provisioning** — some upstream builds include a
-  fallback provisioning flow if no credentials are saved. Check the
-  upstream README for what your commit supports.
-
-Either way, the device must land on a **2.4 GHz** network. ESP32-S3 does
-not do 5 GHz.
+The device must land on a **2.4 GHz** network. ESP32-S3 does not do 5 GHz.
 
 ---
 

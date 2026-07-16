@@ -36,7 +36,7 @@ Full policy: [`AI_TRANSPARENCY.md`](./AI_TRANSPARENCY.md).
 - **Streaming responses** — the bridge streams LLM output to the voice pipeline for lower perceived latency.
 - **Emoji expressions** — every response starts with an emoji that the firmware maps to a face animation (smile, laugh, sad, surprise, thinking, angry, love, sleepy, neutral).
 - **Voice tools** — the pi agent can search its memory, escalate hard questions to a bigger model, take a photo, and play songs, all mid-conversation.
-- **States, toggles & LEDs** — a six-state mutex (`idle / talk / story_time / security / sleep / dance`) plus two orthogonal toggles (`kid_mode`, `smart_mode`), all owned by the firmware StateManager and surfaced on the 12-pixel LED ring. Shipped on the active firmware fork (commit `d78118b`, 2026-04-27); the `firmware/firmware/` submodule pin in this repo lags, so flash from the active fork to get it. See "States, Toggles & LEDs" below and [`docs/modes.md`](./docs/modes.md).
+- **States, toggles & LEDs** — a six-state mutex (`idle / talk / story_time / security / sleep / dance`) plus two orthogonal toggles (`kid_mode`, `smart_mode`), all owned by the firmware StateManager and surfaced on the 12-pixel LED ring. The pinned `BrettKinny/StackChan@dotty` firmware submodule includes the StateManager and current dance-motion ownership fixes. See "States, Toggles & LEDs" below and [`docs/modes.md`](./docs/modes.md).
 - **Vision (camera)** — the robot's built-in camera can capture images for multimodal LLM queries.
 - **Privacy LEDs** — hardware-bound mic (green) and camera (red) indicators on the LED ring. They light from the codec/camera enable signals via RAII guards, so a misbehaving server or model can't capture with the lights off.
 - **Calendar context** — optional calendar integration feeds upcoming events into the conversation context.
@@ -46,7 +46,9 @@ Full policy: [`AI_TRANSPARENCY.md`](./AI_TRANSPARENCY.md).
 
 Behaviour is a **six-state mutex** (`idle / talk / story_time / security / sleep / dance`) plus two orthogonal toggles (`kid_mode`, `smart_mode`), all owned by the firmware StateManager (shipped on the active fork in commit `d78118b`, 2026-04-27; bench checks tracked in [#38](https://github.com/BrettKinny/dotty-stackchan/issues/38)). Voice phrases, camera edges, and dashboard controls all flow through it.
 
-> Note: the `firmware/firmware/` submodule pin in this repo deliberately lags the active fork — flashing from the submodule won't give you Phase 4 yet. See the "Firmware iteration" section in [`CLAUDE.md`](./CLAUDE.md) and the submodule-pin caveat in [`docs/modes.md`](./docs/modes.md).
+Build firmware from this repo's pinned `firmware/` submodule. It points at the
+Dotty fork and is the reproducible source used for the current release; the
+official `m5stack/StackChan` repository remains the upstream project.
 
 The 12-pixel LED ring shows the current state at a glance. **Left ring 0-5 is the state arc** — all six pixels paint the state colour, matching the dashboard's state buttons:
 
@@ -61,7 +63,9 @@ The 12-pixel LED ring shows the current state at a glance. **Left ring 0-5 is th
 
 On the right ring, **indices 8-9 are toggle pips** for kid_mode (salmon pink) and smart_mode (orange), and **index 11 (bottom) lights red while you have the turn** (LISTENING). The `idle → talk` transition fires on `face_detected` from the firmware; VLM identity recognition runs in parallel and feeds the LLM context.
 
-> Heads up: that right-ring layout is the active-fork StateManager. On the firmware **submodule pinned in this repo**, pixels 6 and 11 instead drive the **privacy LEDs** — 6 = mic (green), 11 = camera (red) — and the StateManager pips arrive once the submodule catches up to the active fork.
+The current pin includes the StateManager right-ring layout. Privacy indication
+is still hardware-bound in the firmware, but it no longer uses the older
+pre-StateManager pixel contract described by historical releases.
 
 Full state taxonomy, colour palette, transition diagram, and per-state backing architecture: [`docs/modes.md`](./docs/modes.md).
 
@@ -77,7 +81,7 @@ The dashboard service serves a web dashboard at `http://<XIAOZHI_HOST>:8081/ui` 
 
 ## Reference deployment
 
-- **Hardware**: M5Stack StackChan (CoreS3 + servo kit), firmware built from `m5stack/StackChan`.
+- **Hardware**: M5Stack StackChan (CoreS3 + servo kit), firmware built from the pinned `BrettKinny/StackChan@dotty` fork of `m5stack/StackChan`.
 - **Brain**: a **pi** coding agent running in the `dotty-pi` container. It runs `qwen3.5:4b` on local [llama-swap](./docs/cookbook/llama-swap-concurrent-models.md) for the conversation loop and escalates hard questions to `qwen3.6:27b-think` (also on llama-swap) via its `think_hard` tool. xiaozhi-server's `PiVoiceLLM` provider hands each voice turn to the agent. See [`docs/brain.md`](./docs/brain.md).
 - **Voice I/O**: xiaozhi-esp32-server on Docker (any Linux Docker host).
 
@@ -85,7 +89,7 @@ The dashboard service serves a web dashboard at `http://<XIAOZHI_HOST>:8081/ui` 
 
 | Component | Host | Notes |
 |---|---|---|
-| StackChan (device) | ESP32-S3 on the desk | Firmware built from `m5stack/StackChan` (see `SETUP.md`) |
+| StackChan (device) | ESP32-S3 on the desk | Firmware built from the pinned `BrettKinny/StackChan@dotty` submodule (see `SETUP.md`) |
 | xiaozhi-esp32-server | server (`<XIAOZHI_HOST>`) | Docker — voice I/O, ports 8000 + 8003 |
 | dotty-pi | server (`<XIAOZHI_HOST>`) | Docker — the pi agent, Dotty's voice brain |
 | dotty-behaviour | server (`<XIAOZHI_HOST>`) | Docker — FastAPI: perception bus, ambient consumers, vision, greeter; port 8090 |

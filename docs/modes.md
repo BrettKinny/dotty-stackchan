@@ -12,7 +12,12 @@ This document is the source of truth for Dotty's high-level modes. The model has
 
 The firmware **StateManager** modifier (`firmware/main/stackchan/modes/state_manager.{h,cpp}`) owns both axes. It paints the state arc (left ring 0-5) + toggle pips at 5 Hz, drives the idle-motion profile, and emits `state_changed` perception events on every transition. The **dotty-behaviour** perception bus (`dotty-behaviour/perception/state.py`) consumes those events and runs 11 consumer classes (the running set is config-gated) against them (`FaceGreeter`, `SoundTurner`, `FaceLostAborter`, `WakeWordTurner`, `FaceIdentifiedRefresher`, `PurrPlayer`, `SceneSynthesis`, `IdlePhotographer`, `SleepDreamer`, `DanceReflector`, `SecurityCycle`) — see [architecture.md](./architecture.md#perception-event-bus).
 
-> **Submodule pin caveat.** Phase 4 shipped to the active firmware fork (`BrettKinny/StackChan @ dotty`, commit `d78118b`) on **2026-04-27**. The `firmware/firmware/` submodule pin in this repo deliberately lags upstream — it's a release pointer, not the active development tree. A user who flashes from the submodule will get a pre-Phase-4 firmware. Bump the submodule (or build from the active fork) to get the StateManager. Visual / interactive bench checks tracked in [issue #38](https://github.com/BrettKinny/dotty-stackchan/issues/38).
+> **Firmware source.** Phase 4 first shipped on the Dotty firmware fork in
+> commit `d78118b` (2026-04-27). This repo now pins a later
+> `BrettKinny/StackChan@dotty` commit that includes StateManager, sleep,
+> security, and current dance-motion ownership. Build the checked-out
+> `firmware/firmware/` submodule for the contract documented here. Visual and
+> interactive checks remain tracked in [issue #38](https://github.com/BrettKinny/dotty-stackchan/issues/38).
 
 Pair this with [hardware.md](./hardware.md) (the physical LED ring + servos) and [interaction-map.md](./interaction-map.md) (the underlying signals).
 
@@ -78,22 +83,10 @@ The two toggles are orthogonal — they compose freely. `kid_mode = on` AND `sma
 
 ## LED contract (12-pixel ring)
 
-!!! warning "Two firmwares, two right-ring layouts"
-    The contract below describes the **active-fork Phase 4 StateManager**
-    (`BrettKinny/StackChan @ dotty`). The firmware **submodule pinned in this
-    repo** (`35f701a`) does **not** include StateManager — it ships the
-    **privacy-LED** layout instead, which claims two of the same right-ring
-    pixels for a different purpose:
-
-    - **pixel 6** = microphone indicator (green when the mic is open; pulsing
-      when audio is streaming to the server)
-    - **pixel 11** = camera indicator (red when the camera is capturing)
-
-    These are bound to the codec/camera hardware via RAII guards (see the
-    firmware's `main/stackchan/privacy/PRIVACY_LEDS.md`). So if you flash from
-    the submodule, **pixels 6 and 11 mean mic/camera — not face-state and
-    listening.** The face-state pip, toggle pips, and listening pip described
-    below arrive once StateManager lands in the submodule pin.
+> The table below describes the current pinned Dotty firmware. Older firmware
+> pin `35f701a` used pixels 6 and 11 as standalone mic/camera privacy LEDs and
+> did not contain StateManager; that historical layout is not the source-build
+> target documented by this repo today.
 
 ```
 LEFT RING (global 0–5)              RIGHT RING (global 6–11)
@@ -215,7 +208,7 @@ Phase 4 established the *rails* — pip, transition events, dispatch helpers, vo
 
 ## Sources of truth
 
-- **Firmware (active fork `BrettKinny/StackChan @ dotty`):** `firmware/main/stackchan/modes/state_manager.{h,cpp}`, `firmware/main/stackchan/modifiers/face_tracking.cpp` (camera-edge hooks), `firmware/main/hal/hal_mcp.cpp` (set_state / set_toggle MCP). **This repo's submodule pin lags** — bump it (or maintain a parallel checkout per the [`firmware/`](../firmware) README) to flash a build that includes Phase 4+.
+- **Firmware (pinned `BrettKinny/StackChan @ dotty` submodule):** `firmware/main/stackchan/modes/state_manager.{h,cpp}`, `firmware/main/stackchan/modifiers/face_tracking.cpp` (camera-edge hooks), `firmware/main/hal/hal_mcp.cpp` (set_state / set_toggle MCP). Build the checked-out submodule to reproduce the current firmware contract.
 - **Perception + ambient behaviour:** `dotty-behaviour/perception/state.py` (the perception event bus + per-device `current_state` from `state_changed`) and `dotty-behaviour/consumers/` (the 11 consumer classes — the running set is config-gated: `FaceGreeter`, `SoundTurner`, `FaceLostAborter`, `WakeWordTurner`, `FaceIdentifiedRefresher`, `PurrPlayer`, `SceneSynthesis`, `IdlePhotographer`, `SleepDreamer`, `DanceReflector`, `SecurityCycle`). The old `bridge.py` `_perception_*` / `_update_perception_state` / `_capture_room_view` methods are retired.
 - **Bridge:** `bridge.py` (admin dashboard + the `/admin/kid-mode` and `/admin/smart-mode` toggle relays), `receiveAudioHandle.py` (voice state phrases + per-conn toggle sync). The voice-path model-swap helpers (`_apply_model_swap`, `_apply_tier1slim_runtime`) are retired along with the Tier1Slim provider; smart-mode model-swap is v2 scope.
 - **xiaozhi-server patches:** `custom-providers/xiaozhi-patches/http_server.py` (`/xiaozhi/admin/set-state`, `/xiaozhi/admin/set-toggle`, `/xiaozhi/admin/set-face-identified`, `/xiaozhi/admin/inject-text`, `/xiaozhi/admin/abort`, `/xiaozhi/admin/set-head-angles`), `custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py` (`state_changed` → `conn.current_state`, perception relay to dotty-behaviour)
