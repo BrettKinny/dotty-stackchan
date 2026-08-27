@@ -36,7 +36,10 @@ from core.auth import AuthManager, AuthenticationError
 from core.utils.modules_initialize import initialize_modules
 from core.utils.util import check_vad_update, check_asr_update
 # DOTTY-PATCH: shared registry consumed by the admin /inject-text route.
-from core.portal_bridge import active_connections as _dotty_active_connections
+from core.portal_bridge import (
+    active_connections as _dotty_active_connections,
+    state_for_device as _dotty_state_for_device,
+)
 
 TAG = __name__
 
@@ -115,6 +118,9 @@ class WebSocketServer:
             await websocket.send("认证失败")
             await websocket.close()
             return
+        # Use the request header (the protocol-mandated identifier) for both
+        # state restoration and active-connection registration.
+        _dotty_dev_id = websocket.request.headers.get("device-id", "") or ""
         # 创建ConnectionHandler时传入当前server实例
         handler = ConnectionHandler(
             self.config,
@@ -125,9 +131,15 @@ class WebSocketServer:
             self._intent,
             self,  # 传入server实例
         )
+        # State belongs to the firmware, not to a WebSocket connection. Seed
+        # the fresh handler from the last event seen on this device so a
+        # reconnect during sleep/security does not make voice routing think it
+        # is idle until the next state transition.
+        if _dotty_dev_id:
+            handler.current_state = _dotty_state_for_device(_dotty_dev_id)
+            handler._dotty_desired_state = handler.current_state
         # DOTTY-PATCH: register this connection so the admin HTTP route can
-        # find it. Use the request header (the protocol-mandated identifier).
-        _dotty_dev_id = websocket.request.headers.get("device-id", "") or ""
+        # find it.
         if _dotty_dev_id:
             _dotty_active_connections[_dotty_dev_id] = handler
         try:
