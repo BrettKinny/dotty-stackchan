@@ -12,7 +12,7 @@ This document is the source of truth for Dotty's high-level modes. The model has
 
 The firmware **StateManager** modifier (`firmware/main/stackchan/modes/state_manager.{h,cpp}`) owns both axes. It paints the state arc (left ring 0-5) + toggle pips at 5 Hz, drives the idle-motion profile, and emits `state_changed` perception events on every transition. The **dotty-behaviour** perception bus (`dotty-behaviour/perception/state.py`) consumes those events and runs 11 consumer classes (the running set is config-gated) against them (`FaceGreeter`, `SoundTurner`, `FaceLostAborter`, `WakeWordTurner`, `FaceIdentifiedRefresher`, `PurrPlayer`, `SceneSynthesis`, `IdlePhotographer`, `SleepDreamer`, `DanceReflector`, `SecurityCycle`) — see [architecture.md](./architecture.md#perception-event-bus).
 
-> **Submodule pin caveat.** Phase 4 shipped to the active firmware fork (`BrettKinny/StackChan @ dotty`, commit `d78118b`) on **2026-04-27**. The `firmware/firmware/` submodule pin in this repo deliberately lags upstream — it's a release pointer, not the active development tree. A user who flashes from the submodule will get a pre-Phase-4 firmware. Bump the submodule (or build from the active fork) to get the StateManager. Visual / interactive bench checks tracked in [issue #38](https://github.com/BrettKinny/dotty-stackchan/issues/38).
+> **Release pin.** The `firmware/firmware/` submodule currently points at the active-fork release commit `969c2b2` (2026-07-11), which includes the Phase 4+ StateManager and the server-owned dance contract. Build and flash from this pin for a reproducible release. Visual / interactive bench checks are tracked in [issue #38](https://github.com/BrettKinny/dotty-stackchan/issues/38).
 
 Pair this with [hardware.md](./hardware.md) (the physical LED ring + servos) and [interaction-map.md](./interaction-map.md) (the underlying signals).
 
@@ -41,8 +41,8 @@ The firmware boots into `idle` with both toggles **off**. The bridge resyncs tog
 | `idle` | off `(0,0,0)` | NORMAL | Ambient awareness, gentle idle motion. Default. | n/a (no chat in flight) |
 | `talk` | dim green `(0,60,0)` | NORMAL (face_tracking overlay active) | Conversation engaged. Listening pixel (right 11) lights red while the user has the turn; `thinking` and `speaking` are face-animation only. | xiaozhi → PiVoiceLLM → dotty-pi |
 | `story_time` | warm `(100,40,0)` | NORMAL | Long-running interactive story. | Phase 7 PENDING — backing path unimplemented |
-| `security` | white `(80,80,80)` **flashing 1 Hz** across all 6 left pixels (`kSecurityFlashHalfMs = 500`) | SURVEILLANCE | Wide deliberate scan, serious face, periodic photo + audio capture. No proactive greet. | Phase 8 PENDING — `SecurityCycle` consumer is scaffolding, not a live path |
-| `sleep` | very dim blue `(0,0,16)` | SLEEPY | Head face-down + centred, servo torque off (with `kSleepTorqueReleaseTimeoutMs = 3000` fallback), sleeping emoji on screen, ambient awareness paused. Wakes on face / voice / head-pet. | firmware-only quiescence (Phase 5) |
+| `security` | white `(80,80,80)` **flashing 1 Hz** across all 6 left pixels (`kSecurityFlashHalfMs = 500`) | SURVEILLANCE | Wide deliberate scan, serious face, periodic photo capture. No proactive greet. Audio capture remains pending (#31); servo sweep verification is tracked in #166. | firmware security state + live `SecurityCycle` photo path |
+| `sleep` | very dim blue `(0,0,16)` | SLEEPY | Head face-down + centred, servo torque off (with `kSleepTorqueReleaseTimeoutMs = 3000` fallback), sleeping emoji on screen, ambient awareness paused. Wakes on head-pet or dashboard state control. | firmware-only quiescence (Phase 5) |
 | `dance` | rainbow sweep (left ring) | NORMAL | Transient performance — server-owned named choreography + audio. Firmware holds the cooperative motion lock so face tracking and idle motion cannot overwrite MCP keyframes. | `receiveAudioHandle.py::_handle_dance` |
 
 The `idle → talk` trigger is the firmware `face_detected` event (any face, family or stranger) **or** `onVoiceListening` (the WS opens for a wake-word / inject-text / head-pet hold). dotty-behaviour runs VLM recognition in parallel and feeds the resulting identity into the speaker resolver / persona — recognition does **not** gate the state transition.
@@ -55,11 +55,14 @@ The `idle → talk` trigger is the firmware `face_detected` event (any face, fam
 
 ### Wake-from-sleep edges
 
-`StateManager` accepts three sleep-exit triggers:
+Sleep is a privacy state: entering it disables the camera face detector and the
+microphone/wake-word path. The supported exit triggers are:
 
-- **Face detected** (`onFaceDetected`) — wakes if `_state == State::Sleep`.
-- **Voice listening** (`onVoiceListening`) — wakes on wake-word, inject-text, or any other path that opens the WS.
-- **Head pet** (`onHeadPet`) — the dark-room friendly path; capacitive head touch wakes without line of sight or speech. See [voice-mode-entry.md](./voice-mode-entry.md).
+- **Head pet** (`onHeadPet`) — the dark-room friendly path; capacitive head touch wakes without line of sight or speech.
+- **Dashboard state control** (`/xiaozhi/admin/set-state`) — the guardian can wake the device remotely.
+
+Face detection and voice listening are deliberately not sleep wake paths while
+the privacy gate is active. See [voice-mode-entry.md](./voice-mode-entry.md).
 
 ---
 
@@ -78,22 +81,13 @@ The two toggles are orthogonal — they compose freely. `kid_mode = on` AND `sma
 
 ## LED contract (12-pixel ring)
 
-!!! warning "Two firmwares, two right-ring layouts"
-    The contract below describes the **active-fork Phase 4 StateManager**
-    (`BrettKinny/StackChan @ dotty`). The firmware **submodule pinned in this
-    repo** (`35f701a`) does **not** include StateManager — it ships the
-    **privacy-LED** layout instead, which claims two of the same right-ring
-    pixels for a different purpose:
-
-    - **pixel 6** = microphone indicator (green when the mic is open; pulsing
-      when audio is streaming to the server)
-    - **pixel 11** = camera indicator (red when the camera is capturing)
-
-    These are bound to the codec/camera hardware via RAII guards (see the
-    firmware's `main/stackchan/privacy/PRIVACY_LEDS.md`). So if you flash from
-    the submodule, **pixels 6 and 11 mean mic/camera — not face-state and
-    listening.** The face-state pip, toggle pips, and listening pip described
-    below arrive once StateManager lands in the submodule pin.
+!!! warning "Older firmware pins have a different right-ring layout"
+    The release submodule pin (`969c2b2`) includes the Phase 4+ StateManager
+    and uses the right-ring contract below. An older checkout such as
+    `35f701a` predates StateManager and instead uses privacy LEDs: pixel 6 is
+    the microphone indicator and pixel 11 is the camera indicator. If a device
+    was flashed from an older checkout, update it to the release pin before
+    judging the state/toggle/listening indicators.
 
 ```
 LEFT RING (global 0–5)              RIGHT RING (global 6–11)
@@ -137,13 +131,13 @@ stateDiagram-v2
     talk --> idle: face_lost grace expired (firmware) / onVoiceStandby
 
     idle --> sleep: voice "go to sleep" / "goodnight Dotty"
-    sleep --> idle: face_detected / voice / head_pet
+    sleep --> idle: head_pet / dashboard
 
     idle --> security: voice "keep watch" / "security mode"
-    security --> idle: voice "wake up" / face_detected (Phase 6)
+    security --> idle: voice "wake up" / dashboard
 
     idle --> story_time: voice "tell me a story"
-    story_time --> idle: voice "the end" / "stop story" / 90 s silence (Phase 7)
+    story_time --> idle: voice "wake up" / dashboard
 
     idle --> dance: voice "dance" / song name
     dance --> idle: choreography ends
@@ -191,8 +185,8 @@ Both `kid_mode` and `smart_mode` are voice-untoggleable — they are guardian-co
 | `idle` | n/a | n/a | n/a |
 | `talk` | xiaozhi → PiVoiceLLM → dotty-pi | yes (FTS via `memory_lookup` / `remember` tools in dotty-pi-ext) | yes (5-tool dotty-pi-ext catalogue) |
 | `story_time` | Phase 7 PENDING — backing path unimplemented | n/a (pending) | n/a (pending) |
-| `security` | Phase 8 PENDING — `SecurityCycle` consumer is scaffolding, no live path | n/a (pending) | n/a (pending) |
-| `sleep` | mic stays on for "wake up"; no LLM round-trip | n/a | n/a |
+| `security` | Firmware state rails + live `SecurityCycle` photo capture; audio capture remains pending (#31) and servo sweep awaits #166 bench verification | n/a | n/a |
+| `sleep` | privacy gate disables camera + mic; head-pet/dashboard wake only | n/a | n/a |
 | `dance` | xiaozhi handler dispatches choreography + audio file; firmware state supplies exclusive motion ownership, not a second choreography | n/a | head/LED MCP |
 
 `smart_mode` is a toggle only and sticky across turns; the backing model-swap it was designed to drive is v2 scope and not wired on the `PiVoiceLLM` path. `story_time` (when implemented) would be the only voice path with its own session memory (Phase 7 pending).
@@ -203,19 +197,19 @@ Both `kid_mode` and `smart_mode` are voice-untoggleable — they are guardian-co
 
 | Phase | Scope | Status |
 |---|---|---|
-| 4 | StateManager foundation: state pip + toggle pips + `state_changed` event + voice phrases + admin endpoints + LED contract | ✅ shipped 2026-04-27 (firmware `d78118b`, bridge+xiaozhi `10cbc63`). Bench checks pending: [#38](https://github.com/BrettKinny/dotty-stackchan/issues/38). |
+| 4 | StateManager foundation: state pip + toggle pips + `state_changed` event + voice phrases + admin endpoints + LED contract | ✅ shipped 2026-04-27; release pin updated to firmware `969c2b2` on 2026-07-11 (bridge+xiaozhi `10cbc63`). Bench checks pending: [#38](https://github.com/BrettKinny/dotty-stackchan/issues/38). |
 | 5 | Sleep state behaviour (servo park + torque off + sleepy emoji + wake triggers) | ✅ shipped; bench checks: [#39](https://github.com/BrettKinny/dotty-stackchan/issues/39). |
-| 6 | Security state firmware behaviour (LED flash + surveillance idle profile) | ✅ firmware rails shipped; the backing capture path is **Phase 8 PENDING** (see below). Bench checks: [#40](https://github.com/BrettKinny/dotty-stackchan/issues/40). |
+| 6 | Security state firmware behaviour (LED flash + surveillance idle profile) | ✅ firmware rails shipped; `SecurityCycle` photo capture is live, while audio capture remains pending (#31) and servo sweep needs #166 bench verification. Bench checks: [#40](https://github.com/BrettKinny/dotty-stackchan/issues/40). |
 | 7 | Story_time backing path (interactive setup, LLM session, choose-your-own-adventure) | **PENDING / unimplemented**: [#26](https://github.com/BrettKinny/dotty-stackchan/issues/26). |
-| 8 | Security backing path / ambient awareness loop (periodic photo + audio scene capture, journal) | **PENDING** — the `SecurityCycle` consumer in `dotty-behaviour/consumers/` is scaffolding, not a live path; firmware state binding pending. Tracked alongside #26. |
+| 8 | Security backing path / ambient awareness loop (periodic photo + audio scene capture, journal) | **Partially live** — `SecurityCycle` is wired and photo capture/journaling works; audio capture remains pending (#31), and physical servo sweep verification is tracked in #166. |
 
-Phase 4 established the *rails* — pip, transition events, dispatch helpers, voice routing. Phase 5 hangs sleep behaviour off those rails and has shipped. The `story_time` and `security` **backing paths** (Phases 7–8) are both unimplemented; the `SecurityCycle` consumer exists only as scaffolding.
+Phase 4 established the *rails* — pip, transition events, dispatch helpers, voice routing. Phase 5 hangs sleep behaviour off those rails and has shipped. The `story_time` backing path (Phase 7) remains unimplemented. Security's photo capture/journal path is live; its audio leg remains pending (#31), and the physical sweep still needs #166 bench verification.
 
 ---
 
 ## Sources of truth
 
-- **Firmware (active fork `BrettKinny/StackChan @ dotty`):** `firmware/main/stackchan/modes/state_manager.{h,cpp}`, `firmware/main/stackchan/modifiers/face_tracking.cpp` (camera-edge hooks), `firmware/main/hal/hal_mcp.cpp` (set_state / set_toggle MCP). **This repo's submodule pin lags** — bump it (or maintain a parallel checkout per the [`firmware/`](../firmware) README) to flash a build that includes Phase 4+.
+- **Firmware (release pin `BrettKinny/StackChan @ 969c2b2`):** `firmware/main/stackchan/modes/state_manager.{h,cpp}`, `firmware/main/stackchan/modifiers/face_tracking.cpp` (camera-edge hooks), `firmware/main/hal/hal_mcp.cpp` (set_state / set_toggle MCP). The submodule is the reproducible release build; use a separate `dotty` checkout only for active firmware development.
 - **Perception + ambient behaviour:** `dotty-behaviour/perception/state.py` (the perception event bus + per-device `current_state` from `state_changed`) and `dotty-behaviour/consumers/` (the 11 consumer classes — the running set is config-gated: `FaceGreeter`, `SoundTurner`, `FaceLostAborter`, `WakeWordTurner`, `FaceIdentifiedRefresher`, `PurrPlayer`, `SceneSynthesis`, `IdlePhotographer`, `SleepDreamer`, `DanceReflector`, `SecurityCycle`). The old `bridge.py` `_perception_*` / `_update_perception_state` / `_capture_room_view` methods are retired.
 - **Bridge:** `bridge.py` (admin dashboard + the `/admin/kid-mode` and `/admin/smart-mode` toggle relays), `receiveAudioHandle.py` (voice state phrases + per-conn toggle sync). The voice-path model-swap helpers (`_apply_model_swap`, `_apply_tier1slim_runtime`) are retired along with the Tier1Slim provider; smart-mode model-swap is v2 scope.
 - **xiaozhi-server patches:** `custom-providers/xiaozhi-patches/http_server.py` (`/xiaozhi/admin/set-state`, `/xiaozhi/admin/set-toggle`, `/xiaozhi/admin/set-face-identified`, `/xiaozhi/admin/inject-text`, `/xiaozhi/admin/abort`, `/xiaozhi/admin/set-head-angles`), `custom-providers/xiaozhi-patches/textMessageHandlerRegistry.py` (`state_changed` → `conn.current_state`, perception relay to dotty-behaviour)

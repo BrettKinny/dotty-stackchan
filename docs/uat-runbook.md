@@ -69,7 +69,7 @@ issues rather than spawning new ones, and their clips are candidate
 | Feature | Status | Where tracked |
 |---|---|---|
 | `story_time` backing path | Phase 7 pending — state/LED rails only | modes.md Phase 7 |
-| `security` capture path | SecurityCycle scaffolding; audio leg unshipped (#31) | modes.md Phase 8, #31 |
+| `security` capture path | SecurityCycle photo capture is live; audio leg unshipped (#31), servo sweep verification in #166 | modes.md Phase 8, #31, #166 |
 | `smart_mode` model swap | toggle-only; swap is v2 scope | #36 cutover notes |
 | Tools-inventory card count | dashboard card may list 5 legacy entries; Pi registers 7 voice tools | treat the dashboard as stale presentation, verify Pi inventory separately |
 
@@ -128,23 +128,24 @@ issues rather than spawning new ones, and their clips are candidate
 
 Every state entered by **voice** where a phrase exists, and by **dashboard**
 at least once. Sticky states (`story_time`, `security`, `sleep`) must ignore
-face events and survive chat-turn ends; `wake up` / `come back` /
-`are you there` exits any sticky state.
+face events and survive chat-turn ends. The `wake up` / `come back` /
+`are you there` phrases exit `story_time` and `security`; sleep is a privacy
+state and exits only through a head-pet or dashboard state control.
 
 | ID | Brett does (on camera) | Expected — eyes/video | Expected — logs (Claude) | Shorts framing |
 |---|---|---|---|---|
 | US1 | From idle, walk into view (auto idle→talk), then out (talk→idle) | Pixel 0 dim cyan on face, off ~5 s after leaving | `face_detected`/`face_lost` state edges | Covered again in UP1 — one filming pass serves both |
 | US2 | Voice: *"tell me a story"* **⚠ pending** | State flips (pixel 0 warm orange) + ack line; record whatever storytelling does/doesn't happen | `state_changed` → `story_time` | If a story actually comes out: gold. If not: WIP clip |
 | US3 | While in story_time, let a chat turn end, then walk out of frame | State does **not** drop to idle (sticky) | no spurious `state_changed` | QA-only |
-| US4 | Voice: *"wake up"* | Back to idle, pixel 0 off | `state_changed` → `idle` | QA-only |
+| US4 | From story_time or security, voice: *"wake up"* | Back to idle, pixel 0 off | `state_changed` → `idle` | QA-only |
 | US5 | Voice: *"keep watch"* **⚠ pending** | Within ~3 s: yaw sweep −500→+500→0, angry face latched, pixel 0 flashing white 1 Hz | `state_changed` → `security`; `security capture loop started … interval=20s` | "Dotty guards the house" — the sweep is very filmable |
 | US6 | Stay in security ≥40 s | Sweep continues | security NDJSON gains records with `photo_desc` (+20 s cadence); `audio_capture_pending` errors expected (#31) | QA-only; feeds UD10 |
 | US7 | Voice: *"wake up"* (exit security) | Pan stops ≤4 s, head home, neutral face | `security capture loop cancelled`; NDJSON stops | tail of the US5 clip |
 | US8 | Voice: *"goodnight Dotty"* | Smooth face-down travel (~3–4 s), pixel 0 very dim blue, 😴 + `Zzz…`, torque-release click ~1 s after settle | `state_changed` → `sleep` | "Putting my robot to bed" — reliably charming |
 | US9 | While asleep: idle ~30 s, lights on | Gentle droop, **no** idle motion | no idle-motion servo commands | part of US8 clip |
-| US10 | Wake path 1 — voice: *"wake up"* | Torque re-engages **first** (audible), wake-tilt to ~70 pitch, neutral face, idle | `state_changed` → `idle` | "Three ways to wake a robot" 1/3 |
-| US11 | Sleep again; wake path 2 — **pet her head** | Same wake sequence, lands in **idle** (not talk) | `head_pet_started` | 2/3 |
-| US12 | Sleep again; wake path 3 — **walk into camera view** | Wakes straight to **talk** (pixel 0 cyan), looks up then at you | `face_detected` → talk | 3/3 — the best one |
+| US10 | Wake path 1 — dashboard: set state to *idle* | Torque re-engages **first** (audible), wake-tilt to ~70 pitch, neutral face, idle | `state_changed` → `idle` | Guardian-controlled privacy exit |
+| US11 | Sleep again; wake path 2 — **pet her head** | Same wake sequence, lands in **idle** (not talk) | `head_pet_started` | Dark-room friendly |
+| US12 | While asleep, walk into camera view or say *"wake up"* | No wake: camera and microphone remain disabled by the privacy gate | no state change | QA-only privacy check |
 | US13 | Awake: provoke a sleepy reply (ask her if she's tired → 😴) | Legacy hard-sleep path still works | 😴 emotion frame | QA-only |
 | US14 | Voice/dashboard: trigger **dance** | Left ring rainbow sweep, choreography + song | `state_changed` → `dance`; `_handle_dance` | The flagship Short. Film generously |
 | US15 | From dashboard, click the **current** state's button | `state_changed` still fires (idempotent re-set), dashboard cache refreshes | `state_changed` on idempotent set | QA-only |
