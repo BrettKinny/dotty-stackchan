@@ -67,12 +67,41 @@ NARRATIVE_TIMEOUT_SEC: float = _env_float("NARRATIVE_TIMEOUT_SEC", 90.0)
 STATE_DIR: Path = Path(
     os.environ.get("DOTTY_STATE_DIR", "/var/lib/dotty-behaviour/state")
 )
+# Kid Mode is owned by the bridge dashboard and persisted in a state file
+# shared with the voice container.  Keep the path override explicit: the
+# behaviour container is deployed separately and therefore cannot infer a
+# host bind mount from DOTTY_STATE_DIR alone.
+KID_MODE_STATE_FILE: Path = Path(
+    os.environ.get("DOTTY_KID_MODE_STATE", str(STATE_DIR / "kid-mode"))
+)
 LOG_DIR: Path = Path(
     os.environ.get("CONVO_LOG_DIR", "/var/lib/dotty-behaviour/logs")
 )
 SECRETS_DIR: Path = Path(
     os.environ.get("DOTTY_SECRETS_DIR", "/var/lib/dotty-behaviour/secrets")
 )
+
+
+def read_kid_mode() -> bool:
+    """Read the canonical Kid Mode value, falling back safely to the env.
+
+    The bridge writes ``KID_MODE_STATE_FILE`` and the voice provider reads
+    the same file.  Re-reading on every call lets vision and server-pushed
+    speech honour a dashboard toggle without a behaviour restart.  Invalid
+    or unreadable state fails toward the documented default (or the explicit
+    ``DOTTY_KID_MODE`` override).
+    """
+    try:
+        value = KID_MODE_STATE_FILE.read_text(encoding="utf-8").strip().lower()
+    except OSError:
+        value = ""
+    if value in ("true", "1", "yes", "on"):
+        return True
+    if value in ("false", "0", "no", "off"):
+        return False
+    return os.environ.get("DOTTY_KID_MODE", "true").strip().lower() in (
+        "1", "true", "yes", "on"
+    )
 
 # Per-cache TTLs — identical to bridge.py so the snapshot semantics
 # don't drift across the cutover.

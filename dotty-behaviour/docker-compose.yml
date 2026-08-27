@@ -47,9 +47,13 @@ services:
       # Daemon state (kid-mode/smart-mode toggle files, greeter state,
       # household.yaml)
       - DOTTY_STATE_DIR=/var/lib/dotty-behaviour/state
+      # Kid Mode is owned by dotty-bridge; read the same persisted toggle
+      # that bridge.py and xiaozhi-server use.
+      - DOTTY_KID_MODE_STATE=/var/lib/dotty-bridge/state/kid-mode
       - HOUSEHOLD_YAML_PATH=/var/lib/dotty-behaviour/state/household.yaml
       - GREETER_STATE_PATH=/var/lib/dotty-behaviour/state/greeter_state.json
     volumes:
       - /mnt/user/appdata/dotty-behaviour/state:/var/lib/dotty-behaviour/state
+      - /mnt/user/appdata/dotty-bridge/state:/var/lib/dotty-bridge/state:ro
       - /mnt/user/appdata/dotty-behaviour/logs:/var/lib/dotty-behaviour/logs
       - /mnt/user/appdata/dotty-behaviour/secrets:/var/lib/dotty-behaviour/secrets:ro

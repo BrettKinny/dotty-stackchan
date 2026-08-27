@@ -30,6 +30,7 @@ def _consumer(
     bare_interval=30.0,
     hour_start=0,
     hour_end=24,
+    kid_mode_provider=None,
 ) -> FaceGreeter:
     return FaceGreeter(
         state, xiaozhi, household,
@@ -41,6 +42,7 @@ def _consumer(
         name_min_interval_sec=30.0,
         name_quiet_after_chat_sec=10.0,
         tz=_UTC,
+        kid_mode_provider=kid_mode_provider,
     )
 
 
@@ -260,6 +262,52 @@ people:
                 ]
                 assert xiaozhi.set_face_identified_calls == [
                     {"device_id": "dev-1"}
+                ]
+
+            await _drive(consumer, body)
+
+    asyncio.run(go())
+
+
+def test_face_recognized_direct_speech_uses_kid_mode_filter() -> None:
+    async def go() -> None:
+        with tempfile.TemporaryDirectory() as td:
+            household = _household_with(
+                Path(td),
+                "people:\n  brett:\n    display_name: Brett\n",
+            )
+            state = PerceptionState()
+            xiaozhi = FakeXiaozhi()
+            consumer = FaceGreeter(
+                state,
+                xiaozhi,
+                household,
+                bare_greet_text="Hi!",
+                bare_min_interval_sec=30.0,
+                bare_hour_start=0,
+                bare_hour_end=24,
+                name_template="cocaine {name}",
+                name_min_interval_sec=30.0,
+                name_quiet_after_chat_sec=10.0,
+                tz=_UTC,
+                kid_mode_provider=lambda: True,
+            )
+
+            async def body() -> None:
+                state.broadcast(
+                    PerceptionEvent(
+                        device_id="dev-1",
+                        name="face_recognized",
+                        data={"identity": "brett"},
+                        ts=time.time(),
+                    )
+                )
+                await let_consumer_settle()
+                assert xiaozhi.say_calls == [
+                    {
+                        "device_id": "dev-1",
+                        "text": "😐 Let's talk about something fun instead! What's your favorite animal?",
+                    }
                 ]
 
             await _drive(consumer, body)

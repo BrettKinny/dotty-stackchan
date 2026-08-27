@@ -21,7 +21,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Flat layout — top-level modules + subpackages, no outer Python package.
-COPY config.py main.py ./
+COPY config.py main.py safety.py supervision.py ./
 COPY perception ./perception
 COPY routes ./routes
 COPY dispatch ./dispatch

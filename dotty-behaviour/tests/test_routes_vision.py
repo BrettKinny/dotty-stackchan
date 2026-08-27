@@ -93,8 +93,8 @@ def test_vision_explain_returns_vlm_description_and_caches_it() -> None:
 
         assert len(fake.calls) == 1
         assert fake.calls[0]["question"] == "What do you see?"
-        # Default system prompt is the non-kid wording
-        assert "young child" not in fake.calls[0]["system_prompt"]
+        # Kid Mode defaults on and is read from the canonical state fallback.
+        assert "young child" in fake.calls[0]["system_prompt"]
 
 
 def test_vision_explain_kid_mode_changes_system_prompt() -> None:
