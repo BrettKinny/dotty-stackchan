@@ -264,6 +264,16 @@ class TestErrorFallback(unittest.TestCase):
 
 
 class TestDeterministicVoiceToolRouting(unittest.TestCase):
+    def _kid_response(self, client: FakeClient, text: str) -> str:
+        with patch.dict(os.environ, {
+            "DOTTY_KID_MODE": "true",
+            "DOTTY_KID_MODE_STATE": "/nonexistent/dotty-test-kid-mode",
+        }):
+            provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+            return "".join(provider.response(
+                "s", [{"role": "user", "content": text}],
+            ))
+
     def test_explicit_remember_invokes_tool_and_never_claims_failed_write(self):
         client = FakeClient()
         client.tool_results["remember"] = "(remember failed)"
@@ -319,6 +329,17 @@ class TestDeterministicVoiceToolRouting(unittest.TestCase):
             out, f"{textUtils.FALLBACK_EMOJI} I couldn't check my memory right now.",
         )
 
+    def test_recall_result_is_filtered_before_spoken_in_kid_mode(self):
+        client = FakeClient()
+        client.tool_results["memory_lookup"] = "The memory contains cocaine."
+
+        out = self._kid_response(
+            client, "What did I tell you about my calibration color?",
+        )
+
+        self.assertEqual(out, textUtils.CONTENT_FILTER_REPLACEMENT)
+        self.assertNotIn("cocaine", out.lower())
+
     def test_explicit_think_hard_invokes_reasoner_and_speaks_completed_result(self):
         client = FakeClient()
         client.tool_results["think_hard"] = "The precise answer is forty-two."
@@ -345,6 +366,52 @@ class TestDeterministicVoiceToolRouting(unittest.TestCase):
 
         self.assertEqual(
             out, f"{textUtils.FALLBACK_EMOJI} I couldn't finish the deeper reasoning.",
+        )
+
+    def test_think_hard_result_is_filtered_before_spoken_in_kid_mode(self):
+        client = FakeClient()
+        client.tool_results["think_hard"] = "The answer contains shit."
+
+        out = self._kid_response(
+            client, "Think hard about: what happened?",
+        )
+
+        self.assertEqual(out, textUtils.CONTENT_FILTER_REPLACEMENT)
+        self.assertNotIn("shit", out.lower())
+
+    def test_filmed_favourite_colour_phrase_extracts_only_the_fact(self):
+        client = FakeClient()
+        client.tool_results["remember"] = "(remembered)"
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        out = "".join(provider.response(
+            "s", [{
+                "role": "user",
+                "content": "my favourite colour is purple, please remember that",
+            }],
+        ))
+
+        self.assertEqual(
+            client.tool_calls,
+            [("remember", {"fact": "my favourite colour is purple"})],
+        )
+        self.assertIn("remember", out.lower())
+
+    def test_filmed_phrase_accepts_wake_name_and_terminal_punctuation(self):
+        client = FakeClient()
+        client.tool_results["remember"] = "(remembered)"
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        list(provider.response(
+            "s", [{
+                "role": "user",
+                "content": "Hey, Dotty: My favourite colour is purple, please remember that!",
+            }],
+        ))
+
+        self.assertEqual(
+            client.tool_calls,
+            [("remember", {"fact": "My favourite colour is purple"})],
         )
 
 

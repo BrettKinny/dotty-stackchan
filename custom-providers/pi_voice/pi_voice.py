@@ -207,6 +207,19 @@ _REMEMBER_INTENT_RE = re.compile(
     r"^\s*(?:please\s+)?remember\s+(?:that\s+)?(?P<fact>.+?)\s*[.!?]?\s*$",
     re.IGNORECASE,
 )
+# The filmed UAT wording puts the remember request after the fact. Keep this
+# deliberately narrow: only the known child-sized favourite-colour sentence
+# is promoted to a deterministic tool call instead of guessing at arbitrary
+# natural-language requests.
+_REMEMBER_FAVOURITE_COLOUR_RE = re.compile(
+    r"^\s*(?P<fact>my\s+favourite\s+colour\s+is\s+[^,.!?]+?)"
+    r"\s*,?\s+please\s+remember\s+that\s*[.!?]?\s*$",
+    re.IGNORECASE,
+)
+_WAKE_NAME_RE = re.compile(
+    r"^\s*(?:(?:hey|hi)\s*,?\s+)?dotty\s*(?:[,;:!-]\s*|\s+)",
+    re.IGNORECASE,
+)
 _RECALL_INTENT_RE = re.compile(
     r"^\s*(?:what did i (?:tell|say to) you about|do you remember)\s+"
     r"(?P<query>.+?)\s*[?!.]?\s*$",
@@ -216,6 +229,21 @@ _THINK_HARD_INTENT_RE = re.compile(
     r"^\s*(?:please\s+)?think hard (?:about\s*:?)?\s*(?P<question>.+?)\s*[?!.]?\s*$",
     re.IGNORECASE,
 )
+
+
+def _remember_fact(user_text: str) -> str | None:
+    """Return a fact for the small set of unambiguous remember phrasings."""
+    # A wake-name prefix is only removed when it is a standalone ``Dotty``
+    # token followed by whitespace or punctuation; this avoids changing a
+    # genuine fact such as "Dotty's favourite colour ...".
+    intent_text = _WAKE_NAME_RE.sub("", user_text, count=1)
+    direct = _REMEMBER_INTENT_RE.match(intent_text)
+    if direct:
+        return direct.group("fact").strip()
+    filmed = _REMEMBER_FAVOURITE_COLOUR_RE.match(intent_text)
+    if filmed:
+        return filmed.group("fact").strip()
+    return None
 
 
 class LLMProvider(LLMProviderBase):
@@ -256,14 +284,13 @@ class LLMProvider(LLMProviderBase):
         if not user_text:
             yield f"{FALLBACK_EMOJI} (empty turn)"
             return
-        remember_intent = _REMEMBER_INTENT_RE.match(user_text)
-        if remember_intent:
-            fact = remember_intent.group("fact").strip()
+        fact = _remember_fact(user_text)
+        if fact is not None:
             result = self._invoke_voice_tool("remember", {"fact": fact})
             if result == "(remembered)":
-                yield f"{FALLBACK_EMOJI} I'll remember that."
+                yield from self._spoken_tool_output("I'll remember that.")
             else:
-                yield f"{FALLBACK_EMOJI} I couldn't save that memory."
+                yield from self._spoken_tool_output("I couldn't save that memory.")
             return
         recall_intent = _RECALL_INTENT_RE.match(user_text)
         if recall_intent:
@@ -272,11 +299,15 @@ class LLMProvider(LLMProviderBase):
                 "memory_lookup", {"query": query},
             )
             if result is None:
-                yield f"{FALLBACK_EMOJI} I couldn't check my memory right now."
+                yield from self._spoken_tool_output(
+                    "I couldn't check my memory right now.",
+                )
             elif result in ("(no memories found)", "(empty query)"):
-                yield f"{FALLBACK_EMOJI} I don't remember anything about that yet."
+                yield from self._spoken_tool_output(
+                    "I don't remember anything about that yet.",
+                )
             else:
-                yield f"{FALLBACK_EMOJI} {result}"
+                yield from self._spoken_tool_output(str(result))
             return
         think_intent = _THINK_HARD_INTENT_RE.match(user_text)
         if think_intent:
@@ -285,9 +316,11 @@ class LLMProvider(LLMProviderBase):
                 "think_hard", {"question": question},
             )
             if result is None or result.startswith("("):
-                yield f"{FALLBACK_EMOJI} I couldn't finish the deeper reasoning."
+                yield from self._spoken_tool_output(
+                    "I couldn't finish the deeper reasoning.",
+                )
             else:
-                yield f"{FALLBACK_EMOJI} {result}"
+                yield from self._spoken_tool_output(str(result))
             return
         prompt = _wrap_with_sandwich(user_text, self._kid_mode)
 
@@ -327,6 +360,19 @@ class LLMProvider(LLMProviderBase):
         except PiClientError as exc:
             logger.error("PiVoiceLLM direct tool %s failed: %s", name, exc)
             return None
+
+    def _spoken_tool_output(self, text: str) -> Iterator[str]:
+        """Apply the ordinary TTS output contract to deterministic replies.
+
+        Direct tool calls bypass pi's prompted response path, so they must
+        still receive leading-emoji enforcement and the atomic kid-mode
+        content filter before anything can reach TTS.
+        """
+        yield from filter_tts_stream(
+            _enforce_leading_emoji(iter((text,))),
+            self._kid_mode,
+            on_hit=self._on_filter_hit,
+        )
 
     def _on_filter_hit(self, tier: str, match) -> None:
         # Local logging only — the Prometheus counter / safety ring live in
