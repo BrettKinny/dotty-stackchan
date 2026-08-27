@@ -39,6 +39,7 @@ from zoneinfo import ZoneInfo
 from dispatch import XiaozhiAdminClient
 from household import HouseholdRegistry
 from perception import PerceptionState
+from safety import filter_spoken_text
 
 log = logging.getLogger("dotty-behaviour.consumers.face_greeter")
 
@@ -58,6 +59,7 @@ class FaceGreeter:
         name_min_interval_sec: float,
         name_quiet_after_chat_sec: float,
         tz: ZoneInfo,
+        kid_mode_provider=None,
     ) -> None:
         self._state = state
         self._xiaozhi = xiaozhi
@@ -70,6 +72,7 @@ class FaceGreeter:
         self._name_min_interval_sec = name_min_interval_sec
         self._name_quiet_after_chat_sec = name_quiet_after_chat_sec
         self._tz = tz
+        self._kid_mode = kid_mode_provider or (lambda: True)
         self._tasks: set[asyncio.Task] = set()
 
     def _spawn(self, coro, *, name: str | None = None) -> None:
@@ -168,6 +171,11 @@ class FaceGreeter:
             return
 
         text = self._name_template.format(name=person.display_name)
+        try:
+            text = filter_spoken_text(text, bool(self._kid_mode()))
+        except Exception:
+            # Safety must fail closed if the state reader is unavailable.
+            text = filter_spoken_text(text, True)
         log.info(
             "face_recognized → name-greet: device=%s identity=%s text=%r",
             device_id, identity, text,

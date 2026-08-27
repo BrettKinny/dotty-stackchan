@@ -122,6 +122,46 @@ people:
     asyncio.run(go())
 
 
+def test_kid_mode_filters_proactive_direct_speech() -> None:
+    async def go() -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tdp = Path(td)
+            household = _household_with(
+                tdp,
+                "people:\n  brett:\n    display_name: Brett\n",
+            )
+            llm, _ = _llm_factory("Here is cocaine, Brett!")
+            tts = _RecordingTTS()
+            greeter, state = _make(
+                tdp,
+                llm=llm,
+                tts=tts,
+                household=household,
+                kid_mode=True,
+            )
+
+            async def body() -> None:
+                state.broadcast(
+                    PerceptionEvent(
+                        device_id="dev-1",
+                        name="face_recognized",
+                        data={"identity": "brett"},
+                        ts=time.time(),
+                    )
+                )
+                await let_consumer_settle()
+                assert tts.calls == [
+                    (
+                        "dev-1",
+                        "😐 Let's talk about something fun instead! What's your favorite animal?",
+                    )
+                ]
+
+            await _drive(greeter, body)
+
+    asyncio.run(go())
+
+
 def test_greeting_prompt_includes_own_calendar_events_despite_case() -> None:
     # Audit 2026-06-06 (confirmed 2/3): identity is a lowercase person id
     # ("hudson") but the calendar event's person tag comes from the

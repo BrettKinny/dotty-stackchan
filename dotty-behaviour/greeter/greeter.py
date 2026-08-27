@@ -34,6 +34,7 @@ from zoneinfo import ZoneInfo
 
 from household import PersonResolver
 from perception import PerceptionEvent, PerceptionState
+from safety import filter_spoken_text
 
 log = logging.getLogger("dotty-behaviour.greeter")
 
@@ -363,7 +364,7 @@ class ProactiveGreeter:
                 if text.startswith(ch):
                     text = text[len(ch):].lstrip()
                     break
-        return text
+        return filter_spoken_text(text, kid)
 
     # ------------------------------------------------------------------
     # TTS push

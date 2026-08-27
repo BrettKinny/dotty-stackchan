@@ -68,10 +68,14 @@ def get_vlm_client(request: Request) -> VLMClient:
 
 
 def get_kid_mode(request: Request) -> bool:
-    """Live kid-mode reader. Set on app.state by the kid-mode toggle
-    handler (deferred slice). Defaults to False until the dashboard
-    plumbing lands."""
-    return bool(getattr(request.app.state, "kid_mode", False))
+    """Read the canonical Kid Mode state for every vision request.
+
+    ``main`` stores the reader callable on app.state so a dashboard toggle
+    takes effect without restarting this service. Tests and embedding callers
+    may still install a boolean on app.state for an isolated override.
+    """
+    value = getattr(request.app.state, "kid_mode", config.read_kid_mode)
+    return bool(value() if callable(value) else value)
 
 
 def get_household(request: Request) -> Optional[HouseholdRegistry]:
