@@ -33,6 +33,7 @@ from core.handle.textHandler.mcpMessageHandler import McpTextMessageHandler
 from core.handle.textHandler.pingMessageHandler import PingMessageHandler
 from core.handle.textHandler.serverMessageHandler import ServerTextMessageHandler
 from core.handle.textMessageHandler import TextMessageHandler
+from core.portal_bridge import last_known_states as _dotty_last_known_states
 
 TAG = __name__
 
@@ -112,6 +113,8 @@ class EventTextMessageHandler(TextMessageHandler):
                 if new_state:
                     conn.current_state = new_state
                     conn._dotty_desired_state = new_state
+                    if device_id != "unknown":
+                        _dotty_last_known_states[device_id] = new_state
             except Exception:
                 pass
         # Listen on `face_detected`. Prior firmware also emitted

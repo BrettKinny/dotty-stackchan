@@ -96,6 +96,25 @@ class TestAsrNameCorrections(unittest.TestCase):
         text = "Duddybrook is a place."
         self.assertEqual(_module._apply_asr_corrections(text), text)
 
+    def test_name_correction_preserves_goodnight_command_with_punctuation(self):
+        """Production order canonicalizes the name, then ignores punctuation."""
+        for heard in ("Dottie", "Duddy"):
+            with self.subTest(heard=heard):
+                text = _module._apply_asr_corrections(f"Good night, {heard}.")
+                self.assertEqual(
+                    _module._detect_state_phrase(text),
+                    ("sleep", "Goodnight! 😴"),
+                )
+
+    def test_ambiguous_real_names_do_not_trigger_sleep(self):
+        for heard in ("Donny", "Jody", "Jodi", "Claudia"):
+            with self.subTest(heard=heard):
+                self.assertIsNone(
+                    _module._detect_state_phrase(
+                        _module._apply_asr_corrections(f"Good night, {heard}.")
+                    )
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

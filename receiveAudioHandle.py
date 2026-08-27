@@ -119,7 +119,6 @@ _ASR_CORRECTION_RE = re.compile(
     re.IGNORECASE,
 )
 
-
 # ---------- Fuzzy phrase corrections ----------
 # Each entry: (canonical_phrase, minimum_similarity_ratio)
 # The canonical phrase is what we want. If the ASR text (or a window of it)
@@ -216,6 +215,8 @@ def _apply_asr_corrections(text: str) -> str:
     def _repl(m):
         return _ASR_CORRECTIONS.get(m.group(0).lower(), m.group(0))
     return _ASR_CORRECTION_RE.sub(_repl, text)
+
+
 VISION_PHRASES = (
     "look at", "what do you see", "what is this", "what's this",
     "take a photo", "take a picture", "can you see", "what's in front",
@@ -248,8 +249,12 @@ _NON_CONVERSATIONAL_STATES = ("sleep", "security", "story_time")
 
 def _detect_state_phrase(text: str) -> tuple[str, str] | None:
     lower = text.lower().strip()
+    # ASR punctuation should not decide whether a command fires. Phrase
+    # correction normally removes commas, but direct callers and providers
+    # can hand us the raw transcript too ("Good night, Dotty").
+    lower = re.sub(r"[^a-z0-9_]+", " ", lower).strip()
     for phrase, state, ack in _STATE_TRIGGER_PHRASES:
-        if phrase in lower:
+        if re.sub(r"[^a-z0-9_]+", " ", phrase) in lower:
             return (state, ack)
     return None
 
