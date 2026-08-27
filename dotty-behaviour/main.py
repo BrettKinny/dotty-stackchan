@@ -130,9 +130,10 @@ async def lifespan(app: FastAPI):
     calendar_cache = CalendarCache()
     app.state.calendar_cache = calendar_cache
     app.state.calendar_person_prefix_re = person_prefix_re
-    # kid-mode default — flipped by the dashboard's kid-mode toggle
-    # (deferred slice). vision_explain reads this via get_kid_mode().
-    app.state.kid_mode = False
+    # The bridge owns and persists this value. Store the reader callable so
+    # vision and direct ambient speech observe dashboard changes live. A test
+    # or embedding caller can replace it with a boolean override.
+    app.state.kid_mode = config.read_kid_mode
 
     # Filesystem prep — best-effort; missing bind mounts are an
     # operator error but the daemon should not crash before logging it.
@@ -261,6 +262,7 @@ async def lifespan(app: FastAPI):
             name_min_interval_sec=config.FACE_NAME_GREET_MIN_INTERVAL_SEC,
             name_quiet_after_chat_sec=config.FACE_NAME_GREET_QUIET_AFTER_CHAT_SEC,
             tz=config.LOCAL_TZ,
+            kid_mode_provider=config.read_kid_mode,
         )
     )
 
@@ -320,7 +322,7 @@ async def lifespan(app: FastAPI):
             household_bucket=config.CALENDAR_HOUSEHOLD_BUCKET,
         ),
         _greeter_tts,
-        lambda: bool(getattr(app.state, "kid_mode", False)),
+        config.read_kid_mode,
         household_registry=household,
         tz=config.LOCAL_TZ,
         state_path=config.GREETER_STATE_PATH,
