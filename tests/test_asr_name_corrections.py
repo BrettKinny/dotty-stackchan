@@ -1,11 +1,14 @@
 """Regression tests for wake-name corrections on the live ASR text path."""
 
 import importlib.util
+import asyncio
+import json
 import pathlib
 import sys
 import types
 import unittest
 from contextlib import contextmanager
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 _ROOT = pathlib.Path(__file__).parent.parent
@@ -95,6 +98,37 @@ class TestAsrNameCorrections(unittest.TestCase):
     def test_alias_matching_is_word_bounded(self):
         text = "Duddybrook is a place."
         self.assertEqual(_module._apply_asr_corrections(text), text)
+
+
+class TestAsrEnvelope(unittest.TestCase):
+    """AI-assisted GPT-6: exercise the actual post-ASR call boundary."""
+
+    def test_content_only_json_reaches_intent_as_text(self):
+        for envelope in (
+            {"content": "Purple robot seven window Brisbane."},
+            {"content": "Purple robot seven window Brisbane.", "speaker": "Fixture"},
+            {"content": "Purple robot seven window Brisbane.", "speaker": "Fixture", "language": "en"},
+        ):
+            with self.subTest(envelope=envelope):
+                conn = types.SimpleNamespace(logger=MagicMock(), need_bind=False,
+                    max_output_size=0, client_is_speaking=False)
+                intent = AsyncMock(return_value=True)
+                with patch.object(_module, "_sync_toggles_once", new=AsyncMock()), \
+                     patch.object(_module, "handle_user_intent", new=intent):
+                    asyncio.run(_module.startToChat(conn, json.dumps(envelope)))
+                intent.assert_awaited_once_with(conn, envelope["content"])
+                self.assertEqual(conn.current_speaker, envelope.get("speaker"))
+
+    def test_empty_or_nontext_content_is_not_a_spoken_request(self):
+        for content in ("", "...", None, [], {"nested": "say hello"}):
+            with self.subTest(content=content):
+                conn = types.SimpleNamespace(logger=MagicMock(), need_bind=False,
+                    max_output_size=0, client_is_speaking=False)
+                sync = AsyncMock()
+                with patch.object(_module, "_sync_toggles_once", new=sync), \
+                     patch.object(_module, "handle_user_intent", new=AsyncMock(return_value=True)):
+                    asyncio.run(_module.startToChat(conn, json.dumps({"content": content})))
+                sync.assert_not_awaited()
 
 
 if __name__ == "__main__":

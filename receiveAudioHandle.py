@@ -1050,11 +1050,15 @@ async def startToChat(conn: "ConnectionHandler", text):
     try:
         if text.strip().startswith("{") and text.strip().endswith("}"):
             data = json.loads(text)
-            if "speaker" in data and "content" in data:
-                speaker_name = data["speaker"]
-                _language_tag = data["language"]
-                actual_text = data["content"]
-                conn.logger.bind(tag=TAG).info(f"解析到说话人信息: {speaker_name}")
+            if isinstance(data, dict) and "content" in data:
+                # ASR may omit speaker/language metadata. Decode content before
+                # corrections, noise filtering, or intent routing; otherwise a
+                # fuzzy replacement can corrupt the JSON envelope itself.
+                actual_text = data["content"] if isinstance(data["content"], str) else ""
+                speaker_name = data.get("speaker")
+                _language_tag = data.get("language")
+                if speaker_name:
+                    conn.logger.bind(tag=TAG).info(f"解析到说话人信息: {speaker_name}")
     except (json.JSONDecodeError, KeyError):
         pass
 
