@@ -338,6 +338,43 @@ def host_timestamp(local_iso, clock, margin=0):
     return datetime.fromtimestamp(stamp, timezone.utc).isoformat()
 
 
+def prepare_prompt(session, directory, config, case, env):
+    """Select local prompt evidence only; relative paths are session-relative.
+
+    Snapshot supplied waveforms per attempt so a later render cannot replace
+    the file between validation and the shell harness's playback copy.
+    """
+    env.pop("DOTTY_AV_PROMPT_WAV", None)
+    entries = config.get("prompt_wavs", {})
+    if not isinstance(entries, dict):
+        raise ValueError("prompt_wavs_invalid_mapping")
+    if case["id"] not in entries:
+        return {"source": "harness_default", "renderer": "espeak-ng", "text": case["prompt"]}
+    entry = entries[case["id"]]
+    if not isinstance(entry, dict) or any(
+            not isinstance(entry.get(key), str) or not entry[key].strip()
+            for key in ("path", "text", "sha256", "renderer")):
+        raise ValueError("prompt_wav_invalid_entry")
+    if not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"]):
+        raise ValueError("prompt_wav_invalid_sha256")
+    if entry["text"] != case["prompt"]:
+        raise ValueError("prompt_wav_text_mismatch")
+    source = Path(entry["path"])
+    if not source.is_absolute():
+        source = session / source
+    source = source.resolve()
+    if not source.is_file() or source.stat().st_size == 0:
+        raise ValueError("prompt_wav_missing_or_empty")
+    selected = (directory / "selected-prompt.wav").resolve()
+    shutil.copyfile(source, selected)
+    with selected.open("rb") as audio:
+        digest = hashlib.file_digest(audio, "sha256").hexdigest()
+    if digest != entry["sha256"]:
+        raise ValueError("prompt_wav_sha256_mismatch")
+    env["DOTTY_AV_PROMPT_WAV"] = str(selected)
+    return {**entry, "source": "configured_wav", "source_path": str(source), "path": str(selected)}
+
+
 def run_case(session, config, case):
     ident = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + case["id"] + "-" + uuid.uuid4().hex[:6]
     directory = session / "cases" / ident
@@ -373,6 +410,8 @@ def run_case(session, config, case):
         env = dict(os.environ, DOTTY_AV_VOLUME=str(config["volume"]),
                    DOTTY_AV_ALLOW_HIGH_VOLUME="1", DOTTY_AV_SINK=sink,
                    DOTTY_AV_MAX_SECONDS="180")
+        result["prompt_provenance"] = prepare_prompt(session, directory, config, case, env)
+        write_json(directory / "result.json", result)
         media = directory / "raw.mp4"
         result["host_clock"] = host_clock(config["host"])
         result["capture_started"] = now()

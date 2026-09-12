@@ -1,5 +1,6 @@
 """Evidence and crash-safety regression tests. AI-assisted: OpenAI Codex (GPT-6)."""
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -207,6 +208,105 @@ def test_run_case_blocks_before_playback_without_changing_robot(tmp_path, monkey
     assert result["failure"] == "wake_precondition"
     assert result["capture"] == "INCONCLUSIVE"
     assert len(commands) == 1
+
+
+@pytest.fixture
+def prompt_capture_boundary(monkeypatch):
+    """Stop at the subprocess boundary; never touch real playback or hardware."""
+    captured = []
+    def fake_command(argv, **kwargs):
+        if argv == ["git", "rev-parse", "HEAD"]:
+            return "fixture-commit\n"
+        return {("pactl", "get-default-sink"): "fixture-speaker\n",
+                ("pactl", "get-sink-volume", "fixture-speaker"): "Volume: 35%\n",
+                ("pactl", "get-sink-mute", "fixture-speaker"): "Mute: no\n"}[tuple(argv)]
+    def capture(argv, log, session, timeout, env, deadline):
+        captured.append({"argv": argv, "env": env,
+                         "evidence_at_launch": json.loads((Path(log).parent / "result.json").read_text())})
+        raise RuntimeError("fixture_capture_stop")
+    monkeypatch.setattr(runner, "command", fake_command)
+    monkeypatch.setattr(runner, "snapshot", lambda host: {**after(), "devices": ["robot"]})
+    monkeypatch.setattr(runner, "host_clock", lambda host: {"offset_seconds": 0, "uncertainty_seconds": 0})
+    monkeypatch.setattr(runner, "guarded_process", capture)
+    return {"host": "unused", "device": "robot", "sink": "fixture-speaker", "volume": 35,
+            "stop_prompts_at": "2099-01-01T00:00:00+00:00"}, captured
+
+
+@pytest.mark.parametrize("mapping", [None, {}, {"other-case": {"path": "/unrelated/prompt.wav"}}])
+def test_unconfigured_case_cannot_inherit_another_prompt_wav(tmp_path, monkeypatch, prompt_capture_boundary, mapping):
+    config, captured = prompt_capture_boundary
+    if mapping is not None:
+        config["prompt_wavs"] = mapping
+    monkeypatch.setenv("DOTTY_AV_PROMPT_WAV", "/unrelated/prompt.wav")
+    result = runner.run_case(tmp_path, config, {"id": "arithmetic", "prompt": "Twelve plus seven?"})
+    assert result["failure"] == "fixture_capture_stop"
+    assert "DOTTY_AV_PROMPT_WAV" not in captured[0]["env"]
+    assert result["prompt_provenance"] == {"source": "harness_default", "renderer": "espeak-ng",
+                                             "text": "Twelve plus seven?"}
+
+
+@pytest.mark.parametrize("relative", [False, True])
+def test_configured_prompt_is_bound_to_case_and_persisted_before_capture(tmp_path, monkeypatch, prompt_capture_boundary, relative):
+    config, captured = prompt_capture_boundary
+    wav = tmp_path / "original.wav"
+    wav.write_bytes(b"fixture waveform bytes")
+    entry = {"path": wav.name if relative else str(wav), "text": "Twelve plus seven?",
+             "sha256": hashlib.sha256(wav.read_bytes()).hexdigest(), "renderer": "local Piper fixture"}
+    config["prompt_wavs"] = {"arithmetic": entry}
+    monkeypatch.setenv("DOTTY_AV_PROMPT_WAV", "/unrelated/prompt.wav")
+    result = runner.run_case(tmp_path, config, {"id": "arithmetic", "prompt": entry["text"]})
+    assert result["failure"] == "fixture_capture_stop"
+    selected = Path(captured[0]["env"]["DOTTY_AV_PROMPT_WAV"])
+    assert selected != wav  # Freeze per-attempt evidence against later source edits.
+    assert selected.read_bytes() == wav.read_bytes()
+    assert result["prompt_provenance"] == {**entry, "source_path": str(wav),
+                                             "path": str(selected), "source": "configured_wav"}
+    assert captured[0]["evidence_at_launch"]["prompt_provenance"] == result["prompt_provenance"]
+    wav.write_bytes(b"later replacement waveform")
+    assert hashlib.sha256(selected.read_bytes()).hexdigest() == entry["sha256"]
+
+
+@pytest.mark.parametrize("replacement, failure", [
+    ({"text": "Twelve plus ten?"}, "prompt_wav_text_mismatch"),
+    ({"text": "Twelve plus seven? "}, "prompt_wav_text_mismatch"),
+    ({"sha256": "0" * 64}, "prompt_wav_sha256_mismatch"),
+])
+def test_mismatched_prompt_cannot_reach_capture(tmp_path, prompt_capture_boundary, replacement, failure):
+    config, captured = prompt_capture_boundary
+    wav = tmp_path / "prompt.wav"
+    wav.write_bytes(b"fixture waveform bytes")
+    config["prompt_wavs"] = {"arithmetic": {
+        "path": str(wav), "text": "Twelve plus seven?",
+        "sha256": hashlib.sha256(wav.read_bytes()).hexdigest(), "renderer": "fixture", **replacement}}
+    result = runner.run_case(tmp_path, config, {"id": "arithmetic", "prompt": "Twelve plus seven?"})
+    assert result["failure"] == failure
+    assert result["capture"] == "INCONCLUSIVE"
+    assert captured == []
+
+
+@pytest.mark.parametrize("defect", ["missing_file", "empty_file", "path", "text", "sha256", "renderer",
+                                    "blank_renderer", "invalid_hash", "entry_not_object", "map_not_object"])
+def test_invalid_prompt_manifest_rejected_before_capture(tmp_path, prompt_capture_boundary, defect):
+    config, captured = prompt_capture_boundary
+    wav = tmp_path / "prompt.wav"
+    if defect != "missing_file":
+        wav.write_bytes(b"" if defect == "empty_file" else b"fixture waveform bytes")
+    entry = {"path": str(wav), "text": "Twelve plus seven?",
+             "sha256": hashlib.sha256(b"fixture waveform bytes").hexdigest(), "renderer": "fixture"}
+    if defect in entry:
+        del entry[defect]
+    elif defect == "blank_renderer":
+        entry["renderer"] = " "
+    elif defect == "invalid_hash":
+        entry["sha256"] = "not-a-sha256"
+    config["prompt_wavs"] = {"arithmetic": None if defect == "entry_not_object" else entry}
+    if defect == "map_not_object":
+        config["prompt_wavs"] = []
+    result = runner.run_case(tmp_path, config, {"id": "arithmetic", "prompt": "Twelve plus seven?"})
+    assert result["verdict"] == "FAIL"
+    assert result["failure"].startswith("prompt_wav")
+    assert result["capture"] == "INCONCLUSIVE"
+    assert captured == []
 
 
 def test_blocked_prerequisite_does_not_increment_failure_threshold(tmp_path):
