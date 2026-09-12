@@ -50,7 +50,7 @@ source defaults:
   privacy-state tool), not the current 15-tool contract.
 
 Source inventory uses this repository and the active development checkout
-`/home/brett/dev/stackchan-fw`, particularly `firmware/main/hal/hal_mcp.cpp`,
+`<STACKCHAN_FW_CHECKOUT>`, particularly `firmware/main/hal/hal_mcp.cpp`,
 `firmware/main/stackchan/modes/state_manager.cpp` and upstream `mcp_server.cc`.
 Record the flashed firmware identity before treating those source contracts as
 the deployed implementation. Do not alter the release submodule to run tests.

@@ -15,6 +15,7 @@ generated config. The September 12 session uses `overnight-2200` beneath that
 day's folder; `config.json` records the resolved sink, device and deadline.
 
 ```bash
+python scripts/dotty_overnight.py init --session SESSION --host '<XIAOZHI_USER>@<XIAOZHI_HOST>'
 python scripts/dotty_overnight.py preflight --session SESSION
 python scripts/dotty_overnight.py run --session SESSION --cases V01-identity --once
 python scripts/dotty_overnight.py status --session SESSION
@@ -22,6 +23,9 @@ python scripts/dotty_overnight.py stop --session SESSION
 python scripts/dotty_overnight.py resume --session SESSION
 python scripts/dotty_overnight.py report --session SESSION
 ```
+
+Initialization requires an explicit SSH destination (`--host` or
+`DOTTY_TEST_HOST`); existing sessions use their recorded configuration.
 
 Device/audio/SSH access must run in the host environment, not a sandbox that
 hides `/dev` or PipeWire. Do not modify a running shell script: finish/cancel

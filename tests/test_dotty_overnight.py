@@ -363,11 +363,37 @@ def test_invalid_response_vad_threshold_rejected_before_capture(tmp_path, prompt
 
 @pytest.mark.parametrize("arguments, expected", [([], .5), (["--response-vad-threshold", "0.25"], .25)])
 def test_init_persists_response_vad_setting(tmp_path, monkeypatch, arguments, expected):
-    monkeypatch.setattr(sys, "argv", ["dotty_overnight.py", "init", "--session", str(tmp_path), *arguments])
+    monkeypatch.setattr(sys, "argv", ["dotty_overnight.py", "init", "--session", str(tmp_path),
+                                     "--host", "fixture@fixture-host", *arguments])
     monkeypatch.setattr(runner, "admin", lambda host, route: {"devices": ["fixture-robot"]})
     monkeypatch.setattr(runner, "command", lambda *args, **kwargs: "fixture-speaker\n")
     runner.main()
     assert runner.load(tmp_path / "config.json")["response_vad_threshold"] == expected
+
+
+def test_init_requires_explicit_deployment_host(tmp_path, monkeypatch):
+    monkeypatch.delenv("DOTTY_TEST_HOST", raising=False)
+    session = tmp_path / "not-created"
+    monkeypatch.setattr(sys, "argv", ["dotty_overnight.py", "init", "--session", str(session)])
+    monkeypatch.setattr(runner, "admin", lambda *args: pytest.fail("must not contact an assumed host"))
+    with pytest.raises(SystemExit) as error:
+        runner.main()
+    assert error.value.code == 2
+    assert not session.exists()
+
+
+def test_init_accepts_explicit_host_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOTTY_TEST_HOST", "fixture@fixture-host")
+    monkeypatch.setattr(sys, "argv", ["dotty_overnight.py", "init", "--session", str(tmp_path)])
+    seen = []
+    def admin(host, route):
+        seen.append((host, route))
+        return {"devices": ["fixture-robot"]}
+    monkeypatch.setattr(runner, "admin", admin)
+    monkeypatch.setattr(runner, "command", lambda *args, **kwargs: "fixture-speaker\n")
+    runner.main()
+    assert seen == [("fixture@fixture-host", "devices")]
+    assert runner.load(tmp_path / "config.json")["host"] == "fixture@fixture-host"
 
 
 def test_preflight_reports_response_vad_setting(tmp_path, monkeypatch):

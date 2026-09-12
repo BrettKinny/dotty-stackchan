@@ -651,7 +651,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["init", "preflight", "run", "resume", "status", "stop", "report", "admin"])
     parser.add_argument("--session", required=True, type=Path)
-    parser.add_argument("--host", default="root@tower")
+    parser.add_argument("--host", default=os.environ.get("DOTTY_TEST_HOST"),
+                        help="init only: explicit SSH user@host (or DOTTY_TEST_HOST)")
     parser.add_argument("--device")
     parser.add_argument("--cases", help="comma-separated case IDs")
     parser.add_argument("--once", action="store_true")
@@ -663,6 +664,8 @@ def main():
     args = parser.parse_args()
     if args.response_vad_threshold is not None and args.command != "init":
         parser.error("--response-vad-threshold is init-only; existing sessions use config.json")
+    if args.command == "init" and (not args.host or not args.host.strip()):
+        parser.error("init requires --host or DOTTY_TEST_HOST; no deployment host is assumed")
     session = args.session.resolve()
     session.mkdir(parents=True, exist_ok=True)
     if args.command == "init":
