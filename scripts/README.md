@@ -8,6 +8,7 @@ Companions to [`docs/uat-runbook.md`](../docs/uat-runbook.md):
 
 - **`uat-capture.sh start|stop [--dry-run]`** — tails the four service containers into `uat-sessions/<date>/logs/`, then on stop pulls the day's NDJSON logs out of the containers and snapshots the health/perception endpoints. Needs `XIAOZHI_SSH=user@host`.
 - **`uat-slice.py`** — cuts the phone/screen recordings into per-check clips from the session results CSV, using the on-camera sync mark to align wall-clock and video time. PASS clips → `clips/shorts/`, the rest → `clips/issues/`. Requires `ffmpeg`.
+- **`dotty-av-test.sh`** — plays repeatable local TTS prompts through the workstation speakers while the C920 records Dotty's visible and audible response. Includes interactive volume calibration and automatic A/V verification; see [`docs/dotty-av-tests.md`](../docs/dotty-av-tests.md).
 
 ## render_singing_piper.py — Phase 1: Quick prototype
 

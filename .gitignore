@@ -57,3 +57,6 @@ package-lock.json
 # Downloaded ASR/TTS model weights (fetched by `make fetch-models`). Big
 # binaries, easy to regenerate; not part of the repo.
 /models/
+
+# Local UAT evidence can contain private webcam video and room audio.
+/uat-sessions/

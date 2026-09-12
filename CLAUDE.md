@@ -202,6 +202,16 @@ For hardware specs, protocol details, model internals, latent capabilities, and 
 
 ## Agent skills
 
+### Physical Dotty A/V testing
+
+For black-box voice tests that play a workstation TTS prompt to the physical
+robot while recording its visible and audible response, read and follow
+`skills/dotty-av-test/SKILL.md`. The canonical harness is
+`scripts/dotty-av-test.sh` and the operator guide is
+`docs/dotty-av-tests.md`. Calibrate speaker volume with the human before
+playback, keep recordings local unless explicitly asked to share them, and
+report capture, audible playback, and robot response as separate outcomes.
+
 ### Issue tracker
 
 Issues live as GitHub issues on `BrettKinny/dotty-stackchan` (the `origin` remote), managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
