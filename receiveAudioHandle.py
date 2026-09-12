@@ -150,6 +150,12 @@ _CANONICAL_PHRASES: tuple[str, ...] = (
     "good night",
 )
 
+# Paired quotation marks only. Apostrophes inside words (don't / Dotty's)
+# are not quote delimiters. Quoted spans remain verbatim for the LLM.
+_QUOTED_SPAN_RE = re.compile(
+    r'"[^"]*"|“[^”]*”|(?<!\w)\'[^\n]*?\'(?!\w)|‘[^\n]*?’(?!\w)'
+)
+
 
 def _apply_phrase_corrections(text: str) -> str:
     """Normalize one known phrase's punctuation without changing its words.
@@ -158,6 +164,9 @@ def _apply_phrase_corrections(text: str) -> str:
     near-matches stay intact for ordinary conversation instead of manufacturing
     camera, music, or state commands. Prefer the longest exact word sequence.
     """
+    # Do not erase the distinction between a command and a quoted mention.
+    if _QUOTED_SPAN_RE.search(text):
+        return text
     original_words = text.split()
     words = [word.lower().strip(".,!?;:\"'()[]{}‘’“”") for word in original_words]
     for canonical in sorted(_CANONICAL_PHRASES, key=lambda p: len(p.split()), reverse=True):
@@ -215,17 +224,35 @@ _WAKE_PHRASES = ("wake up", "come back", "are you there")
 _NON_CONVERSATIONAL_STATES = ("sleep", "security", "story_time")
 
 
+def _has_state_command(text: str, phrase: str) -> bool:
+    """Recognize a literal state phrase, excluding explicit mentions/negation.
+
+    This is deliberately not NLU: paired quotes and immediately preceding
+    do-not/don't/never (with common politeness/adverb fillers) are protected.
+    Indirect negation, hypothetical/reporting language, and unmatched quotes
+    remain outside this guard. Wake and entry shortcuts share the same rule.
+    """
+    lower = _QUOTED_SPAN_RE.sub(" [quoted] ", text.lower()).strip()
+    for match in re.finditer(r"\b" + re.escape(phrase) + r"\b", lower):
+        prefix = lower[:match.start()]
+        negated = re.search(
+            r"\b(?:do\s+not|don['’]t|never)\b"
+            r"(?:[\s,]+(?:please|ever|just|you))*[\s,]*$", prefix,
+        )
+        if not negated:
+            return True
+    return False
+
+
 def _detect_state_phrase(text: str) -> tuple[str, str] | None:
-    lower = text.lower().strip()
     for phrase, state, ack in _STATE_TRIGGER_PHRASES:
-        if phrase in lower:
+        if _has_state_command(text, phrase):
             return (state, ack)
     return None
 
 
 def _is_wake_phrase(text: str) -> bool:
-    lower = text.lower().strip()
-    return any(phrase in lower for phrase in _WAKE_PHRASES)
+    return any(_has_state_command(text, phrase) for phrase in _WAKE_PHRASES)
 
 
 _HELP_PHRASES = (
