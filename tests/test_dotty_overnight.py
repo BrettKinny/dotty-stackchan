@@ -48,6 +48,91 @@ def test_no_visual_evidence_means_no_overall_pass():
     assert result["verdict"] == "INCONCLUSIVE"
 
 
+@pytest.mark.parametrize("state", [after(current_state="talk", listening=True), after()])
+def test_ready_for_followup_accepts_ended_tts_and_fresh_resting_state(state):
+    result = runner.evaluate({"recovery_policy": "ready_for_followup", "reply": [["Dotty"]]},
+                             transcript("Dotty"), "结果: name\nSentenceType.FIRST\nSentenceType.LAST",
+                             10, state, "robot")
+    assert result["recovery"] == "PASS"
+    assert result["interaction"] == "PASS"
+    assert result["verdict"] == "INCONCLUSIVE"
+
+
+@pytest.mark.parametrize("logs", ["SentenceType.FIRST", "SentenceType.LAST\nSentenceType.FIRST",
+                                  "SentenceType.LAST\n发送第一段语音:"])
+def test_ready_for_followup_rejects_missing_or_prior_turn_last(logs):
+    result = runner.evaluate({"recovery_policy": "ready_for_followup"}, transcript("Dotty"),
+                             "结果: name\n" + logs, 10,
+                             after(current_state="talk", listening=True), "robot")
+    assert result["recovery"] == "FAIL"
+    assert result["failure"] == "not_ready_for_followup"
+
+
+@pytest.mark.parametrize("state", [
+    after(current_state="talk", listening=False),
+    after(current_state="idle", listening=True),
+    after(current_state="sleep", listening=False),
+    after(sensor_stale=True),
+    {**after(), "services_running": False},
+    {**after(), "errors": {"bridge": "unavailable"}},
+])
+def test_ready_for_followup_rejects_unhealthy_or_wrong_state(state):
+    result = runner.evaluate({"recovery_policy": "ready_for_followup"}, transcript("Dotty"),
+                             "结果: name\nSentenceType.FIRST\nSentenceType.LAST", 10, state, "robot")
+    assert result["recovery"] == "FAIL"
+
+
+def test_tool_requires_concrete_call_marker_not_spoken_name():
+    result = runner.evaluate({"expected_tool": "think_hard"}, transcript("I used think_hard"),
+                             "结果: please use think_hard\nSentenceType.FIRST", 10, after(), "robot")
+    assert result["expected_tool_call"] == "INCONCLUSIVE"
+    assert result["interaction"] == "INCONCLUSIVE"
+    assert result["verdict"] == "INCONCLUSIVE"
+
+
+def test_tool_marker_is_exact_and_does_not_prove_execution():
+    logs = "结果: think\nSentenceType.FIRST\nPiClient: tool call name=think_hard id=call_123"
+    result = runner.evaluate({"expected_tool": "think_hard"}, transcript("No"), logs, 10, after(), "robot")
+    assert result["expected_tool_call"] == "PASS"
+    assert result["tool_execution"] == "INCONCLUSIVE"
+    other = runner.evaluate({"expected_tool": "think"}, transcript("No"), logs, 10, after(), "robot")
+    assert other["expected_tool_call"] == "INCONCLUSIVE"
+
+
+def test_missing_tool_marker_does_not_hide_known_acoustic_failure():
+    result = runner.evaluate({"expected_tool": "think_hard"}, {"segments": []},
+                             "结果: think\nSentenceType.FIRST", 10, after(), "robot")
+    assert result["failure"] == "no_audible_response"
+    assert result["interaction"] == "FAIL"
+
+
+def test_response_word_limit_is_strict_without_asserting_creative_quality():
+    logs = "结果: joke\nSentenceType.FIRST"
+    result = runner.evaluate({"max_response_words": 3}, transcript("I'm a robot"), logs, 10, after(), "robot")
+    assert result["response_word_count"] == 3
+    assert result["response_length"] == "PASS"
+    assert result["semantic_quality"] == "INCONCLUSIVE"
+    assert result["verdict"] == "INCONCLUSIVE"
+    longer = runner.evaluate({"max_response_words": 3}, transcript("I'm a tiny robot"), logs, 10, after(), "robot")
+    assert longer["response_word_count"] == 4
+    assert longer["failure"] == "response_too_long"
+    assert longer["verdict"] == "FAIL"
+
+
+@pytest.mark.parametrize("limit", [0, -1, True, "3", 3.5])
+def test_invalid_word_limit_is_rejected(limit):
+    with pytest.raises(ValueError, match="positive integer"):
+        runner.evaluate({"max_response_words": limit}, transcript("hello"),
+                        "结果: hello\nSentenceType.FIRST", 10, after(), "robot")
+
+
+def test_emoji_stripped_tts_does_not_imply_bad_expression():
+    result = runner.evaluate({}, transcript("Dotty"), "结果: name\n发送第一段语音: Dotty",
+                             10, after(), "robot")
+    assert result["expression"] == "INCONCLUSIVE"
+    assert result["visual"] == "INCONCLUSIVE"
+
+
 def test_cannot_pool_unrelated_asr_requests():
     result = runner.evaluate({"asr": [["purple"], ["robot"]]}, transcript("yes"),
                              "结果: purple\n结果: robot\nSentenceType.FIRST", 10, after(), "robot")

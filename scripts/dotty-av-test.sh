@@ -55,6 +55,7 @@ Usage:
 Environment overrides:
   DOTTY_AV_VIDEO_DEVICE, DOTTY_AV_AUDIO_DEVICE, DOTTY_AV_SINK
   DOTTY_AV_AUDIO_BACKEND (pulse default, alsa fallback), DOTTY_AV_AUDIO_SOURCE
+  DOTTY_AV_PROMPT_WAV (optional pre-rendered local prompt)
   DOTTY_AV_VIDEO_SIZE, DOTTY_AV_VIDEO_FPS, DOTTY_AV_VOLUME
   DOTTY_AV_RESPONSE_SECONDS, DOTTY_AV_OUT_DIR
 
@@ -192,7 +193,12 @@ run)
     lock_capture
     mkdir -p "$(dirname "$output")"
     speech="$(mktemp --suffix=.wav)"
-    espeak-ng -v en-au -s 145 -w "$speech" "$prompt"
+    if [[ -n "${DOTTY_AV_PROMPT_WAV:-}" ]]; then
+        [[ -s "$DOTTY_AV_PROMPT_WAV" ]] || { echo 'ERROR: missing prompt WAV' >&2; exit 2; }
+        cp -- "$DOTTY_AV_PROMPT_WAV" "$speech"
+    else
+        espeak-ng -v en-au -s 145 -w "$speech" "$prompt"
+    fi
     speech_seconds="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$speech")"
     total_seconds="$(awk -v speech="$speech_seconds" -v response="$response_seconds" 'BEGIN { printf "%d", speech + response + 3.999 }')"
     bounded "$total_seconds"

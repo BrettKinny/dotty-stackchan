@@ -132,10 +132,26 @@ def evaluate(case, transcript, log_text, playback_end, after, device):
     asr = re.findall(r"结果: (.*)", log_text)
     state = after.get("perception", {}).get(device, {})
     tts = "SentenceType.FIRST" in log_text or "发送第一段语音:" in log_text
+    tts_edges = re.findall(r"SentenceType\.(FIRST|LAST)\b|(发送第一段语音:)", log_text)
+    tts_completed = bool(tts_edges) and tts_edges[-1][0] == "LAST"
     # One recognition must contain the request; unrelated log lines cannot pool
     # their words into evidence that Dotty understood this prompt.
     asr_ok = any(matches(item, case.get("asr", [])) for item in asr)
     response_ok = bool(response) and matches(response, case.get("reply", []))
+    word_count = len(re.findall(r"\b\w+(?:['’]\w+)*\b", response))
+    word_limit = case.get("max_response_words")
+    if word_limit is not None and (type(word_limit) is not int or word_limit < 1):
+        raise ValueError("max_response_words must be a positive integer")
+    within_limit = word_limit is None or word_count <= word_limit
+    expected_tool = case.get("expected_tool")
+    if expected_tool is not None and (not isinstance(expected_tool, str) or not expected_tool.strip()):
+        raise ValueError("expected_tool must name one tool")
+    # This concrete PiClient marker records model tool-call construction. It
+    # cannot prove execution or a successful result, and a name mentioned in
+    # an ASR transcript or assistant answer must not satisfy it.
+    tool_calls = re.findall(r"PiClient: tool call name=([a-z_][a-z0-9_]*) id=([^\s]+)", log_text)
+    observed_tools = [name for name, ident in tool_calls if ident != "unknown"]
+    tool_observed = expected_tool in observed_tools if expected_tool else None
     recovered = (not after.get("errors") and after.get("services_running", False)
                  and not state.get("sensor_stale", True)
                  and state.get("current_state") in case.get("resting_states", ["idle"])
@@ -145,7 +161,7 @@ def evaluate(case, transcript, log_text, playback_end, after, device):
         # Count readiness only with an ended TTS turn and a fresh live state.
         recovered = (not after.get("errors") and after.get("services_running", False)
                      and not state.get("sensor_stale", True)
-                     and "SentenceType.LAST" in log_text
+                     and tts_completed
                      and ((state.get("current_state") == "idle" and state.get("listening") is False)
                           or (state.get("current_state") == "talk" and state.get("listening") is True)))
     failure = None
@@ -159,12 +175,29 @@ def evaluate(case, transcript, log_text, playback_end, after, device):
         failure = "no_audible_response"
     elif not response_ok:
         failure = "response_mismatch"
+    elif not within_limit:
+        failure = "response_too_long"
     elif not recovered:
         failure = "not_ready_for_followup" if case.get("recovery_policy") == "ready_for_followup" else "no_idle_recovery"
+    interaction = "FAIL" if failure else "PASS"
+    if failure is None and expected_tool and not tool_observed:
+        # Absence of a marker may mean the deployed provider lacks this logger;
+        # do not turn uncertain instrumentation into a product failure or pass.
+        interaction = "INCONCLUSIVE"
     return {"asr": asr, "asr_match": asr_ok, "response_transcript": response,
-            "response_match": response_ok, "tts_evidence": tts,
+            "response_match": response_ok, "tts_evidence": tts, "tts_completed": tts_completed,
+            "response_word_count": word_count, "max_response_words": word_limit,
+            "response_length": "PASS" if within_limit else "FAIL",
+            "semantic_quality": "INCONCLUSIVE",
+            "semantic_note": "Keyword/length checks do not establish creative quality or complete semantic correctness.",
+            "observed_tool_calls": observed_tools,
+            "expected_tool_call": "PASS" if tool_observed else "INCONCLUSIVE",
+            "tool_execution": "INCONCLUSIVE",
+            "tool_note": "Expected call unverified; logger availability and execution/result require review."
+                         if expected_tool and not tool_observed else "Call markers alone do not prove tool execution/result.",
+            "expression": "INCONCLUSIVE",
             "recovery": "PASS" if recovered else "FAIL", "failure": failure,
-            "interaction": "PASS" if failure is None else "FAIL",
+            "interaction": interaction,
             "visual": "INCONCLUSIVE", "verdict": "FAIL" if failure else "INCONCLUSIVE",
             "note": "Visual assertion requires frame review; automated acoustic checks are provisional."}
 
