@@ -151,7 +151,20 @@ def prepare_analysis(path, output):
                         "analysis_limit_seconds": 180}
 
 
-def transcribe(path, model_path, output, normalize=False, vad_filter=True):
+def validate_vad_threshold(value):
+    try:
+        threshold = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("VAD threshold must be finite and between 0 and 1") from None
+    if isinstance(value, bool) or not math.isfinite(threshold) or not 0 <= threshold <= 1:
+        raise ValueError("VAD threshold must be finite and between 0 and 1")
+    return threshold
+
+
+def transcribe(path, model_path, output, normalize=False, vad_filter=True, vad_threshold=.5):
+    # Lower thresholds are explicit prospective experiments, never inferred from
+    # expected words or used to reclassify existing case evidence.
+    vad_parameters = {"threshold": validate_vad_threshold(vad_threshold)}
     if Path(output).exists() or Path(output).resolve() == Path(path).resolve():
         raise FileExistsError("transcription output already exists or matches input")
     analysis_path, analysis = (path, {"enabled": False, "source": str(Path(path).resolve())})
@@ -159,7 +172,7 @@ def transcribe(path, model_path, output, normalize=False, vad_filter=True):
         analysis_path, analysis = prepare_analysis(path, output)
     if normalize and analysis["original_quality"]["near_silence"]:
         result = {"model": str(model_path), "language_probability": None, "segments": [],
-                  "analysis": analysis, "vad_filter": vad_filter,
+                  "analysis": analysis, "vad_filter": vad_filter, "vad_parameters": vad_parameters,
                   "evidence_status": "INCONCLUSIVE", "reason": "original_audio_near_silent"}
         with Path(output).open("x") as file:
             json.dump(result, file, indent=2)
@@ -170,10 +183,11 @@ def transcribe(path, model_path, output, normalize=False, vad_filter=True):
     model = WhisperModel(str(model_path), device="cpu", compute_type="int8",
                          cpu_threads=4, local_files_only=True)
     segments, info = model.transcribe(str(analysis_path), language="en", beam_size=3,
-                                      vad_filter=vad_filter, condition_on_previous_text=False,
+                                      vad_filter=vad_filter, vad_parameters=vad_parameters,
+                                      condition_on_previous_text=False,
                                       word_timestamps=True)
     result = {"model": str(model_path), "language_probability": info.language_probability,
-              "analysis": analysis, "vad_filter": vad_filter,
+              "analysis": analysis, "vad_filter": vad_filter, "vad_parameters": vad_parameters,
               "evidence_status": "UNVERIFIED_TRANSCRIPT",
               "note": "Transcription is evidence only, including after gain. Confirm response timing, "
                       "service TTS and content independently; noise can hallucinate words.",
@@ -200,9 +214,12 @@ if __name__ == "__main__":
     p.add_argument("--output", required=True, type=Path)
     p.add_argument("--normalize", action="store_true", help="create bounded-gain analysis WAV; preserve original")
     p.add_argument("--no-vad", action="store_true", help="diagnostic transcription only; increases hallucination risk")
+    p.add_argument("--vad-threshold", type=validate_vad_threshold, default=.5,
+                   help="explicit VAD speech threshold 0..1 (default: 0.5); recorded in provenance")
     args = parser.parse_args()
     if args.command == "verify":
         print(json.dumps(verify(args.file, args.expected)))
     else:
         print(json.dumps(transcribe(args.file, args.model, args.output,
-                                    normalize=args.normalize, vad_filter=not args.no_vad)))
+                                    normalize=args.normalize, vad_filter=not args.no_vad,
+                                    vad_threshold=args.vad_threshold)))

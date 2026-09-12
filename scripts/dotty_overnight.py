@@ -375,6 +375,15 @@ def prepare_prompt(session, directory, config, case, env):
     return {**entry, "source": "configured_wav", "source_path": str(source), "path": str(selected)}
 
 
+def response_vad_threshold(config):
+    value = config.get("response_vad_threshold", .5)
+    # The bounded comparison also rejects NaN and infinities. JSON booleans
+    # are not numerical settings, despite bool being an int subclass.
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+        raise ValueError("response_vad_threshold_must_be_finite_number_between_0_and_1")
+    return float(value)
+
+
 def run_case(session, config, case):
     ident = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + case["id"] + "-" + uuid.uuid4().hex[:6]
     directory = session / "cases" / ident
@@ -388,6 +397,7 @@ def run_case(session, config, case):
     write_json(session / "active.json", {"case": ident, "case_id": case["id"], "started": result["started"]})
     journal(session, {"event": "case_started", "id": ident})
     try:
+        result["response_vad_threshold"] = response_vad_threshold(config)
         before = snapshot(config["host"])
         write_json(directory / "before.json", before)
         if before["errors"] or not before.get("services_running") or config["device"] not in before.get("devices", []):
@@ -442,9 +452,14 @@ def run_case(session, config, case):
                      "-vn", "-ar", "16000", "-ac", "1", wav])
             guarded_process([config["python"], ROOT / "scripts/dotty_av_media.py", "transcribe", wav,
                             "--model", config["model"], "--output", directory / f"{label}.json",
-                            *(["--normalize"] if label == "response" else [])],
+                            *(["--normalize", "--vad-threshold", str(result["response_vad_threshold"])]
+                              if label == "response" else [])],
                             directory / f"{label}-transcribe.log", session, 120,
                             deadline=datetime.fromisoformat(config["finish_at"]).timestamp())
+            analysis = load(directory / f"{label}.json")
+            result.setdefault("transcription_analysis", {})[label] = {
+                key: analysis[key] for key in ("model", "analysis", "vad_filter", "vad_parameters")
+                if key in analysis}
         heard = " ".join(s["text"] for s in load(directory / "prompt-heard.json")["segments"])
         result["prompt_heard"] = heard
         result["playback"] = "PASS" if heard.strip() and matches(heard, case.get("asr", [])) else "INCONCLUSIVE"
@@ -494,7 +509,9 @@ def report(session):
 
 
 def preflight(session, config):
-    data = {"at": now(), "disk_ok": space_ok(session), "snapshot": snapshot(config["host"])}
+    threshold = response_vad_threshold(config)
+    data = {"at": now(), "response_vad_threshold": threshold,
+            "disk_ok": space_ok(session), "snapshot": snapshot(config["host"])}
     for binary in ("ffmpeg", "ffprobe", "espeak-ng", "pw-play", "pactl", "flock"):
         data[binary] = shutil.which(binary)
     data["model_exists"] = (Path(config["model"]) / "model.bin").is_file()
@@ -640,7 +657,12 @@ def main():
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--route")
     parser.add_argument("--body", help="JSON object; tokens are resolved remotely")
+    parser.add_argument("--response-vad-threshold", type=lambda value: response_vad_threshold(
+        {"response_vad_threshold": float(value)}),
+        help="init only: response transcription VAD threshold, 0..1 (default 0.5)")
     args = parser.parse_args()
+    if args.response_vad_threshold is not None and args.command != "init":
+        parser.error("--response-vad-threshold is init-only; existing sessions use config.json")
     session = args.session.resolve()
     session.mkdir(parents=True, exist_ok=True)
     if args.command == "init":
@@ -657,6 +679,7 @@ def main():
             "sink": command(["pactl", "get-default-sink"]).strip(), "volume": 100,
             "python": str(session / "evaluator-venv/bin/python"),
             "model": str(session / "models/whisper-small.en-ct2"),
+            "response_vad_threshold": .5 if args.response_vad_threshold is None else args.response_vad_threshold,
             "seed": 20260912, "interval_seconds": 600,
             "stop_prompts_at": (morning - timedelta(minutes=30)).isoformat(),
             "finish_at": morning.isoformat(), "created": now(), "framing": "BLOCKED"}

@@ -309,6 +309,94 @@ def test_invalid_prompt_manifest_rejected_before_capture(tmp_path, prompt_captur
     assert captured == []
 
 
+@pytest.mark.parametrize("threshold", [None, .25, 0, 1])
+def test_response_vad_threshold_does_not_change_prompt_transcription(tmp_path, monkeypatch, prompt_capture_boundary, threshold):
+    config, _ = prompt_capture_boundary
+    expected = .5 if threshold is None else float(threshold)
+    if threshold is not None:
+        config["response_vad_threshold"] = threshold
+    config.update(python="fixture-python", model="fixture-model",
+                  finish_at="2099-01-01T01:00:00+00:00")
+    boundary_command = runner.command
+    monkeypatch.setattr(runner, "command", lambda argv, **kwargs:
+                        "" if argv[0] == "ffmpeg" else boundary_command(argv, **kwargs))
+    monkeypatch.setattr(runner, "verify", lambda *args, **kwargs: {"audio_seconds": 40, "video_seconds": 40})
+    def logs(host, start, end, directory):
+        (directory / "xiaozhi-esp32-server.log").write_text("结果: Twelve plus seven\nSentenceType.FIRST")
+    monkeypatch.setattr(runner, "read_log_window", logs)
+    transcriptions = {}
+    def process(argv, log, session, timeout, env=None, deadline=None):
+        directory = Path(log).parent
+        if "transcribe" not in argv:
+            for name, second in (("recording-start", 0), ("playback-start", 2), ("playback-end", 5)):
+                (directory / f"raw.{name}.txt").write_text(f"2026-09-12T12:00:0{second}+00:00")
+            return
+        label = Path(argv[3]).stem
+        transcriptions[label] = argv
+        threshold = float(argv[argv.index("--vad-threshold") + 1]) if "--vad-threshold" in argv else .5
+        output = Path(argv[argv.index("--output") + 1])
+        runner.write_json(output, {**transcript("nineteen" if label == "response" else "Twelve plus seven"),
+                                  "vad_parameters": {"threshold": threshold}, "vad_filter": True,
+                                  "analysis": {"enabled": "--normalize" in argv}, "model": "fixture-model"})
+    monkeypatch.setattr(runner, "guarded_process", process)
+    result = runner.run_case(tmp_path, config, {"id": "arithmetic", "prompt": "Twelve plus seven?",
+                                               "asr": [["twelve"], ["seven"]], "reply": [["nineteen"]]})
+    assert result["interaction"] == "PASS", result
+    response = transcriptions["response"]
+    assert float(response[response.index("--vad-threshold") + 1]) == expected
+    assert "--vad-threshold" not in transcriptions["prompt-heard"]
+    assert result["response_vad_threshold"] == expected
+    assert result["transcription_analysis"]["response"]["vad_parameters"] == {"threshold": expected}
+    assert result["transcription_analysis"]["prompt-heard"]["vad_parameters"] == {"threshold": .5}
+
+
+@pytest.mark.parametrize("threshold", [-.1, 1.1, float("nan"), float("inf"), -float("inf"),
+                                        True, False, None, ".25", [], {}])
+def test_invalid_response_vad_threshold_rejected_before_capture(tmp_path, prompt_capture_boundary, threshold):
+    config, captured = prompt_capture_boundary
+    config["response_vad_threshold"] = threshold
+    result = runner.run_case(tmp_path, config, {"id": "arithmetic", "prompt": "Twelve plus seven?"})
+    assert result["failure"] == "response_vad_threshold_must_be_finite_number_between_0_and_1"
+    assert result["capture"] == "INCONCLUSIVE"
+    assert captured == []
+
+
+@pytest.mark.parametrize("arguments, expected", [([], .5), (["--response-vad-threshold", "0.25"], .25)])
+def test_init_persists_response_vad_setting(tmp_path, monkeypatch, arguments, expected):
+    monkeypatch.setattr(sys, "argv", ["dotty_overnight.py", "init", "--session", str(tmp_path), *arguments])
+    monkeypatch.setattr(runner, "admin", lambda host, route: {"devices": ["fixture-robot"]})
+    monkeypatch.setattr(runner, "command", lambda *args, **kwargs: "fixture-speaker\n")
+    runner.main()
+    assert runner.load(tmp_path / "config.json")["response_vad_threshold"] == expected
+
+
+def test_preflight_reports_response_vad_setting(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "snapshot", lambda host: after())
+    monkeypatch.setattr(runner, "space_ok", lambda session: True)
+    result = runner.preflight(tmp_path, {"host": "unused", "model": str(tmp_path), "response_vad_threshold": .25})
+    assert result["response_vad_threshold"] == .25
+
+
+def test_preflight_rejects_invalid_vad_before_external_checks(tmp_path, monkeypatch):
+    def no_snapshot(*args):
+        pytest.fail("invalid config must not access the live host")
+    monkeypatch.setattr(runner, "snapshot", no_snapshot)
+    with pytest.raises(ValueError, match="response_vad_threshold"):
+        runner.preflight(tmp_path, {"host": "unused", "response_vad_threshold": float("nan")})
+
+
+@pytest.mark.parametrize("command, threshold", [("init", "nan"), ("init", "inf"), ("init", "-0.1"),
+                                                ("init", "1.1"), ("run", ".25"), ("resume", ".25")])
+def test_vad_cli_cannot_silently_override_existing_config(tmp_path, monkeypatch, command, threshold):
+    session = tmp_path / "not-created"
+    monkeypatch.setattr(sys, "argv", ["dotty_overnight.py", command, "--session", str(session),
+                                      "--response-vad-threshold", threshold])
+    with pytest.raises(SystemExit) as error:
+        runner.main()
+    assert error.value.code == 2
+    assert not session.exists()
+
+
 def test_blocked_prerequisite_does_not_increment_failure_threshold(tmp_path):
     checkpoint = runner.restore_checkpoint(tmp_path)
     runner.record_attempt(checkpoint, {"id": "wake"},

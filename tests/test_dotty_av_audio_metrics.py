@@ -130,7 +130,8 @@ def test_near_silence_never_invokes_model_or_becomes_pass(tmp_path, monkeypatch)
     assert "verdict" not in result
 
 
-def test_transcript_is_unverified_even_if_noise_hallucinates_text(tmp_path, monkeypatch):
+@pytest.mark.parametrize("threshold", [None, .3])
+def test_transcript_is_unverified_even_if_noise_hallucinates_text(tmp_path, monkeypatch, threshold):
     calls = []
 
     class FakeModel:
@@ -143,11 +144,33 @@ def test_transcript_is_unverified_even_if_noise_hallucinates_text(tmp_path, monk
                                     no_speech_prob=.2, avg_logprob=-.4, words=[])], SimpleNamespace(language_probability=1)
 
     monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeModel))
-    result = media.transcribe(tmp_path / "noise.wav", "local-model", tmp_path / "out.json")
+    options = {} if threshold is None else {"vad_threshold": threshold}
+    result = media.transcribe(tmp_path / "noise.wav", "local-model", tmp_path / "out.json", **options)
     assert calls[0]["vad_filter"] is True
     assert calls[0]["condition_on_previous_text"] is False
+    assert calls[0]["vad_parameters"] == {"threshold": .5 if threshold is None else threshold}
+    assert result["vad_parameters"] == calls[0]["vad_parameters"]
     assert "initial_prompt" not in calls[0]
     assert result["evidence_status"] == "UNVERIFIED_TRANSCRIPT"
     assert "verdict" not in result
     with pytest.raises(FileExistsError):
         media.transcribe(tmp_path / "noise.wav", "local-model", tmp_path / "out.json")
+
+
+@pytest.mark.parametrize("threshold", [-.1, 1.1, math.nan, math.inf, True, None, "invalid"])
+def test_invalid_vad_threshold_is_rejected_before_artifacts(tmp_path, threshold):
+    with pytest.raises(ValueError, match="VAD threshold"):
+        media.transcribe(tmp_path / "source.wav", "unused", tmp_path / "out.json",
+                         normalize=True, vad_threshold=threshold)
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("threshold", [0, .3, .5, 1])
+def test_silent_normalized_provenance_preserves_valid_threshold(tmp_path, monkeypatch, threshold):
+    monkeypatch.setattr(media, "prepare_analysis", lambda *_: (
+        tmp_path / "analysis.wav", {"original_quality": {"near_silence": True}}))
+    result = media.transcribe(tmp_path / "source.wav", "unused", tmp_path / "out.json",
+                              normalize=True, vad_threshold=threshold)
+    assert result["evidence_status"] == "INCONCLUSIVE"
+    assert result["segments"] == []
+    assert result["vad_parameters"] == {"threshold": float(threshold)}
