@@ -88,8 +88,41 @@ recordings; they cannot drive Dotty's microphone during a live test.
 DOTTY_AV_VOLUME=25 scripts/dotty-av-test.sh speaker-test
 DOTTY_AV_RESPONSE_SECONDS=30 scripts/dotty-av-test.sh run "Hi E S P. Tell me a joke."
 DOTTY_AV_OUT_DIR=/tmp/dotty-tests scripts/dotty-av-test.sh record 10
+# Optional diagnostic: same capture process also writes diagnostic.capture.wav.
+DOTTY_AV_LOSSLESS_AUDIO=1 scripts/dotty-av-test.sh record 10 /tmp/diagnostic.mp4
 ```
 
 Device selection can be overridden with `DOTTY_AV_VIDEO_DEVICE`,
 `DOTTY_AV_AUDIO_DEVICE`, and `DOTTY_AV_SINK`. The defaults match the C920 and
 the current default PipeWire speaker sink.
+
+`DOTTY_AV_LOSSLESS_AUDIO=1` adds a 32 kHz stereo `pcm_f32le` WAV named from
+the unique MP4 destination (`raw.mp4` → `raw.capture.wav`). Both outputs map the
+same audio input in one FFmpeg process and have the same bounded duration;
+existing MP4s or sidecars are refused. The default remains MP4-only. With the
+Pulse backend, this opt-in also requests float input instead of Pulse's default
+16-bit input format, so above-full-scale samples can survive into the WAV. The
+ALSA fallback retains its existing input format and converts that captured
+signal to float for storage. The input-codec selection follows
+[FFmpeg's Pulse demuxer](https://github.com/FFmpeg/FFmpeg/blob/master/libavdevice/pulse_audio_dec.c).
+
+This is a capture-quality diagnostic, not proof of analogue microphone
+clipping. AAC decoding can create overshoots; the same-input PCM provides an
+independent comparison before AAC encoding, but does not undo clipping or gain
+earlier in the audio stack. MP4 and WAV start timestamps need not align exactly:
+the WAV starts at its first audio sample, and the recording-launch timestamp
+precedes device startup. Do not use matching nominal durations as proof of
+sample-accurate timing.
+
+The overnight evaluator records native-channel prompt and response window
+metrics separately under `native_audio_windows`, including the sidecar when
+present. Prompt metrics include pre-roll and use the approximate playback-end
+anchor; response metrics start after the existing tail margin. These windows
+do not downmix or normalize and do not automatically pass an interaction.
+For follow-up or state-command cases that must start with an open microphone,
+set `require_warm_listening: true` on the case. An absent/stale listening signal
+blocks playback; it does not change the robot's state. The default retains the
+existing `ready_for_followup` prerequisite, except for explicit cold-wake tests.
+
+*Lossless capture and window-metrics additions were AI-assisted by OpenAI Codex
+(GPT-6); their automated checks use synthetic audio, not a physical calibration.*

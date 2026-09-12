@@ -256,6 +256,26 @@ def test_explicit_warm_precondition_requires_listening_not_talk_state(
     assert len(captured) == 1
 
 
+def test_window_metrics_keep_prompt_and_response_separate_without_verdict(tmp_path, monkeypatch):
+    media = tmp_path / "raw.mp4"
+    sidecar = tmp_path / "raw.capture.wav"
+    sidecar.write_bytes(b"fixture")
+    calls = []
+    def metrics(path, start, duration):
+        calls.append((Path(path).name, start, duration))
+        return {"clipping_ratio": .006 if start == 0 else 0,
+                "channel_policy": "native; no downmix or resampling"}
+    monkeypatch.setattr(runner, "audio_metrics", metrics)
+    result = runner.capture_window_metrics(media, 53, 6.4, 6.8)
+    assert calls == [("raw.mp4", 0, 6.4), ("raw.mp4", 6.8, 46.2),
+                     ("raw.capture.wav", 0, 6.4), ("raw.capture.wav", 6.8, 46.2)]
+    assert result["container_audio"]["prompt"]["clipping_ratio"] == .006
+    assert result["container_audio"]["response"]["clipping_ratio"] == 0
+    assert result["lossless_capture"]["source"] == str(sidecar)
+    assert "verdict" not in result and "interaction" not in result
+    assert "not sample-aligned" in result["timing_note"]
+
+
 @pytest.mark.parametrize("mapping", [None, {}, {"other-case": {"path": "/unrelated/prompt.wav"}}])
 def test_unconfigured_case_cannot_inherit_another_prompt_wav(tmp_path, monkeypatch, prompt_capture_boundary, mapping):
     config, captured = prompt_capture_boundary
@@ -345,6 +365,7 @@ def test_response_vad_threshold_does_not_change_prompt_transcription(tmp_path, m
     monkeypatch.setattr(runner, "command", lambda argv, **kwargs:
                         "" if argv[0] == "ffmpeg" else boundary_command(argv, **kwargs))
     monkeypatch.setattr(runner, "verify", lambda *args, **kwargs: {"audio_seconds": 40, "video_seconds": 40})
+    monkeypatch.setattr(runner, "audio_metrics", lambda *args, **kwargs: {"fixture": True})
     def logs(host, start, end, directory):
         (directory / "xiaozhi-esp32-server.log").write_text("结果: Twelve plus seven\nSentenceType.FIRST")
     monkeypatch.setattr(runner, "read_log_window", logs)

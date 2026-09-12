@@ -82,14 +82,18 @@ def pcm_metrics(pcm):
                     "Lossy decoding can produce full-scale overshoots."}
 
 
-def audio_metrics(path):
+def audio_metrics(path, start=0, duration=180):
     # Preserve native channels/rate: downmixing or resampling can mask saturation.
     # Bound decoding to the maximum permitted case duration; never play audio.
+    if (any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+            for v in (start, duration)) or start < 0 or duration <= 0 or start + duration > 180):
+        raise ValueError("audio metric window must lie within 0..180 seconds")
     pcm = subprocess.check_output([
-        "ffmpeg", "-nostdin", "-v", "error", "-i", str(path), "-t", "180",
+        "ffmpeg", "-nostdin", "-v", "error", "-i", str(path), "-ss", str(start), "-t", str(duration),
         "-map", "0:a:0", "-vn", "-sn", "-dn", "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1"
     ], timeout=45)
-    return {**pcm_metrics(pcm), "analysis_limit_seconds": 180}
+    return {**pcm_metrics(pcm), "window_start_seconds": start,
+            "analysis_limit_seconds": duration, "channel_policy": "native; no downmix or resampling"}
 
 
 def audio_continuity(path, rate):

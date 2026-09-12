@@ -24,7 +24,7 @@ import time
 import uuid
 from zoneinfo import ZoneInfo
 
-from dotty_av_media import verify
+from dotty_av_media import audio_metrics, verify
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVICES = ("xiaozhi-esp32-server", "dotty-behaviour", "dotty-bridge", "dotty-pi")
@@ -325,6 +325,27 @@ def playback_window(directory, media_seconds):
     return start, end + .4
 
 
+def capture_window_metrics(media, media_seconds, prompt_end, response_start):
+    """Keep short loud prompts visible instead of diluting them across silence.
+
+    Measure the native channel/rate signal, not the mono transcription WAV.
+    This evidence does not alter interaction verdicts or claim ADC clipping.
+    """
+    result = {"timing_note": "Approximate recording-launch-relative windows, not sample-aligned. "
+              "Prompt includes pre-roll. WAV begins at first audio sample; MP4 has its own "
+              "stream timestamps. Capture startup delay can shift either window."}
+    sources = [("container_audio", Path(media))]
+    sidecar = Path(media).with_suffix(".capture.wav")
+    if sidecar.exists():
+        sources.append(("lossless_capture", sidecar))
+    for label, source in sources:
+        result[label] = {"source": str(source),
+                         "prompt": audio_metrics(source, start=0, duration=prompt_end),
+                         "response": audio_metrics(source, start=response_start,
+                                                   duration=min(180, media_seconds) - response_start)}
+    return result
+
+
 def host_clock(host):
     started = time.time()
     remote = datetime.fromisoformat(ssh(host, ["date", "-u", "+%FT%T.%NZ"]).strip().replace("Z", "+00:00")).timestamp()
@@ -454,6 +475,8 @@ def run_case(session, config, case):
         prompt_offset, offset = playback_window(directory, result["media"]["audio_seconds"])
         result["response_offset"] = offset
         result["timing_note"] = "Recording-launch timestamp precedes first sample; response crop is conservatively late. Early reply/latency may be lost."
+        result["native_audio_windows"] = capture_window_metrics(
+            media, result["media"]["audio_seconds"], offset - .4, offset)
         for label, options in (("response", ["-ss", str(offset)]),
                                ("prompt-heard", ["-ss", "0", "-t", str(offset - .4)])):
             wav = directory / f"{label}.wav"

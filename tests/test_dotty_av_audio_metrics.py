@@ -73,6 +73,30 @@ def test_decode_is_bounded_and_preserves_channels(monkeypatch):
     assert result["analysis_limit_seconds"] == 180
 
 
+def test_native_window_metrics_do_not_downmix_or_resample(monkeypatch):
+    commands = []
+    monkeypatch.setattr(media.subprocess, "check_output",
+                        lambda argv, **kwargs: commands.append(argv) or pcm([1.1, .1]))
+    result = media.audio_metrics(Path("capture.mp4"), start=2, duration=4.5)
+    assert commands[0][commands[0].index("-ss") + 1] == "2"
+    assert commands[0][commands[0].index("-t") + 1] == "4.5"
+    assert "-ac" not in commands[0] and "-ar" not in commands[0]
+    assert result["window_start_seconds"] == 2
+    assert result["analysis_limit_seconds"] == 4.5
+    assert result["clipping_ratio"] == .5
+    assert "verdict" not in result
+
+
+@pytest.mark.parametrize("start, duration", [(-1, 1), (0, 0), (0, 181), (179, 2),
+                                             (math.nan, 2), (0, math.inf), (True, 2)])
+def test_invalid_audio_metric_windows_fail_before_decode(monkeypatch, start, duration):
+    def unexpected(*args, **kwargs):
+        pytest.fail("invalid window reached decoder")
+    monkeypatch.setattr(media.subprocess, "check_output", unexpected)
+    with pytest.raises(ValueError, match="window"):
+        media.audio_metrics("unused", start=start, duration=duration)
+
+
 def test_verify_adds_quality_without_replacing_continuity(monkeypatch):
     monkeypatch.setattr(media, "probe", lambda _: {"streams": [
         {"codec_type": "video", "duration": "10", "width": 640, "height": 480},
