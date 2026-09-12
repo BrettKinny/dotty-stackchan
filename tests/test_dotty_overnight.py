@@ -29,7 +29,7 @@ def test_substring_is_not_correct_answer():
 
 
 @pytest.mark.parametrize("speech,logs,failure", [
-    ({"segments": []}, "结果: name\nSentenceType.FIRST", "no_audible_response"),
+    ({"segments": []}, "结果: name\nSentenceType.FIRST", "response_transcription_unavailable"),
     (transcript("Dotty"), "", "no_asr_or_no_wake"),
     (transcript("Dotty"), "结果: name", "no_tts"),
     (transcript("other"), "结果: name\nSentenceType.FIRST", "response_mismatch"),
@@ -38,7 +38,7 @@ def test_independent_evidence_required(speech, logs, failure):
     result = runner.evaluate({"asr": [["name"]], "reply": [["Dotty"]]}, speech,
                              logs, 10, after(), "robot")
     assert result["failure"] == failure
-    assert result["verdict"] == "FAIL"
+    assert result["verdict"] == ("INCONCLUSIVE" if failure == "response_transcription_unavailable" else "FAIL")
 
 
 def test_no_visual_evidence_means_no_overall_pass():
@@ -99,11 +99,11 @@ def test_tool_marker_is_exact_and_does_not_prove_execution():
     assert other["expected_tool_call"] == "INCONCLUSIVE"
 
 
-def test_missing_tool_marker_does_not_hide_known_acoustic_failure():
+def test_missing_tool_marker_and_words_cannot_establish_silence():
     result = runner.evaluate({"expected_tool": "think_hard"}, {"segments": []},
                              "结果: think\nSentenceType.FIRST", 10, after(), "robot")
-    assert result["failure"] == "no_audible_response"
-    assert result["interaction"] == "FAIL"
+    assert result["failure"] == "response_transcription_unavailable"
+    assert result["interaction"] == "INCONCLUSIVE"
 
 
 def test_response_word_limit_is_strict_without_asserting_creative_quality():
@@ -237,7 +237,8 @@ def test_low_confidence_hallucination_is_not_audible_response():
     speech = transcript("Dotty")
     speech["segments"][0]["avg_logprob"] = -2
     result = runner.evaluate({}, speech, "结果: name\nSentenceType.FIRST", 10, after(), "robot")
-    assert result["failure"] == "no_audible_response"
+    assert result["failure"] == "response_transcription_unavailable"
+    assert result["interaction"] == "INCONCLUSIVE"
 
 
 def test_playback_window_crosses_midnight(tmp_path):

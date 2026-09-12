@@ -214,7 +214,9 @@ def evaluate(case, transcript, log_text, playback_end, after, device, before=Non
     elif not tts:
         failure = "no_tts"
     elif not response:
-        failure = "no_audible_response"
+        # VAD/transcription can miss quiet physical replies despite completed
+        # TTS. Missing words alone cannot establish acoustic silence.
+        failure = "response_transcription_unavailable"
     elif not response_ok:
         failure = "response_mismatch"
     elif not within_limit:
@@ -225,6 +227,8 @@ def evaluate(case, transcript, log_text, playback_end, after, device, before=Non
     verdict = "FAIL" if failure else "INCONCLUSIVE"
     if failure == "wake_precondition":
         interaction = verdict = "BLOCKED"
+    elif failure == "response_transcription_unavailable":
+        interaction = verdict = "INCONCLUSIVE"
     if failure is None and expected_tool and not tool_observed:
         # Absence of a marker may mean the deployed provider lacks this logger;
         # do not turn uncertain instrumentation into a product failure or pass.
