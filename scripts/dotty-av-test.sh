@@ -16,6 +16,7 @@ RESPONSE_SECONDS="${DOTTY_AV_RESPONSE_SECONDS:-20}"
 OUT_DIR="${DOTTY_AV_OUT_DIR:-uat-sessions/$(date +%F)/av}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 MAX_SECONDS="${DOTTY_AV_MAX_SECONDS:-180}"
+LOSSLESS_AUDIO="${DOTTY_AV_LOSSLESS_AUDIO:-0}"
 
 cleanup() {
     if [[ -n "${capture_pid:-}" ]]; then
@@ -56,6 +57,7 @@ Environment overrides:
   DOTTY_AV_VIDEO_DEVICE, DOTTY_AV_AUDIO_DEVICE, DOTTY_AV_SINK
   DOTTY_AV_AUDIO_BACKEND (pulse default, alsa fallback), DOTTY_AV_AUDIO_SOURCE
   DOTTY_AV_PROMPT_WAV (optional pre-rendered local prompt)
+  DOTTY_AV_LOSSLESS_AUDIO=1 (optional same-capture float32 PCM .capture.wav)
   DOTTY_AV_VIDEO_SIZE, DOTTY_AV_VIDEO_FPS, DOTTY_AV_VOLUME
   DOTTY_AV_RESPONSE_SECONDS, DOTTY_AV_OUT_DIR
 
@@ -100,10 +102,40 @@ capture_args() {
         -thread_queue_size 512 -f v4l2 -input_format mjpeg -video_size "$VIDEO_SIZE" -framerate "$VIDEO_FPS" -i "$VIDEO_DEVICE"
     case "$AUDIO_BACKEND" in
         alsa) printf '%s\n' -thread_queue_size 512 -f alsa -ac 2 -ar 32000 -i "$AUDIO_DEVICE" ;;
-        pulse) printf '%s\n' -thread_queue_size 512 -f pulse -ac 2 -ar 32000 -i "$AUDIO_SOURCE" ;;
+        pulse)
+            printf '%s\n' -thread_queue_size 512 -f pulse -ac 2 -ar 32000
+            # Pulse defaults to signed 16-bit. Request float input explicitly
+            # for this experiment so >1.0 samples survive into the PCM sidecar.
+            [[ "$LOSSLESS_AUDIO" != 1 ]] || printf '%s\n' -c:a pcm_f32le
+            printf '%s\n' -i "$AUDIO_SOURCE"
+            ;;
         *) echo "ERROR: unknown audio backend $AUDIO_BACKEND" >&2; exit 2 ;;
     esac
-    printf '%s\n' -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -b:a 128k
+}
+
+check_capture_outputs() {
+    local output="$1" sidecar="${1%.mp4}.capture.wav"
+    [[ "$LOSSLESS_AUDIO" == 0 || "$LOSSLESS_AUDIO" == 1 ]] || {
+        echo 'ERROR: DOTTY_AV_LOSSLESS_AUDIO must be 0 or 1' >&2; exit 2;
+    }
+    [[ ! -e "$output" && ! -L "$output" ]] || {
+        echo "ERROR: output already exists: $output" >&2; exit 1;
+    }
+    if [[ "$LOSSLESS_AUDIO" == 1 && ( -e "$sidecar" || -L "$sidecar" ) ]]; then
+        echo "ERROR: output already exists: $sidecar" >&2; exit 1
+    fi
+}
+
+capture_output_args() {
+    local seconds="$1" output="$2"
+    printf '%s\n' -map 0:v:0 -map 1:a:0 \
+        -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -b:a 128k -t "$seconds" "$output"
+    if [[ "$LOSSLESS_AUDIO" == 1 ]]; then
+        # One input and one process: no second microphone reader. -t is an
+        # output option and must be repeated to bound the audio-only output.
+        printf '%s\n' -map 1:a:0 -vn -c:a pcm_f32le -ar 32000 -ac 2 \
+            -t "$seconds" "${output%.mp4}.capture.wav"
+    fi
 }
 
 verify() {
@@ -125,12 +157,13 @@ record() {
         echo "ERROR: duration must be a positive whole number" >&2
         exit 2
     }
-    [[ ! -e "$output" ]] || { echo "ERROR: output already exists: $output" >&2; exit 1; }
+    check_capture_outputs "$output"
     bounded "$seconds"
     lock_capture
     mkdir -p "$(dirname "$output")"
     mapfile -t args < <(capture_args)
-    ffmpeg -nostdin -n -hide_banner -loglevel warning "${args[@]}" -t "$seconds" "$output" &
+    mapfile -t outputs < <(capture_output_args "$seconds" "$output")
+    ffmpeg -nostdin -n -hide_banner -loglevel warning "${args[@]}" "${outputs[@]}" &
     capture_pid=$!
     wait "$capture_pid"
     capture_pid=''
@@ -189,7 +222,7 @@ run)
         exit 2
     }
     output="${4:-$(default_output response)}"
-    [[ ! -e "$output" ]] || { echo "ERROR: output already exists: $output" >&2; exit 1; }
+    check_capture_outputs "$output"
     lock_capture
     mkdir -p "$(dirname "$output")"
     speech="$(mktemp --suffix=.wav)"
@@ -207,9 +240,10 @@ run)
     [[ "$target_sink" != '@DEFAULT_SINK@' ]] || target_sink="$(pactl get-default-sink)"
     cp -- "$speech" "${output%.mp4}.prompt.wav"
     mapfile -t args < <(capture_args)
+    mapfile -t outputs < <(capture_output_args "$total_seconds" "$output")
     # Launch-time anchor; first encoded sample may lag device initialization.
     date -u +%FT%T.%NZ > "${output%.mp4}.recording-start.txt"
-    ffmpeg -nostdin -n -hide_banner -loglevel warning "${args[@]}" -t "$total_seconds" "$output" &
+    ffmpeg -nostdin -n -hide_banner -loglevel warning "${args[@]}" "${outputs[@]}" &
     capture_pid=$!
     echo "Recording. Prompt plays in 2 seconds; Dotty then has ${response_seconds}s to answer."
     sleep 2

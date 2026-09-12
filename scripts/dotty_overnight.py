@@ -398,16 +398,25 @@ def run_case(session, config, case):
     journal(session, {"event": "case_started", "id": ident})
     try:
         result["response_vad_threshold"] = response_vad_threshold(config)
+        require_warm = case.get("require_warm_listening",
+                                case.get("recovery_policy") == "ready_for_followup"
+                                and not case.get("require_wake_event"))
+        if not isinstance(require_warm, bool):
+            raise ValueError("require_warm_listening_must_be_boolean")
+        if require_warm and case.get("require_wake_event"):
+            raise ValueError("warm_listening_and_cold_wake_preconditions_conflict")
+        result["warm_listening_precondition"] = "NOT_REQUIRED"
         before = snapshot(config["host"])
         write_json(directory / "before.json", before)
         if before["errors"] or not before.get("services_running") or config["device"] not in before.get("devices", []):
             raise RuntimeError("infrastructure_down_or_device_disconnected")
         if case.get("require_wake_event") and not wake_precondition(before, config["device"]):
             raise CaseBlocked("wake_precondition")
-        if case.get("recovery_policy") == "ready_for_followup" and not case.get("require_wake_event"):
+        if require_warm:
             dev = before.get("perception", {}).get(config["device"], {})
             if dev.get("listening") is not True or dev.get("sensor_stale", True):
                 raise CaseBlocked("warm_listening_precondition")
+            result["warm_listening_precondition"] = "PASS"
         sink = command(["pactl", "get-default-sink"]).strip()
         if sink != config["sink"]:
             raise RuntimeError("speaker_sink_changed")
@@ -474,7 +483,8 @@ def run_case(session, config, case):
                      "-i", media, "-frames:v", "1", directory / f"frame-{label}.jpg"])
     except CaseBlocked as exc:
         result.update(verdict="BLOCKED", interaction="BLOCKED", failure=str(exc),
-                      wake_precondition="BLOCKED", exception=type(exc).__name__)
+                      exception=type(exc).__name__)
+        result[str(exc)] = "BLOCKED"
     except Exception as exc:
         result.update(verdict="FAIL", failure=str(exc), exception=type(exc).__name__)
     finally:

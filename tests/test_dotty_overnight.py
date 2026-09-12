@@ -232,6 +232,30 @@ def prompt_capture_boundary(monkeypatch):
             "stop_prompts_at": "2099-01-01T00:00:00+00:00"}, captured
 
 
+def test_explicit_warm_state_case_blocks_before_capture_when_idle(tmp_path, prompt_capture_boundary):
+    config, captured = prompt_capture_boundary
+    result = runner.run_case(tmp_path, config, {"id": "sleep", "prompt": "Go to sleep.",
+                                               "require_warm_listening": True})
+    assert result["verdict"] == "BLOCKED"
+    assert result["failure"] == "warm_listening_precondition"
+    assert result["warm_listening_precondition"] == "BLOCKED"
+    assert result["capture"] == "INCONCLUSIVE"
+    assert captured == []
+
+
+@pytest.mark.parametrize("state", ["idle", "talk", "story_time"])
+def test_explicit_warm_precondition_requires_listening_not_talk_state(
+        tmp_path, monkeypatch, prompt_capture_boundary, state):
+    config, captured = prompt_capture_boundary
+    monkeypatch.setattr(runner, "snapshot", lambda host: {
+        **after(current_state=state, listening=True), "devices": ["robot"]})
+    result = runner.run_case(tmp_path, config, {"id": "sleep", "prompt": "Go to sleep.",
+                                               "require_warm_listening": True})
+    assert result["failure"] == "fixture_capture_stop"
+    assert result["warm_listening_precondition"] == "PASS"
+    assert len(captured) == 1
+
+
 @pytest.mark.parametrize("mapping", [None, {}, {"other-case": {"path": "/unrelated/prompt.wav"}}])
 def test_unconfigured_case_cannot_inherit_another_prompt_wav(tmp_path, monkeypatch, prompt_capture_boundary, mapping):
     config, captured = prompt_capture_boundary
