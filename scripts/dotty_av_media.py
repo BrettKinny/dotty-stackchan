@@ -108,21 +108,83 @@ def audio_continuity(path, rate):
     return {"decoded_samples": samples, "decoded_seconds": samples / rate, "max_gap_seconds": gap}
 
 
-def transcribe(path, model_path, output):
+def analysis_gain(quality):
+    """Raise quiet analysis audio towards -20 dBFS RMS, preserving 1 dB headroom."""
+    if quality["near_silence"] or not quality["rms"] or not quality["peak"]:
+        return 0.0
+    return max(0.0, min(20.0, -20.0 - quality["rms_dbfs"], -1.0 - quality["peak_dbfs"]))
+
+
+def prepare_analysis(path, output):
+    """Persist a separate normalized derivative; originals are never rewritten."""
+    derivative = Path(output).with_suffix(".analysis.wav")
+    if derivative.exists() or derivative.resolve() == Path(path).resolve():
+        raise FileExistsError("analysis derivative already exists or matches input")
+    # Measure the exact mono/16k signal supplied to Whisper before choosing gain.
+    # No normalization, VAD or transcript-derived conditioning is applied here.
+    pcm = subprocess.check_output([
+        "ffmpeg", "-nostdin", "-v", "error", "-i", str(path), "-t", "180",
+        "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000",
+        "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1"
+    ], timeout=45)
+    before = pcm_metrics(pcm)
+    gain = analysis_gain(before)
+    samples = array("f")
+    samples.frombytes(pcm)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    multiplier = 10 ** (gain / 20)
+    normalized = array("f", (sample * multiplier for sample in samples))
+    if sys.byteorder != "little":
+        normalized.byteswap()
+    rendered = normalized.tobytes()
+    after = pcm_metrics(rendered)
+    subprocess.run([
+        "ffmpeg", "-nostdin", "-n", "-v", "error", "-f", "f32le", "-ar", "16000",
+        "-ac", "1", "-i", "pipe:0", "-c:a", "pcm_f32le", str(derivative)
+    ], input=rendered, check=True, capture_output=True, timeout=45)
+    return derivative, {"enabled": True, "source": str(Path(path).resolve()),
+                        "derivative": str(derivative.resolve()), "gain_db": gain,
+                        "maximum_gain_db": 20, "target_rms_dbfs": -20, "headroom_db": 1,
+                        "filter": "mono 16000 Hz float32 decode, constant amplitude gain; no limiter",
+                        "original_quality": before, "analysis_quality": after,
+                        "analysis_limit_seconds": 180}
+
+
+def transcribe(path, model_path, output, normalize=False, vad_filter=True):
+    if Path(output).exists() or Path(output).resolve() == Path(path).resolve():
+        raise FileExistsError("transcription output already exists or matches input")
+    analysis_path, analysis = (path, {"enabled": False, "source": str(Path(path).resolve())})
+    if normalize:
+        analysis_path, analysis = prepare_analysis(path, output)
+    if normalize and analysis["original_quality"]["near_silence"]:
+        result = {"model": str(model_path), "language_probability": None, "segments": [],
+                  "analysis": analysis, "vad_filter": vad_filter,
+                  "evidence_status": "INCONCLUSIVE", "reason": "original_audio_near_silent"}
+        with Path(output).open("x") as file:
+            json.dump(result, file, indent=2)
+            file.write("\n")
+        return result
     # Explicit disk path + local_files_only prevent network model/media access.
     from faster_whisper import WhisperModel
     model = WhisperModel(str(model_path), device="cpu", compute_type="int8",
                          cpu_threads=4, local_files_only=True)
-    segments, info = model.transcribe(str(path), language="en", beam_size=3,
-                                      vad_filter=True, condition_on_previous_text=False,
+    segments, info = model.transcribe(str(analysis_path), language="en", beam_size=3,
+                                      vad_filter=vad_filter, condition_on_previous_text=False,
                                       word_timestamps=True)
     result = {"model": str(model_path), "language_probability": info.language_probability,
+              "analysis": analysis, "vad_filter": vad_filter,
+              "evidence_status": "UNVERIFIED_TRANSCRIPT",
+              "note": "Transcription is evidence only, including after gain. Confirm response timing, "
+                      "service TTS and content independently; noise can hallucinate words.",
               "segments": [{"start": s.start, "end": s.end, "text": s.text,
                             "no_speech_prob": s.no_speech_prob, "avg_logprob": s.avg_logprob,
                             "words": [{"start": w.start, "end": w.end, "word": w.word,
                                        "probability": w.probability} for w in (s.words or [])]}
                            for s in segments]}
-    Path(output).write_text(json.dumps(result, indent=2) + "\n")
+    with Path(output).open("x") as file:
+        json.dump(result, file, indent=2)
+        file.write("\n")
     return result
 
 
@@ -136,8 +198,11 @@ if __name__ == "__main__":
     p.add_argument("file", type=Path)
     p.add_argument("--model", required=True, type=Path)
     p.add_argument("--output", required=True, type=Path)
+    p.add_argument("--normalize", action="store_true", help="create bounded-gain analysis WAV; preserve original")
+    p.add_argument("--no-vad", action="store_true", help="diagnostic transcription only; increases hallucination risk")
     args = parser.parse_args()
     if args.command == "verify":
         print(json.dumps(verify(args.file, args.expected)))
     else:
-        print(json.dumps(transcribe(args.file, args.model, args.output)))
+        print(json.dumps(transcribe(args.file, args.model, args.output,
+                                    normalize=args.normalize, vad_filter=not args.no_vad)))

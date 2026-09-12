@@ -3,6 +3,8 @@ import importlib.util
 import math
 from pathlib import Path
 import struct
+import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -82,3 +84,70 @@ def test_verify_adds_quality_without_replacing_continuity(monkeypatch):
     assert result["decoded_seconds"] == 10
     assert result["audio_quality"]["near_silence"]
     assert "verdict" not in result
+
+
+def test_gain_is_capped_and_peak_limited():
+    quiet = media.pcm_metrics(pcm([.001, -.001] * 100 + [.01]))
+    gain = media.analysis_gain(quiet)
+    assert gain <= 20
+    assert quiet["peak"] * 10 ** (gain / 20) <= 10 ** (-1 / 20) + 1e-6
+    transient = media.pcm_metrics(pcm([.01] * 1000 + [.5]))
+    assert media.analysis_gain(transient) == pytest.approx(-1 - transient["peak_dbfs"])
+    assert media.analysis_gain(media.pcm_metrics(pcm([1., .1]))) == 0
+    assert media.analysis_gain(media.pcm_metrics(pcm([0.] * 100))) == 0
+
+
+def test_analysis_preserves_input_and_records_exact_gain(tmp_path, monkeypatch):
+    source = tmp_path / "original.wav"
+    source.write_bytes(b"original unchanged")
+    decoded = pcm([.02, -.03, .01])
+    monkeypatch.setattr(media.subprocess, "check_output", lambda *a, **kw: decoded)
+    commands = []
+
+    def encode(command, **kwargs):
+        commands.append(command)
+        (tmp_path / "result.analysis.wav").write_bytes(kwargs["input"])
+
+    monkeypatch.setattr(media.subprocess, "run", encode)
+    derivative, record = media.prepare_analysis(source, tmp_path / "result.json")
+    assert source.read_bytes() == b"original unchanged"
+    assert derivative.name == "result.analysis.wav"
+    assert record["gain_db"] > 0
+    assert record["analysis_quality"]["clipped_samples"] == 0
+    assert record["source"] == str(source)
+    assert "-n" in commands[0]
+    with pytest.raises(FileExistsError):
+        media.prepare_analysis(source, tmp_path / "result.json")
+
+
+def test_near_silence_never_invokes_model_or_becomes_pass(tmp_path, monkeypatch):
+    monkeypatch.setattr(media, "prepare_analysis", lambda *_: (
+        tmp_path / "analysis.wav", {"original_quality": {"near_silence": True}}))
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace())
+    result = media.transcribe(tmp_path / "silence.wav", "unused", tmp_path / "out.json", normalize=True)
+    assert result["segments"] == []
+    assert result["evidence_status"] == "INCONCLUSIVE"
+    assert "verdict" not in result
+
+
+def test_transcript_is_unverified_even_if_noise_hallucinates_text(tmp_path, monkeypatch):
+    calls = []
+
+    class FakeModel:
+        def __init__(self, *args, **kwargs):
+            assert kwargs["local_files_only"] is True
+
+        def transcribe(self, path, **kwargs):
+            calls.append(kwargs)
+            return [SimpleNamespace(start=1, end=2, text="Thank you for watching",
+                                    no_speech_prob=.2, avg_logprob=-.4, words=[])], SimpleNamespace(language_probability=1)
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeModel))
+    result = media.transcribe(tmp_path / "noise.wav", "local-model", tmp_path / "out.json")
+    assert calls[0]["vad_filter"] is True
+    assert calls[0]["condition_on_previous_text"] is False
+    assert "initial_prompt" not in calls[0]
+    assert result["evidence_status"] == "UNVERIFIED_TRANSCRIPT"
+    assert "verdict" not in result
+    with pytest.raises(FileExistsError):
+        media.transcribe(tmp_path / "noise.wav", "local-model", tmp_path / "out.json")

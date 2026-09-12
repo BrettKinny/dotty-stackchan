@@ -121,7 +121,42 @@ def matches(text, groups):
                for group in groups)
 
 
-def evaluate(case, transcript, log_text, playback_end, after, device):
+class CaseBlocked(RuntimeError):
+    """An absent physical prerequisite; do not stimulate or change the robot."""
+
+
+def wake_precondition(before, device):
+    state = (before or {}).get("perception", {}).get(device, {})
+    return (bool(before) and not before.get("errors") and before.get("services_running", False)
+            and not state.get("sensor_stale", True)
+            and state.get("current_state") == "idle"
+            and state.get("listening") is False
+            # Receiver logs lack device IDs, so another connected robot would
+            # make attribution of its wake event ambiguous.
+            and (before or {}).get("devices") == [device])
+
+
+def wake_events(log_text):
+    events = []
+    for line in log_text.splitlines():
+        # Confirmed deployed textMessageProcessor receive logger. A user saying
+        # "wake_word_detected", ASR JSON, or an admin state change cannot count.
+        match = re.search(r"\[core\.handle\.textMessageProcessor\]-INFO-收到(listen|event)消息[：:]\s*(\{.*)", line)
+        if not match:
+            continue
+        try:
+            frame, _ = json.JSONDecoder().raw_decode(match[2])
+        except (ValueError, TypeError):
+            continue
+        if frame.get("type") != match[1]:
+            continue
+        if ((frame.get("type") == "listen" and frame.get("state") == "detect")
+                or (frame.get("type") == "event" and frame.get("name") == "wake_word_detected")):
+            events.append(frame)
+    return events
+
+
+def evaluate(case, transcript, log_text, playback_end, after, device, before=None):
     # Only response-window words count. Prompt and response transcribed separately
     # to prevent Whisper concatenating both speakers into a single segment.
     segments = transcript.get("segments", [])
@@ -152,6 +187,9 @@ def evaluate(case, transcript, log_text, playback_end, after, device):
     tool_calls = re.findall(r"PiClient: tool call name=([a-z_][a-z0-9_]*) id=([^\s]+)", log_text)
     observed_tools = [name for name, ident in tool_calls if ident != "unknown"]
     tool_observed = expected_tool in observed_tools if expected_tool else None
+    observed_wakes = wake_events(log_text)
+    requires_wake = case.get("require_wake_event", False)
+    wake_ready = wake_precondition(before, device) if requires_wake else None
     recovered = (not after.get("errors") and after.get("services_running", False)
                  and not state.get("sensor_stale", True)
                  and state.get("current_state") in case.get("resting_states", ["idle"])
@@ -165,7 +203,11 @@ def evaluate(case, transcript, log_text, playback_end, after, device):
                      and ((state.get("current_state") == "idle" and state.get("listening") is False)
                           or (state.get("current_state") == "talk" and state.get("listening") is True)))
     failure = None
-    if not asr:
+    if requires_wake and not wake_ready:
+        failure = "wake_precondition"
+    elif requires_wake and not observed_wakes:
+        failure = "no_wake_event"
+    elif not asr:
         failure = "no_asr_or_no_wake"
     elif not asr_ok:
         failure = "asr_mismatch"
@@ -180,6 +222,9 @@ def evaluate(case, transcript, log_text, playback_end, after, device):
     elif not recovered:
         failure = "not_ready_for_followup" if case.get("recovery_policy") == "ready_for_followup" else "no_idle_recovery"
     interaction = "FAIL" if failure else "PASS"
+    verdict = "FAIL" if failure else "INCONCLUSIVE"
+    if failure == "wake_precondition":
+        interaction = verdict = "BLOCKED"
     if failure is None and expected_tool and not tool_observed:
         # Absence of a marker may mean the deployed provider lacks this logger;
         # do not turn uncertain instrumentation into a product failure or pass.
@@ -191,6 +236,9 @@ def evaluate(case, transcript, log_text, playback_end, after, device):
             "semantic_quality": "INCONCLUSIVE",
             "semantic_note": "Keyword/length checks do not establish creative quality or complete semantic correctness.",
             "observed_tool_calls": observed_tools,
+            "wake_precondition": "PASS" if wake_ready else "BLOCKED" if requires_wake else "NOT_REQUIRED",
+            "observed_wake_events": observed_wakes,
+            "wake_event": "PASS" if observed_wakes else "FAIL" if requires_wake else "NOT_REQUIRED",
             "expected_tool_call": "PASS" if tool_observed else "INCONCLUSIVE",
             "tool_execution": "INCONCLUSIVE",
             "tool_note": "Expected call unverified; logger availability and execution/result require review."
@@ -198,7 +246,7 @@ def evaluate(case, transcript, log_text, playback_end, after, device):
             "expression": "INCONCLUSIVE",
             "recovery": "PASS" if recovered else "FAIL", "failure": failure,
             "interaction": interaction,
-            "visual": "INCONCLUSIVE", "verdict": "FAIL" if failure else "INCONCLUSIVE",
+            "visual": "INCONCLUSIVE", "verdict": verdict,
             "note": "Visual assertion requires frame review; automated acoustic checks are provisional."}
 
 
@@ -303,6 +351,12 @@ def run_case(session, config, case):
         write_json(directory / "before.json", before)
         if before["errors"] or not before.get("services_running") or config["device"] not in before.get("devices", []):
             raise RuntimeError("infrastructure_down_or_device_disconnected")
+        if case.get("require_wake_event") and not wake_precondition(before, config["device"]):
+            raise CaseBlocked("wake_precondition")
+        if case.get("recovery_policy") == "ready_for_followup" and not case.get("require_wake_event"):
+            dev = before.get("perception", {}).get(config["device"], {})
+            if dev.get("listening") is not True or dev.get("sensor_stale", True):
+                raise CaseBlocked("warm_listening_precondition")
         sink = command(["pactl", "get-default-sink"]).strip()
         if sink != config["sink"]:
             raise RuntimeError("speaker_sink_changed")
@@ -344,7 +398,8 @@ def run_case(session, config, case):
             command(["ffmpeg", "-nostdin", "-n", "-v", "error", *options, "-i", media,
                      "-vn", "-ar", "16000", "-ac", "1", wav])
             guarded_process([config["python"], ROOT / "scripts/dotty_av_media.py", "transcribe", wav,
-                            "--model", config["model"], "--output", directory / f"{label}.json"],
+                            "--model", config["model"], "--output", directory / f"{label}.json",
+                            *(["--normalize"] if label == "response" else [])],
                             directory / f"{label}-transcribe.log", session, 120,
                             deadline=datetime.fromisoformat(config["finish_at"]).timestamp())
         heard = " ".join(s["text"] for s in load(directory / "prompt-heard.json")["segments"])
@@ -352,13 +407,16 @@ def run_case(session, config, case):
         result["playback"] = "PASS" if heard.strip() and matches(heard, case.get("asr", [])) else "INCONCLUSIVE"
         result.update(evaluate(case, load(directory / "response.json"),
                                (directory / "xiaozhi-esp32-server.log").read_text(),
-                               offset, after, config["device"]))
+                               offset, after, config["device"], before=before))
         if result["playback"] != "PASS" and result["interaction"] == "PASS":
             result.update(interaction="INCONCLUSIVE", failure="prompt_playback_unverified")
         for label, seconds in (("prompt", 3), ("response", offset + 2),
                                ("final", max(0, result["media"]["video_seconds"] - 2))):
             command(["ffmpeg", "-nostdin", "-n", "-v", "error", "-ss", str(seconds),
                      "-i", media, "-frames:v", "1", directory / f"frame-{label}.jpg"])
+    except CaseBlocked as exc:
+        result.update(verdict="BLOCKED", interaction="BLOCKED", failure=str(exc),
+                      wake_precondition="BLOCKED", exception=type(exc).__name__)
     except Exception as exc:
         result.update(verdict="FAIL", failure=str(exc), exception=type(exc).__name__)
     finally:
@@ -388,6 +446,7 @@ def report(session):
     write_json(session / "summary.json", {"at": now(), "attempts": len(results),
         "interaction_passes": sum(r.get("interaction") == "PASS" for r in results),
         "failures": sum(r["verdict"] == "FAIL" for r in results),
+        "blocked": sum(r["verdict"] == "BLOCKED" for r in results),
         "inconclusive": sum(r["verdict"] == "INCONCLUSIVE" for r in results)})
 
 
@@ -420,7 +479,7 @@ def device_lock(config):
 
 def restore_checkpoint(session):
     checkpoint = load(session / "checkpoint.json", {})
-    for key, value in {"completed": [], "quarantined": [], "consecutive_failures": 0,
+    for key, value in {"completed": [], "quarantined": [], "blocked": {}, "consecutive_failures": 0,
                        "soak": 0, "counts": {}}.items():
         checkpoint.setdefault(key, value)
     active = load(session / "active.json", {})
@@ -451,6 +510,9 @@ def record_attempt(checkpoint, case, result):
         checkpoint["last_attempt"] = result["id"]
     counts = checkpoint["counts"].setdefault(case["id"], {"attempts": 0, "streak": 0, "failures": 0})
     counts["attempts"] += 1
+    if result.get("verdict") == "BLOCKED":
+        checkpoint.setdefault("blocked", {})[case["id"]] = result.get("failure", "prerequisite_missing")
+        return
     acoustic_pass = all(result.get(k) == "PASS" for k in ("capture", "playback", "interaction", "recovery"))
     counts["streak"] = counts["streak"] + 1 if acoustic_pass else 0
     if not acoustic_pass:
@@ -485,7 +547,8 @@ def run(session, config, catalogue, selected=None, once=False):
                     write_json(session / "PAUSE", {"reason": "three consecutive failures require agent diagnosis"})
                     write_json(session / "checkpoint.json", checkpoint)
                     continue
-                eligible = [c for c in bank if c["id"] not in checkpoint["quarantined"]]
+                eligible = [c for c in bank if c["id"] not in checkpoint["quarantined"]
+                            and c["id"] not in checkpoint["blocked"]]
                 pending = [c for c in eligible if c["id"] not in checkpoint["completed"]]
                 if pending:
                     case = pending[0]

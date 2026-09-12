@@ -133,6 +133,92 @@ def test_emoji_stripped_tts_does_not_imply_bad_expression():
     assert result["visual"] == "INCONCLUSIVE"
 
 
+def receive_frame(frame):
+    return ("260912 22:24:45[0.9.3_SiWhPiLononoCh][core.handle.textMessageProcessor]-INFO-收到"
+            + frame["type"] + "消息：" + json.dumps(frame))
+
+
+@pytest.mark.parametrize("frame", [
+    {"session_id": "fixture", "type": "listen", "state": "detect", "text": "Hi ESP"},
+    {"type": "event", "name": "wake_word_detected", "data": {"phrase": "Hi ESP"}},
+])
+def test_real_received_wake_frame_proves_wake_with_idle_precondition(frame):
+    before = {**after(), "devices": ["robot"]}
+    result = runner.evaluate({"require_wake_event": True}, transcript("Dotty"),
+                             receive_frame(frame) + "\n结果: name\nSentenceType.FIRST",
+                             10, after(), "robot", before=before)
+    assert result["wake_event"] == "PASS"
+    assert result["wake_precondition"] == "PASS"
+    assert result["interaction"] == "PASS"
+
+
+@pytest.mark.parametrize("false_evidence", [
+    receive_frame({"type": "listen", "state": "start", "mode": "auto"}),
+    receive_frame({"type": "event", "name": "state_changed", "data": {"state": "talk"}}),
+    '结果: {"type":"listen","state":"detect"}',
+    'wake_word_detected',
+    'PiClient: text wake_word_detected',
+    '[core.handle.textMessageProcessor]-INFO-收到listen消息：{"type":"event","name":"wake_word_detected"}',
+    '[core.handle.textMessageProcessor]-INFO-收到listen消息：{bad json}',
+])
+def test_existing_listening_or_keyword_mentions_do_not_prove_wake(false_evidence):
+    result = runner.evaluate({"require_wake_event": True}, transcript("Dotty"),
+                             false_evidence + "\n结果: name\nSentenceType.FIRST", 10, after(), "robot",
+                             before={**after(), "devices": ["robot"]})
+    assert result["failure"] == "no_wake_event"
+    assert result["interaction"] == "FAIL"
+
+
+@pytest.mark.parametrize("before", [
+    None,
+    {**after(current_state="talk", listening=True), "devices": ["robot"]},
+    {**after(sensor_stale=True), "devices": ["robot"]},
+    {**after(), "devices": ["robot", "other"]},
+])
+def test_absent_wake_precondition_blocks_even_if_wake_frame_seen(before):
+    result = runner.evaluate({"require_wake_event": True}, transcript("Dotty"),
+                             receive_frame({"type": "listen", "state": "detect"})
+                             + "\n结果: name\nSentenceType.FIRST", 10, after(), "robot", before=before)
+    assert result["verdict"] == "BLOCKED"
+    assert result["failure"] == "wake_precondition"
+
+
+def test_warm_followup_does_not_require_cold_wake():
+    result = runner.evaluate({"recovery_policy": "ready_for_followup"}, transcript("Dotty"),
+                             "结果: name\nSentenceType.FIRST\nSentenceType.LAST", 10,
+                             after(current_state="talk", listening=True), "robot",
+                             before={**after(current_state="talk", listening=True), "devices": ["robot"]})
+    assert result["interaction"] == "PASS"
+    assert result["wake_event"] == "NOT_REQUIRED"
+
+
+def test_run_case_blocks_before_playback_without_changing_robot(tmp_path, monkeypatch):
+    commands = []
+    def fake_command(argv, **kwargs):
+        commands.append(argv)
+        assert argv == ["git", "rev-parse", "HEAD"]
+        return "fixture-commit\n"
+    monkeypatch.setattr(runner, "command", fake_command)
+    monkeypatch.setattr(runner, "snapshot", lambda host: {
+        **after(current_state="talk", listening=True), "devices": ["robot"]})
+    result = runner.run_case(tmp_path, {"host": "unused", "device": "robot"},
+                             {"id": "wake", "require_wake_event": True})
+    assert result["verdict"] == "BLOCKED"
+    assert result["failure"] == "wake_precondition"
+    assert result["capture"] == "INCONCLUSIVE"
+    assert len(commands) == 1
+
+
+def test_blocked_prerequisite_does_not_increment_failure_threshold(tmp_path):
+    checkpoint = runner.restore_checkpoint(tmp_path)
+    runner.record_attempt(checkpoint, {"id": "wake"},
+                          {"verdict": "BLOCKED", "failure": "wake_precondition"})
+    assert checkpoint["blocked"] == {"wake": "wake_precondition"}
+    assert checkpoint["counts"]["wake"]["failures"] == 0
+    assert checkpoint["consecutive_failures"] == 0
+    assert checkpoint["completed"] == []
+
+
 def test_cannot_pool_unrelated_asr_requests():
     result = runner.evaluate({"asr": [["purple"], ["robot"]]}, transcript("yes"),
                              "结果: purple\n结果: robot\nSentenceType.FIRST", 10, after(), "robot")
