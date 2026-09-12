@@ -131,5 +131,36 @@ class TestAsrEnvelope(unittest.TestCase):
                 sync.assert_not_awaited()
 
 
+class TestPhraseIntentPreservation(unittest.TestCase):
+    def test_correct_ordinary_requests_are_not_rewritten_as_commands(self):
+        for text in (
+            "Tell me one short joke about being a very small robot.",
+            "Tell me a short joke.",
+            "What is your game?",
+            "Can you sing a long note?",
+            "Please take a phota of the toy.",
+            "Tell me. A story is something I dislike.",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(_module._apply_phrase_corrections(text), text)
+
+    def test_known_phrase_punctuation_still_normalizes(self):
+        self.assertEqual(_module._apply_phrase_corrections("Good night, Dotty."),
+                         "good night Dotty.")
+        self.assertEqual(_module._apply_phrase_corrections("Please take a photo, now."),
+                         "Please take a photo now.")
+
+    def test_actual_json_joke_turn_reaches_routing_unchanged(self):
+        text = "Tell me one short joke about being a very small robot."
+        conn = types.SimpleNamespace(logger=MagicMock(), need_bind=False,
+            max_output_size=0, client_is_speaking=False)
+        intent = AsyncMock(return_value=True)
+        with patch.object(_module, "_sync_toggles_once", new=AsyncMock()), \
+             patch.object(_module, "handle_user_intent", new=intent):
+            asyncio.run(_module.startToChat(conn, json.dumps({"content": text})))
+        intent.assert_awaited_once_with(conn, text)
+        self.assertIsNone(_module._detect_state_phrase(intent.await_args.args[1]))
+
+
 if __name__ == "__main__":
     unittest.main()
