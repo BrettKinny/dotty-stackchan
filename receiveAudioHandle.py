@@ -75,6 +75,25 @@ def _read_smart_mode_state() -> bool:
     return False
 
 
+def _camera_access_denied() -> bool:
+    """Voice-camera access requires explicit adult policy in the shared file.
+
+    This camera-only reader intentionally fails closed on missing/invalid
+    state, even when a startup environment flag says adult mode. Re-read on
+    every access; keep in sync with dotty-behaviour/routes/voice.py.
+    """
+    try:
+        with open(_KID_MODE_STATE_FILE, "r", encoding="utf-8") as file:
+            value = file.read().strip().lower()
+    except (OSError, UnicodeError):
+        return True
+    return value not in ("false", "0", "no")
+
+
+class _VoiceCameraDenied(PermissionError):
+    """Distinct from a stale/missing image; never treat denial as a photo."""
+
+
 def _write_smart_mode_state(enabled: bool) -> None:
     try:
         os.makedirs(os.path.dirname(_SMART_MODE_STATE_FILE), exist_ok=True)
@@ -391,6 +410,8 @@ def _is_vision_request(text: str) -> bool:
 
 
 async def _handle_vision(conn: "ConnectionHandler", text: str) -> str | None:
+    if _camera_access_denied():
+        raise _VoiceCameraDenied("Camera access is disabled in Kid Mode")
     if not VISION_BRIDGE_URL:
         conn.logger.bind(tag=TAG).warning("VISION_BRIDGE_URL not set, skipping vision")
         return None
@@ -1162,7 +1183,15 @@ async def startToChat(conn: "ConnectionHandler", text):
 
     if _is_vision_request(user_text):
         conn.logger.bind(tag=TAG).info(f"Vision intent detected: {user_text[:60]}")
-        description = await _handle_vision(conn, user_text)
+        try:
+            description = await _handle_vision(conn, user_text)
+        except _VoiceCameraDenied:
+            conn.logger.bind(tag=TAG).info("Voice camera denied by Kid Mode policy")
+            _submit_chat(conn,
+                "[CAMERA_DISABLED] Camera access is disabled in Kid Mode. "
+                "This request did not take a photo or access a camera view. "
+                "Briefly tell the user that camera access is disabled; do not use tools.")
+            return
         if description:
             vision_prompt = (
                 f"[You just used your camera and took a photo. "

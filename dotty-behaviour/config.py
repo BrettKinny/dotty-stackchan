@@ -67,6 +67,11 @@ NARRATIVE_TIMEOUT_SEC: float = _env_float("NARRATIVE_TIMEOUT_SEC", 90.0)
 STATE_DIR: Path = Path(
     os.environ.get("DOTTY_STATE_DIR", "/var/lib/dotty-behaviour/state")
 )
+# Camera voice access uses the canonical bridge-owned policy file, not this
+# daemon's independent state directory or startup-only app.state.kid_mode.
+KID_MODE_STATE_FILE: Path = Path(os.environ.get(
+    "DOTTY_KID_MODE_STATE", "/var/lib/dotty-bridge/state/kid-mode"
+))
 LOG_DIR: Path = Path(
     os.environ.get("CONVO_LOG_DIR", "/var/lib/dotty-behaviour/logs")
 )

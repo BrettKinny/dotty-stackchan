@@ -13,6 +13,7 @@ from time import perf_counter
 
 from fastapi import APIRouter, Depends, Request
 
+import config
 from perception import PerceptionState
 
 log = logging.getLogger("dotty-behaviour.routes.voice")
@@ -28,6 +29,21 @@ def get_perception_state(request: Request) -> PerceptionState:
 TAKE_PHOTO_FRESHNESS_SEC = 30.0
 TAKE_PHOTO_FALLBACK = "(I can't see anything fresh right now)"
 TAKE_PHOTO_MAX_CHARS = 300
+TAKE_PHOTO_DENIED = "(Camera access is disabled in Kid Mode)"
+
+
+def camera_access_denied() -> bool:
+    """Fail closed unless the current shared policy explicitly allows adults.
+
+    Deliberately do not fall back to a startup env flag or the unsynchronized
+    app.state toggle. Read on every request so dashboard changes apply live.
+    Keep this camera-only contract in sync with receiveAudioHandle.py.
+    """
+    try:
+        value = config.KID_MODE_STATE_FILE.read_text(encoding="utf-8").strip().lower()
+    except (OSError, UnicodeError):
+        return True
+    return value not in ("false", "0", "no")
 
 
 router = APIRouter()
@@ -45,6 +61,9 @@ async def voice_take_photo(
     nothing is fresh. Future v2: actively fire take_photo MCP and await
     a new capture.
     """
+    if camera_access_denied():
+        return {"description": TAKE_PHOTO_DENIED, "denied": True,
+                "reason": "kid_mode_camera_denied"}
     best_desc = ""
     best_age = float("inf")
     now = perf_counter()
