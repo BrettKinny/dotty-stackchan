@@ -16,7 +16,8 @@ spec.loader.exec_module(runner)
 
 def after(**state):
     return {"errors": {}, "services_running": True, "perception": {"robot": {
-        "sensor_stale": False, "current_state": "idle", "listening": False, **state}}}
+        "sensor_stale": False, "current_state": "idle", "listening": False,
+        "sensor_age_s": 0, "last_event_t": 1000, "last_chat_status_t": 1000, **state}}}
 
 
 def transcript(text):
@@ -240,6 +241,20 @@ def test_explicit_warm_state_case_blocks_before_capture_when_idle(tmp_path, prom
     assert result["failure"] == "warm_listening_precondition"
     assert result["warm_listening_precondition"] == "BLOCKED"
     assert result["capture"] == "INCONCLUSIVE"
+    assert captured == []
+
+
+def test_fresh_state_event_cannot_revalidate_old_listening_status(
+        tmp_path, monkeypatch, prompt_capture_boundary):
+    config, captured = prompt_capture_boundary
+    monkeypatch.setattr(runner, "snapshot", lambda host: {
+        **after(current_state="idle", listening=True, last_event_t=1500,
+                last_chat_status_t=1000, sensor_age_s=1), "devices": ["robot"]})
+    result = runner.run_case(tmp_path, config, {"id": "sleep", "prompt": "Go to sleep.",
+                                               "require_warm_listening": True})
+    assert result["verdict"] == "BLOCKED"
+    assert result["failure"] == "warm_listening_precondition"
+    assert result["warm_listening_status_age_seconds"] == 501
     assert captured == []
 
 

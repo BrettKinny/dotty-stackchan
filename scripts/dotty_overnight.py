@@ -11,6 +11,7 @@ import fcntl
 import hashlib
 import html
 import json
+import math
 import os
 from pathlib import Path
 import random
@@ -134,6 +135,17 @@ def wake_precondition(before, device):
             # Receiver logs lack device IDs, so another connected robot would
             # make attribution of its wake event ambiguous.
             and (before or {}).get("devices") == [device])
+
+
+def listening_status_age(state):
+    """Use the perception server's clock; unrelated events cannot refresh chat."""
+    values = [state.get(key) for key in ("sensor_age_s", "last_event_t", "last_chat_status_t")]
+    if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+           for v in values):
+        return None
+    sensor_age, event_at, chat_at = values
+    age = sensor_age + event_at - chat_at
+    return age if sensor_age >= 0 and event_at >= chat_at and age >= 0 else None
 
 
 def wake_events(log_text):
@@ -435,7 +447,13 @@ def run_case(session, config, case):
             raise CaseBlocked("wake_precondition")
         if require_warm:
             dev = before.get("perception", {}).get(config["device"], {})
-            if dev.get("listening") is not True or dev.get("sensor_stale", True):
+            age = listening_status_age(dev)
+            result["warm_listening_status_age_seconds"] = age
+            result["warm_listening_max_age_seconds"] = 30
+            # A prerequisite for a new trial, not a claim that an older open
+            # conversation is dead. Recovery after a long capture is separate.
+            if (dev.get("listening") is not True or dev.get("sensor_stale", True)
+                    or age is None or age > 30):
                 raise CaseBlocked("warm_listening_precondition")
             result["warm_listening_precondition"] = "PASS"
         sink = command(["pactl", "get-default-sink"]).strip()
