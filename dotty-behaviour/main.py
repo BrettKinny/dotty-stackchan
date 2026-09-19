@@ -74,7 +74,13 @@ async def lifespan(app: FastAPI):
     # Singleton perception state — bus + caches + per-device dicts.
     # Stored on app.state so routes/consumers can retrieve it via
     # FastAPI's Request.app.state.
-    state = PerceptionState()
+    # Persist only the last state_changed mutex per device. This survives a
+    # daemon/container restart through the existing mounted STATE_DIR, but is
+    # not an authoritative sync for firmware changes made while this service
+    # was offline; the next relayed state_changed event remains authoritative.
+    state = PerceptionState(
+        state_path=config.STATE_DIR / "perception-state.json"
+    )
     app.state.perception = state
 
     # Singleton dispatch clients — outbound HTTP to xiaozhi-server's

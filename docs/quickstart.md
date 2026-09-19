@@ -51,6 +51,18 @@ Download the latest release from
 `bootloader.bin`, `partition-table.bin`, `ota_data_initial.bin`,
 `stack-chan.bin`, `generated_assets.bin`, and `human_face_detect.espdl`.
 
+> **Self-hosting note:** the current `fw-v1.3.3` prebuilt was compiled for
+> the maintainer's LAN (`CONFIG_OTA_URL` points at that deployment). It is a
+> reproducible release artifact, but it is not a portable binary for another
+> self-hosted server. There is no OTA/server editor in the StackChan's
+> on-device Settings app. For your own server, build from source with
+> `CONFIG_OTA_URL="http://<XIAOZHI_HOST>:8003/xiaozhi/ota/"` before flashing;
+> [SETUP.md](../SETUP.md#2-build-and-flash-open-firmware) has the reliable
+> procedure using this repo's pinned `BrettKinny/StackChan@dotty` submodule.
+> Do not build the official `m5stack/StackChan` upstream directly: it does not
+> include Dotty's firmware changes. A browser tab named **Advanced** exists
+> only in the Xiaozhi hotspot portal.
+
 Install esptool and flash over USB-C:
 
 ```bash
@@ -141,10 +153,24 @@ No separate host, no systemd bridge unit, no SSH to a second machine.
 
 ## 6. Connect the robot
 
-1. Power on the robot (USB-C or battery).
-2. On the device screen, navigate to **Settings > Advanced Options**.
-3. Enter the OTA URL: `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/`
-4. The robot connects via WebSocket and shows a face.
+1. Confirm the firmware was built with
+   `CONFIG_OTA_URL="http://<XIAOZHI_HOST>:8003/xiaozhi/ota/"` as described in
+   [SETUP.md](../SETUP.md#2-build-and-flash-open-firmware).
+2. Power on the robot (USB-C or battery).
+3. On a fresh flash, **“Welcome! Let's get started.” is expected**. Tap
+   **Skip** to bypass the M5Stack account wizard. If the launcher remains,
+   open **SETUP** and use its home control to exit into Xiaozhi.
+4. Join the temporary `Xiaozhi-*` hotspot, open the browser URL shown on the
+   robot (normally `http://192.168.4.1`), and select your 2.4 GHz Wi-Fi.
+   The portal's **Advanced** tab can confirm or override `ota_url`.
+5. Watch `docker logs -f xiaozhi-esp32-server`. The robot should POST to the
+   configured OTA URL, receive the WebSocket endpoint, connect, and show a
+   face.
+
+The StackChan's on-device Settings app does **not** contain an Advanced
+Options or OTA URL field. Wi-Fi credentials are provisioned into NVS through
+the browser hotspot portal; `CONFIG_WIFI_SSID` and `CONFIG_WIFI_PASSWORD` are
+not firmware options in the pinned source.
 
 ## 7. First voice turn
 
@@ -228,7 +254,7 @@ The full file inventory lives in [architecture.md](./architecture.md#deployment-
 
 | What | URL | Who calls it |
 |---|---|---|
-| OTA (enter into StackChan settings) | `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/` | The robot on boot |
+| OTA (compile into firmware or set in the hotspot portal) | `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/` | The robot on boot |
 | WebSocket | `ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/` | The robot after OTA handshake |
 | Perception / ambient events | `http://<XIAOZHI_HOST>:8090` | xiaozhi-server → dotty-behaviour |
 | Admin dashboard | `http://<XIAOZHI_HOST>:8081/ui` | Humans (LAN-only HTMX UI) |

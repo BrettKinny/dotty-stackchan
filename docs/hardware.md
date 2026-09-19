@@ -10,7 +10,7 @@ description: M5Stack StackChan hardware specs, CoreS3 ESP32-S3 SoC, and servo ch
 - The robot body is the **M5Stack StackChan** kit: an M5Stack **CoreS3** (ESP32-S3) head on a 2-servo chassis.
 - The CoreS3 supplies the SoC, display, camera, mic array, speaker, IMU, proximity, microSD — all integrated. NFC and the IR tx/rx pair physically live on the kit body, not the CoreS3 (see the kit table below).
 - The *StackChan kit* adds the head-yaw servo, head-pitch servo, 12 RGB LEDs, 3-zone touch panel, 550 mAh supplementary battery, USB-C, NFC, an IR tx/rx pair, an IO expander, a dedicated battery monitor, and the 3D-printed body. A separate handheld ESP-NOW remote controller ships in the same box (M5Stack's product page describes it as an ESP-NOW wireless remote).
-- Firmware on the device is built from [`m5stack/StackChan`](https://github.com/m5stack/StackChan) — an Arduino C++ codebase that bundles the **XiaoZhi AI agent** client. It is **not** the same codebase as `meganetaaan/stack-chan` (the original Moddable/JS project) or `78/xiaozhi-esp32` (generic voice-assistant firmware).
+- Firmware on the device is built from the pinned [`BrettKinny/StackChan@dotty`](https://github.com/BrettKinny/StackChan/tree/dotty) fork of [`m5stack/StackChan`](https://github.com/m5stack/StackChan). It bundles the **XiaoZhi AI agent** client plus Dotty's state, motion, LED, privacy, and perception changes. It is **not** the same codebase as `meganetaaan/stack-chan` (the original Moddable/JS project) or a direct build of `78/xiaozhi-esp32` (generic voice-assistant firmware).
 - The device advertises itself over the Xiaozhi WebSocket protocol and exposes **on-device tools via MCP** (see [protocols.md](./protocols.md)).
 - Canonical hardware reference: [`docs.m5stack.com/en/StackChan`](https://docs.m5stack.com/en/StackChan) (kit-level) and [`docs.m5stack.com/en/core/CoreS3`](https://docs.m5stack.com/en/core/CoreS3) (head unit). See [references.md](./references.md#hardware).
 
@@ -80,10 +80,11 @@ Three related codebases — do not confuse them:
 | Repo | Language | Purpose | Runs on StackChan? |
 |---|---|---|---|
 | [`meganetaaan/stack-chan`](https://github.com/meganetaaan/stack-chan) | TypeScript / JavaScript on Moddable SDK | Original open-source Stack-chan (Shinya Ishikawa) | Yes (but not what we run) |
-| [`m5stack/StackChan`](https://github.com/m5stack/StackChan) | Arduino C++ | M5Stack's official firmware — bundles XiaoZhi AI agent, targets CoreS3 | **Yes — this is what we flash** |
+| [`BrettKinny/StackChan@dotty`](https://github.com/BrettKinny/StackChan/tree/dotty) | ESP-IDF / C++ | Dotty's pinned fork of M5Stack's firmware — bundles XiaoZhi and the Dotty-specific firmware contract | **Yes — build the pinned submodule** |
+| [`m5stack/StackChan`](https://github.com/m5stack/StackChan) | ESP-IDF / C++ | Official upstream firmware | Upstream only; do not flash directly for Dotty |
 | [`78/xiaozhi-esp32`](https://github.com/78/xiaozhi-esp32) | Arduino C++ | Generic multi-board voice assistant firmware (70+ target boards) | Runs on the same ESP32-S3 but is a different application — you pick one, not both |
 
-Our pipeline uses `m5stack/StackChan` because it comes with the robot-body integration (servos, avatar rendering, LED patterns, MCP tools mapped to peripherals) already done. `78/xiaozhi-esp32` is the upstream *protocol* reference — the voice channel speaks the same WebSocket protocol regardless.
+Our fork inherits M5Stack's robot-body integration (servos, avatar rendering, LED patterns, MCP tools mapped to peripherals) and adds Dotty's firmware behaviour. `78/xiaozhi-esp32` is the upstream *protocol* reference — the voice channel speaks the same WebSocket protocol regardless.
 
 ## On-device MCP tools
 
@@ -91,7 +92,7 @@ The device acts as an **MCP server** — after the WS `hello` handshake, it adve
 
 Tool names follow the dotted-namespace convention from the `78/xiaozhi-esp32` MCP protocol doc (e.g. `self.audio_speaker.set_volume`, `self.get_device_status`). The **registration sites** in the firmware use `McpServer::AddTool` for public tools and `McpServer::AddUserOnlyTool` for privileged/hidden ones.
 
-Per internal deployment observation, the live firmware advertises **11 tools**. The mapping below is from that observation plus the `m5stack/StackChan` README's feature list — **verify against the handshake logs** (`docker logs xiaozhi-esp32-server | grep tools/list`) before relying on exact tool names:
+The live Dotty firmware advertises the upstream hardware tools plus Dotty's state/toggle additions. The mapping below is from deployment observation and the pinned fork — **verify against the handshake logs** (`docker logs xiaozhi-esp32-server | grep tools/list`) before relying on exact tool names:
 
 | # | Tool (functional) | Hardware touched |
 |---|---|---|

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import unicodedata
 from pathlib import Path
 from typing import Iterator
@@ -201,6 +202,21 @@ def _enforce_leading_emoji(chunks: Iterator[str]) -> Iterator[str]:
         yield f"{FALLBACK_EMOJI} (no response)"
 
 
+_REMEMBER_INTENT_RE = re.compile(
+    r"^\s*(?:please\s+)?remember\s+(?:that\s+)?(?P<fact>.+?)\s*[.!?]?\s*$",
+    re.IGNORECASE,
+)
+_RECALL_INTENT_RE = re.compile(
+    r"^\s*(?:what did i (?:tell|say to) you about|do you remember)\s+"
+    r"(?P<query>.+?)\s*[?!.]?\s*$",
+    re.IGNORECASE,
+)
+_THINK_HARD_INTENT_RE = re.compile(
+    r"^\s*(?:please\s+)?think hard (?:about\s*:?)?\s*(?P<question>.+?)\s*[?!.]?\s*$",
+    re.IGNORECASE,
+)
+
+
 class LLMProvider(LLMProviderBase):
     """xiaozhi-server LLM provider backed by the dotty-pi container."""
 
@@ -228,6 +244,39 @@ class LLMProvider(LLMProviderBase):
         user_text = _last_user_text(dialogue)
         if not user_text:
             yield f"{FALLBACK_EMOJI} (empty turn)"
+            return
+        remember_intent = _REMEMBER_INTENT_RE.match(user_text)
+        if remember_intent:
+            fact = remember_intent.group("fact").strip()
+            result = self._invoke_voice_tool("remember", {"fact": fact})
+            if result == "(remembered)":
+                yield f"{FALLBACK_EMOJI} I'll remember that."
+            else:
+                yield f"{FALLBACK_EMOJI} I couldn't save that memory."
+            return
+        recall_intent = _RECALL_INTENT_RE.match(user_text)
+        if recall_intent:
+            query = recall_intent.group("query").strip()
+            result = self._invoke_voice_tool(
+                "memory_lookup", {"query": query},
+            )
+            if result is None:
+                yield f"{FALLBACK_EMOJI} I couldn't check my memory right now."
+            elif result in ("(no memories found)", "(empty query)"):
+                yield f"{FALLBACK_EMOJI} I don't remember anything about that yet."
+            else:
+                yield f"{FALLBACK_EMOJI} {result}"
+            return
+        think_intent = _THINK_HARD_INTENT_RE.match(user_text)
+        if think_intent:
+            question = think_intent.group("question").strip()
+            result = self._invoke_voice_tool(
+                "think_hard", {"question": question},
+            )
+            if result is None or result.startswith("("):
+                yield f"{FALLBACK_EMOJI} I couldn't finish the deeper reasoning."
+            else:
+                yield f"{FALLBACK_EMOJI} {result}"
             return
         prompt = _wrap_with_sandwich(user_text, self._kid_mode)
 
@@ -258,6 +307,15 @@ class LLMProvider(LLMProviderBase):
             for line in self._client.recent_stderr()[-5:]:
                 logger.error("  pi.stderr: %s", line)
             yield f"{FALLBACK_EMOJI} (brain offline — try again in a moment)"
+
+    def _invoke_voice_tool(
+        self, name: str, arguments: dict[str, str],
+    ) -> str | None:
+        try:
+            return self._client.invoke_voice_tool(name, arguments)
+        except PiClientError as exc:
+            logger.error("PiVoiceLLM direct tool %s failed: %s", name, exc)
+            return None
 
     def _on_filter_hit(self, tier: str, match) -> None:
         # Local logging only — the Prometheus counter / safety ring live in
