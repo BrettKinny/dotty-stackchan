@@ -204,7 +204,12 @@ class PiClient:
             if (
                 frame.get("type") == "response"
                 and frame.get("command") == "new_session"
+                and frame.get("id") == req_id
             ):
+                if not frame.get("success", False):
+                    raise PiClientError(
+                        f"pi rejected new_session: {frame.get('error', 'unknown')}"
+                    )
                 return
         raise PiClientError("new_session timed out waiting for response")
 

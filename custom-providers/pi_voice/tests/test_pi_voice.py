@@ -10,6 +10,8 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from typing import Iterator
@@ -192,6 +194,54 @@ class TestNewSessionLifecycle(unittest.TestCase):
         self.assertEqual(client.new_session_calls, 0, "no new_session on first turn")
         list(provider.response("s", [{"role": "user", "content": "b"}]))
         self.assertEqual(client.new_session_calls, 1, "new_session on second turn")
+
+    def test_concurrent_responses_are_serialized_through_agent_end(self):
+        class OverlapDetectingClient(FakeClient):
+            def __init__(self):
+                super().__init__()
+                self.active = 0
+                self.max_active = 0
+                self.first_started = threading.Event()
+                self.release_first = threading.Event()
+
+            def iter_turn_text(self, prompt: str) -> Iterator[str]:
+                self.prompts.append(prompt)
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+                try:
+                    if len(self.prompts) == 1:
+                        self.first_started.set()
+                        self.release_first.wait(timeout=2)
+                    yield "😊 ok"
+                finally:
+                    self.active -= 1
+
+        os.environ["DOTTY_KID_MODE"] = "false"
+        client = OverlapDetectingClient()
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        outputs: list[list[str]] = []
+
+        def run(text: str) -> None:
+            outputs.append(list(provider.response(
+                "s", [{"role": "user", "content": text}],
+            )))
+
+        first = threading.Thread(target=run, args=("first",))
+        second = threading.Thread(target=run, args=("second",))
+        first.start()
+        self.assertTrue(client.first_started.wait(timeout=1))
+        second.start()
+        time.sleep(0.05)
+        self.assertEqual(len(client.prompts), 1, "second turn must wait")
+        client.release_first.set()
+        first.join(timeout=2)
+        second.join(timeout=2)
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual(client.max_active, 1)
+        self.assertEqual(len(outputs), 2)
+        self.assertEqual(client.new_session_calls, 1)
 
 
 class TestErrorFallback(unittest.TestCase):

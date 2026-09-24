@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import unicodedata
 from pathlib import Path
 from typing import Iterator
@@ -214,6 +215,11 @@ class LLMProvider(LLMProviderBase):
         # `client` is injected by tests; production passes None to get
         # the env-configured default.
         self._client: PiClient = client if client is not None else make_default_pi_client()
+        # A connection can submit multiple chat jobs to its thread pool. Pi RPC
+        # is one ordered stream, so keep the complete new_session -> prompt ->
+        # agent_end transaction exclusive; per-write locking cannot prevent one
+        # caller from consuming another caller's response frames.
+        self._turn_lock = threading.Lock()
         self._first_turn = True
         msg = f"PiVoiceLLM ready (container={self._container} kid_mode={self._kid_mode})"
         try:
@@ -224,6 +230,11 @@ class LLMProvider(LLMProviderBase):
     # xiaozhi-server's voice loop calls this as a sync generator.
     # Each yielded string becomes a TTS chunk.
     def response(self, session_id, dialogue, **kwargs) -> Iterator[str]:
+        with self._turn_lock:
+            yield from self._response_serialized(session_id, dialogue, **kwargs)
+
+    def _response_serialized(self, session_id, dialogue, **kwargs) -> Iterator[str]:
+        """Run one complete Pi RPC transaction while ``_turn_lock`` is held."""
         self._kid_mode = _read_kid_mode()
         user_text = _last_user_text(dialogue)
         if not user_text:
