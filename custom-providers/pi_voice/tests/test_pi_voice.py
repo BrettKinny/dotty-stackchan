@@ -439,6 +439,29 @@ class TestDashboardReporting(unittest.TestCase):
         (turn,) = self._turns()
         self.assertEqual(turn["response_text"], first)
 
+    def test_direct_tool_turn_is_reported(self):
+        client = FakeClient()
+        client.tool_results["remember"] = "(remembered)"
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "remember that my cat is called Biscuit"}],
+        ))
+        (turn,) = self._turns()
+        self.assertEqual(turn["request_text"], "remember that my cat is called Biscuit")
+        self.assertEqual(turn["response_text"], out)
+        self.assertIsNone(turn["error"])
+
+    def test_direct_tool_failure_is_reported_with_error(self):
+        client = FakeClient()
+        client.tool_errors["think_hard"] = PiClientError("tool timed out")
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        list(provider.response(
+            "s", [{"role": "user", "content": "think hard about why the sky is blue"}],
+        ))
+        (turn,) = self._turns()
+        self.assertEqual(turn["error"], "think_hard: tool timed out")
+        self.assertIn("couldn't finish", turn["response_text"])
+
     def test_empty_turn_is_not_reported(self):
         provider = LLMProvider({}, client=FakeClient())  # type: ignore[arg-type]
         list(provider.response("s", [{"role": "assistant", "content": "x"}]))
