@@ -86,7 +86,7 @@ The two toggles are orthogonal — they compose freely. `kid_mode = on` AND `sma
 !!! warning "Historical firmware has a different right-ring layout"
     The contract below describes the **active-fork Phase 4 StateManager**
     (`BrettKinny/StackChan @ dotty`). The **historical** submodule pin
-    `35f701a` does **not** include StateManager — it ships the
+    `35f701a` predates StateManager — it ships the
     **privacy-LED** layout instead, which claims two of the same right-ring
     pixels for a different purpose:
 
