@@ -1,5 +1,5 @@
 """Tests for the perception-feed relay, the no-wait inject helper, the
-last-seen fallback, and the voice-tool inventory.
+last-seen fallback, the voice-tool inventory, and the voice-turn ingest.
 
 The dashboard's live pieces all pointed at producers that moved out of the
 bridge in #36 / #111: the activity feed opened an SSE route the bridge never
@@ -139,9 +139,12 @@ class LastSeenFallbackTests(_StateSaver):
 
     def setUp(self):
         super().setUp()
-        original = dash._log_last_voice_ts
-        dash._log_last_voice_ts = lambda: None
-        self.addCleanup(lambda: setattr(dash, "_log_last_voice_ts", original))
+        dash._state["recent_turns_getter"] = lambda: []
+
+    def test_prefers_newest_reported_turn(self):
+        dash._state["recent_turns_getter"] = lambda: [{"ts": 300.0}, {"ts": 400.0}]
+        dash._state["perception_state_getter"] = lambda: {"dev-1": {"last_chat_t": 100.0}}
+        self.assertEqual(dash._stackchan_last_seen(), 400.0)
 
     def test_falls_back_to_perception_last_chat(self):
         dash._state["perception_state_getter"] = lambda: {
@@ -161,6 +164,78 @@ class VoiceToolInventoryTests(unittest.TestCase):
         for src in (_repo_root / "dotty-pi-ext/src/tools").glob("*.ts"):
             shipped.update(re.findall(r'^\s*name: "(\w+)"', src.read_text(), re.M))
         self.assertEqual({t["name"] for t in dash._VOICE_TOOLS}, shipped)
+
+
+class VoiceTurnIngestTests(unittest.TestCase):
+    """PiVoiceLLM reports turns to /api/voice/turn; the bridge keeps them in
+    an in-memory ring that feeds /ui/events, the Errors count and report."""
+
+    def setUp(self):
+        from fastapi.testclient import TestClient
+        bridge_app._dashboard_recent_turns.clear()
+        self.addCleanup(bridge_app._dashboard_recent_turns.clear)
+        saved_token = bridge_app._ADMIN_TOKEN
+        self.addCleanup(lambda: setattr(bridge_app, "_ADMIN_TOKEN", saved_token))
+        bridge_app._ADMIN_TOKEN = ""
+        # Each test module loads its own copy of bridge.py, and the shared
+        # bridge.dashboard is wired to whichever loaded last — pin it to ours.
+        saved_getter = dash._state.get("recent_turns_getter")
+        self.addCleanup(lambda: dash._state.update(recent_turns_getter=saved_getter))
+        dash._state["recent_turns_getter"] = bridge_app._dashboard_recent_turns_getter
+        self.client = TestClient(bridge_app.app)
+
+    def test_turn_lands_in_ring_and_reaches_subscribers(self):
+        q = bridge_app._dashboard_subscribe_events()
+        self.addCleanup(lambda: bridge_app._dashboard_unsubscribe_events(q))
+        r = self.client.post("/api/voice/turn", json={
+            "request_text": "hello", "response_text": "😊 Hi!", "latency_ms": 1200,
+        })
+        self.assertEqual(r.status_code, 200)
+        turns = bridge_app._dashboard_recent_turns_getter()
+        self.assertEqual(len(turns), 1)
+        self.assertEqual(turns[0]["request_text"], "hello")
+        self.assertIsNone(turns[0]["error"])
+        self.assertIsInstance(turns[0]["ts"], float)
+        self.assertEqual(q.get_nowait()["response_text"], "😊 Hi!")
+
+    def test_errored_turn_shows_in_count_and_report(self):
+        self.client.post("/api/voice/turn", json={"request_text": "a", "response_text": "ok"})
+        self.client.post("/api/voice/turn", json={
+            "request_text": "what is the weather", "response_text": "😐 (brain offline)",
+            "error": "pi rpc timeout",
+        })
+        self.assertIn("Errors (1)", self.client.get("/ui/alerts/count?chip=1").text)
+        detail = self.client.get("/ui/alerts/detail").text
+        self.assertIn("pi rpc timeout", detail)
+        self.assertIn("what is the weather", detail)
+
+    def test_no_errors_leaves_plain_chip(self):
+        self.client.post("/api/voice/turn", json={"request_text": "a", "response_text": "ok"})
+        self.assertEqual(self.client.get("/ui/alerts/count?chip=1").text, "Errors")
+
+    def test_admin_token_enforced_when_set(self):
+        bridge_app._ADMIN_TOKEN = "s3cret"
+        body = {"request_text": "a", "response_text": "b"}
+        self.assertEqual(self.client.post("/api/voice/turn", json=body).status_code, 401)
+        ok = self.client.post("/api/voice/turn", json=body, headers={"X-Admin-Token": "s3cret"})
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(len(bridge_app._dashboard_recent_turns_getter()), 1)
+
+    def test_long_text_is_truncated(self):
+        self.client.post("/api/voice/turn", json={"request_text": "x" * 5000, "response_text": ""})
+        self.assertEqual(len(bridge_app._dashboard_recent_turns_getter()[0]["request_text"]), 2000)
+
+    def test_filter_hit_lands_in_safety_ring(self):
+        import bridge.text as btext
+        btext._cf_recent.clear()
+        self.addCleanup(btext._cf_recent.clear)
+        r = self.client.post("/api/voice/filter-hit", json={
+            "tier": "redirect", "rule": "badword", "prefix": "a longer prefix",
+        })
+        self.assertEqual(r.status_code, 200)
+        hit = btext.recent_content_filter_hits()[0]
+        self.assertEqual((hit["tier"], hit["rule"], hit["prefix"]), ("redirect", "badword", "a longer"))
+        self.assertIn("badword", self.client.get("/ui/safety/recent").text)
 
 
 if __name__ == "__main__":

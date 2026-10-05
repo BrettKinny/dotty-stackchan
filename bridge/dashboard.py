@@ -46,6 +46,7 @@ _state: dict[str, Any] = {
     "abort_device": None,
     "subscribe_events": None,
     "unsubscribe_events": None,
+    "recent_turns_getter": None,
     "perception_state_getter": None,
     "perception_recent_getter": None,
     "identity_display_name": None,
@@ -67,6 +68,7 @@ def configure(*, send_message: Any = None, vision_cache_getter: Any = None,
               inject_to_device: Any = None, abort_device: Any = None,
               subscribe_events: Any = None,
               unsubscribe_events: Any = None,
+              recent_turns_getter: Any = None,
               perception_state_getter: Any = None,
               perception_recent_getter: Any = None,
               identity_display_name: Any = None,
@@ -105,6 +107,8 @@ def configure(*, send_message: Any = None, vision_cache_getter: Any = None,
         _state["subscribe_events"] = subscribe_events
     if unsubscribe_events is not None:
         _state["unsubscribe_events"] = unsubscribe_events
+    if recent_turns_getter is not None:
+        _state["recent_turns_getter"] = recent_turns_getter
     if perception_state_getter is not None:
         _state["perception_state_getter"] = perception_state_getter
     if perception_recent_getter is not None:
@@ -298,7 +302,6 @@ def _xiaozhi_admin_headers() -> dict[str, str]:
     is set (matches the xiaozhi-server middleware); empty otherwise."""
     return {"X-Admin-Token": _ADMIN_TOKEN} if _ADMIN_TOKEN else {}
 LOG_DIR = Path(os.environ.get("CONVO_LOG_DIR", "/var/lib/dotty-bridge/logs"))
-VOICE_CHANNELS = ("dotty", "stackchan")
 
 _START_TIME = time.time()
 
@@ -340,12 +343,27 @@ def _humanize_age(seconds: float) -> str:
     return f"{s // 86400}d"
 
 
-def _today_log_path() -> Path:
-    return _log_path_for(datetime.now().strftime("%Y-%m-%d"))
+def _recent_turns() -> list[dict]:
+    """Recent voice turns from the bridge's in-memory ring, oldest first.
+    Empty after a bridge restart — nothing is persisted."""
+    getter = _state.get("recent_turns_getter")
+    try:
+        return list(getter()) if getter else []
+    except Exception:
+        return []
 
 
-def _log_path_for(date_str: str) -> Path:
-    return LOG_DIR / f"convo-{date_str}.ndjson"
+def _errored_turns_today() -> list[dict]:
+    """Today's (local date) errored turns, newest first."""
+    today = datetime.now().date()
+    out: list[dict] = []
+    for rec in reversed(_recent_turns()):
+        ts = rec.get("ts")
+        if not rec.get("error") or not isinstance(ts, (int, float)):
+            continue
+        if datetime.fromtimestamp(ts).date() == today:
+            out.append(rec)
+    return out
 
 
 def _clean_request_text(s: str) -> str:
@@ -372,22 +390,13 @@ def _clean_request_text(s: str) -> str:
     return after
 
 
-def _parse_ts(ts: str) -> float | None:
-    if not ts:
-        return None
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
-    except Exception:
-        return None
-
-
 def _stackchan_last_seen() -> float | None:
     """Timestamp of the most recent voice activity.
 
-    Prefers today's convo log; falls back to dotty-behaviour's per-device
-    `last_chat_t`, since voice turns are owned by dotty-pi post-#111 and
-    no longer land in the bridge's log."""
-    return _log_last_voice_ts() or _perception_last_chat_ts()
+    Prefers the newest reported turn; falls back to dotty-behaviour's
+    per-device `last_chat_t`, which also covers the window after a bridge
+    restart when the turn ring is empty."""
+    return _last_turn_ts() or _perception_last_chat_ts()
 
 
 def _perception_last_chat_ts() -> float | None:
@@ -403,27 +412,12 @@ def _perception_last_chat_ts() -> float | None:
     return max(stamps) if stamps else None
 
 
-def _log_last_voice_ts() -> float | None:
-    path = _today_log_path()
-    if not path.exists():
-        return None
-    try:
-        data = path.read_bytes()
-    except OSError:
-        return None
-    last_voice_ts: float | None = None
-    for line in data.splitlines():
-        if not line.strip():
-            continue
-        try:
-            rec = json.loads(line)
-        except Exception:
-            continue
-        if rec.get("channel") in VOICE_CHANNELS:
-            ts = _parse_ts(rec.get("ts", ""))
-            if ts is not None:
-                last_voice_ts = ts
-    return last_voice_ts
+def _last_turn_ts() -> float | None:
+    for rec in reversed(_recent_turns()):
+        ts = rec.get("ts")
+        if isinstance(ts, (int, float)):
+            return float(ts)
+    return None
 
 
 @router.get("", response_class=HTMLResponse, include_in_schema=False)
@@ -500,7 +494,7 @@ async def device_status(request: Request) -> Any:
 
 @router.get("/alerts/count", response_class=HTMLResponse, include_in_schema=False)
 async def alerts_count(request: Request, chip: int = 0) -> Any:
-    """Q6: count today's errored turns from the convo log.
+    """Q6: count today's errored turns from the recent-turns ring.
 
     Two render modes share the same count so the dashboard polls one URL:
       - default: legacy floating ``alerts_badge.html`` (kept for
@@ -511,22 +505,7 @@ async def alerts_count(request: Request, chip: int = 0) -> Any:
         the chip. innerHTML swap target is the chip itself, so the script
         runs against its own parent element.
     """
-    today = datetime.now().strftime("%Y-%m-%d")
-    path = _log_path_for(today)
-    n = 0
-    if path.exists():
-        try:
-            for line in path.read_bytes().splitlines():
-                if not line.strip():
-                    continue
-                try:
-                    rec = json.loads(line)
-                except Exception:
-                    continue
-                if rec.get("error"):
-                    n += 1
-        except OSError:
-            pass
+    n = len(_errored_turns_today())
     if chip:
         # Don't tint the chip red — selection (`btn-primary` via setFeedFilter)
         # is the only "selected" cue; the chip just shows a warning glyph +
@@ -547,37 +526,15 @@ async def alerts_count(request: Request, chip: int = 0) -> Any:
 async def alerts_detail(request: Request) -> Any:
     """F13: render today's errored turns. Opened via the alerts-badge
     modal in dashboard.html."""
-    today = datetime.now().strftime("%Y-%m-%d")
-    path = _log_path_for(today)
     entries: list[dict[str, Any]] = []
-    if path.exists():
-        try:
-            lines = path.read_bytes().splitlines()
-        except OSError:
-            lines = []
-        for line in reversed(lines):
-            if not line.strip():
-                continue
-            try:
-                rec = json.loads(line)
-            except Exception:
-                continue
-            if not rec.get("error"):
-                continue
-            ts = rec.get("ts", "")
-            try:
-                time_str = datetime.fromisoformat(
-                    ts.replace("Z", "+00:00")
-                ).astimezone().strftime("%H:%M:%S")
-            except Exception:
-                time_str = ts[-8:] if ts else "?"
-            entries.append({
-                "time": time_str,
-                "channel": rec.get("channel") or "?",
-                "request": _clean_request_text(rec.get("request_text") or "")[:400],
-                "response": (rec.get("response_text") or "")[:300],
-                "error": str(rec.get("error"))[:500],
-            })
+    for rec in _errored_turns_today():
+        entries.append({
+            "time": datetime.fromtimestamp(rec["ts"]).astimezone().strftime("%H:%M:%S"),
+            "channel": rec.get("channel") or "?",
+            "request": _clean_request_text(rec.get("request_text") or "")[:400],
+            "response": (rec.get("response_text") or "")[:300],
+            "error": str(rec.get("error"))[:500],
+        })
     return templates.TemplateResponse(
         request, "alerts_detail.html",
         {"entries": entries},
@@ -2136,8 +2093,8 @@ async def events_stream(request: Request) -> StreamingResponse:
     """Server-Sent Events stream of completed conversation turns.
 
     Each event is one JSON object: {ts, channel, request_text, response_text,
-    latency_ms, error, emoji_used}. The bridge's ConvoLogger broadcasts on
-    every turn. Heartbeats every 15s keep proxies / browsers awake.
+    latency_ms, error}. Published when the voice provider reports a turn to
+    /api/voice/turn. Heartbeats every 15s keep proxies / browsers awake.
     """
     subscribe = _state.get("subscribe_events")
     unsubscribe = _state.get("unsubscribe_events")
