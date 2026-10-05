@@ -1,10 +1,12 @@
 {% if ok %}
 <div class="alert alert-success dotty-alert">
   <div>
-    <div class="text-xs text-base-content/60">you said</div>
+    <div class="text-xs text-base-content/60">{% if response %}you said{% else %}sent to Dotty{% endif %}</div>
     <div class="break-words">{{ sent }}</div>
+    {% if response %}
     <div class="text-xs text-base-content/60 mt-2">Dotty replied</div>
     <div class="break-words whitespace-pre-wrap">{{ response }}</div>
+    {% endif %}
   </div>
 </div>
 {% else %}

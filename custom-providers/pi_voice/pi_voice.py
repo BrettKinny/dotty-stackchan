@@ -37,9 +37,12 @@ import json
 import os
 import re
 import threading
+import time
 import unicodedata
+import urllib.request
 from pathlib import Path
 from typing import Iterator
+from urllib.parse import urlparse
 
 from .pi_client import PiClient, PiClientError, make_default_pi_client
 
@@ -104,6 +107,53 @@ def _read_kid_mode() -> bool:
     except OSError:
         pass
     return os.environ.get("DOTTY_KID_MODE", "true").lower() in ("1", "true", "yes")
+
+
+_DASHBOARD_PORT = 8081
+
+
+def _dashboard_url() -> str:
+    """Base URL of the bridge dashboard, or "" when it can't be worked out.
+
+    `DOTTY_DASHBOARD_URL` wins. Otherwise assume the dashboard sits on the
+    same host as dotty-behaviour (which this container already reaches via
+    `BRIDGE_URL` / `VISION_BRIDGE_URL`) on its default port."""
+    explicit = os.environ.get("DOTTY_DASHBOARD_URL", "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    sibling = os.environ.get("BRIDGE_URL") or os.environ.get("VISION_BRIDGE_URL", "")
+    parsed = urlparse(sibling)
+    if not parsed.hostname:
+        return ""
+    return f"{parsed.scheme or 'http'}://{parsed.hostname}:{_DASHBOARD_PORT}"
+
+
+def _report_to_dashboard(path: str, payload: dict) -> None:
+    """Fire-and-forget POST to the bridge dashboard.
+
+    Runs on a daemon thread with a short timeout and swallows every error:
+    a missing or slow dashboard must never delay or break a voice turn."""
+    base = _dashboard_url()
+    if not base:
+        return
+    headers = {"Content-Type": "application/json"}
+    token = os.environ.get("DOTTY_ADMIN_TOKEN", "").strip()
+    if token:
+        headers["X-Admin-Token"] = token
+    body = json.dumps(payload).encode("utf-8")
+
+    def _post() -> None:
+        try:
+            req = urllib.request.Request(
+                base + path, data=body, headers=headers, method="POST",
+            )
+            urllib.request.urlopen(req, timeout=2).close()
+        except Exception as exc:
+            logger.debug("PiVoiceLLM dashboard report to %s failed: %s", path, exc)
+
+    threading.Thread(
+        target=_post, name="dotty-dashboard-report", daemon=True,
+    ).start()
 
 
 def _last_user_text(dialogue: list[dict]) -> str:
@@ -300,6 +350,11 @@ class LLMProvider(LLMProviderBase):
                 logger.exception("PiVoiceLLM: new_session failed, continuing")
         self._first_turn = False
 
+        # Everything spoken this turn, reported to the dashboard when the
+        # generator finishes — including when xiaozhi closes it early.
+        spoken: list[str] = []
+        error: str | None = None
+        started = time.monotonic()
         try:
             # #157: kid-mode blocked-content filter on TTS-bound output.
             # Full-turn buffered — the filter drains the pi RPC stream through
@@ -312,12 +367,23 @@ class LLMProvider(LLMProviderBase):
                 self._kid_mode,
                 on_hit=self._on_filter_hit,
             ):
+                spoken.append(chunk)
                 yield chunk
         except PiClientError as exc:
+            error = str(exc) or exc.__class__.__name__
             logger.error("PiVoiceLLM turn failed: %s", exc)
             for line in self._client.recent_stderr()[-5:]:
                 logger.error("  pi.stderr: %s", line)
-            yield f"{FALLBACK_EMOJI} (brain offline — try again in a moment)"
+            fallback = f"{FALLBACK_EMOJI} (brain offline — try again in a moment)"
+            spoken.append(fallback)
+            yield fallback
+        finally:
+            _report_to_dashboard("/api/voice/turn", {
+                "request_text": user_text,
+                "response_text": "".join(spoken),
+                "latency_ms": int((time.monotonic() - started) * 1000),
+                "error": error,
+            })
 
     def _invoke_voice_tool(
         self, name: str, arguments: dict[str, str],
@@ -329,12 +395,17 @@ class LLMProvider(LLMProviderBase):
             return None
 
     def _on_filter_hit(self, tier: str, match) -> None:
-        # Local logging only — the Prometheus counter / safety ring live in
-        # the bridge container, which this provider can't reach.
         logger.warning(
             "PiVoiceLLM content-filter hit tier=%s pattern=%r — turn replaced",
             tier, match.group(),
         )
+        # The Prometheus counter and /ui/safety/recent ring live in the
+        # bridge container; hand the hit over so the dashboard card shows it.
+        _report_to_dashboard("/api/voice/filter-hit", {
+            "tier": tier,
+            "rule": match.group(),
+            "prefix": match.string[:8],
+        })
 
     def close(self) -> None:
         """xiaozhi may call this on shutdown — make sure pi cleans up."""

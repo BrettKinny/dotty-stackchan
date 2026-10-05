@@ -152,14 +152,6 @@ async def lifespan(app: FastAPI):
             window_sec=config.FACE_LOST_ABORT_WINDOW_SEC,
             grace_sec=config.FACE_LOST_ABORT_GRACE_SEC,
         ),
-        SoundTurner(
-            state,
-            xiaozhi,
-            cooldown_sec=config.SOUND_TURN_COOLDOWN_SEC,
-            yaw_deg=config.SOUND_TURN_YAW_DEG,
-            speed=config.SOUND_TURN_SPEED,
-            quiet_after_chat_sec=config.SOUND_TURN_QUIET_AFTER_CHAT_SEC,
-        ),
         FaceIdentifiedRefresher(
             state,
             xiaozhi,
@@ -175,6 +167,20 @@ async def lifespan(app: FastAPI):
             duration_sec=config.PURR_DURATION_SEC,
         ),
     ]
+    if config.SOUND_TURN_ENABLED:
+        consumers.append(
+            SoundTurner(
+                state,
+                xiaozhi,
+                cooldown_sec=config.SOUND_TURN_COOLDOWN_SEC,
+                yaw_deg=config.SOUND_TURN_YAW_DEG,
+                speed=config.SOUND_TURN_SPEED,
+                quiet_after_chat_sec=config.SOUND_TURN_QUIET_AFTER_CHAT_SEC,
+            )
+        )
+    else:
+        log.info("sound turner disabled by SOUND_TURN_ENABLED=0 (see #27)")
+
     if config.WAKE_TURN_ENABLED:
         consumers.append(
             WakeWordTurner(

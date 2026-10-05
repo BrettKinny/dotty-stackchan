@@ -391,5 +391,98 @@ class TestLeadingEmojiContract(unittest.TestCase):
         self.assertEqual(out, [textUtils.CONTENT_FILTER_REPLACEMENT])
 
 
+class TestDashboardReporting(unittest.TestCase):
+    """Each turn (and each kid-filter hit) is reported to the bridge
+    dashboard, which otherwise never sees a voice turn."""
+
+    def setUp(self):
+        import pi_voice.pi_voice as mod
+        self.mod = mod
+        self.reports: list[tuple[str, dict]] = []
+        p = patch.object(mod, "_report_to_dashboard",
+                         lambda path, payload: self.reports.append((path, payload)))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def _turns(self):
+        return [body for path, body in self.reports if path == "/api/voice/turn"]
+
+    def test_successful_turn_is_reported(self):
+        os.environ["DOTTY_KID_MODE"] = "false"
+        client = FakeClient()
+        client.script_turn(["😊 ", "Hi there"])
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        out = "".join(provider.response("s", [{"role": "user", "content": "Hello"}]))
+        (turn,) = self._turns()
+        self.assertEqual(turn["request_text"], "Hello")
+        self.assertEqual(turn["response_text"], out)
+        self.assertIsNone(turn["error"])
+        self.assertGreaterEqual(turn["latency_ms"], 0)
+
+    def test_failed_turn_is_reported_with_error(self):
+        client = FakeClient()
+        client.script_turn([], error=PiClientError("rpc timeout"))
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        list(provider.response("s", [{"role": "user", "content": "Hello"}]))
+        (turn,) = self._turns()
+        self.assertEqual(turn["error"], "rpc timeout")
+        self.assertIn("brain offline", turn["response_text"])
+
+    def test_early_close_still_reports(self):
+        os.environ["DOTTY_KID_MODE"] = "false"
+        client = FakeClient()
+        client.script_turn(["😊 one ", "two ", "three"])
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        gen = provider.response("s", [{"role": "user", "content": "Hello"}])
+        first = next(gen)
+        gen.close()
+        (turn,) = self._turns()
+        self.assertEqual(turn["response_text"], first)
+
+    def test_empty_turn_is_not_reported(self):
+        provider = LLMProvider({}, client=FakeClient())  # type: ignore[arg-type]
+        list(provider.response("s", [{"role": "assistant", "content": "x"}]))
+        self.assertEqual(self.reports, [])
+
+    def test_filter_hit_is_reported_without_blocked_reply(self):
+        os.environ["DOTTY_KID_MODE"] = "true"
+        client = FakeClient()
+        client.script_turn(["😊 that is a load of shit"])
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        with tempfile.TemporaryDirectory() as d, patch.dict(
+            os.environ, {"DOTTY_KID_MODE_STATE": str(Path(d) / "missing")},
+        ):
+            out = "".join(provider.response("s", [{"role": "user", "content": "Hello"}]))
+        hits = [body for path, body in self.reports if path == "/api/voice/filter-hit"]
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["rule"], "shit")
+        (turn,) = self._turns()
+        self.assertEqual(turn["response_text"], out)
+        self.assertNotIn("shit", turn["response_text"])
+
+
+class TestDashboardUrl(unittest.TestCase):
+    def _url(self, env: dict) -> str:
+        import pi_voice.pi_voice as mod
+        clean = {k: v for k, v in os.environ.items()
+                 if k not in ("DOTTY_DASHBOARD_URL", "BRIDGE_URL", "VISION_BRIDGE_URL")}
+        with patch.dict(os.environ, {**clean, **env}, clear=True):
+            return mod._dashboard_url()
+
+    def test_explicit_url_wins(self):
+        self.assertEqual(
+            self._url({"DOTTY_DASHBOARD_URL": "http://dash:9000/",
+                       "VISION_BRIDGE_URL": "http://10.0.0.5:8090"}),
+            "http://dash:9000",
+        )
+
+    def test_derived_from_behaviour_host(self):
+        self.assertEqual(self._url({"VISION_BRIDGE_URL": "http://10.0.0.5:8090"}),
+                         "http://10.0.0.5:8081")
+
+    def test_unknown_host_disables_reporting(self):
+        self.assertEqual(self._url({}), "")
+
+
 if __name__ == "__main__":
     unittest.main()
