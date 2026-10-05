@@ -208,7 +208,7 @@ The xiaozhi-server's `EventTextMessageHandler` (`custom-providers/xiaozhi-patche
 | Consumer | What it does |
 |---|---|
 | `FaceGreeter` | "Hi!" greeting (via `/xiaozhi/admin/inject-text`) on first face detection after a cooldown window. |
-| `SoundTurner` | Head-turn (via `/xiaozhi/admin/set-head-angles`) toward sound direction. |
+| `SoundTurner` | Head-turn (via `/xiaozhi/admin/set-head-angles`) toward sound direction. **Off by default** (`SOUND_TURN_ENABLED=0`) — the firmware localizer is stuck-left (#27), so it only ever turned left. |
 | `FaceLostAborter` | Aborts an in-flight TTS turn (via `/xiaozhi/admin/abort`) when the audience walks away. |
 | `WakeWordTurner` | Head-turn toward the speaker on wake-word event. |
 | `FaceIdentifiedRefresher` | Re-asserts the face-identified pixel every ~3 s so the firmware's 4 s timeout doesn't drop it. |

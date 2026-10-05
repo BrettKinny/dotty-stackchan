@@ -53,7 +53,7 @@ _state: dict[str, Any] = {
     "memory_records_getter": None,
     "memory_approve": None,
     "memory_redact": None,
-    "sound_balance_getter": None,
+    "perception_feed_opener": None,
     "vision_failures_getter": None,
 }
 
@@ -74,7 +74,7 @@ def configure(*, send_message: Any = None, vision_cache_getter: Any = None,
               memory_records_getter: Any = None,
               memory_approve: Any = None,
               memory_redact: Any = None,
-              sound_balance_getter: Any = None,
+              perception_feed_opener: Any = None,
               vision_failures_getter: Any = None) -> None:
     """Register bridge state with the dashboard. Idempotent."""
     if send_message is not None:
@@ -119,8 +119,8 @@ def configure(*, send_message: Any = None, vision_cache_getter: Any = None,
         _state["memory_approve"] = memory_approve
     if memory_redact is not None:
         _state["memory_redact"] = memory_redact
-    if sound_balance_getter is not None:
-        _state["sound_balance_getter"] = sound_balance_getter
+    if perception_feed_opener is not None:
+        _state["perception_feed_opener"] = perception_feed_opener
     if vision_failures_getter is not None:
         _state["vision_failures_getter"] = vision_failures_getter
 
@@ -382,7 +382,28 @@ def _parse_ts(ts: str) -> float | None:
 
 
 def _stackchan_last_seen() -> float | None:
-    """Timestamp of the most recent voice-channel turn in today's log."""
+    """Timestamp of the most recent voice activity.
+
+    Prefers today's convo log; falls back to dotty-behaviour's per-device
+    `last_chat_t`, since voice turns are owned by dotty-pi post-#111 and
+    no longer land in the bridge's log."""
+    return _log_last_voice_ts() or _perception_last_chat_ts()
+
+
+def _perception_last_chat_ts() -> float | None:
+    getter = _state.get("perception_state_getter")
+    try:
+        pstate = (getter() if getter else None) or {}
+    except Exception:
+        return None
+    stamps = [
+        d["last_chat_t"] for d in pstate.values()
+        if isinstance(d, dict) and isinstance(d.get("last_chat_t"), (int, float))
+    ]
+    return max(stamps) if stamps else None
+
+
+def _log_last_voice_ts() -> float | None:
     path = _today_log_path()
     if not path.exists():
         return None
@@ -663,17 +684,13 @@ async def play_song(request: Request, filename: str = Form(...)) -> Any:
     return templates.TemplateResponse(request, "say_result.html", result)
 
 
-_INJECT_WAIT_SEC = 8.0  # Q4: how long to wait for Dotty's reply before
-                        #     showing "no response in time" fallback.
-
-
 async def _inject_or_error(request: Request, text: str, label: str) -> Any:
     """Helper for action endpoints that fire text into xiaozhi-server's
     pipeline so the device actually speaks/emotes/runs MCP tools.
 
-    Q4: subscribes to the bridge's event stream BEFORE injecting, then
-    waits up to ~8s for the next turn so the dashboard can show what Dotty
-    actually said (not just "Sent…")."""
+    Returns as soon as the inject is accepted. It used to wait ~8 s for the
+    reply on the bridge's turn stream, but turns are owned by dotty-pi since
+    #111 and nothing publishes them here — the wait only ever timed out."""
     inject = _state.get("inject_to_device")
     if inject is None:
         return templates.TemplateResponse(
@@ -681,38 +698,22 @@ async def _inject_or_error(request: Request, text: str, label: str) -> Any:
             {"ok": False,
              "error": "Inject path not configured (xiaozhi admin patch missing)."},
         )
-    subscribe = _state.get("subscribe_events")
-    unsubscribe = _state.get("unsubscribe_events")
-    queue = subscribe() if subscribe else None
     try:
-        try:
-            result = await inject(text=text)
-        except Exception as exc:
-            log.exception("dashboard inject failed")
-            return templates.TemplateResponse(
-                request, "say_result.html",
-                {"ok": False, "error": f"Bridge error: {exc.__class__.__name__}"},
-            )
-        if not result.get("ok"):
-            return templates.TemplateResponse(
-                request, "say_result.html",
-                {"ok": False, "error": result.get("error", "unknown injection failure")},
-            )
-        # Wait for the next completed turn (likely ours — single device).
-        response_text = "Sent — no reply in 8s."
-        if queue is not None:
-            try:
-                event = await asyncio.wait_for(queue.get(), timeout=_INJECT_WAIT_SEC)
-                response_text = event.get("response_text") or "(no text)"
-            except asyncio.TimeoutError:
-                pass
+        result = await inject(text=text)
+    except Exception as exc:
+        log.exception("dashboard inject failed")
         return templates.TemplateResponse(
             request, "say_result.html",
-            {"ok": True, "sent": label, "response": response_text},
+            {"ok": False, "error": f"Bridge error: {exc.__class__.__name__}"},
         )
-    finally:
-        if queue is not None and unsubscribe is not None:
-            unsubscribe(queue)
+    if not result.get("ok"):
+        return templates.TemplateResponse(
+            request, "say_result.html",
+            {"ok": False, "error": result.get("error", "unknown injection failure")},
+        )
+    return templates.TemplateResponse(
+        request, "say_result.html", {"ok": True, "sent": label},
+    )
 
 
 def _kid_blocked(text: str) -> bool:
@@ -954,29 +955,6 @@ _STATE_DESCRIPTIONS = {
 }
 
 
-def _sound_balance_sparkline() -> dict | None:
-    """Build the State-tile sound-balance sparkline (#69) — an SVG
-    polyline over the last 60 s of localizer `balance` samples. Returns
-    None when there's no recent sound data (fewer than 2 points)."""
-    getter = _state.get("sound_balance_getter")
-    series = getter() if getter else []
-    if not series or len(series) < 2:
-        return None
-    width, height = 100.0, 24.0
-    n = len(series)
-    pts: list[str] = []
-    for i, bal in enumerate(series):
-        x = (i / (n - 1)) * width
-        y = (1.0 - max(0.0, min(1.0, float(bal)))) * height
-        pts.append(f"{x:.1f},{y:.1f}")
-    return {
-        "points": " ".join(pts),
-        "last": series[-1],
-        "width": width,
-        "height": height,
-    }
-
-
 def _vision_failures_count() -> int:
     """Total vision-capture failures in the last hour (#74) — summed
     across error kinds. 0 when the getter is unwired or the window is
@@ -1002,21 +980,25 @@ async def state_partial(request: Request) -> Any:
             "states": _STATES,
             "labels": _STATE_LABELS,
             "descriptions": _STATE_DESCRIPTIONS,
-            "sound_spark": _sound_balance_sparkline(),
         },
     )
 
 
 # #65 tier 1 — voice tool inventory. Hardcoded list of the tools shipped
 # by dotty-pi-ext (see dotty-pi-ext/package.json). Per the issue body the
-# static list is intentional: "hardcoded; same five values until a sixth
-# tool ships". Tier 2 (call counts via PiClient stdout parsing) and Tier 3
-# (safety-denial counts) are deferred follow-ups.
+# static list is intentional — keep it in step with dotty-pi-ext/src/tools/
+# (seven tools since #53 added recall_person / remember_person). Tier 2
+# (call counts via PiClient stdout parsing) and Tier 3 (safety-denial
+# counts) are deferred follow-ups.
 _VOICE_TOOLS: list[dict[str, str]] = [
     {"name": "memory_lookup",
      "description": "Search Dotty's long-term memory by keyword"},
     {"name": "remember",
      "description": "Save a new memory (\"Brett's birthday is …\")"},
+    {"name": "recall_person",
+     "description": "Look up what Dotty knows about a named person"},
+    {"name": "remember_person",
+     "description": "Save a fact about a named person (kid-mode: pending review)"},
     {"name": "think_hard",
      "description": "Hand a hard reasoning task to the bigger 27B model"},
     {"name": "take_photo",
@@ -1815,7 +1797,7 @@ async def host_detail(request: Request, slug: str) -> Any:
         smart_on = bool(smart_getter()) if smart_getter else None
         active_llm = _host_detail_llm_label(smart_on)
         facts = [
-            ("Device",     "Raspberry Pi"),
+            ("Device",     "Docker container (dotty-bridge)"),
             ("Status",     "online"),
             ("Version",    BRIDGE_VERSION),
             ("Uptime",     _humanize_age(time.time() - _START_TIME)),
@@ -2097,6 +2079,54 @@ async def security_recent(request: Request, device_id: str) -> Any:
     """
     ctx = _build_security_panel_ctx(device_id)
     return templates.TemplateResponse(request, "security_panel.html", ctx)
+
+
+# --- Perception feed proxy ------------------------------------------------
+
+@router.get("/perception/feed", include_in_schema=False)
+async def perception_feed_proxy(request: Request) -> StreamingResponse:
+    """Relay dotty-behaviour's perception SSE stream to the browser.
+
+    The perception bus moved to dotty-behaviour in #36, but the page can
+    only open same-origin EventSources — so the bridge relays the stream
+    line-for-line. If the upstream is down or drops, the stream just ends
+    and EventSource reconnects after the `retry` interval (a non-200 would
+    stop it retrying for good)."""
+    opener = _state.get("perception_feed_opener")
+
+    async def gen():
+        yield b"retry: 5000\n\n"
+        if opener is None:
+            return
+        try:
+            upstream = await asyncio.to_thread(opener)
+        except Exception as exc:
+            log.warning("perception feed upstream unavailable: %s", exc)
+            return
+        lines = upstream.iter_lines(chunk_size=1)
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    line = await asyncio.to_thread(next, lines, None)
+                except Exception as exc:
+                    log.warning("perception feed upstream dropped: %s", exc)
+                    break
+                if line is None:
+                    break
+                yield line + b"\n"
+        finally:
+            upstream.close()
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # --- P13 + P12: SSE event stream for live log + error toasts -------------

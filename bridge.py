@@ -596,25 +596,19 @@ def _dashboard_last_user_line_getter(device_id: str) -> dict | None:
     return None
 
 
-def _dashboard_sound_balance_series() -> list[float]:
-    """Live sound_event balance series from dotty-behaviour.
+def _dashboard_open_perception_feed() -> Any:
+    """Open dotty-behaviour's perception SSE stream for the dashboard proxy.
 
-    Picks the first device with perception state (single-robot
-    deployment heuristic — matches the device-picking strategy used
-    for the perception card) and reads its sound-balance ring via
-    /api/perception/sound-balance/{device_id}. Same cache + timeout +
-    circuit-breaker contract as the other dotty-behaviour-backed
-    getters — returns ``[]`` on any failure."""
-    state = _dashboard_perception_state_getter()
-    device_id = next(iter(state), None) if isinstance(state, dict) else None
-    if not device_id:
-        return []
-    result = _dotty_behaviour_get(
-        f"/api/perception/sound-balance/{device_id}",
-        {"limit": 30},
-        [],
+    Returns a streaming ``requests.Response`` (caller closes it). The read
+    timeout sits above the upstream's 15 s keepalive so an idle-but-healthy
+    stream never trips it. Raises on connect failure / non-2xx."""
+    r = requests.get(
+        f"{DOTTY_BEHAVIOUR_URL}/api/perception/feed",
+        stream=True,
+        timeout=(_DOTTY_BEHAVIOUR_TIMEOUT_SEC, 30.0),
     )
-    return result if isinstance(result, list) else []
+    r.raise_for_status()
+    return r
 
 
 def _dashboard_vision_failures_last_hour() -> dict[str, int]:
@@ -771,7 +765,7 @@ if _configure_dashboard is not None:
         memory_redact=_dashboard_memory_redact,
         identity_display_name=_identity_display_name,
         last_user_line_getter=_dashboard_last_user_line_getter,
-        sound_balance_getter=_dashboard_sound_balance_series,
+        perception_feed_opener=_dashboard_open_perception_feed,
         vision_failures_getter=_dashboard_vision_failures_last_hour,
     )
 
