@@ -44,6 +44,9 @@ class FakeClient:
         self.scripted_chunks: list[list[str]] = []
         self.scripted_errors: list[BaseException | None] = []
         self.closed = False
+        self.tool_calls: list[tuple[str, dict[str, str]]] = []
+        self.tool_results: dict[str, str] = {}
+        self.tool_errors: dict[str, BaseException] = {}
 
     def script_turn(self, chunks: list[str], error: BaseException | None = None) -> None:
         self.scripted_chunks.append(chunks)
@@ -63,6 +66,12 @@ class FakeClient:
 
     def recent_stderr(self) -> list[str]:
         return []
+
+    def invoke_voice_tool(self, name: str, arguments: dict[str, str]) -> str:
+        self.tool_calls.append((name, arguments))
+        if name in self.tool_errors:
+            raise self.tool_errors[name]
+        return self.tool_results.get(name, "(tool failed)")
 
     def close(self) -> None:
         self.closed = True
@@ -204,6 +213,91 @@ class TestErrorFallback(unittest.TestCase):
         self.assertEqual(out, [f"{textUtils.FALLBACK_EMOJI} (brain offline — try again in a moment)"])
 
 
+class TestDeterministicVoiceToolRouting(unittest.TestCase):
+    def test_explicit_remember_invokes_tool_and_never_claims_failed_write(self):
+        client = FakeClient()
+        client.tool_results["remember"] = "(remember failed)"
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "Remember that my calibration color is ultraviolet"}],
+        ))
+
+        self.assertEqual(
+            client.tool_calls,
+            [("remember", {"fact": "my calibration color is ultraviolet"})],
+        )
+        self.assertNotIn("remembered", out.lower())
+        self.assertIn("couldn't save", out.lower())
+
+    def test_remember_client_error_returns_honest_tts_failure(self):
+        client = FakeClient()
+        client.tool_errors["remember"] = PiClientError("tool timed out")
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "Remember that the key is amber"}],
+        ))
+
+        self.assertEqual(out, f"{textUtils.FALLBACK_EMOJI} I couldn't save that memory.")
+
+    def test_explicit_recall_invokes_lookup_and_speaks_completed_result(self):
+        client = FakeClient()
+        client.tool_results["memory_lookup"] = "My calibration color is ultraviolet."
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "What did I tell you about my calibration color?"}],
+        ))
+
+        self.assertEqual(
+            client.tool_calls,
+            [("memory_lookup", {"query": "my calibration color"})],
+        )
+        self.assertIn("My calibration color is ultraviolet.", out)
+
+    def test_recall_client_error_returns_honest_tts_failure(self):
+        client = FakeClient()
+        client.tool_errors["memory_lookup"] = PiClientError("lookup failed")
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "Do you remember my calibration color?"}],
+        ))
+
+        self.assertEqual(
+            out, f"{textUtils.FALLBACK_EMOJI} I couldn't check my memory right now.",
+        )
+
+    def test_explicit_think_hard_invokes_reasoner_and_speaks_completed_result(self):
+        client = FakeClient()
+        client.tool_results["think_hard"] = "The precise answer is forty-two."
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "Think hard about: what is six times seven?"}],
+        ))
+
+        self.assertEqual(
+            client.tool_calls,
+            [("think_hard", {"question": "what is six times seven"})],
+        )
+        self.assertIn("The precise answer is forty-two.", out)
+
+    def test_think_hard_client_timeout_returns_honest_tts_failure(self):
+        client = FakeClient()
+        client.tool_errors["think_hard"] = PiClientError("tool timed out")
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "Think hard about: six times seven"}],
+        ))
+
+        self.assertEqual(
+            out, f"{textUtils.FALLBACK_EMOJI} I couldn't finish the deeper reasoning.",
+        )
+
+
 class TestLeadingEmojiContract(unittest.TestCase):
     def _response(self, chunks: list[str], *, kid_mode: bool = False) -> list[str]:
         env = {
@@ -294,6 +388,29 @@ class TestDashboardReporting(unittest.TestCase):
         gen.close()
         (turn,) = self._turns()
         self.assertEqual(turn["response_text"], first)
+
+    def test_direct_tool_turn_is_reported(self):
+        client = FakeClient()
+        client.tool_results["remember"] = "(remembered)"
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "remember that my cat is called Biscuit"}],
+        ))
+        (turn,) = self._turns()
+        self.assertEqual(turn["request_text"], "remember that my cat is called Biscuit")
+        self.assertEqual(turn["response_text"], out)
+        self.assertIsNone(turn["error"])
+
+    def test_direct_tool_failure_is_reported_with_error(self):
+        client = FakeClient()
+        client.tool_errors["think_hard"] = PiClientError("tool timed out")
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        list(provider.response(
+            "s", [{"role": "user", "content": "think hard about why the sky is blue"}],
+        ))
+        (turn,) = self._turns()
+        self.assertEqual(turn["error"], "think_hard: tool timed out")
+        self.assertIn("couldn't finish", turn["response_text"])
 
     def test_empty_turn_is_not_reported(self):
         provider = LLMProvider({}, client=FakeClient())  # type: ignore[arg-type]

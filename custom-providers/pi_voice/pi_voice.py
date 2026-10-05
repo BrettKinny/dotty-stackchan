@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 import unicodedata
@@ -252,6 +253,21 @@ def _enforce_leading_emoji(chunks: Iterator[str]) -> Iterator[str]:
         yield f"{FALLBACK_EMOJI} (no response)"
 
 
+_REMEMBER_INTENT_RE = re.compile(
+    r"^\s*(?:please\s+)?remember\s+(?:that\s+)?(?P<fact>.+?)\s*[.!?]?\s*$",
+    re.IGNORECASE,
+)
+_RECALL_INTENT_RE = re.compile(
+    r"^\s*(?:what did i (?:tell|say to) you about|do you remember)\s+"
+    r"(?P<query>.+?)\s*[?!.]?\s*$",
+    re.IGNORECASE,
+)
+_THINK_HARD_INTENT_RE = re.compile(
+    r"^\s*(?:please\s+)?think hard (?:about\s*:?)?\s*(?P<question>.+?)\s*[?!.]?\s*$",
+    re.IGNORECASE,
+)
+
+
 class LLMProvider(LLMProviderBase):
     """xiaozhi-server LLM provider backed by the dotty-pi container."""
 
@@ -280,6 +296,59 @@ class LLMProvider(LLMProviderBase):
         if not user_text:
             yield f"{FALLBACK_EMOJI} (empty turn)"
             return
+        # Everything spoken this turn is reported to the dashboard when the
+        # generator finishes — including when xiaozhi closes it early.
+        spoken: list[str] = []
+        errors: list[str] = []
+        started = time.monotonic()
+        try:
+            for chunk in self._respond(user_text, errors):
+                spoken.append(chunk)
+                yield chunk
+        finally:
+            _report_to_dashboard("/api/voice/turn", {
+                "request_text": user_text,
+                "response_text": "".join(spoken),
+                "latency_ms": int((time.monotonic() - started) * 1000),
+                "error": "; ".join(errors) or None,
+            })
+
+    def _respond(self, user_text: str, errors: list[str]) -> Iterator[str]:
+        """One turn's TTS chunks. Failures are appended to `errors` so
+        response() can report them alongside the spoken fallback."""
+        remember_intent = _REMEMBER_INTENT_RE.match(user_text)
+        if remember_intent:
+            fact = remember_intent.group("fact").strip()
+            result = self._invoke_voice_tool("remember", {"fact": fact}, errors)
+            if result == "(remembered)":
+                yield f"{FALLBACK_EMOJI} I'll remember that."
+            else:
+                yield f"{FALLBACK_EMOJI} I couldn't save that memory."
+            return
+        recall_intent = _RECALL_INTENT_RE.match(user_text)
+        if recall_intent:
+            query = recall_intent.group("query").strip()
+            result = self._invoke_voice_tool(
+                "memory_lookup", {"query": query}, errors,
+            )
+            if result is None:
+                yield f"{FALLBACK_EMOJI} I couldn't check my memory right now."
+            elif result in ("(no memories found)", "(empty query)"):
+                yield f"{FALLBACK_EMOJI} I don't remember anything about that yet."
+            else:
+                yield f"{FALLBACK_EMOJI} {result}"
+            return
+        think_intent = _THINK_HARD_INTENT_RE.match(user_text)
+        if think_intent:
+            question = think_intent.group("question").strip()
+            result = self._invoke_voice_tool(
+                "think_hard", {"question": question}, errors,
+            )
+            if result is None or result.startswith("("):
+                yield f"{FALLBACK_EMOJI} I couldn't finish the deeper reasoning."
+            else:
+                yield f"{FALLBACK_EMOJI} {result}"
+            return
         prompt = _wrap_with_sandwich(user_text, self._kid_mode)
 
         # Reset pi state between voice turns. First turn skips this —
@@ -291,11 +360,6 @@ class LLMProvider(LLMProviderBase):
                 logger.exception("PiVoiceLLM: new_session failed, continuing")
         self._first_turn = False
 
-        # Everything spoken this turn, reported to the dashboard when the
-        # generator finishes — including when xiaozhi closes it early.
-        spoken: list[str] = []
-        error: str | None = None
-        started = time.monotonic()
         try:
             # #157: kid-mode blocked-content filter on TTS-bound output.
             # Full-turn buffered — the filter drains the pi RPC stream through
@@ -308,23 +372,25 @@ class LLMProvider(LLMProviderBase):
                 self._kid_mode,
                 on_hit=self._on_filter_hit,
             ):
-                spoken.append(chunk)
                 yield chunk
         except PiClientError as exc:
-            error = str(exc) or exc.__class__.__name__
+            errors.append(str(exc) or exc.__class__.__name__)
             logger.error("PiVoiceLLM turn failed: %s", exc)
             for line in self._client.recent_stderr()[-5:]:
                 logger.error("  pi.stderr: %s", line)
-            fallback = f"{FALLBACK_EMOJI} (brain offline — try again in a moment)"
-            spoken.append(fallback)
-            yield fallback
-        finally:
-            _report_to_dashboard("/api/voice/turn", {
-                "request_text": user_text,
-                "response_text": "".join(spoken),
-                "latency_ms": int((time.monotonic() - started) * 1000),
-                "error": error,
-            })
+            yield f"{FALLBACK_EMOJI} (brain offline — try again in a moment)"
+
+    def _invoke_voice_tool(
+        self, name: str, arguments: dict[str, str],
+        errors: list[str] | None = None,
+    ) -> str | None:
+        try:
+            return self._client.invoke_voice_tool(name, arguments)
+        except PiClientError as exc:
+            logger.error("PiVoiceLLM direct tool %s failed: %s", name, exc)
+            if errors is not None:
+                errors.append(f"{name}: {exc}" if str(exc) else name)
+            return None
 
     def _on_filter_hit(self, tier: str, match) -> None:
         logger.warning(

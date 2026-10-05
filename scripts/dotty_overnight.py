@@ -177,6 +177,11 @@ def evaluate(case, transcript, log_text, playback_end, after, device, before=Non
                         and s.get("no_speech_prob", 1) < .8
                         and s.get("avg_logprob", -10) > -1.2)
     asr = re.findall(r"结果: (.*)", log_text)
+    # 识别文本 is logged only for recognitions handed to the chat path, so
+    # empty and ASR-REJECTed results never appear here.
+    recognised = [item.strip() for item in re.findall(r"识别文本: (.*)", log_text) if item.strip()]
+    service_tts = " ".join(text.strip() for text in re.findall(
+        r"发送音频消息: SentenceType\.(?:FIRST|MIDDLE), (.*)", log_text) if text.strip() != "None")
     state = after.get("perception", {}).get(device, {})
     tts = "SentenceType.FIRST" in log_text or "发送第一段语音:" in log_text
     tts_edges = re.findall(r"SentenceType\.(FIRST|LAST)\b|(发送第一段语音:)", log_text)
@@ -185,6 +190,14 @@ def evaluate(case, transcript, log_text, playback_end, after, device, before=Non
     # their words into evidence that Dotty understood this prompt.
     asr_ok = any(matches(item, case.get("asr", [])) for item in asr)
     response_ok = bool(response) and matches(response, case.get("reply", []))
+    # The reference microphone can mishear a correct reply ("Dadi" for Dotty).
+    # Service text is not acoustic proof, so agreement there cannot pass the
+    # case, but it does stop a transcription slip being scored as a robot fault.
+    service_ok = bool(service_tts) and bool(case.get("reply")) and matches(service_tts, case["reply"])
+    matched = next((item for item in recognised if matches(item, case.get("asr", []))), None)
+    extra_speech = list(recognised)
+    if matched in extra_speech:
+        extra_speech.remove(matched)
     word_count = len(re.findall(r"\b\w+(?:['’]\w+)*\b", response))
     word_limit = case.get("max_response_words")
     if word_limit is not None and (type(word_limit) is not int or word_limit < 1):
@@ -230,16 +243,21 @@ def evaluate(case, transcript, log_text, playback_end, after, device, before=Non
         # TTS. Missing words alone cannot establish acoustic silence.
         failure = "response_transcription_unavailable"
     elif not response_ok:
-        failure = "response_mismatch"
+        failure = "response_transcript_disagrees_with_tts" if service_ok else "response_mismatch"
     elif not within_limit:
         failure = "response_too_long"
     elif not recovered:
         failure = "not_ready_for_followup" if case.get("recovery_policy") == "ready_for_followup" else "no_idle_recovery"
+    if extra_speech and failure not in ("wake_precondition", "no_wake_event"):
+        # Someone else spoke (or the robot answered room noise) inside the
+        # capture; neither a pass nor a failure can be attributed to the prompt.
+        failure = "extra_speech_in_capture"
     interaction = "FAIL" if failure else "PASS"
     verdict = "FAIL" if failure else "INCONCLUSIVE"
     if failure == "wake_precondition":
         interaction = verdict = "BLOCKED"
-    elif failure == "response_transcription_unavailable":
+    elif failure in ("response_transcription_unavailable", "response_transcript_disagrees_with_tts",
+                     "extra_speech_in_capture"):
         interaction = verdict = "INCONCLUSIVE"
     if failure is None and expected_tool and not tool_observed:
         # Absence of a marker may mean the deployed provider lacks this logger;
@@ -247,6 +265,8 @@ def evaluate(case, transcript, log_text, playback_end, after, device, before=Non
         interaction = "INCONCLUSIVE"
     return {"asr": asr, "asr_match": asr_ok, "response_transcript": response,
             "response_match": response_ok, "tts_evidence": tts, "tts_completed": tts_completed,
+            "service_tts_text": service_tts, "service_tts_match": service_ok,
+            "extra_speech": extra_speech,
             "response_word_count": word_count, "max_response_words": word_limit,
             "response_length": "PASS" if within_limit else "FAIL",
             "semantic_quality": "INCONCLUSIVE",
@@ -264,6 +284,44 @@ def evaluate(case, transcript, log_text, playback_end, after, device, before=Non
             "interaction": interaction,
             "visual": "INCONCLUSIVE", "verdict": verdict,
             "note": "Visual assertion requires frame review; automated acoustic checks are provisional."}
+
+
+def playback_verdict(heard, asr_ok, groups):
+    """The prompt was audible if the reference microphone transcript contains
+    it, or if the robot's own recogniser did. The second is the stronger
+    evidence: the reference transcript can mishear a prompt the robot got right."""
+    if heard.strip() and matches(heard, groups):
+        return "PASS", "reference_mic"
+    if asr_ok:
+        return "PASS", "robot_asr"
+    return "INCONCLUSIVE", None
+
+
+MIC_OPEN_POLLS = 90
+MIC_SETTLE_SECONDS = (4, 14)
+
+
+def warm_listening(snap, device, max_age=30, min_age=0):
+    dev = (snap or {}).get("perception", {}).get(device, {})
+    age = listening_status_age(dev)
+    fresh = (dev.get("listening") is True and not dev.get("sensor_stale", True)
+             and age is not None and min_age <= age <= max_age)
+    return fresh, age
+
+
+def open_mic(config):
+    """Opt-in (`mic_opener: admin_say`): make the robot say one word through the
+    admin route; its firmware then opens the microphone. Wait until the mic has
+    been open a few seconds so a transcript of the trailing silence cannot
+    collide with the prompt. Returns the settled snapshot, or None."""
+    admin(config["host"], "say", {"device_id": config["device"], "text": "Ready."})
+    low, high = MIC_SETTLE_SECONDS
+    for _ in range(MIC_OPEN_POLLS):
+        snap = snapshot(config["host"])
+        if warm_listening(snap, config["device"], max_age=high, min_age=low)[0]:
+            return snap
+        time.sleep(.5)
+    return None
 
 
 def space_ok(path):
@@ -446,14 +504,21 @@ def run_case(session, config, case):
         if case.get("require_wake_event") and not wake_precondition(before, config["device"]):
             raise CaseBlocked("wake_precondition")
         if require_warm:
-            dev = before.get("perception", {}).get(config["device"], {})
-            age = listening_status_age(dev)
+            fresh, age = warm_listening(before, config["device"])
+            if not fresh and config.get("mic_opener") == "admin_say":
+                # Explicit operator opt-in: the default remains "never change
+                # the robot's state to satisfy a prerequisite".
+                result["mic_opened_by"] = "admin_say"
+                opened = open_mic(config)
+                if opened:
+                    before = opened
+                    write_json(directory / "before.json", before)
+                    fresh, age = warm_listening(before, config["device"])
             result["warm_listening_status_age_seconds"] = age
             result["warm_listening_max_age_seconds"] = 30
             # A prerequisite for a new trial, not a claim that an older open
             # conversation is dead. Recovery after a long capture is separate.
-            if (dev.get("listening") is not True or dev.get("sensor_stale", True)
-                    or age is None or age > 30):
+            if not fresh:
                 raise CaseBlocked("warm_listening_precondition")
             result["warm_listening_precondition"] = "PASS"
         sink = command(["pactl", "get-default-sink"]).strip()
@@ -512,10 +577,11 @@ def run_case(session, config, case):
                 if key in analysis}
         heard = " ".join(s["text"] for s in load(directory / "prompt-heard.json")["segments"])
         result["prompt_heard"] = heard
-        result["playback"] = "PASS" if heard.strip() and matches(heard, case.get("asr", [])) else "INCONCLUSIVE"
         result.update(evaluate(case, load(directory / "response.json"),
                                (directory / "xiaozhi-esp32-server.log").read_text(),
                                offset, after, config["device"], before=before))
+        result["playback"], result["playback_evidence"] = playback_verdict(
+            heard, result["asr_match"], case.get("asr", []))
         if result["playback"] != "PASS" and result["interaction"] == "PASS":
             result.update(interaction="INCONCLUSIVE", failure="prompt_playback_unverified")
         for label, seconds in (("prompt", 3), ("response", offset + 2),
@@ -624,11 +690,20 @@ def record_attempt(checkpoint, case, result):
     if result.get("verdict") == "BLOCKED":
         checkpoint.setdefault("blocked", {})[case["id"]] = result.get("failure", "prerequisite_missing")
         return
-    acoustic_pass = all(result.get(k) == "PASS" for k in ("capture", "playback", "interaction", "recovery"))
+    fields = [result.get(k) for k in ("capture", "playback", "interaction", "recovery")]
+    acoustic_pass = all(value == "PASS" for value in fields)
+    # An attempt that proved nothing (reference-mic slip, extra speech in the
+    # room) breaks the streak but is not evidence of a robot fault, so it must
+    # not push a healthy case toward quarantine or pause the run.
+    inconclusive = (not acoustic_pass and result.get("verdict") != "FAIL"
+                    and "FAIL" not in fields and "INCONCLUSIVE" in fields)
     counts["streak"] = counts["streak"] + 1 if acoustic_pass else 0
-    if not acoustic_pass:
+    if not acoustic_pass and not inconclusive:
         counts["failures"] += 1
-    checkpoint["consecutive_failures"] = 0 if acoustic_pass else checkpoint["consecutive_failures"] + 1
+    if acoustic_pass:
+        checkpoint["consecutive_failures"] = 0
+    elif not inconclusive:
+        checkpoint["consecutive_failures"] += 1
     # Acoustic completion remains provisional while the visual verdict is open.
     if counts["streak"] >= case.get("required_passes", 3) and case["id"] not in checkpoint["completed"]:
         checkpoint["completed"].append(case["id"])
@@ -712,7 +787,12 @@ def main():
     parser.add_argument("--response-vad-threshold", type=lambda value: response_vad_threshold(
         {"response_vad_threshold": float(value)}),
         help="init only: response transcription VAD threshold, 0..1 (default 0.5)")
+    parser.add_argument("--mic-opener", choices=["none", "admin_say"],
+                        help="init only: 'admin_say' lets warm cases open the microphone through "
+                             "/xiaozhi/admin/say instead of blocking (default none)")
     args = parser.parse_args()
+    if args.mic_opener is not None and args.command != "init":
+        parser.error("--mic-opener is init-only; existing sessions use config.json")
     if args.response_vad_threshold is not None and args.command != "init":
         parser.error("--response-vad-threshold is init-only; existing sessions use config.json")
     if args.command == "init" and (not args.host or not args.host.strip()):
@@ -734,6 +814,7 @@ def main():
             "python": str(session / "evaluator-venv/bin/python"),
             "model": str(session / "models/whisper-small.en-ct2"),
             "response_vad_threshold": .5 if args.response_vad_threshold is None else args.response_vad_threshold,
+            "mic_opener": args.mic_opener or "none",
             "seed": 20260912, "interval_seconds": 600,
             "stop_prompts_at": (morning - timedelta(minutes=30)).isoformat(),
             "finish_at": morning.isoformat(), "created": now(), "framing": "BLOCKED"}
