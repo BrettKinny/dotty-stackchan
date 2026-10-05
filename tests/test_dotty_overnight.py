@@ -606,3 +606,109 @@ def test_deadline_prevents_launch(tmp_path):
         runner.guarded_process(["this-command-must-never-start"], tmp_path / "log",
                                tmp_path, 60, deadline=0)
     assert not (tmp_path / "log").exists()
+
+
+# --- #182: unattended operation and evaluator false alarms. AI-assisted: Claude. ---
+
+def test_reference_mic_mishearing_is_inconclusive_when_service_tts_matches():
+    logs = "结果: name\n发送音频消息: SentenceType.FIRST, My name is Dotty\nSentenceType.LAST"
+    result = runner.evaluate({"asr": [["name"]], "reply": [["Dotty"]]}, transcript("Your name is Dadi"),
+                             logs, 2, after(), "robot")
+    assert result["failure"] == "response_transcript_disagrees_with_tts"
+    assert result["interaction"] == result["verdict"] == "INCONCLUSIVE"
+    assert result["service_tts_text"] == "My name is Dotty"
+
+
+def test_wrong_reply_still_fails_when_service_tts_also_lacks_the_answer():
+    logs = "结果: name\n发送音频消息: SentenceType.FIRST, I like trains\nSentenceType.LAST"
+    result = runner.evaluate({"asr": [["name"]], "reply": [["Dotty"]]}, transcript("I like trains"),
+                             logs, 2, after(), "robot")
+    assert result["failure"] == "response_mismatch"
+    assert result["interaction"] == "FAIL"
+
+
+def test_extra_recognised_speech_makes_the_case_inconclusive():
+    logs = ("结果: what is your name\n识别文本: what is your name\n"
+            "发送音频消息: SentenceType.FIRST, My name is Dotty\nSentenceType.LAST\n"
+            "结果: I made a house\n识别文本: I made a house\n")
+    result = runner.evaluate({"asr": [["name"]], "reply": [["Dotty"]]}, transcript("My name is Dotty"),
+                             logs, 2, after(), "robot")
+    assert result["extra_speech"] == ["I made a house"]
+    assert result["failure"] == "extra_speech_in_capture"
+    assert result["interaction"] == result["verdict"] == "INCONCLUSIVE"
+
+
+def test_rejected_or_empty_recognitions_are_not_extra_speech():
+    logs = ("结果: what is your name\n识别文本: what is your name\n"
+            "发送音频消息: SentenceType.FIRST, My name is Dotty\nSentenceType.LAST\n"
+            "结果: Thank you.\nASR-REJECT no_speech=0.811 > 0.60 | dropped 'Thank you.'\n结果: \n")
+    result = runner.evaluate({"asr": [["name"]], "reply": [["Dotty"]]}, transcript("My name is Dotty"),
+                             logs, 2, after(), "robot")
+    assert result["extra_speech"] == []
+    assert result["failure"] is None
+
+
+@pytest.mark.parametrize("heard,asr_ok,expected", [
+    ("repeat purple robot", True, ("PASS", "reference_mic")),
+    ("repeat purple brisket", True, ("PASS", "robot_asr")),
+    ("repeat purple brisket", False, ("INCONCLUSIVE", None)),
+    ("", False, ("INCONCLUSIVE", None)),
+])
+def test_playback_is_proven_by_reference_mic_or_by_the_robot_hearing_it(heard, asr_ok, expected):
+    assert runner.playback_verdict(heard, asr_ok, [["robot"]]) == expected
+
+
+def test_inconclusive_attempt_resets_streak_without_counting_as_failure(tmp_path):
+    checkpoint = runner.restore_checkpoint(tmp_path)
+    good = dict.fromkeys(("capture", "playback", "interaction", "recovery"), "PASS")
+    runner.record_attempt(checkpoint, {"id": "identity"}, good)
+    for _ in range(4):
+        runner.record_attempt(checkpoint, {"id": "identity"}, {**good, "interaction": "INCONCLUSIVE"})
+    counts = checkpoint["counts"]["identity"]
+    assert (counts["streak"], counts["failures"]) == (0, 0)
+    assert checkpoint["consecutive_failures"] == 0
+    assert checkpoint["quarantined"] == []
+
+
+def test_mic_opener_refreshes_a_stale_listening_status_before_capture(
+        tmp_path, monkeypatch, prompt_capture_boundary):
+    config, captured = prompt_capture_boundary
+    calls = []
+    snapshots = iter([
+        {**after(), "devices": ["robot"]},                                    # idle, mic closed
+        {**after(current_state="talk", listening=True, sensor_age_s=1), "devices": ["robot"]},   # too fresh
+        {**after(current_state="talk", listening=True, sensor_age_s=5), "devices": ["robot"]},   # settled
+    ])
+    monkeypatch.setattr(runner, "snapshot", lambda host: next(snapshots))
+    monkeypatch.setattr(runner, "admin", lambda host, route, body=None: calls.append((route, body)) or {"ok": True})
+    monkeypatch.setattr(runner.time, "sleep", lambda seconds: None)
+    result = runner.run_case(tmp_path, {**config, "mic_opener": "admin_say"},
+                             {"id": "identity", "prompt": "What is your name?",
+                              "require_warm_listening": True})
+    assert calls == [("say", {"device_id": "robot", "text": "Ready."})]
+    assert result["mic_opened_by"] == "admin_say"
+    assert result["warm_listening_precondition"] == "PASS"
+    assert len(captured) == 1                     # reached the capture boundary
+    assert result["failure"] == "fixture_capture_stop"
+
+
+def test_mic_opener_that_never_opens_the_mic_still_blocks(tmp_path, monkeypatch, prompt_capture_boundary):
+    config, captured = prompt_capture_boundary
+    monkeypatch.setattr(runner, "admin", lambda host, route, body=None: {"ok": True})
+    monkeypatch.setattr(runner.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(runner, "MIC_OPEN_POLLS", 3)
+    result = runner.run_case(tmp_path, {**config, "mic_opener": "admin_say"},
+                             {"id": "identity", "prompt": "What is your name?",
+                              "require_warm_listening": True})
+    assert result["verdict"] == "BLOCKED"
+    assert result["failure"] == "warm_listening_precondition"
+    assert captured == []
+
+
+def test_init_persists_mic_opener(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "admin", lambda host, route, body=None: {"devices": ["robot"]})
+    monkeypatch.setattr(runner, "command", lambda argv, **kwargs: "fixture-speaker\n")
+    monkeypatch.setattr(sys, "argv", ["dotty_overnight.py", "init", "--session", str(tmp_path),
+                                      "--host", "user@host", "--mic-opener", "admin_say"])
+    runner.main()
+    assert json.loads((tmp_path / "config.json").read_text())["mic_opener"] == "admin_say"

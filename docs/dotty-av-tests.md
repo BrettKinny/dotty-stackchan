@@ -124,5 +124,44 @@ set `require_warm_listening: true` on the case. An absent/stale listening signal
 blocks playback; it does not change the robot's state. The default retains the
 existing `ready_for_followup` prerequisite, except for explicit cold-wake tests.
 
+## Unattended runs
+
+By default a warm case never changes the robot to satisfy its prerequisite: a
+stale or closed-microphone status blocks the case, and a blocked case is not
+retried. After one case the listening status is already older than the 30 s
+limit, so an unattended session needs an explicit opener:
+
+```bash
+scripts/dotty_overnight.py init --session uat-sessions/$(date +%F)/overnight \
+  --host user@docker-host --mic-opener admin_say
+```
+
+With `mic_opener: admin_say` the runner asks `/xiaozhi/admin/say` to make the
+robot say "Ready."; the firmware then opens the microphone. The runner waits
+until the microphone has been open 4–14 s before playing the prompt, and
+records `mic_opened_by` in the result. Playing the wake word through speakers
+proved placement-sensitive on the bench and is not used for this.
+
+Use pre-rendered natural-voice prompts (`prompt_wavs` in the session
+`config.json`, bound to the exact text and a SHA-256). The harness default
+`espeak-ng` voice was mis-transcribed by Whisper even from the reference
+microphone; Piper prompts were recognised 17 times out of 18.
+
+Evidence rules worth knowing when reading results:
+
+- `playback` passes on the reference-microphone transcript **or** on the
+  robot's own recognition of the prompt (`playback_evidence` says which).
+- If the reference microphone mishears a reply whose service TTS text does
+  contain the expected words, the case is `INCONCLUSIVE`
+  (`response_transcript_disagrees_with_tts`), not a failure. Service text never
+  passes a case by itself.
+- Any other recognised speech inside the capture makes the case
+  `INCONCLUSIVE` (`extra_speech_in_capture`): keep the room quiet.
+- Inconclusive attempts reset a case's pass streak but do not count toward
+  quarantine or the three-failure pause.
+
+*Unattended-run additions were AI-assisted by Claude (Opus 5.5) from a
+supervised bench session on 2026-10-05.*
+
 *Lossless capture and window-metrics additions were AI-assisted by OpenAI Codex
 (GPT-6); their automated checks use synthetic audio, not a physical calibration.*
