@@ -119,3 +119,24 @@ def test_synthetic_media_round_trip(tmp_path):
     video = next(s for s in streams if s["codec_type"] == "video")
     assert (video["width"], video["height"]) == (1080, 1920)
     assert (destination / "thumbnail.jpg").stat().st_size > 0
+
+
+# --- vertical crop for Shorts framing. AI-assisted: Claude. ---
+
+def test_crop_fills_the_vertical_frame_and_is_recorded(case):
+    session, _folder, commands = case
+    destination = clips.export(session, "funny-1", name="cropped", start=9, end=14, crop="405:720:368:0")
+    video_filter = commands[0][commands[0].index("-vf") + 1]
+    assert video_filter.startswith("crop=405:720:368:0,scale=1080:1920")
+    assert "pad=" not in video_filter
+    manifest = clips.load(destination / "manifest.json")
+    assert manifest["layout"] == "1080x1920 cropped from source region 405:720:368:0"
+
+
+@pytest.mark.parametrize("crop", ["405x720", "405:720:368", "0:720:0:0", "720:405:0:0", "a:b:c:d", "405:720:-1:0"])
+def test_crop_must_be_a_portrait_source_region(case, crop):
+    session, _folder, commands = case
+    with pytest.raises(ValueError):
+        clips.export(session, "funny-1", name="bad-crop", start=9, end=14, crop=crop)
+    assert commands == []
+    assert not list((session / "clips").glob("*/bad-crop"))
