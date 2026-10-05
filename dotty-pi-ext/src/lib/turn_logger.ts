@@ -12,6 +12,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { storeMemory } from "./brain_db.ts";
+import { stripTurnBoilerplate } from "./turn_text.ts";
 
 // bridge.py:/api/voice/memory_log truncates user→500 chars, assistant→1000
 // before storing. Keep parity so the LLM that was tuned against this
@@ -51,7 +52,9 @@ export function extractTurnText(messages: readonly any[]): {
   if (lastUserIdx === -1) return { user: "", assistant: "" };
 
   const userMsg = messages[lastUserIdx];
-  const user = stringifyUserContent(userMsg.content).trim();
+  // The prompt pi received is the person's words plus the provider's per-turn
+  // scaffolding; only the former is conversation worth remembering.
+  const user = stripTurnBoilerplate(stringifyUserContent(userMsg.content));
 
   const assistantParts: string[] = [];
   for (let i = lastUserIdx + 1; i < messages.length; i++) {

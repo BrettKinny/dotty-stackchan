@@ -200,6 +200,18 @@ _VOICE_TOOL_ROUTING = (
 )
 
 
+# Appended to the user's words for an explicit recall. dotty-pi-ext's
+# turn_text.ts strips from this exact marker when logging the turn, so search
+# results are never written back into memory as if the person had said them.
+_MEMORY_CONTEXT = (
+    "\n\nMEMORY SEARCH RESULTS (from earlier conversations; \"user\" is the "
+    "person, \"assistant\" was you):\n{results}\n"
+    "Answer their question from these results in your own words. If the "
+    "results do not answer it, say you don't remember that yet. Never read "
+    "the results out as they are written."
+)
+
+
 def _wrap_with_sandwich(user_text: str, kid_mode: bool) -> str:
     """Append the HARD CONSTRAINTS suffix to the user's text via the shared
     textUtils.build_turn_suffix contract — emoji-prefix
@@ -326,6 +338,7 @@ class LLMProvider(LLMProviderBase):
     def _respond(self, user_text: str, errors: list[str]) -> Iterator[str]:
         """One turn's TTS chunks. Failures are appended to `errors` so
         response() can report them alongside the spoken fallback."""
+        memory_context = ""
         remember_intent = _REMEMBER_INTENT_RE.match(user_text)
         if remember_intent:
             fact = remember_intent.group("fact").strip()
@@ -343,12 +356,15 @@ class LLMProvider(LLMProviderBase):
             )
             if result is None:
                 yield f"{FALLBACK_EMOJI} I couldn't check my memory right now."
-            elif result in ("(no memories found)", "(empty query)"):
+                return
+            if result in ("(no memories found)", "(empty query)"):
                 yield f"{FALLBACK_EMOJI} I don't remember anything about that yet."
-            else:
-                yield f"{FALLBACK_EMOJI} {result}"
-            return
-        think_intent = _THINK_HARD_INTENT_RE.match(user_text)
+                return
+            # The lookup is deterministic; the wording is not. Search output is
+            # raw stored rows ("user: … | assistant: …"), never fit to be
+            # spoken as-is, so hand it to the model as context for this turn.
+            memory_context = _MEMORY_CONTEXT.format(results=result)
+        think_intent = None if memory_context else _THINK_HARD_INTENT_RE.match(user_text)
         if think_intent:
             question = think_intent.group("question").strip()
             result = self._invoke_voice_tool(
@@ -359,7 +375,7 @@ class LLMProvider(LLMProviderBase):
             else:
                 yield f"{FALLBACK_EMOJI} {result}"
             return
-        prompt = _wrap_with_sandwich(user_text, self._kid_mode)
+        prompt = _wrap_with_sandwich(user_text + memory_context, self._kid_mode)
 
         # Reset pi state between voice turns. First turn skips this —
         # the freshly-spawned process is already clean.

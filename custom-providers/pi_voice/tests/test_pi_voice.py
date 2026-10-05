@@ -291,9 +291,14 @@ class TestDeterministicVoiceToolRouting(unittest.TestCase):
 
         self.assertEqual(out, f"{textUtils.FALLBACK_EMOJI} I couldn't save that memory.")
 
-    def test_explicit_recall_invokes_lookup_and_speaks_completed_result(self):
+    def test_explicit_recall_looks_up_then_lets_the_model_phrase_the_answer(self):
+        # Raw rows ("user: … | assistant: …") are search output, not speech:
+        # the lookup stays deterministic, the wording comes from the model.
         client = FakeClient()
-        client.tool_results["memory_lookup"] = "My calibration color is ultraviolet."
+        client.tool_results["memory_lookup"] = (
+            "user: My calibration color is ultraviolet. | assistant: 😊 Noted!"
+        )
+        client.script_turn(["😊 You told me it is ultraviolet."])
         provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
 
         out = "".join(provider.response(
@@ -304,7 +309,28 @@ class TestDeterministicVoiceToolRouting(unittest.TestCase):
             client.tool_calls,
             [("memory_lookup", {"query": "my calibration color"})],
         )
-        self.assertIn("My calibration color is ultraviolet.", out)
+        self.assertEqual(out, "😊 You told me it is ultraviolet.")
+        self.assertNotIn("assistant:", out)
+        self.assertEqual(len(client.prompts), 1)
+        prompt = client.prompts[0]
+        self.assertTrue(prompt.startswith(
+            "What did I tell you about my calibration color?\n\nMEMORY SEARCH RESULTS ("))
+        self.assertIn("My calibration color is ultraviolet.", prompt)
+        self.assertLess(prompt.index("MEMORY SEARCH RESULTS"), prompt.index("HARD CONSTRAINTS"))
+
+    def test_recall_with_no_matches_does_not_spend_a_model_turn(self):
+        client = FakeClient()
+        client.tool_results["memory_lookup"] = "(no memories found)"
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "Do you remember my calibration color?"}],
+        ))
+
+        self.assertEqual(
+            out, f"{textUtils.FALLBACK_EMOJI} I don't remember anything about that yet.",
+        )
+        self.assertEqual(client.prompts, [])
 
     def test_recall_client_error_returns_honest_tts_failure(self):
         client = FakeClient()
