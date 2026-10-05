@@ -15,6 +15,16 @@ logger = setup_logging()
 
 MAX_RETRIES = 2
 RETRY_DELAY = 1  # seconds
+DEFAULT_NO_SPEECH_THRESHOLD = 0.6  # Whisper's own default
+
+
+def _no_speech_threshold(config: dict) -> float:
+    """Mean no_speech_prob above which a transcript is dropped. 1.0 disables."""
+    try:
+        value = float(config.get("no_speech_threshold", DEFAULT_NO_SPEECH_THRESHOLD))
+    except (TypeError, ValueError):
+        return DEFAULT_NO_SPEECH_THRESHOLD
+    return value if 0.0 <= value <= 1.0 else DEFAULT_NO_SPEECH_THRESHOLD
 
 
 class ASRProvider(ASRProviderBase):
@@ -43,6 +53,7 @@ class ASRProvider(ASRProviderBase):
         self.beam_size = int(config.get("beam_size", 1))
         self.cpu_threads = int(config.get("cpu_threads", 0))
         self.initial_prompt = config.get("initial_prompt", None)
+        self.no_speech_threshold = _no_speech_threshold(config)
         self.delete_audio_file = delete_audio_file
 
         if self.output_dir:
@@ -110,6 +121,17 @@ class ASRProvider(ASRProviderBase):
                 segments = list(segments)
 
                 content = "".join(seg.text for seg in segments).strip()
+                # Near-silence after Dotty stops speaking comes back as a
+                # confident stock phrase ("Thank you."). vad_filter is off, so
+                # Whisper's own no-speech score is the only signal here.
+                if segments and content:
+                    mean_no_speech = sum(s.no_speech_prob for s in segments) / len(segments)
+                    if mean_no_speech > self.no_speech_threshold:
+                        logger.bind(tag=TAG).info(
+                            f"ASR-REJECT no_speech={mean_no_speech:.3f} > "
+                            f"{self.no_speech_threshold:.2f} | dropped {content!r}"
+                        )
+                        content = ""
                 text = {"content": content}
 
                 logger.bind(tag=TAG).info(
