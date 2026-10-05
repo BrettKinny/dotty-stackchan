@@ -345,20 +345,29 @@ class TestDeterministicVoiceToolRouting(unittest.TestCase):
             out, f"{textUtils.FALLBACK_EMOJI} I couldn't check my memory right now.",
         )
 
-    def test_explicit_think_hard_invokes_reasoner_and_speaks_completed_result(self):
+    def test_explicit_think_hard_speaks_first_then_answers_with_one_emoji(self):
+        # The reasoner can take 30-60 s to load from cold. Dotty says so before
+        # starting instead of sitting silent, and the reply still carries
+        # exactly one (leading) emoji.
         client = FakeClient()
         client.tool_results["think_hard"] = "The precise answer is forty-two."
         provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
 
-        out = "".join(provider.response(
+        turn = provider.response(
             "s", [{"role": "user", "content": "Think hard about: what is six times seven?"}],
-        ))
+        )
+        first = next(turn)
+        self.assertEqual(first, "🤔 Let me think hard about that. ")
+        self.assertEqual(client.tool_calls, [])          # nothing started before Dotty spoke
+        rest = "".join(turn)
 
         self.assertEqual(
             client.tool_calls,
             [("think_hard", {"question": "what is six times seven"})],
         )
-        self.assertIn("The precise answer is forty-two.", out)
+        self.assertEqual(rest, "The precise answer is forty-two.")
+        emojis = [ch for ch in first + rest if ch in textUtils.ALLOWED_EMOJIS]
+        self.assertEqual(emojis, ["🤔"])
 
     def test_think_hard_client_timeout_returns_honest_tts_failure(self):
         client = FakeClient()
@@ -370,7 +379,7 @@ class TestDeterministicVoiceToolRouting(unittest.TestCase):
         ))
 
         self.assertEqual(
-            out, f"{textUtils.FALLBACK_EMOJI} I couldn't finish the deeper reasoning.",
+            out, "🤔 Let me think hard about that. I couldn't finish the deeper reasoning.",
         )
 
 

@@ -460,5 +460,27 @@ class TestContainerVoiceToolRunner(unittest.TestCase):
                 _run_container_voice_tool("dotty-pi", "remember", {"fact": "x"})
 
 
+
+class TestDirectToolTimeouts(unittest.TestCase):
+    """think_hard may wait for a cold 27B load; quick tools must stay quick."""
+
+    def _timeout_for(self, name: str, argument: str) -> float:
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen["timeout"] = kwargs["timeout"]
+            return SimpleNamespace(returncode=0, stdout=json.dumps({"result": "ok"}), stderr="")
+
+        with patch("pi_client.subprocess.run", fake_run):
+            _run_container_voice_tool("dotty-pi", name, {argument: "x"})
+        return seen["timeout"]
+
+    def test_think_hard_outlasts_the_reasoner_cold_start(self):
+        self.assertGreaterEqual(self._timeout_for("think_hard", "question"), 100)
+
+    def test_memory_tools_keep_a_short_timeout(self):
+        self.assertEqual(self._timeout_for("memory_lookup", "query"), 60)
+        self.assertEqual(self._timeout_for("remember", "fact"), 60)
+
 if __name__ == "__main__":
     unittest.main()

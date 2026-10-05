@@ -422,6 +422,12 @@ def make_default_pi_client() -> PiClient:
     )
 
 
+# think_hard waits on the 27B reasoner, which is not kept resident: a cold
+# load is 30-50 s before generation starts. Its own request timeout is
+# VOICE_THINKER_TIMEOUT (90 s) inside the container; allow a little more here.
+_DIRECT_TOOL_TIMEOUT_SEC = {"think_hard": 105}
+
+
 def _run_container_voice_tool(
     container: str, name: str, arguments: dict[str, str],
 ) -> str:
@@ -445,8 +451,8 @@ def _run_container_voice_tool(
             "docker", "exec", "-i", container, "node",
             "--experimental-strip-types", "--input-type=module", "-e", script,
         ],
-        input=json.dumps(arguments), text=True, capture_output=True, timeout=60,
-        check=False,
+        input=json.dumps(arguments), text=True, capture_output=True,
+        timeout=_DIRECT_TOOL_TIMEOUT_SEC.get(name, 60), check=False,
     )
     if proc.returncode != 0:
         raise PiClientError(proc.stderr.strip() or f"tool exited {proc.returncode}")

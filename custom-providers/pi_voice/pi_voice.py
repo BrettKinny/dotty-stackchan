@@ -212,6 +212,9 @@ _MEMORY_CONTEXT = (
 )
 
 
+_THINKING_PREAMBLE = "\U0001F914 Let me think hard about that. "
+
+
 def _wrap_with_sandwich(user_text: str, kid_mode: bool) -> str:
     """Append the HARD CONSTRAINTS suffix to the user's text via the shared
     textUtils.build_turn_suffix contract — emoji-prefix
@@ -367,13 +370,17 @@ class LLMProvider(LLMProviderBase):
         think_intent = None if memory_context else _THINK_HARD_INTENT_RE.match(user_text)
         if think_intent:
             question = think_intent.group("question").strip()
+            # The reasoner unloads when idle and takes 30-60 s to come back.
+            # Say so first: this chunk carries the turn's one emoji (the
+            # thinking face) and reaches TTS before the wait starts.
+            yield _THINKING_PREAMBLE
             result = self._invoke_voice_tool(
                 "think_hard", {"question": question}, errors,
             )
             if result is None or result.startswith("("):
-                yield f"{FALLBACK_EMOJI} I couldn't finish the deeper reasoning."
+                yield "I couldn't finish the deeper reasoning."
             else:
-                yield f"{FALLBACK_EMOJI} {result}"
+                yield result
             return
         prompt = _wrap_with_sandwich(user_text + memory_context, self._kid_mode)
 
