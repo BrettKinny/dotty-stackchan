@@ -195,9 +195,13 @@ def evaluate(case, transcript, log_text, playback_end, after, device, before=Non
     # case, but it does stop a transcription slip being scored as a robot fault.
     service_ok = bool(service_tts) and bool(case.get("reply")) and matches(service_tts, case["reply"])
     matched = next((item for item in recognised if matches(item, case.get("asr", []))), None)
+    # The first recognition in the capture is the prompt, whether or not it was
+    # heard correctly; a mishearing is an asr_mismatch, not someone else talking.
     extra_speech = list(recognised)
     if matched in extra_speech:
         extra_speech.remove(matched)
+    elif extra_speech:
+        extra_speech.pop(0)
     word_count = len(re.findall(r"\b\w+(?:['’]\w+)*\b", response))
     word_limit = case.get("max_response_words")
     if word_limit is not None and (type(word_limit) is not int or word_limit < 1):
@@ -656,7 +660,7 @@ def device_lock(config):
 
 def restore_checkpoint(session):
     checkpoint = load(session / "checkpoint.json", {})
-    for key, value in {"completed": [], "quarantined": [], "blocked": {}, "consecutive_failures": 0,
+    for key, value in {"completed": [], "quarantined": [], "unresolved": [], "blocked": {}, "consecutive_failures": 0,
                        "soak": 0, "counts": {}}.items():
         checkpoint.setdefault(key, value)
     active = load(session / "active.json", {})
@@ -700,6 +704,12 @@ def record_attempt(checkpoint, case, result):
     counts["streak"] = counts["streak"] + 1 if acoustic_pass else 0
     if not acoustic_pass and not inconclusive:
         counts["failures"] += 1
+    # A case the evidence can never settle (for example a word the reference
+    # microphone always mishears) must not hold the queue for ever.
+    counts["inconclusive"] = 0 if acoustic_pass else counts.get("inconclusive", 0) + (1 if inconclusive else 0)
+    if (counts["inconclusive"] >= case.get("max_inconclusive", 3)
+            and case["id"] not in checkpoint.setdefault("unresolved", [])):
+        checkpoint["unresolved"].append(case["id"])
     if acoustic_pass:
         checkpoint["consecutive_failures"] = 0
     elif not inconclusive:
@@ -711,6 +721,12 @@ def record_attempt(checkpoint, case, result):
         checkpoint["quarantined"].append(case["id"])
     if result.get("exception") in {"InterruptedError", "TimeoutError"} and case["id"] not in checkpoint["quarantined"]:
         checkpoint["quarantined"].append(case["id"])
+
+
+def eligible_cases(bank, checkpoint):
+    return [c for c in bank if c["id"] not in checkpoint["quarantined"]
+            and c["id"] not in checkpoint["blocked"]
+            and c["id"] not in checkpoint.get("unresolved", [])]
 
 
 def run(session, config, catalogue, selected=None, once=False):
@@ -733,8 +749,7 @@ def run(session, config, catalogue, selected=None, once=False):
                     write_json(session / "PAUSE", {"reason": "three consecutive failures require agent diagnosis"})
                     write_json(session / "checkpoint.json", checkpoint)
                     continue
-                eligible = [c for c in bank if c["id"] not in checkpoint["quarantined"]
-                            and c["id"] not in checkpoint["blocked"]]
+                eligible = eligible_cases(bank, checkpoint)
                 pending = [c for c in eligible if c["id"] not in checkpoint["completed"]]
                 if pending:
                     case = pending[0]

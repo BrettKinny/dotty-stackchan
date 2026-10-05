@@ -712,3 +712,34 @@ def test_init_persists_mic_opener(tmp_path, monkeypatch):
                                       "--host", "user@host", "--mic-opener", "admin_say"])
     runner.main()
     assert json.loads((tmp_path / "config.json").read_text())["mic_opener"] == "admin_say"
+
+
+def test_misheard_prompt_is_an_asr_mismatch_not_extra_speech():
+    logs = ("结果: Repeat these words purple frispen\n识别文本: Repeat these words purple frispen\n"
+            "发送音频消息: SentenceType.FIRST, purple frispen\nSentenceType.LAST\n")
+    result = runner.evaluate({"asr": [["purple"], ["Brisbane"]], "reply": [["purple"]]},
+                             transcript("purple frispen"), logs, 2, after(), "robot")
+    assert result["extra_speech"] == []
+    assert result["failure"] == "asr_mismatch"
+    assert result["interaction"] == "FAIL"
+
+
+def test_repeatedly_inconclusive_case_is_set_aside_instead_of_retried_forever(tmp_path):
+    checkpoint = runner.restore_checkpoint(tmp_path)
+    murky = {**dict.fromkeys(("capture", "playback", "recovery"), "PASS"), "interaction": "INCONCLUSIVE"}
+    for _ in range(2):
+        runner.record_attempt(checkpoint, {"id": "repeat"}, murky)
+    assert checkpoint["unresolved"] == []
+    runner.record_attempt(checkpoint, {"id": "repeat"}, murky)
+    assert checkpoint["unresolved"] == ["repeat"]
+    assert checkpoint["quarantined"] == [] and checkpoint["counts"]["repeat"]["failures"] == 0
+    assert runner.eligible_cases([{"id": "repeat"}, {"id": "other"}], checkpoint) == [{"id": "other"}]
+
+
+def test_a_pass_clears_the_inconclusive_count(tmp_path):
+    checkpoint = runner.restore_checkpoint(tmp_path)
+    good = dict.fromkeys(("capture", "playback", "interaction", "recovery"), "PASS")
+    murky = {**good, "interaction": "INCONCLUSIVE"}
+    for attempt in (murky, murky, good, murky, murky):
+        runner.record_attempt(checkpoint, {"id": "repeat"}, attempt)
+    assert checkpoint["unresolved"] == []
