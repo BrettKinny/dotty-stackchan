@@ -15,7 +15,7 @@ For protocol wire formats see `docs/protocols.md`.
 |---|---|---|---|
 | StackChan firmware (m5stack/StackChan v1.2.4) | v1.2.4 | Xiaozhi WebSocket protocol, MCP over WS (JSON-RPC 2.0) | Pin firmware to a known-good build; do not OTA-update without verifying server compatibility first |
 | xiaozhi-esp32-server (local build) | `xiaozhi-esp32-server-piper:local` | Custom LLM provider API, `.config.yaml` schema, Xiaozhi WS server | Rebuild image only after checking upstream changelog for provider API or config schema changes |
-| dotty-pi (pi agent) | `dotty-pi:0.1.0` | pi RPC (JSONL over stdio), the five `dotty-pi-ext` voice tools | Pin the image tag; pi-version or model changes need end-to-end cutover testing |
+| dotty-pi (pi agent) | `dotty-pi:0.1.0` | pi RPC (JSONL over stdio), the seven `dotty-pi-ext` voice tools | Pin the image tag; pi-version or model changes need end-to-end cutover testing |
 | dotty-behaviour | `dotty-behaviour:0.1.0` | HTTP API (`/api/perception/*`, `/api/vision/*`, `/api/audio/*`, `/health`) | Endpoint signatures stable; perception event-schema changes require firmware + xiaozhi review |
 | bridge.py (dashboard) | unversioned (HEAD) | `/ui` dashboard, `/admin/*`, `/health` | Dashboard/admin service only post-#36; admin route changes require updating dashboard callers |
 

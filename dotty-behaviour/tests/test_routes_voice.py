@@ -4,11 +4,28 @@ from __future__ import annotations
 
 from time import perf_counter
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
+import config
 from household import Person
-from main import app
-from routes.voice import TAKE_PHOTO_FALLBACK, person_needs_review
+from perception import PerceptionState
+from routes.voice import TAKE_PHOTO_FALLBACK, person_needs_review, router
+
+# Exercise the actual HTTP route without starting unrelated live consumers,
+# loading household records or preparing production directories.
+app = FastAPI()
+app.include_router(router)
+
+
+@pytest.fixture(autouse=True)
+def explicit_adult_camera_policy(tmp_path, monkeypatch):
+    """Existing freshness tests exercise adult mode, never a live toggle."""
+    path = tmp_path / "kid-mode"
+    path.write_text("false")
+    monkeypatch.setattr(config, "KID_MODE_STATE_FILE", path)
+    app.state.perception = PerceptionState()
 
 
 def test_take_photo_returns_fallback_when_cache_empty() -> None:

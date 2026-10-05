@@ -93,6 +93,21 @@ def test_update_state_chat_status_toggles_listening() -> None:
     assert ps.state["dev-1"]["listening"] is False
 
 
+def test_chat_edges_refresh_quiet_timestamp_without_shortening_purr() -> None:
+    """AI-assisted regression: OpenAI Codex (GPT-6)."""
+    ps = PerceptionState()
+    ps.update_state("dev-1", "chat_status", {"listening": True}, 100.0)
+    assert ps.state["dev-1"]["last_chat_t"] == 100.0
+    ps.update_state("dev-1", "chat_status", {"listening": False}, 110.0)
+    assert ps.state["dev-1"]["last_chat_t"] == 110.0
+    # PurrPlayer intentionally reserves a future quiet window for its audio.
+    ps.state["dev-1"]["last_chat_t"] = 120.0
+    ps.update_state("dev-1", "chat_status", {"listening": True}, 115.0)
+    assert ps.state["dev-1"]["last_chat_t"] == 120.0
+    ps.update_state("dev-1", "chat_status", {"listening": False}, 125.0)
+    assert ps.state["dev-1"]["last_chat_t"] == 125.0
+
+
 def test_full_queue_drops_event_without_raising() -> None:
     async def go() -> None:
         ps = PerceptionState()

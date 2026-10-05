@@ -35,9 +35,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import threading
+import time
 import unicodedata
+import urllib.request
 from pathlib import Path
 from typing import Iterator
+from urllib.parse import urlparse
 
 from .pi_client import PiClient, PiClientError, make_default_pi_client
 
@@ -102,6 +107,53 @@ def _read_kid_mode() -> bool:
     except OSError:
         pass
     return os.environ.get("DOTTY_KID_MODE", "true").lower() in ("1", "true", "yes")
+
+
+_DASHBOARD_PORT = 8081
+
+
+def _dashboard_url() -> str:
+    """Base URL of the bridge dashboard, or "" when it can't be worked out.
+
+    `DOTTY_DASHBOARD_URL` wins. Otherwise assume the dashboard sits on the
+    same host as dotty-behaviour (which this container already reaches via
+    `BRIDGE_URL` / `VISION_BRIDGE_URL`) on its default port."""
+    explicit = os.environ.get("DOTTY_DASHBOARD_URL", "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    sibling = os.environ.get("BRIDGE_URL") or os.environ.get("VISION_BRIDGE_URL", "")
+    parsed = urlparse(sibling)
+    if not parsed.hostname:
+        return ""
+    return f"{parsed.scheme or 'http'}://{parsed.hostname}:{_DASHBOARD_PORT}"
+
+
+def _report_to_dashboard(path: str, payload: dict) -> None:
+    """Fire-and-forget POST to the bridge dashboard.
+
+    Runs on a daemon thread with a short timeout and swallows every error:
+    a missing or slow dashboard must never delay or break a voice turn."""
+    base = _dashboard_url()
+    if not base:
+        return
+    headers = {"Content-Type": "application/json"}
+    token = os.environ.get("DOTTY_ADMIN_TOKEN", "").strip()
+    if token:
+        headers["X-Admin-Token"] = token
+    body = json.dumps(payload).encode("utf-8")
+
+    def _post() -> None:
+        try:
+            req = urllib.request.Request(
+                base + path, data=body, headers=headers, method="POST",
+            )
+            urllib.request.urlopen(req, timeout=2).close()
+        except Exception as exc:
+            logger.debug("PiVoiceLLM dashboard report to %s failed: %s", path, exc)
+
+    threading.Thread(
+        target=_post, name="dotty-dashboard-report", daemon=True,
+    ).start()
 
 
 def _last_user_text(dialogue: list[dict]) -> str:
@@ -201,6 +253,21 @@ def _enforce_leading_emoji(chunks: Iterator[str]) -> Iterator[str]:
         yield f"{FALLBACK_EMOJI} (no response)"
 
 
+_REMEMBER_INTENT_RE = re.compile(
+    r"^\s*(?:please\s+)?remember\s+(?:that\s+)?(?P<fact>.+?)\s*[.!?]?\s*$",
+    re.IGNORECASE,
+)
+_RECALL_INTENT_RE = re.compile(
+    r"^\s*(?:what did i (?:tell|say to) you about|do you remember)\s+"
+    r"(?P<query>.+?)\s*[?!.]?\s*$",
+    re.IGNORECASE,
+)
+_THINK_HARD_INTENT_RE = re.compile(
+    r"^\s*(?:please\s+)?think hard (?:about\s*:?)?\s*(?P<question>.+?)\s*[?!.]?\s*$",
+    re.IGNORECASE,
+)
+
+
 class LLMProvider(LLMProviderBase):
     """xiaozhi-server LLM provider backed by the dotty-pi container."""
 
@@ -229,6 +296,59 @@ class LLMProvider(LLMProviderBase):
         if not user_text:
             yield f"{FALLBACK_EMOJI} (empty turn)"
             return
+        # Everything spoken this turn is reported to the dashboard when the
+        # generator finishes — including when xiaozhi closes it early.
+        spoken: list[str] = []
+        errors: list[str] = []
+        started = time.monotonic()
+        try:
+            for chunk in self._respond(user_text, errors):
+                spoken.append(chunk)
+                yield chunk
+        finally:
+            _report_to_dashboard("/api/voice/turn", {
+                "request_text": user_text,
+                "response_text": "".join(spoken),
+                "latency_ms": int((time.monotonic() - started) * 1000),
+                "error": "; ".join(errors) or None,
+            })
+
+    def _respond(self, user_text: str, errors: list[str]) -> Iterator[str]:
+        """One turn's TTS chunks. Failures are appended to `errors` so
+        response() can report them alongside the spoken fallback."""
+        remember_intent = _REMEMBER_INTENT_RE.match(user_text)
+        if remember_intent:
+            fact = remember_intent.group("fact").strip()
+            result = self._invoke_voice_tool("remember", {"fact": fact}, errors)
+            if result == "(remembered)":
+                yield f"{FALLBACK_EMOJI} I'll remember that."
+            else:
+                yield f"{FALLBACK_EMOJI} I couldn't save that memory."
+            return
+        recall_intent = _RECALL_INTENT_RE.match(user_text)
+        if recall_intent:
+            query = recall_intent.group("query").strip()
+            result = self._invoke_voice_tool(
+                "memory_lookup", {"query": query}, errors,
+            )
+            if result is None:
+                yield f"{FALLBACK_EMOJI} I couldn't check my memory right now."
+            elif result in ("(no memories found)", "(empty query)"):
+                yield f"{FALLBACK_EMOJI} I don't remember anything about that yet."
+            else:
+                yield f"{FALLBACK_EMOJI} {result}"
+            return
+        think_intent = _THINK_HARD_INTENT_RE.match(user_text)
+        if think_intent:
+            question = think_intent.group("question").strip()
+            result = self._invoke_voice_tool(
+                "think_hard", {"question": question}, errors,
+            )
+            if result is None or result.startswith("("):
+                yield f"{FALLBACK_EMOJI} I couldn't finish the deeper reasoning."
+            else:
+                yield f"{FALLBACK_EMOJI} {result}"
+            return
         prompt = _wrap_with_sandwich(user_text, self._kid_mode)
 
         # Reset pi state between voice turns. First turn skips this —
@@ -254,18 +374,36 @@ class LLMProvider(LLMProviderBase):
             ):
                 yield chunk
         except PiClientError as exc:
+            errors.append(str(exc) or exc.__class__.__name__)
             logger.error("PiVoiceLLM turn failed: %s", exc)
             for line in self._client.recent_stderr()[-5:]:
                 logger.error("  pi.stderr: %s", line)
             yield f"{FALLBACK_EMOJI} (brain offline — try again in a moment)"
 
+    def _invoke_voice_tool(
+        self, name: str, arguments: dict[str, str],
+        errors: list[str] | None = None,
+    ) -> str | None:
+        try:
+            return self._client.invoke_voice_tool(name, arguments)
+        except PiClientError as exc:
+            logger.error("PiVoiceLLM direct tool %s failed: %s", name, exc)
+            if errors is not None:
+                errors.append(f"{name}: {exc}" if str(exc) else name)
+            return None
+
     def _on_filter_hit(self, tier: str, match) -> None:
-        # Local logging only — the Prometheus counter / safety ring live in
-        # the bridge container, which this provider can't reach.
         logger.warning(
             "PiVoiceLLM content-filter hit tier=%s pattern=%r — turn replaced",
             tier, match.group(),
         )
+        # The Prometheus counter and /ui/safety/recent ring live in the
+        # bridge container; hand the hit over so the dashboard card shows it.
+        _report_to_dashboard("/api/voice/filter-hit", {
+            "tier": tier,
+            "rule": match.group(),
+            "prefix": match.string[:8],
+        })
 
     def close(self) -> None:
         """xiaozhi may call this on shutdown — make sure pi cleans up."""

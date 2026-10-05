@@ -201,6 +201,10 @@ class PerceptionState:
             listening = bool(data.get("listening"))
             state["listening"] = listening
             state["last_chat_status_t"] = ts
+            # Both edges are conversation activity: stop/listening-off often
+            # precedes Dotty's own TTS. Preserve PurrPlayer's future reservation
+            # and never move the quiet-after-chat clock backwards.
+            state["last_chat_t"] = max(ts, state.get("last_chat_t", 0.0))
         elif name == "face_recognized":
             identity = (data.get("identity") or "").strip()
             if identity:

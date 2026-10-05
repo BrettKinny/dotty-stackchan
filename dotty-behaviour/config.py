@@ -67,6 +67,11 @@ NARRATIVE_TIMEOUT_SEC: float = _env_float("NARRATIVE_TIMEOUT_SEC", 90.0)
 STATE_DIR: Path = Path(
     os.environ.get("DOTTY_STATE_DIR", "/var/lib/dotty-behaviour/state")
 )
+# Camera voice access uses the canonical bridge-owned policy file, not this
+# daemon's independent state directory or startup-only app.state.kid_mode.
+KID_MODE_STATE_FILE: Path = Path(os.environ.get(
+    "DOTTY_KID_MODE_STATE", "/var/lib/dotty-bridge/state/kid-mode"
+))
 LOG_DIR: Path = Path(
     os.environ.get("CONVO_LOG_DIR", "/var/lib/dotty-behaviour/logs")
 )
@@ -101,6 +106,14 @@ FACE_LOST_ABORT_WINDOW_SEC: float = _env_float("FACE_LOST_ABORT_WINDOW_SEC", 12.
 FACE_LOST_ABORT_GRACE_SEC: float = _env_float("FACE_LOST_ABORT_GRACE_SEC", 4.0)
 
 # sound_turner — gentler "curious about an ambient noise" head turn.
+# Disabled by default (2026-10-05): the firmware SoundLocalizer is still
+# stuck-left (#27, closed not-planned pending a calibration bench session)
+# — every sound_event reports balance >= 0.996 / direction "left", so the
+# turner snaps the head left on any noise. Set SOUND_TURN_ENABLED=1 only
+# after deliberate left/right claps classify correctly.
+SOUND_TURN_ENABLED: bool = (
+    os.environ.get("SOUND_TURN_ENABLED", "0") in ("1", "true", "True")
+)
 SOUND_TURN_COOLDOWN_SEC: float = _env_float("SOUND_TURN_COOLDOWN_SEC", 3.0)
 SOUND_TURN_YAW_DEG: int = _env_int("SOUND_TURN_YAW_DEG", 45)
 SOUND_TURN_SPEED: int = _env_int("SOUND_TURN_SPEED", 250)
