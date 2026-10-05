@@ -48,7 +48,7 @@ This is a hackable starting point, not a product. There are no releases, no inst
 
 - A polished end-user product. No GUI installer, no app store, no firmware OTA distribution.
 - Multi-user / multi-device. The reference deployment is one robot talking to one server.
-- Upstream firmware development. We build from `m5stack/StackChan` source but don't maintain firmware patches beyond what's needed for the voice integration.
+- General upstream firmware development. Dotty builds from the pinned `BrettKinny/StackChan@dotty` fork of `m5stack/StackChan` and maintains the state, motion, LED, privacy, and perception changes needed by this stack.
 - Cloud hosting. This is designed for a LAN deployment. You could expose it to the internet, but that's your problem.
 
 ## Privacy

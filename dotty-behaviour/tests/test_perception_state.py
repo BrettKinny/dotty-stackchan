@@ -10,8 +10,53 @@ from __future__ import annotations
 
 import asyncio
 import time
+from pathlib import Path
 
 from perception import PerceptionEvent, PerceptionState
+
+
+def test_current_device_state_survives_daemon_reconstruction(tmp_path: Path) -> None:
+    state_file = tmp_path / "perception-state.json"
+    before_restart = PerceptionState(state_path=state_file)
+    before_restart.update_state(
+        "dev-1", "state_changed", {"state": "security"}, 100.0
+    )
+
+    after_restart = PerceptionState(state_path=state_file)
+
+    assert after_restart.current_device_state("dev-1") == "security"
+
+
+def test_invalid_persisted_state_fails_safe_to_idle(tmp_path: Path) -> None:
+    state_file = tmp_path / "perception-state.json"
+    state_file.write_text('{"dev-1":"security"}', encoding="utf-8")
+
+    restarted = PerceptionState(state_path=state_file)
+
+    assert restarted.current_device_state("dev-1") == "idle"
+
+
+def test_invalid_persisted_mutex_value_fails_safe_to_idle(tmp_path: Path) -> None:
+    state_file = tmp_path / "perception-state.json"
+    state_file.write_text('{"dev-1":{"current_state":7}}', encoding="utf-8")
+
+    restarted = PerceptionState(state_path=state_file)
+
+    assert restarted.current_device_state("dev-1") == "idle"
+
+
+def test_restart_does_not_revive_transient_sensor_state(tmp_path: Path) -> None:
+    state_file = tmp_path / "perception-state.json"
+    before_restart = PerceptionState(state_path=state_file)
+    before_restart.update_state("dev-1", "face_detected", {}, 90.0)
+    before_restart.update_state(
+        "dev-1", "state_changed", {"state": "security"}, 100.0
+    )
+
+    after_restart = PerceptionState(state_path=state_file)
+
+    assert after_restart.current_device_state("dev-1") == "security"
+    assert "face_present" not in after_restart.state["dev-1"]
 
 
 def test_subscribe_broadcast_unsubscribe_roundtrip() -> None:

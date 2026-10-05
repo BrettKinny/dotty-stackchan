@@ -221,9 +221,10 @@ setup: _preflight-compose ## Interactive first-run wizard (re-runnable; remember
 	 echo -e "$(GREEN)$(BOLD)Setup complete.$(RESET)"; \
 	 echo ""; \
 	 echo "Next steps:"; \
-	 echo "  1. Flash the StackChan firmware (see SETUP.md or m5stack/StackChan repo)."; \
-	 echo "  2. In the device's Advanced Options, set the OTA URL to:"; \
-	 echo "       http://$$XIAOZHI_HOST:8003/xiaozhi/ota/"; \
+	 echo "  1. Build and flash StackChan firmware with this compiled setting:"; \
+	 echo "       CONFIG_OTA_URL=\"http://$$XIAOZHI_HOST:8003/xiaozhi/ota/\""; \
+	 echo "     See SETUP.md. The on-device Settings app has no OTA URL editor."; \
+	 echo "  2. Provision the robot's 2.4 GHz Wi-Fi using its displayed setup flow."; \
 	 echo "  3. Run 'make doctor' to verify everything is healthy."; \
 	 echo ""
 

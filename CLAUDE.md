@@ -27,7 +27,7 @@ The voice path runs through a single LLM provider — `PiVoiceLLM`, selected via
 
 ```
                  StackChan hardware → configured persona
-                   │  ESP32-S3, xiaozhi firmware (built from m5stack/StackChan source)
+                   │  ESP32-S3, xiaozhi firmware (pinned BrettKinny/StackChan@dotty fork)
                    │  WiFi / WebSocket (Xiaozhi protocol)
                    ▼
                  xiaozhi-esp32-server (Docker)
@@ -197,7 +197,8 @@ For hardware specs, protocol details, model internals, latent capabilities, and 
 
 - xiaozhi-esp32-server: https://github.com/xinnan-tech/xiaozhi-esp32-server
 - xiaozhi-esp32 firmware (upstream): https://github.com/78/xiaozhi-esp32
-- StackChan (hardware + firmware patches): https://github.com/m5stack/StackChan
+- StackChan upstream (hardware + base firmware): https://github.com/m5stack/StackChan
+- Dotty firmware fork (the pinned build source): https://github.com/BrettKinny/StackChan/tree/dotty
 - Emotion protocol: https://xiaozhi.dev/en/docs/development/emotion/
 
 ## Agent skills
