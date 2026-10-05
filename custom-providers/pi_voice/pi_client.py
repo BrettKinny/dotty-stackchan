@@ -377,9 +377,33 @@ class PiClient:
 
 # Convenience factory that wires the env-var-defaults into a
 # PiClient ready to be used by xiaozhi-server.
+DEFAULT_SYSTEM_PROMPT_FILE = "/opt/xiaozhi-esp32-server/personas/pi_voice.md"
+
+
+def _system_prompt_args() -> list[str]:
+    """`--system-prompt <persona>` from DOTTY_PI_SYSTEM_PROMPT_FILE.
+
+    Without it pi uses its built-in coding-assistant prompt, and that identity
+    leaks into spoken replies (#177). A missing or empty file keeps the old
+    behaviour rather than breaking the voice path.
+    """
+    path = os.environ.get("DOTTY_PI_SYSTEM_PROMPT_FILE", DEFAULT_SYSTEM_PROMPT_FILE)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read().strip()
+    except OSError:
+        logger.warning("PiClient: no voice persona at %s; pi default prompt in use", path)
+        return []
+    if not text:
+        logger.warning("PiClient: voice persona %s is empty; pi default prompt in use", path)
+        return []
+    return ["--system-prompt", text]
+
+
 def make_default_pi_client() -> PiClient:
     container = os.environ.get("DOTTY_PI_CONTAINER", "dotty-pi")
     pi_args: list[str] = list(_DEFAULT_PI_FLAGS)
+    pi_args.extend(_system_prompt_args())
     extra = os.environ.get("DOTTY_PI_EXTRA_FLAGS", "").split()
     if extra:
         pi_args.extend(extra)
