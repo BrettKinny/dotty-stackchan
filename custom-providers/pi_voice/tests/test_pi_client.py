@@ -17,12 +17,14 @@ import sys
 import threading
 import time
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 # Make the package importable as `pi_voice.*` regardless of cwd.
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
-from pi_client import PiClient, PiClientError  # noqa: E402
+from pi_client import PiClient, PiClientError, _run_container_voice_tool  # noqa: E402
 
 
 class FakePopen:
@@ -357,6 +359,28 @@ class TestTurnTimeout(unittest.TestCase):
             self.assertIn("timed out", str(ctx.exception))
         finally:
             client.close()
+
+
+class TestContainerVoiceToolRunner(unittest.TestCase):
+    def test_rejects_tools_outside_allowlist_without_spawning(self):
+        with patch("pi_client.subprocess.run") as run:
+            with self.assertRaisesRegex(PiClientError, "unsupported"):
+                _run_container_voice_tool("dotty-pi", "play_song", {"name": "x"})
+        run.assert_not_called()
+
+    def test_rejects_malformed_json_output(self):
+        completed = SimpleNamespace(returncode=0, stdout="not-json", stderr="")
+        with patch("pi_client.subprocess.run", return_value=completed):
+            with self.assertRaisesRegex(PiClientError, "invalid JSON"):
+                _run_container_voice_tool("dotty-pi", "remember", {"fact": "x"})
+
+    def test_rejects_non_string_result(self):
+        completed = SimpleNamespace(
+            returncode=0, stdout='{"result":42}', stderr="",
+        )
+        with patch("pi_client.subprocess.run", return_value=completed):
+            with self.assertRaisesRegex(PiClientError, "non-string"):
+                _run_container_voice_tool("dotty-pi", "remember", {"fact": "x"})
 
 
 if __name__ == "__main__":

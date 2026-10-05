@@ -98,6 +98,7 @@ def local_exec_subprocess_factory(
 
 
 SubprocessFactory = Callable[[], subprocess.Popen]
+VoiceToolRunner = Callable[[str, dict[str, str]], str]
 
 
 class PiClientError(Exception):
@@ -129,6 +130,7 @@ class PiClient:
         *,
         turn_timeout_sec: float = 120.0,
         stderr_ring_size: int = 200,
+        voice_tool_runner: VoiceToolRunner | None = None,
     ):
         self._spawn = subprocess_factory
         self._proc: Optional[subprocess.Popen] = None
@@ -141,6 +143,7 @@ class PiClient:
         self._turn_timeout_sec = turn_timeout_sec
         self._next_req_id = 0
         self._closed = False
+        self._voice_tool_runner = voice_tool_runner
 
     # ------------------------------------------------------------------
     # lifecycle
@@ -277,6 +280,15 @@ class PiClient:
             f"turn timed out after {self._turn_timeout_sec}s"
         )
 
+    def invoke_voice_tool(self, name: str, arguments: dict[str, str]) -> str:
+        """Run one deterministic voice tool outside the fallible 4B router."""
+        if self._voice_tool_runner is None:
+            raise PiClientError("direct voice-tool runner is not configured")
+        try:
+            return self._voice_tool_runner(name, arguments)
+        except Exception as exc:
+            raise PiClientError(f"voice tool {name} failed: {exc}") from exc
+
     # ------------------------------------------------------------------
     # diagnostics
     # ------------------------------------------------------------------
@@ -375,4 +387,47 @@ def make_default_pi_client() -> PiClient:
         subprocess_factory=lambda: local_exec_subprocess_factory(
             container=container, pi_args=pi_args,
         ),
+        voice_tool_runner=lambda name, arguments: _run_container_voice_tool(
+            container, name, arguments,
+        ),
     )
+
+
+def _run_container_voice_tool(
+    container: str, name: str, arguments: dict[str, str],
+) -> str:
+    modules = {
+        "remember": ("remember.ts", "runRemember", "fact"),
+        "memory_lookup": ("memory_lookup.ts", "runMemoryLookup", "query"),
+        "think_hard": ("think_hard.ts", "runThinkHard", "question"),
+    }
+    if name not in modules:
+        raise PiClientError(f"unsupported direct voice tool: {name}")
+    module, function, argument = modules[name]
+    script = (
+        'import fs from "node:fs";'
+        f'import {{ {function} }} from "/root/.pi/extensions/dotty-pi-ext/src/tools/{module}";'
+        'const input=JSON.parse(fs.readFileSync(0,"utf8"));'
+        f'const result=await {function}(input[{json.dumps(argument)}]);'
+        'process.stdout.write(JSON.stringify({result}));'
+    )
+    proc = subprocess.run(
+        [
+            "docker", "exec", "-i", container, "node",
+            "--experimental-strip-types", "--input-type=module", "-e", script,
+        ],
+        input=json.dumps(arguments), text=True, capture_output=True, timeout=60,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise PiClientError(proc.stderr.strip() or f"tool exited {proc.returncode}")
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise PiClientError("voice tool returned invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise PiClientError("voice tool returned invalid JSON shape")
+    result = payload.get("result")
+    if not isinstance(result, str):
+        raise PiClientError("voice tool returned a non-string result")
+    return result
