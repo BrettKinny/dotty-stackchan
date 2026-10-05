@@ -11,6 +11,7 @@
 
 import { Type } from "typebox";
 import { searchMemories, type MemoryRow } from "../lib/brain_db.ts";
+import { cleanStoredTurn } from "../lib/turn_text.ts";
 
 const MAX_SNIPPETS = 3;
 const SNIPPET_MAX_CHARS = 200;
@@ -40,12 +41,21 @@ export function formatLookupResult(rows: MemoryRow[]): string {
   return snippets.join(" | ");
 }
 
+/**
+ * Drop prompt scaffolding from stored conversation rows before they are
+ * formatted. Kept apart from formatLookupResult so that function stays
+ * byte-compatible with the bridge.py oracle.
+ */
+export function cleanLookupRows(rows: MemoryRow[]): MemoryRow[] {
+  return rows.map((row) => ({ ...row, content: cleanStoredTurn(row.content ?? "") }));
+}
+
 /** Top-level dispatch used by both the pi tool and the test rig. */
 export function runMemoryLookup(query: string, dbPath?: string): string {
   const q = (query ?? "").trim();
   if (!q) return "(empty query)";
   const rows = searchMemories(q, { limit: 5, dbPath });
-  return formatLookupResult(rows);
+  return formatLookupResult(cleanLookupRows(rows));
 }
 
 /** Pi tool descriptor — passed to `pi.registerTool` from index.ts. */

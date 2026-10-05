@@ -10,6 +10,8 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from typing import Iterator
@@ -44,6 +46,9 @@ class FakeClient:
         self.scripted_chunks: list[list[str]] = []
         self.scripted_errors: list[BaseException | None] = []
         self.closed = False
+        self.tool_calls: list[tuple[str, dict[str, str]]] = []
+        self.tool_results: dict[str, str] = {}
+        self.tool_errors: dict[str, BaseException] = {}
 
     def script_turn(self, chunks: list[str], error: BaseException | None = None) -> None:
         self.scripted_chunks.append(chunks)
@@ -63,6 +68,12 @@ class FakeClient:
 
     def recent_stderr(self) -> list[str]:
         return []
+
+    def invoke_voice_tool(self, name: str, arguments: dict[str, str]) -> str:
+        self.tool_calls.append((name, arguments))
+        if name in self.tool_errors:
+            raise self.tool_errors[name]
+        return self.tool_results.get(name, "(tool failed)")
 
     def close(self) -> None:
         self.closed = True
@@ -193,6 +204,54 @@ class TestNewSessionLifecycle(unittest.TestCase):
         list(provider.response("s", [{"role": "user", "content": "b"}]))
         self.assertEqual(client.new_session_calls, 1, "new_session on second turn")
 
+    def test_concurrent_responses_are_serialized_through_agent_end(self):
+        class OverlapDetectingClient(FakeClient):
+            def __init__(self):
+                super().__init__()
+                self.active = 0
+                self.max_active = 0
+                self.first_started = threading.Event()
+                self.release_first = threading.Event()
+
+            def iter_turn_text(self, prompt: str) -> Iterator[str]:
+                self.prompts.append(prompt)
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+                try:
+                    if len(self.prompts) == 1:
+                        self.first_started.set()
+                        self.release_first.wait(timeout=2)
+                    yield "😊 ok"
+                finally:
+                    self.active -= 1
+
+        os.environ["DOTTY_KID_MODE"] = "false"
+        client = OverlapDetectingClient()
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        outputs: list[list[str]] = []
+
+        def run(text: str) -> None:
+            outputs.append(list(provider.response(
+                "s", [{"role": "user", "content": text}],
+            )))
+
+        first = threading.Thread(target=run, args=("first",))
+        second = threading.Thread(target=run, args=("second",))
+        first.start()
+        self.assertTrue(client.first_started.wait(timeout=1))
+        second.start()
+        time.sleep(0.05)
+        self.assertEqual(len(client.prompts), 1, "second turn must wait")
+        client.release_first.set()
+        first.join(timeout=2)
+        second.join(timeout=2)
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual(client.max_active, 1)
+        self.assertEqual(len(outputs), 2)
+        self.assertEqual(client.new_session_calls, 1)
+
 
 class TestErrorFallback(unittest.TestCase):
     def test_client_error_yields_fallback(self):
@@ -202,6 +261,126 @@ class TestErrorFallback(unittest.TestCase):
         provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
         out = list(provider.response("s", [{"role": "user", "content": "anything"}]))
         self.assertEqual(out, [f"{textUtils.FALLBACK_EMOJI} (brain offline — try again in a moment)"])
+
+
+class TestDeterministicVoiceToolRouting(unittest.TestCase):
+    def test_explicit_remember_invokes_tool_and_never_claims_failed_write(self):
+        client = FakeClient()
+        client.tool_results["remember"] = "(remember failed)"
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "Remember that my calibration color is ultraviolet"}],
+        ))
+
+        self.assertEqual(
+            client.tool_calls,
+            [("remember", {"fact": "my calibration color is ultraviolet"})],
+        )
+        self.assertNotIn("remembered", out.lower())
+        self.assertIn("couldn't save", out.lower())
+
+    def test_remember_client_error_returns_honest_tts_failure(self):
+        client = FakeClient()
+        client.tool_errors["remember"] = PiClientError("tool timed out")
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "Remember that the key is amber"}],
+        ))
+
+        self.assertEqual(out, f"{textUtils.FALLBACK_EMOJI} I couldn't save that memory.")
+
+    def test_explicit_recall_looks_up_then_lets_the_model_phrase_the_answer(self):
+        # Raw rows ("user: … | assistant: …") are search output, not speech:
+        # the lookup stays deterministic, the wording comes from the model.
+        client = FakeClient()
+        client.tool_results["memory_lookup"] = (
+            "user: My calibration color is ultraviolet. | assistant: 😊 Noted!"
+        )
+        client.script_turn(["😊 You told me it is ultraviolet."])
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "What did I tell you about my calibration color?"}],
+        ))
+
+        self.assertEqual(
+            client.tool_calls,
+            [("memory_lookup", {"query": "my calibration color"})],
+        )
+        self.assertEqual(out, "😊 You told me it is ultraviolet.")
+        self.assertNotIn("assistant:", out)
+        self.assertEqual(len(client.prompts), 1)
+        prompt = client.prompts[0]
+        self.assertTrue(prompt.startswith(
+            "What did I tell you about my calibration color?\n\nMEMORY SEARCH RESULTS ("))
+        self.assertIn("My calibration color is ultraviolet.", prompt)
+        self.assertLess(prompt.index("MEMORY SEARCH RESULTS"), prompt.index("HARD CONSTRAINTS"))
+
+    def test_recall_with_no_matches_does_not_spend_a_model_turn(self):
+        client = FakeClient()
+        client.tool_results["memory_lookup"] = "(no memories found)"
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "Do you remember my calibration color?"}],
+        ))
+
+        self.assertEqual(
+            out, f"{textUtils.FALLBACK_EMOJI} I don't remember anything about that yet.",
+        )
+        self.assertEqual(client.prompts, [])
+
+    def test_recall_client_error_returns_honest_tts_failure(self):
+        client = FakeClient()
+        client.tool_errors["memory_lookup"] = PiClientError("lookup failed")
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "Do you remember my calibration color?"}],
+        ))
+
+        self.assertEqual(
+            out, f"{textUtils.FALLBACK_EMOJI} I couldn't check my memory right now.",
+        )
+
+    def test_explicit_think_hard_speaks_first_then_answers_with_one_emoji(self):
+        # The reasoner can take 30-60 s to load from cold. Dotty says so before
+        # starting instead of sitting silent, and the reply still carries
+        # exactly one (leading) emoji.
+        client = FakeClient()
+        client.tool_results["think_hard"] = "The precise answer is forty-two."
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        turn = provider.response(
+            "s", [{"role": "user", "content": "Think hard about: what is six times seven?"}],
+        )
+        first = next(turn)
+        self.assertEqual(first, "🤔 Let me think hard about that. ")
+        self.assertEqual(client.tool_calls, [])          # nothing started before Dotty spoke
+        rest = "".join(turn)
+
+        self.assertEqual(
+            client.tool_calls,
+            [("think_hard", {"question": "what is six times seven"})],
+        )
+        self.assertEqual(rest, "The precise answer is forty-two.")
+        emojis = [ch for ch in first + rest if ch in textUtils.ALLOWED_EMOJIS]
+        self.assertEqual(emojis, ["🤔"])
+
+    def test_think_hard_client_timeout_returns_honest_tts_failure(self):
+        client = FakeClient()
+        client.tool_errors["think_hard"] = PiClientError("tool timed out")
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "Think hard about: six times seven"}],
+        ))
+
+        self.assertEqual(
+            out, "🤔 Let me think hard about that. I couldn't finish the deeper reasoning.",
+        )
 
 
 class TestLeadingEmojiContract(unittest.TestCase):
@@ -245,6 +424,122 @@ class TestLeadingEmojiContract(unittest.TestCase):
     def test_kid_filter_still_replaces_the_complete_turn(self):
         out = self._response(["Hello ", "cocaine"], kid_mode=True)
         self.assertEqual(out, [textUtils.CONTENT_FILTER_REPLACEMENT])
+
+
+class TestDashboardReporting(unittest.TestCase):
+    """Each turn (and each kid-filter hit) is reported to the bridge
+    dashboard, which otherwise never sees a voice turn."""
+
+    def setUp(self):
+        import pi_voice.pi_voice as mod
+        self.mod = mod
+        self.reports: list[tuple[str, dict]] = []
+        p = patch.object(mod, "_report_to_dashboard",
+                         lambda path, payload: self.reports.append((path, payload)))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def _turns(self):
+        return [body for path, body in self.reports if path == "/api/voice/turn"]
+
+    def test_successful_turn_is_reported(self):
+        os.environ["DOTTY_KID_MODE"] = "false"
+        client = FakeClient()
+        client.script_turn(["😊 ", "Hi there"])
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        out = "".join(provider.response("s", [{"role": "user", "content": "Hello"}]))
+        (turn,) = self._turns()
+        self.assertEqual(turn["request_text"], "Hello")
+        self.assertEqual(turn["response_text"], out)
+        self.assertIsNone(turn["error"])
+        self.assertGreaterEqual(turn["latency_ms"], 0)
+
+    def test_failed_turn_is_reported_with_error(self):
+        client = FakeClient()
+        client.script_turn([], error=PiClientError("rpc timeout"))
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        list(provider.response("s", [{"role": "user", "content": "Hello"}]))
+        (turn,) = self._turns()
+        self.assertEqual(turn["error"], "rpc timeout")
+        self.assertIn("brain offline", turn["response_text"])
+
+    def test_early_close_still_reports(self):
+        os.environ["DOTTY_KID_MODE"] = "false"
+        client = FakeClient()
+        client.script_turn(["😊 one ", "two ", "three"])
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        gen = provider.response("s", [{"role": "user", "content": "Hello"}])
+        first = next(gen)
+        gen.close()
+        (turn,) = self._turns()
+        self.assertEqual(turn["response_text"], first)
+
+    def test_direct_tool_turn_is_reported(self):
+        client = FakeClient()
+        client.tool_results["remember"] = "(remembered)"
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "remember that my cat is called Biscuit"}],
+        ))
+        (turn,) = self._turns()
+        self.assertEqual(turn["request_text"], "remember that my cat is called Biscuit")
+        self.assertEqual(turn["response_text"], out)
+        self.assertIsNone(turn["error"])
+
+    def test_direct_tool_failure_is_reported_with_error(self):
+        client = FakeClient()
+        client.tool_errors["think_hard"] = PiClientError("tool timed out")
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        list(provider.response(
+            "s", [{"role": "user", "content": "think hard about why the sky is blue"}],
+        ))
+        (turn,) = self._turns()
+        self.assertEqual(turn["error"], "think_hard: tool timed out")
+        self.assertIn("couldn't finish", turn["response_text"])
+
+    def test_empty_turn_is_not_reported(self):
+        provider = LLMProvider({}, client=FakeClient())  # type: ignore[arg-type]
+        list(provider.response("s", [{"role": "assistant", "content": "x"}]))
+        self.assertEqual(self.reports, [])
+
+    def test_filter_hit_is_reported_without_blocked_reply(self):
+        os.environ["DOTTY_KID_MODE"] = "true"
+        client = FakeClient()
+        client.script_turn(["😊 that is a load of shit"])
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        with tempfile.TemporaryDirectory() as d, patch.dict(
+            os.environ, {"DOTTY_KID_MODE_STATE": str(Path(d) / "missing")},
+        ):
+            out = "".join(provider.response("s", [{"role": "user", "content": "Hello"}]))
+        hits = [body for path, body in self.reports if path == "/api/voice/filter-hit"]
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["rule"], "shit")
+        (turn,) = self._turns()
+        self.assertEqual(turn["response_text"], out)
+        self.assertNotIn("shit", turn["response_text"])
+
+
+class TestDashboardUrl(unittest.TestCase):
+    def _url(self, env: dict) -> str:
+        import pi_voice.pi_voice as mod
+        clean = {k: v for k, v in os.environ.items()
+                 if k not in ("DOTTY_DASHBOARD_URL", "BRIDGE_URL", "VISION_BRIDGE_URL")}
+        with patch.dict(os.environ, {**clean, **env}, clear=True):
+            return mod._dashboard_url()
+
+    def test_explicit_url_wins(self):
+        self.assertEqual(
+            self._url({"DOTTY_DASHBOARD_URL": "http://dash:9000/",
+                       "VISION_BRIDGE_URL": "http://10.0.0.5:8090"}),
+            "http://dash:9000",
+        )
+
+    def test_derived_from_behaviour_host(self):
+        self.assertEqual(self._url({"VISION_BRIDGE_URL": "http://10.0.0.5:8090"}),
+                         "http://10.0.0.5:8081")
+
+    def test_unknown_host_disables_reporting(self):
+        self.assertEqual(self._url({}), "")
 
 
 if __name__ == "__main__":

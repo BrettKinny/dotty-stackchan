@@ -14,9 +14,12 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import json
 import logging
+import os
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterable
 
 from config import (
@@ -26,6 +29,10 @@ from config import (
 )
 
 log = logging.getLogger("dotty-behaviour.perception")
+
+_DURABLE_DEVICE_STATES = frozenset(
+    {"idle", "talk", "story_time", "security", "sleep", "dance"}
+)
 
 
 @dataclass(frozen=True)
@@ -59,12 +66,13 @@ class PerceptionState:
     construct instances directly.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, state_path: str | Path | None = None) -> None:
+        self._state_path = Path(state_path) if state_path is not None else None
         # Event bus
         self._listeners: list[asyncio.Queue[PerceptionEvent]] = []
         # Per-device state (face_present, listening, current_state,
         # last_*_t timestamps, dance_active, etc.)
-        self.state: dict[str, dict[str, Any]] = {}
+        self.state: dict[str, dict[str, Any]] = self._load_state()
         # Bounded per-device ring buffer of recent events (dashboard).
         self._recent: dict[
             str, collections.deque[dict[str, Any]]
@@ -88,6 +96,51 @@ class PerceptionState:
         # slice — included now so the audio explain route can share
         # the pattern).
         self._audio_waiters: dict[str, list[asyncio.Event]] = {}
+
+    def _load_state(self) -> dict[str, dict[str, Any]]:
+        if self._state_path is None:
+            return {}
+        try:
+            payload = json.loads(self._state_path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict) and all(
+                isinstance(device_id, str)
+                and isinstance(device_state, dict)
+                and device_state.get("current_state") in _DURABLE_DEVICE_STATES
+                and isinstance(
+                    device_state.get("last_state_change_t", 0.0),
+                    (int, float),
+                )
+                for device_id, device_state in payload.items()
+            ):
+                return payload
+        except (OSError, json.JSONDecodeError):
+            pass
+        return {}
+
+    def _persist_state(self) -> None:
+        if self._state_path is None:
+            return
+        try:
+            self._state_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self._state_path.with_name(f".{self._state_path.name}.tmp")
+            durable_state = {
+                device_id: {
+                    "current_state": device_state["current_state"],
+                    "last_state_change_t": device_state.get(
+                        "last_state_change_t", 0.0
+                    ),
+                }
+                for device_id, device_state in self.state.items()
+                if isinstance(device_state.get("current_state"), str)
+                and device_state["current_state"]
+            }
+            temporary.write_text(
+                json.dumps(durable_state, separators=(",", ":")),
+                encoding="utf-8",
+            )
+            os.replace(temporary, self._state_path)
+        except OSError as exc:
+            log.warning("failed to persist perception state: %s", exc)
 
     # ------------------------------------------------------------------
     # Bus
@@ -191,6 +244,7 @@ class PerceptionState:
                     state["dance_active"] = True
                 elif state.get("dance_active"):
                     state["dance_active"] = False
+                self._persist_state()
         elif name == "dance_started":
             state["dance_active"] = True
             state["last_dance_started_t"] = ts
@@ -201,6 +255,10 @@ class PerceptionState:
             listening = bool(data.get("listening"))
             state["listening"] = listening
             state["last_chat_status_t"] = ts
+            # Both edges are conversation activity: stop/listening-off often
+            # precedes Dotty's own TTS. Preserve PurrPlayer's future reservation
+            # and never move the quiet-after-chat clock backwards.
+            state["last_chat_t"] = max(ts, state.get("last_chat_t", 0.0))
         elif name == "face_recognized":
             identity = (data.get("identity") or "").strip()
             if identity:

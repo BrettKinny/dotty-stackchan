@@ -140,14 +140,17 @@ face events and survive chat-turn ends; `wake up` / `come back` /
 | US5 | Voice: *"keep watch"* **⚠ pending** | Within ~3 s: yaw sweep −500→+500→0, angry face latched, pixel 0 flashing white 1 Hz | `state_changed` → `security`; `security capture loop started … interval=20s` | "Dotty guards the house" — the sweep is very filmable |
 | US6 | Stay in security ≥40 s | Sweep continues | security NDJSON gains records with `photo_desc` (+20 s cadence); `audio_capture_pending` errors expected (#31) | QA-only; feeds UD10 |
 | US7 | Voice: *"wake up"* (exit security) | Pan stops ≤4 s, head home, neutral face | `security capture loop cancelled`; NDJSON stops | tail of the US5 clip |
-| US8 | Voice: *"goodnight Dotty"* | Smooth face-down travel (~3–4 s), pixel 0 very dim blue, 😴 + `Zzz…`, torque-release click ~1 s after settle | `state_changed` → `sleep` | "Putting my robot to bed" — reliably charming |
-| US9 | While asleep: idle ~30 s, lights on | Gentle droop, **no** idle motion | no idle-motion servo commands | part of US8 clip |
-| US10 | Wake path 1 — voice: *"wake up"* | Torque re-engages **first** (audible), wake-tilt to ~70 pitch, neutral face, idle | `state_changed` → `idle` | "Three ways to wake a robot" 1/3 |
-| US11 | Sleep again; wake path 2 — **pet her head** | Same wake sequence, lands in **idle** (not talk) | `head_pet_started` | 2/3 |
-| US12 | Sleep again; wake path 3 — **walk into camera view** | Wakes straight to **talk** (pixel 0 cyan), looks up then at you | `face_detected` → talk | 3/3 — the best one |
+| US8 | Voice: *"goodnight Dotty"* | Neutral home pose, left arc very dim blue, 😴 + `Zzz…`; torque releases after settling or the 3 s fallback | `state_changed` → `sleep`; privacy gate engaged, face detector and voice/wake-word processing disabled | "Putting my robot to bed" |
+| US9 | While asleep: idle ~30 s, lights on | Quiet, **no** idle motion, listening indicator off | no idle-motion commands or new face/listening producer activity after sleep settles | part of US8 clip |
+| US10 | Privacy check — say the configured wake word and *"wake up"* | Remains asleep; no listening or wake tilt | no wake detection or sleep-exit transition attributable to speech | Show the actual privacy behavior; do not claim voice wake |
+| US11 | While asleep, briefly **touch the head** | Torque re-engages before wake tilt, neutral face; initial transition to **idle**. Continued ≥2 s hold separately requests listening | `head_pet_started` then `state_changed` → `idle`; later face/listening transitions are separate | "A gentle touch wakes Dotty" |
+| US12 | Sleep again; **walk into camera view** | Remains asleep; no face-driven wake | no new face-driven sleep-exit transition | Privacy check, not a face-wake demonstration |
+| US12a | While asleep, explicitly select **idle** in the dashboard | Wake tilt, `Zzz…` clears; normal perception resumes | admin acknowledgement plus `state_changed` → `idle` | Label as dashboard wake, not acoustic verification |
 | US13 | Awake: provoke a sleepy reply (ask her if she's tired → 😴) | Legacy hard-sleep path still works | 😴 emotion frame | QA-only |
 | US14 | Voice/dashboard: trigger **dance** | Left ring rainbow sweep, choreography + song | `state_changed` → `dance`; `_handle_dance` | The flagship Short. Film generously |
 | US15 | From dashboard, click the **current** state's button | `state_changed` still fires (idempotent re-set), dashboard cache refreshes | `state_changed` on idempotent set | QA-only |
+
+Sleep rows US8–US12a follow active firmware `3140f03` (source audit 2026-09-12); they are acceptance instructions, not recorded passes. See [modes.md](./modes.md#wake-from-sleep-edges) for the privacy contract and release-pin caveat. This targeted correction is AI-assisted (OpenAI Codex, GPT-6).
 
 ## Phase UL — toggles & the LED contract
 
@@ -175,7 +178,7 @@ Live checks first, then the timer/env-gated consumers verified by **evidence**
 | UP1 | From idle, walk into view, face 30–60 cm, well lit | Pixel 6 yellow ≤1 s; possible "Hi!" greeting (hour-gated) | `phase0 det>0`; `face_detected`; FaceGreeter | "She notices when I walk in" |
 | UP2 | Stay in frame for VLM identify | Pixel 6 → **green**; named greeting if roster-matched | FaceIdentifiedRefresher keeps it green past the 4 s firmware timeout; `set-face-identified` hits | "My robot knows my face" |
 | UP3 | Start her talking, then walk out of frame mid-reply | TTS aborts after the grace window (audience gone) | `face_lost` → FaceLostAborter | "She stops talking when you leave. Rude? Efficient?" |
-| UP4 | From idle, off-camera-side: snap fingers / clap left, then right | Head turns toward each sound | `sound_event` (direction/balance) → SoundTurner | "Sneaking up on my robot (impossible)" |
+| UP4 | From idle, off-camera-side: snap fingers / clap left, then right | Head turns toward each sound | `sound_event` (direction/balance) → SoundTurner (needs `SOUND_TURN_ENABLED=1`; off by default until the stuck-left localizer in #27 is calibrated) | "Sneaking up on my robot (impossible)" |
 | UP5 | From across the room, say the wake word | Fast head-turn to the speaker | `wake_word_detected` → WakeWordTurner (if `WAKE_TURN_ENABLED`) | pairs with UP4 |
 | UP6 | Pet her head while awake | Hearts + happy face + **purr** sound; no state change | `head_pet_started` → PurrPlayer | "Yes, the robot purrs." Instant clip |
 | UP7 | Return to idle, leave the room 2+ min (camera keeps rolling) | Idle-motion cadence drops 4–8 s → 15–30 s; walk back in → cadence recovers in seconds | idle-motion timing in serial | Time-lapse: "robot gets bored" |
@@ -204,7 +207,7 @@ dashboard works well for Shorts).
 | UD5 | Memory card: find UT4's pending kid fact → **approve** it; **redact** another | Pending → approved queue move; redacted fact gone; `recall_person` now sees the approved one | `/ui/actions/memory/{approve,redact}` | QA-critical (human-review loop); clip optional |
 | UD6 | Tools-inventory card | If it lists 5 legacy entries, record presentation FAIL; separately verify Pi registers all 7 voice tools | Pi RPC/tool-startup evidence is authoritative | QA-only |
 | UD7 | Safety card after UL2 | The kid-mode filter hit from UL2 listed (last 20) | `/ui/safety/recent` | QA-only |
-| UD8 | Activity feed: cycle All / Turns / Events / Errors chips; open the errors modal | Live SSE turns + perception events streaming; errors modal renders | `/ui/events` SSE + `/api/perception/feed`; `/ui/alerts/detail` | B-roll: the feed scrolling during a chat |
+| UD8 | Activity feed: cycle All / Turns / Events / Errors chips; open the errors modal | Live SSE turns + perception events streaming; errors modal renders | `/ui/events` SSE + `/ui/perception/feed` (bridge relay of dotty-behaviour `/api/perception/feed`); `/ui/alerts/detail` | B-roll: the feed scrolling during a chat |
 | UD9 | Perception card + vision modal: open latest photo large, download | Latest VLM photo + description, audio caption, last voice line, scene sentence | `/ui/vision/large`, `/ui/vision/photo?download=1` | "What my robot sees" |
 | UD10 | Security panel (after US5–US7): open security scene history | Capture records from the US6 window render | `/ui/security/recent/{device_id}` | pairs with the US5 clip |
 | UD11 | LED-ring mirror page while toggling kid_mode on the robot | Mirror tracks the physical ring ≤2 s (HTMX poll) | `/ui/led-ring-mirror` | split-screen: physical ring vs mirror |

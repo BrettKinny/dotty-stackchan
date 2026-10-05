@@ -17,12 +17,14 @@ import sys
 import threading
 import time
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 # Make the package importable as `pi_voice.*` regardless of cwd.
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
-from pi_client import PiClient, PiClientError  # noqa: E402
+from pi_client import PiClient, PiClientError, _run_container_voice_tool  # noqa: E402
 
 
 class FakePopen:
@@ -156,6 +158,7 @@ class TestSpawnOnce(unittest.TestCase):
                     for cmd in fake.stdin_lines:
                         if cmd.get("type") == "new_session":
                             fake.emit({
+                                "id": cmd["id"],
                                 "type": "response", "command": "new_session",
                                 "success": True,
                             })
@@ -169,6 +172,82 @@ class TestSpawnOnce(unittest.TestCase):
             self.assertEqual(chunks, ["bye"])
 
             self.assertEqual(client._spawn_count[0], 1, "must only spawn once")
+        finally:
+            client.close()
+
+    def test_new_session_ignores_stale_response_until_matching_ack(self):
+        fake = FakePopen()
+        client = make_client(fake)
+        stale_emitted = threading.Event()
+        release_matching = threading.Event()
+        errors: list[BaseException] = []
+
+        def responder():
+            while True:
+                time.sleep(0.01)
+                for cmd in fake.stdin_lines:
+                    if cmd.get("type") == "new_session":
+                        fake.emit({
+                            "id": "nsess-stale",
+                            "type": "response",
+                            "command": "new_session",
+                            "success": False,
+                            "error": "stale failure",
+                        })
+                        stale_emitted.set()
+                        release_matching.wait(timeout=2)
+                        fake.emit({
+                            "id": cmd["id"],
+                            "type": "response",
+                            "command": "new_session",
+                            "success": True,
+                        })
+                        return
+
+        def reset_session():
+            try:
+                client.new_session()
+            except BaseException as exc:  # captured for the main test thread
+                errors.append(exc)
+
+        threading.Thread(target=responder, daemon=True).start()
+        reset = threading.Thread(target=reset_session)
+        reset.start()
+        try:
+            self.assertTrue(stale_emitted.wait(timeout=1))
+            time.sleep(0.05)
+            self.assertTrue(reset.is_alive(), "stale response must not complete reset")
+            release_matching.set()
+            reset.join(timeout=2)
+            self.assertFalse(reset.is_alive())
+            self.assertEqual(errors, [])
+        finally:
+            release_matching.set()
+            reset.join(timeout=2)
+            client.close()
+
+    def test_new_session_raises_on_matching_failure(self):
+        fake = FakePopen()
+        client = make_client(fake)
+
+        def responder():
+            while True:
+                time.sleep(0.01)
+                for cmd in fake.stdin_lines:
+                    if cmd.get("type") == "new_session":
+                        fake.emit({
+                            "id": cmd["id"],
+                            "type": "response",
+                            "command": "new_session",
+                            "success": False,
+                            "error": "reset refused",
+                        })
+                        return
+
+        threading.Thread(target=responder, daemon=True).start()
+        try:
+            with self.assertRaisesRegex(PiClientError, "reset refused"):
+                client.new_session()
         finally:
             client.close()
 
@@ -358,6 +437,50 @@ class TestTurnTimeout(unittest.TestCase):
         finally:
             client.close()
 
+
+class TestContainerVoiceToolRunner(unittest.TestCase):
+    def test_rejects_tools_outside_allowlist_without_spawning(self):
+        with patch("pi_client.subprocess.run") as run:
+            with self.assertRaisesRegex(PiClientError, "unsupported"):
+                _run_container_voice_tool("dotty-pi", "play_song", {"name": "x"})
+        run.assert_not_called()
+
+    def test_rejects_malformed_json_output(self):
+        completed = SimpleNamespace(returncode=0, stdout="not-json", stderr="")
+        with patch("pi_client.subprocess.run", return_value=completed):
+            with self.assertRaisesRegex(PiClientError, "invalid JSON"):
+                _run_container_voice_tool("dotty-pi", "remember", {"fact": "x"})
+
+    def test_rejects_non_string_result(self):
+        completed = SimpleNamespace(
+            returncode=0, stdout='{"result":42}', stderr="",
+        )
+        with patch("pi_client.subprocess.run", return_value=completed):
+            with self.assertRaisesRegex(PiClientError, "non-string"):
+                _run_container_voice_tool("dotty-pi", "remember", {"fact": "x"})
+
+
+
+class TestDirectToolTimeouts(unittest.TestCase):
+    """think_hard may wait for a cold 27B load; quick tools must stay quick."""
+
+    def _timeout_for(self, name: str, argument: str) -> float:
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen["timeout"] = kwargs["timeout"]
+            return SimpleNamespace(returncode=0, stdout=json.dumps({"result": "ok"}), stderr="")
+
+        with patch("pi_client.subprocess.run", fake_run):
+            _run_container_voice_tool("dotty-pi", name, {argument: "x"})
+        return seen["timeout"]
+
+    def test_think_hard_outlasts_the_reasoner_cold_start(self):
+        self.assertGreaterEqual(self._timeout_for("think_hard", "question"), 100)
+
+    def test_memory_tools_keep_a_short_timeout(self):
+        self.assertEqual(self._timeout_for("memory_lookup", "query"), 60)
+        self.assertEqual(self._timeout_for("remember", "fact"), 60)
 
 if __name__ == "__main__":
     unittest.main()

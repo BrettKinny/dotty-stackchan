@@ -61,7 +61,7 @@ Solid arrows are per-turn data flow; dotted arrows are cloud / conditional. All 
 
 | Actor | Host | Role | Process |
 |---|---|---|---|
-| **StackChan** | Desk | Captures audio, plays audio, renders face, runs MCP tools for head/LED/camera | ESP32-S3 firmware built from `m5stack/StackChan` |
+| **StackChan** | Desk | Captures audio, plays audio, renders face, runs MCP tools for head/LED/camera | ESP32-S3 firmware built from the pinned `BrettKinny/StackChan@dotty` fork |
 | **xiaozhi-esp32-server** | Docker host | VAD → ASR → LLM (proxy) → TTS pipeline, emotion dispatch, OTA, admin surface | Docker container |
 | **PiVoiceLLM custom provider** | Docker host (inside xiaozhi container) | Default LLM provider — translates each voice turn into a pi RPC request, streams TTS-bound text back | Python, mounted via volume |
 | **dotty-pi** | Docker host | The voice-tool brain — pi coding agent with the `dotty-pi-ext` extension; owns the agent loop and tool dispatch | Docker container (`dotty-pi`) |
@@ -208,7 +208,7 @@ The xiaozhi-server's `EventTextMessageHandler` (`custom-providers/xiaozhi-patche
 | Consumer | What it does |
 |---|---|
 | `FaceGreeter` | "Hi!" greeting (via `/xiaozhi/admin/inject-text`) on first face detection after a cooldown window. |
-| `SoundTurner` | Head-turn (via `/xiaozhi/admin/set-head-angles`) toward sound direction. |
+| `SoundTurner` | Head-turn (via `/xiaozhi/admin/set-head-angles`) toward sound direction. **Off by default** (`SOUND_TURN_ENABLED=0`) — the firmware localizer is stuck-left (#27), so it only ever turned left. |
 | `FaceLostAborter` | Aborts an in-flight TTS turn (via `/xiaozhi/admin/abort`) when the audience walks away. |
 | `WakeWordTurner` | Head-turn toward the speaker on wake-word event. |
 | `FaceIdentifiedRefresher` | Re-asserts the face-identified pixel every ~3 s so the firmware's 4 s timeout doesn't drop it. |

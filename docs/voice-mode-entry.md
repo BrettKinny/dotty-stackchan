@@ -7,6 +7,8 @@ description: Every way to invite Dotty into a voice turn — wake word, face det
 
 A "voice turn" is the moment Dotty switches from passive idle to actively listening: the wake-word path opens, the mic opens, ASR captures speech, the LLM responds, and TTS plays. There are four distinct ways to enter that state today. This page collects them in one place, with a comparison table at the end so you can pick the right one for the room you're in.
 
+**Idle is not sleep.** In [privacy sleep](./modes.md#wake-from-sleep-edges), face detection, voice processing, and wake-word detection are disabled. Head touch or an explicit dashboard/admin state change must exit sleep first. The entry paths below describe an awake device; injected text is not evidence of acoustic wake.
+
 The default phrase is **"Hi, ESP"** (firmware shipped this as the default in a recent change). See [wake-word.md](./wake-word.md) for how to change it.
 
 ## Entry paths
@@ -15,7 +17,7 @@ The default phrase is **"Hi, ESP"** (firmware shipped this as the default in a r
 
 > **"Hi, ESP" (default), "Hi, Stack Chan", "Computer", or any of the prebuilt WakeNet9 phrases.**
 
-The classic path. The mic is always sampling at low cost (AFE + WakeNet9 INT8 on the ESP32-S3). When the wake-net spots the phrase, `Application::HandleWakeWordDetectedEvent` opens the WebSocket and the robot transitions to listening. Works with no line of sight, no touch, no LAN. **Requires the user to speak.**
+The classic path. While awake with wake-word detection armed, the mic samples at low cost (AFE + WakeNet9 INT8 on the ESP32-S3). When the wake-net spots the phrase, `Application::HandleWakeWordDetectedEvent` opens the WebSocket and the robot transitions to listening. Detection is local and needs no line of sight or touch; opening the server conversation still needs connectivity. **Requires the user to speak. Disabled during privacy sleep.**
 
 Cross-link: [wake-word.md](./wake-word.md) covers the whole stack — current model, the five-minute switch to a different prebuilt, and the long-term branded "Hey Dotty" microWakeWord roadmap.
 
@@ -25,13 +27,15 @@ The on-device face tracker (PSRAM-mounted ESP-WHO model in `firmware/firmware/ma
 
 A per-device minimum interval (`FACE_GREET_MIN_INTERVAL_SEC`, default 30 s) stops a stationary user from re-triggering on every blink of the tracker. Set `FACE_GREET_TEXT=""` to suppress the verbal greeting and just open the mic silently — these knobs live in `dotty-behaviour/config.py`.
 
-**Requires line of sight.** Useless in the dark or when the camera is occluded.
+**Requires line of sight and an enabled face detector.** Unavailable in privacy sleep, in the dark, or when the camera is occluded. The StateManager face hook only enters `talk` from `idle`; it does not wake `sleep`.
 
 ### 3. Head-pet hold — firmware
 
 > **Hold a finger on Dotty's head capacitive pad for ≥2 seconds.**
 
 Shipped in firmware commit `e8370d2`. The head-pet handler distinguishes a quick swipe (visual purr feedback only — see Path B in `head_pet.h`) from a sustained hold; on hold-detected the firmware fires `Application::WakeWordInvoke("head_pet_hold")` directly, which is exactly what the wake-net would do for a real wake-word hit. The mic opens, no audible cue.
+
+When asleep, the initial capacitive **press** first invokes `onHeadPet`, changing `sleep` to `idle` and lifting the privacy gate. A continued ≥2-second hold separately requests listening. A brief touch wakes without itself requesting a voice turn; normal face detection may engage `talk` after wake.
 
 This is the **dark-room friendly** entry point: works with no light, no line of sight, no spoken phrase. Brett's primary use case is morning interactions before the lights are up.
 
@@ -41,16 +45,20 @@ This is the **dark-room friendly** entry point: works with no light, no line of 
 
 This is the path the portal "Greet" button and `dotty-behaviour` consumers (e.g. `face_greeter`) use. Strictly speaking it doesn't enter voice mode — it bypasses the listen pipeline entirely and inserts text directly into the LLM turn, skipping wake-word + ASR. Useful when you want Dotty to say something **without anyone needing to be physically present**: scheduled greetings, DM-style admin messages, automation hooks. Not exposed to the public internet.
 
+For a sleeping device, use the explicit `/xiaozhi/admin/set-state` endpoint with `state: "idle"` before testing a conversation. An injected prompt is an administrative test, not a physical sleep-wake or ASR test.
+
 ## Comparison
 
 | Entry path | Works in dark | Line of sight | Spoken utterance | Touch | LAN admin | Cooldown |
 |---|---|---|---|---|---|---|
-| Wake word ("Hi, ESP") | yes | no | yes | no | no | none (always armed) |
+| Wake word ("Hi, ESP") | yes | no | yes | no | no | none while armed; disabled in privacy sleep |
 | Face detected | no | yes | no | no | no | per-device, `FACE_GREET_MIN_INTERVAL_SEC` |
 | Head-pet hold (≥2 s) | yes | no | no | yes | no | none (immediate WakeWordInvoke) |
 | `/admin/inject-text` | yes | no | no | no | yes | none |
 
 ## Choosing for your room
+
+These choices assume Dotty is awake. In privacy sleep, touch the head or explicitly select `idle` in the dashboard first.
 
 - **Lights on, you're across the room**: wake word.
 - **Lights on, you're right in front of Dotty**: face detection beats waiting for the wake-net every time.
@@ -65,3 +73,5 @@ This is the path the portal "Greet" button and `dotty-behaviour` consumers (e.g.
 - [voice-pipeline.md](./voice-pipeline.md) — what happens *after* the listen window opens (VAD → ASR → LLM → TTS).
 - [modes.md](./modes.md) — the broader mode taxonomy and LED contract.
 - [interaction-map.md](./interaction-map.md) — every Dotty-side input/output, including the non-voice ones.
+
+Sleep-entry distinctions source-audited against active firmware `3140f03` on 2026-09-12. Documentation correction AI-assisted by OpenAI Codex (GPT-6).
