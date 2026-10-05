@@ -1118,6 +1118,10 @@ async def startToChat(conn: "ConnectionHandler", text):
         return
 
     await send_stt_message(conn, actual_text)
+    # DOTTY-PATCH: an abort cancels the turn in flight, not the ones after it.
+    # Nothing else on the `nointent` path clears this, so a single abort frame
+    # left conn.chat() breaking out of every later reply until reconnect.
+    conn.client_abort = False
 
     thinking_frame = json.dumps({
         "type": "llm",
