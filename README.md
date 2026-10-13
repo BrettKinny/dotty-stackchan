@@ -36,7 +36,7 @@ Full policy: [`AI_TRANSPARENCY.md`](./AI_TRANSPARENCY.md).
 - **Streaming responses** — the bridge streams LLM output to the voice pipeline for lower perceived latency.
 - **Emoji expressions** — every response starts with an emoji that the firmware maps to a face animation (smile, laugh, sad, surprise, thinking, angry, love, sleepy, neutral).
 - **Voice tools** — the pi agent can search its memory, escalate hard questions to a bigger model, take a photo, and play songs, all mid-conversation.
-- **States, toggles & LEDs** — a six-state mutex (`idle / talk / story_time / security / sleep / dance`) plus two orthogonal toggles (`kid_mode`, `smart_mode`), all owned by the firmware StateManager and surfaced on the 12-pixel LED ring. Shipped on the active firmware fork (commit `d78118b`, 2026-04-27); the `firmware/firmware/` submodule pin in this repo lags, so flash from the active fork to get it. See "States, Toggles & LEDs" below and [`docs/modes.md`](./docs/modes.md).
+- **States, toggles & LEDs** — a six-state mutex (`idle / talk / story_time / security / sleep / dance`) plus two orthogonal toggles (`kid_mode`, `smart_mode`), all owned by the firmware StateManager and surfaced on the 12-pixel LED ring. Shipped on the active firmware fork (commit `d78118b`, 2026-04-27) and included in the release pin checked on 2026-09-12 (`969c2b2`). Later fixes may still differ between the release pin and active fork; see [`docs/modes.md`](./docs/modes.md).
 - **Vision (camera)** — the robot's built-in camera can capture images for multimodal LLM queries.
 - **Privacy LEDs** — hardware-bound mic (green) and camera (red) indicators on the LED ring. They light from the codec/camera enable signals via RAII guards, so a misbehaving server or model can't capture with the lights off.
 - **Calendar context** — optional calendar integration feeds upcoming events into the conversation context.
@@ -46,7 +46,7 @@ Full policy: [`AI_TRANSPARENCY.md`](./AI_TRANSPARENCY.md).
 
 Behaviour is a **six-state mutex** (`idle / talk / story_time / security / sleep / dance`) plus two orthogonal toggles (`kid_mode`, `smart_mode`), all owned by the firmware StateManager (shipped on the active fork in commit `d78118b`, 2026-04-27; bench checks tracked in [#38](https://github.com/BrettKinny/dotty-stackchan/issues/38)). Voice phrases, camera edges, and dashboard controls all flow through it.
 
-> Note: the `firmware/firmware/` submodule pin in this repo deliberately lags the active fork — flashing from the submodule won't give you Phase 4 yet. See the "Firmware iteration" section in [`CLAUDE.md`](./CLAUDE.md) and the submodule-pin caveat in [`docs/modes.md`](./docs/modes.md).
+> Note: `firmware/` is a release pointer, not the active development checkout. The historical `35f701a` pin predates Phase 4; the pin checked on 2026-09-12 (`969c2b2`) includes it. Check your actual revision for subsequent fixes. See the "Firmware iteration" section in [`CLAUDE.md`](./CLAUDE.md) and the submodule-pin caveat in [`docs/modes.md`](./docs/modes.md).
 
 The 12-pixel LED ring shows the current state at a glance. **Left ring 0-5 is the state arc** — all six pixels paint the state colour, matching the dashboard's state buttons:
 
@@ -56,12 +56,12 @@ The 12-pixel LED ring shows the current state at a glance. **Left ring 0-5 is th
 | 🟢 | `talk` — conversation engaged. |
 | 🟠 | `story_time` — long-running interactive story. |
 | ⚪ | `security` — watching the room (1 Hz white flash). |
-| 🔵 | `sleep` — quiescent, mic open for "wake up". |
+| 🔵 | `sleep` — privacy sleep: face detection, voice processing, and wake-word detection off; wake by head touch or explicit dashboard state change. |
 | 🟣 | `dance` — rainbow sweep + choreography. |
 
 On the right ring, **indices 8-9 are toggle pips** for kid_mode (salmon pink) and smart_mode (orange), and **index 11 (bottom) lights red while you have the turn** (LISTENING). The `idle → talk` transition fires on `face_detected` from the firmware; VLM identity recognition runs in parallel and feeds the LLM context.
 
-> Heads up: that right-ring layout is the active-fork StateManager. On the firmware **submodule pinned in this repo**, pixels 6 and 11 instead drive the **privacy LEDs** — 6 = mic (green), 11 = camera (red) — and the StateManager pips arrive once the submodule catches up to the active fork.
+> Heads up: the historical pre-StateManager build (`35f701a`) used a different right-ring layout: 6 = mic (green), 11 = camera (red). The release pin checked on 2026-09-12 already includes StateManager. Interpret indicators against the actual firmware revision, not the old pre-StateManager layout.
 
 Full state taxonomy, colour palette, transition diagram, and per-state backing architecture: [`docs/modes.md`](./docs/modes.md).
 

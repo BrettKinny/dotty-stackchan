@@ -9,7 +9,7 @@ One-page reference for every cross-layer signal in the Dotty stack.
 
 **Layers:**
 
-1. **StackChan firmware** -- ESP32-S3 (m5stack/StackChan). The physical robot.
+1. **StackChan firmware** -- ESP32-S3 (`BrettKinny/StackChan@dotty`, forked from `m5stack/StackChan`). The physical robot.
 2. **xiaozhi-esp32-server** -- Docker on a Linux host. Voice I/O pipeline (ASR, TTS, VAD, emotion parsing).
 3. **dotty-pi** -- the pi coding agent (Docker container on the same host). The LLM brain; reached by xiaozhi-server's `PiVoiceLLM` provider via `docker exec` pi RPC. (Ambient perception runs in a sibling `dotty-behaviour` container — see [architecture.md](./architecture.md).)
 

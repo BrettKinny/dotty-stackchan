@@ -40,16 +40,23 @@ services:
       - XIAOZHI_OTA_PORT=8003
       # llama-swap for narrative LLM (dreams, dance reflections, scene synth)
       - NARRATIVE_LLM_URL=http://127.0.0.1:8080/v1
-      - NARRATIVE_MODEL=qwen3.6:27b-think
+      # Overridable from the host-resident .env (compose reads it for
+      # interpolation too) — e.g. point narrative writes at a model that is
+      # already resident so they don't evict the voice model.
+      - NARRATIVE_MODEL=${NARRATIVE_MODEL:-qwen3.6:27b-think}
       - NARRATIVE_TIMEOUT_SEC=90
       # NDJSON log root
       - CONVO_LOG_DIR=/var/lib/dotty-behaviour/logs
       # Daemon state (kid-mode/smart-mode toggle files, greeter state,
       # household.yaml)
       - DOTTY_STATE_DIR=/var/lib/dotty-behaviour/state
+      # Voice-camera policy must follow the guardian's live shared toggle.
+      - DOTTY_KID_MODE_STATE=/var/lib/dotty-bridge/state/kid-mode
       - HOUSEHOLD_YAML_PATH=/var/lib/dotty-behaviour/state/household.yaml
       - GREETER_STATE_PATH=/var/lib/dotty-behaviour/state/greeter_state.json
     volumes:
+      # Read-only directory mount follows atomic replacement of the state file.
+      - /mnt/user/appdata/dotty-bridge/state:/var/lib/dotty-bridge/state:ro
       - /mnt/user/appdata/dotty-behaviour/state:/var/lib/dotty-behaviour/state
       - /mnt/user/appdata/dotty-behaviour/logs:/var/lib/dotty-behaviour/logs
       - /mnt/user/appdata/dotty-behaviour/secrets:/var/lib/dotty-behaviour/secrets:ro

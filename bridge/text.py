@@ -144,15 +144,23 @@ def content_filter(text: str) -> str | None:
         "content-filter-hit tier=%s pattern=%r pos=%d len=%d",
         tier, match.group(), match.start(), len(text),
     )
+    record_content_filter_hit(tier, match.group(), text[:8])
+    return CONTENT_FILTER_REPLACEMENT
+
+
+def record_content_filter_hit(tier: str, rule: str, prefix: str = "") -> None:
+    """Add a hit to the /ui/safety/recent ring and bump the Prometheus
+    counter. Called by content_filter() and by the /api/voice/filter-hit
+    ingress, where the voice provider reports hits it made in the xiaozhi
+    container."""
     _cf_recent.append({
         "ts": time.time(),
         "tier": tier,
-        "rule": match.group(),
-        "prefix": text[:8],
+        "rule": rule,
+        "prefix": prefix[:8],
     })
     if dotty_content_filter_hits_total is not None:
         try:
             dotty_content_filter_hits_total.labels(tier=tier).inc()
         except Exception:
             pass
-    return CONTENT_FILTER_REPLACEMENT

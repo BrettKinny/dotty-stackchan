@@ -1,0 +1,24 @@
+{
+  "ai_assistance": "OpenAI Codex (GPT-6), human-directed overnight session",
+  "cases": [
+    {"id":"V01-identity","feature":"warm conversation identity/recovery","prompt":"What is your name? Please answer in one short sentence.","asr":[["name"]],"reply":[["Dotty","Dottie","Dotti"]],"seconds":35,"recovery_policy":"ready_for_followup","soak_safe":true,"max_response_words":40},
+    {"id":"V02-repeat","feature":"ASR/constrained reply","prompt":"Repeat these five words: purple, robot, seven, window, Brisbane.","asr":[["purple"],["robot"],["seven","7"],["window"],["Brisbane"]],"reply":[["purple"],["robot"],["seven","7"],["window"],["Brisbane"]],"seconds":35,"recovery_policy":"ready_for_followup","soak_safe":true,"max_response_words":25},
+    {"id":"V03-arithmetic","feature":"comprehension/recovery","prompt":"What is twelve plus seven? Just say the answer.","asr":[["twelve","12"],["seven","7"]],"reply":[["nineteen","19"]],"seconds":35,"recovery_policy":"ready_for_followup","soak_safe":true,"max_response_words":10},
+    {"id":"V04-tiny-review","feature":"persona/short response","prompt":"Give yourself a very tiny performance review in two funny sentences.","asr":[["performance","review"]],"reply":[],"seconds":45,"recovery_policy":"ready_for_followup","soak_safe":true,"max_response_words":60},
+    {"id":"V05-toaster","feature":"creative explanation","prompt":"Explain gravity to a sleepy toaster in two short sentences.","asr":[["gravity"],["toaster"]],"reply":[["gravity","fall","pull","ground"]],"seconds":45,"recovery_policy":"ready_for_followup","soak_safe":true,"max_response_words":60},
+    {"id":"V06-robot-joke","feature":"expressive speech","prompt":"Tell me one short joke about being a very small robot.","asr":[["joke"],["robot"]],"reply":[],"seconds":45,"recovery_policy":"ready_for_followup","soak_safe":true,"max_response_words":60},
+    {"id":"W01-cold-wake","feature":"cold wake word","prompt":"Hi E S P. What is your name?","asr":[["name"]],"reply":[["Dotty","Dottie"]],"seconds":35,"require_wake_event":true,"recovery_policy":"ready_for_followup","required_passes":10,"enabled":false},
+    {"id":"V07-hard-thinking","feature":"think_hard","prompt":"Hi E S P. Think hard: if all wugs are blue and some blue things are round, must some wugs be round? Give one sentence.","asr":[["blue"],["round"]],"reply":[["no","not necessarily","cannot","can't"]],"seconds":110,"enabled":false},
+    {"id":"S01-sleep","feature":"sleep entry","prompt":"Hi E S P. Goodnight Dotty. Go to sleep.","asr":[["goodnight","good night","sleep"]],"reply":[],"resting_states":["sleep"],"seconds":50,"enabled":false},
+    {"id":"S02-wake","feature":"wake from sleep","prompt":"Hi E S P. Wake up. What is your name?","asr":[["wake"],["name"]],"reply":[["Dotty","Dottie"]],"seconds":65,"enabled":false}
+  ],
+  "pending_coverage": [
+    {"feature":"physical touch, face tracking/loss, spatial sound localization","status":"BLOCKED","reason":"requires physical stimuli; synthetic events only prove downstream consumers"},
+    {"feature":"screen, LEDs, movement and Shorts framing","status":"BLOCKED","reason":"preflight framing crops body and shows screen obliquely"},
+    {"feature":"memory/person tools","status":"PENDING","reason":"isolate fixture writes and preserve household records"},
+    {"feature":"think_hard and cached take_photo","status":"PENDING","reason":"need explicit tool/result assertions and deployed capability check"},
+    {"feature":"states, toggles, songs, reminders, interruption","status":"PENDING","reason":"run after acoustic baseline; per-feature cleanup required"},
+    {"feature":"dashboard, enabled ambient consumers, restart recovery","status":"PENDING","reason":"inventory live configuration and establish baseline first"},
+    {"feature":"story/security full backing and smart-model swap","status":"PENDING","reason":"reconcile code with live deployment; do not implement missing features"}
+  ]
+}

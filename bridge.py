@@ -15,12 +15,14 @@ running in dotty-behaviour.
 """
 
 import asyncio
+import hmac
 import json
 import logging
 import os
 import re
 import sys
 import time
+from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -596,25 +598,19 @@ def _dashboard_last_user_line_getter(device_id: str) -> dict | None:
     return None
 
 
-def _dashboard_sound_balance_series() -> list[float]:
-    """Live sound_event balance series from dotty-behaviour.
+def _dashboard_open_perception_feed() -> Any:
+    """Open dotty-behaviour's perception SSE stream for the dashboard proxy.
 
-    Picks the first device with perception state (single-robot
-    deployment heuristic — matches the device-picking strategy used
-    for the perception card) and reads its sound-balance ring via
-    /api/perception/sound-balance/{device_id}. Same cache + timeout +
-    circuit-breaker contract as the other dotty-behaviour-backed
-    getters — returns ``[]`` on any failure."""
-    state = _dashboard_perception_state_getter()
-    device_id = next(iter(state), None) if isinstance(state, dict) else None
-    if not device_id:
-        return []
-    result = _dotty_behaviour_get(
-        f"/api/perception/sound-balance/{device_id}",
-        {"limit": 30},
-        [],
+    Returns a streaming ``requests.Response`` (caller closes it). The read
+    timeout sits above the upstream's 15 s keepalive so an idle-but-healthy
+    stream never trips it. Raises on connect failure / non-2xx."""
+    r = requests.get(
+        f"{DOTTY_BEHAVIOUR_URL}/api/perception/feed",
+        stream=True,
+        timeout=(_DOTTY_BEHAVIOUR_TIMEOUT_SEC, 30.0),
     )
-    return result if isinstance(result, list) else []
+    r.raise_for_status()
+    return r
 
 
 def _dashboard_vision_failures_last_hour() -> dict[str, int]:
@@ -631,10 +627,30 @@ def _identity_display_name(identity: str) -> str | None:
     return None
 
 
-# Stub SSE plumbing — kept so /ui/events still wakes the queue handler
-# (sends heartbeats) when the browser subscribes. No producer is wired in
-# bridge.py post-#111; convo turns are owned by dotty-pi now.
+# Turn stream — /ui/events subscribers plus the recent-turns ring behind
+# the Turns tab, Errors count and error report. Voice turns are owned by
+# dotty-pi since #111, so the PiVoiceLLM provider reports each completed
+# turn to /api/voice/turn (below). In-memory ONLY: the ring is lost on
+# restart and transcripts are never written to disk.
 _dashboard_event_listeners: list[asyncio.Queue] = []
+_DASHBOARD_TURNS_MAX = 200
+_dashboard_recent_turns: "deque[dict]" = deque(maxlen=_DASHBOARD_TURNS_MAX)
+
+
+def _dashboard_publish_turn(record: dict) -> None:
+    """Record a completed turn and fan it out to /ui/events subscribers.
+    A slow subscriber's full queue drops the event rather than blocking."""
+    _dashboard_recent_turns.append(record)
+    for q in list(_dashboard_event_listeners):
+        try:
+            q.put_nowait(record)
+        except asyncio.QueueFull:
+            pass
+
+
+def _dashboard_recent_turns_getter() -> list[dict]:
+    """Recent turns, oldest first."""
+    return list(_dashboard_recent_turns)
 
 
 def _dashboard_subscribe_events() -> asyncio.Queue:
@@ -764,6 +780,7 @@ if _configure_dashboard is not None:
         abort_device=_dashboard_abort_device,
         subscribe_events=_dashboard_subscribe_events,
         unsubscribe_events=_dashboard_unsubscribe_events,
+        recent_turns_getter=_dashboard_recent_turns_getter,
         perception_state_getter=_dashboard_perception_state_getter,
         perception_recent_getter=_dashboard_perception_recent_getter,
         memory_records_getter=_dashboard_memory_records,
@@ -771,9 +788,72 @@ if _configure_dashboard is not None:
         memory_redact=_dashboard_memory_redact,
         identity_display_name=_identity_display_name,
         last_user_line_getter=_dashboard_last_user_line_getter,
-        sound_balance_getter=_dashboard_sound_balance_series,
+        perception_feed_opener=_dashboard_open_perception_feed,
         vision_failures_getter=_dashboard_vision_failures_last_hour,
     )
+
+
+# ---------------------------------------------------------------------------
+# /api/voice/* — turn + filter-hit reports from the voice provider
+# ---------------------------------------------------------------------------
+# PiVoiceLLM runs inside the xiaozhi container, so the bridge only learns
+# about a voice turn if the provider tells it. Guarded by the same shared
+# X-Admin-Token as /xiaozhi/admin/* when DOTTY_ADMIN_TOKEN is set; open on
+# the LAN otherwise, matching the rest of the stack's unset-token posture.
+
+_VOICE_TEXT_MAX = 2000
+
+
+def _voice_require_admin_token(request: Request) -> None:
+    if not _ADMIN_TOKEN:
+        return
+    supplied = request.headers.get("X-Admin-Token", "")
+    if not hmac.compare_digest(supplied.encode(), _ADMIN_TOKEN.encode()):
+        raise HTTPException(status_code=401, detail="bad admin token")
+
+
+class _VoiceTurnIn(BaseModel):
+    request_text: str = ""
+    response_text: str = ""
+    latency_ms: int | None = None
+    error: str | None = None
+    channel: str = "dotty"
+
+
+class _VoiceFilterHitIn(BaseModel):
+    tier: str
+    rule: str = ""
+    prefix: str = ""
+
+
+_voice_router = APIRouter(
+    prefix="/api/voice", dependencies=[Depends(_voice_require_admin_token)],
+)
+
+
+@_voice_router.post("/turn")
+async def _voice_turn(payload: _VoiceTurnIn) -> dict:
+    _dashboard_publish_turn({
+        "ts": time.time(),
+        "channel": payload.channel[:32] or "dotty",
+        "request_text": payload.request_text[:_VOICE_TEXT_MAX],
+        "response_text": payload.response_text[:_VOICE_TEXT_MAX],
+        "latency_ms": payload.latency_ms,
+        "error": (payload.error or "")[:500] or None,
+    })
+    return {"ok": True}
+
+
+@_voice_router.post("/filter-hit")
+async def _voice_filter_hit(payload: _VoiceFilterHitIn) -> dict:
+    from bridge.text import record_content_filter_hit
+    record_content_filter_hit(
+        payload.tier[:16], payload.rule[:64], payload.prefix,
+    )
+    return {"ok": True}
+
+
+app.include_router(_voice_router)
 
 
 # ---------------------------------------------------------------------------

@@ -561,7 +561,7 @@
   }
   (function () {
     if (typeof EventSource === 'undefined') return;
-    var psrc = new EventSource('/api/perception/feed');
+    var psrc = new EventSource('/ui/perception/feed');
     psrc.onmessage = function (ev) {
       var data;
       try { data = JSON.parse(ev.data); } catch (e) { return; }

@@ -552,16 +552,18 @@ class SimpleHttpServer:
         )
 
         sentence_id = _uuid.uuid4().hex
+        server_push_ids = getattr(conn, "_dotty_server_push_sentence_ids", None)
+        if server_push_ids is None:
+            server_push_ids = set()
+            conn._dotty_server_push_sentence_ids = server_push_ids
 
         def _enqueue() -> None:
             try:
-                # The consumer thread filters with
-                # `message.sentence_id != self.conn.sentence_id` and
-                # drops anything that doesn't match — so we stamp the
-                # conn with our new id BEFORE putting messages on the
-                # queue. This will pre-empt any in-flight TTS for this
-                # conn, which is acceptable for server-pushed greetings
-                # (they shouldn't race a chat turn in normal operation).
+                # Stamp the connection so an idle device treats this as its
+                # active utterance. Explicitly register this ID as a server
+                # push so the patched TTS consumer accepts it independently
+                # if a concurrent chat replaces conn.sentence_id (#104).
+                server_push_ids.add(sentence_id)
                 #
                 # Frame the utterance with FIRST/MIDDLE/LAST: FIRST inits
                 # consumer state, MIDDLE carries the text into the
@@ -589,6 +591,12 @@ class SimpleHttpServer:
         # The puts are sync on a thread-safe queue, but we hop a thread
         # so the aiohttp loop never blocks on producer-side contention.
         await asyncio.to_thread(_enqueue)
+        # Consumers need the marker through text synthesis and audio queuing,
+        # but not forever. Expiry bounds per-connection state without risking
+        # eviction of an active push during a short burst.
+        asyncio.get_running_loop().call_later(
+            120.0, server_push_ids.discard, sentence_id,
+        )
         self.logger.bind(tag=TAG).info(
             f"say queued device={resolved_id} sid={sentence_id[:8]} "
             f"text={text[:60]!r}"

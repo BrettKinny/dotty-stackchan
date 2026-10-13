@@ -10,7 +10,10 @@
 
 const DEFAULT_URL =
   process.env.VOICE_THINKER_URL ?? "http://localhost:8080/v1/chat/completions";
-const DEFAULT_TIMEOUT_SEC = Number(process.env.VOICE_THINKER_TIMEOUT ?? "30");
+// 90 s, not 30: the reasoner is not kept resident, and a cold load alone is
+// 30-50 s. At 30 s the first think_hard after any idle period was cancelled
+// mid-load (llama-swap logged "502 … context canceled" at ~31 s).
+export const DEFAULT_TIMEOUT_SEC = Number(process.env.VOICE_THINKER_TIMEOUT ?? "90");
 
 export interface ChatCompletionRequest {
   model: string;

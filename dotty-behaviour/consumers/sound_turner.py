@@ -7,6 +7,7 @@ turn that the wake-word consumer does).
 Mirrors bridge.py's `_perception_sound_turner` including:
 
   * skip if face_present (face tracker owns gaze)
+  * skip outside idle or while listening/dancing (those paths own motion)
   * skip if a chat happened within QUIET_AFTER_CHAT_SEC
     (the user's own continuing speech shouldn't yank Dotty around)
   * per-device cooldown
@@ -72,6 +73,10 @@ class SoundTurner:
 
                 now = event.ts
                 dev_state = self._state.state.setdefault(device_id, {})
+                if (self._state.current_device_state(device_id) != "idle"
+                        or dev_state.get("listening")
+                        or self._state.is_dance_active(device_id)):
+                    continue
                 if dev_state.get("face_present"):
                     continue
                 last_chat = dev_state.get("last_chat_t", 0.0)

@@ -3,6 +3,11 @@ FROM ghcr.io/xinnan-tech/xiaozhi-esp32-server@sha256:3accd82a7d1a6c01c58f32f6199
 
 RUN pip install --no-cache-dir piper-tts scipy numpy mido faster-whisper sherpa-onnx==1.13.2
 
+# Patch upstream TTS consumers to treat explicitly registered server-push
+# sentence IDs as independent from chat-turn stale-message arbitration (#104).
+COPY scripts/patch-tts-server-push.py /tmp/patch-tts-server-push.py
+RUN python /tmp/patch-tts-server-push.py /opt/xiaozhi-esp32-server/core/providers/tts
+
 # fluidsynth + General MIDI soundfont for runtime rendering of dance/song MIDI
 # files to Opus. Installed as the LAST layer so iteration on Python deps above
 # doesn't invalidate the soundfont download (~141MB).

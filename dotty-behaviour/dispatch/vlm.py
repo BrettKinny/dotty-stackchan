@@ -85,6 +85,12 @@ class VLMClient:
                 "(VLM_API_KEY/VISION_API_KEY/OPENROUTER_API_KEY all empty)"
             )
             return VLM_OFFLINE_SENTINEL
+        if not self._url:
+            log.error(
+                "VLM call aborted — no endpoint configured "
+                "(VLM_API_URL empty, or blanked by DOTTY_LOCAL_ONLY)"
+            )
+            return VLM_OFFLINE_SENTINEL
         payload = {
             "model": model or self._model,
             "messages": [

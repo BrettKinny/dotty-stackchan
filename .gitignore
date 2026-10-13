@@ -38,6 +38,21 @@ sbom-server.json
 htmlcov/
 .pytest_cache/
 
+# Local UAT evidence. Keep compact manifests/results/draft issue summaries
+# visible for selective review, but never offer raw household media, event
+# streams, health snapshots, or container logs for an accidental commit.
+/uat-sessions/**/video/
+/uat-sessions/**/clips/
+/uat-sessions/**/logs/
+/uat-sessions/**/ndjson/
+/uat-sessions/**/snapshots/
+
+# Generated audit/session outputs. These can contain machine-local paths,
+# prompts, or deployment observations; regenerate or curate before publishing.
+/AUDIT-REPORT.md
+/audit-draft-issues.md
+/pi-session-*.html
+
 # Frontend build deps for the dashboard's vendored Tailwind bundle.
 # package.json + tailwind.config.js are committed; build artifacts and
 # the npm install state are not. Re-run `npm install && npm run build:css`

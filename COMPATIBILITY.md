@@ -13,11 +13,16 @@ For protocol wire formats see `docs/protocols.md`.
 
 | Component | Current Version | Protocol / Interface | Breaking Change Policy |
 |---|---|---|---|
-| StackChan firmware (m5stack/StackChan v1.2.4) | v1.2.4 | Xiaozhi WebSocket protocol, MCP over WS (JSON-RPC 2.0) | Pin firmware to a known-good build; do not OTA-update without verifying server compatibility first |
+| StackChan firmware (`BrettKinny/StackChan@dotty`) | `fw-v1.3.3` release; submodule `969c2b2` | Xiaozhi WebSocket protocol, MCP over WS (JSON-RPC 2.0), StateManager event contract | Build the pinned submodule; do not substitute the official upstream tree or OTA-update without coordinated verification |
 | xiaozhi-esp32-server (local build) | `xiaozhi-esp32-server-piper:local` | Custom LLM provider API, `.config.yaml` schema, Xiaozhi WS server | Rebuild image only after checking upstream changelog for provider API or config schema changes |
-| dotty-pi (pi agent) | `dotty-pi:0.1.0` | pi RPC (JSONL over stdio), the five `dotty-pi-ext` voice tools | Pin the image tag; pi-version or model changes need end-to-end cutover testing |
+| dotty-pi (pi agent) | `dotty-pi:0.1.0` | pi RPC (JSONL over stdio), the seven `dotty-pi-ext` voice tools | Pin the image tag; pi-version or model changes need end-to-end cutover testing |
 | dotty-behaviour | `dotty-behaviour:0.1.0` | HTTP API (`/api/perception/*`, `/api/vision/*`, `/api/audio/*`, `/health`) | Endpoint signatures stable; perception event-schema changes require firmware + xiaozhi review |
-| bridge.py (dashboard) | unversioned (HEAD) | `/ui` dashboard, `/admin/*`, `/health` | Dashboard/admin service only post-#36; admin route changes require updating dashboard callers |
+| bridge.py (dashboard) | `dotty-bridge:0.1.0` image from repo HEAD | `/ui` dashboard, `/admin/*`, `/health` | Dashboard/admin service only post-#36; admin route changes require updating dashboard callers |
+
+The public `fw-v1.3.3` superproject tag (commit `24a009c`, 2026-07-12) is the
+current coordinated release pointer. It pins firmware submodule `969c2b2` and
+the matching server-side patches. Draft PRs and a dirty submodule are not a
+released compatibility set.
 
 ## What counts as a breaking change
 
@@ -42,27 +47,28 @@ Any of the following require coordinated updates across components:
 
 ## Versioning strategy
 
-No formal versioning is adopted yet (tracked in
-[ROADMAP.md](ROADMAP.md#community-wishlist) under "Firmware/server
-compatibility matrix"). When adopted, the plan is:
+The repo uses separate tag namespaces:
 
-- Separate tag namespaces: `server-vX.Y.Z` and `fw-vX.Y.Z`.
-- This matrix will document which server versions are compatible with which
-  firmware versions.
-- The bridge will carry its own version once it moves to a tagged release
-  cadence.
+- `server-vX.Y.Z` for server-only release milestones.
+- `fw-vX.Y.Z` for coordinated firmware release pointers in this superproject.
+
+Container image tags remain `0.1.0` today and are not sufficient by themselves
+to identify the exact source revision; retain the Git commit/tag alongside a
+deployment record.
 
 ## Upgrade guidance
 
 1. **Check this matrix first.** Confirm the component you are upgrading is
    compatible with the versions of the other components you are running.
-2. **Back up before upgrading.** Run `scripts/backup.sh` (or the equivalent
-   manual steps) to snapshot config, persona files, and bridge state.
+2. **Back up before upgrading.** Manually snapshot `.env`, rendered
+   `data/.config.yaml`, persona/household files, `brain.db` (including WAL/SHM
+   companions), and the bridge state directory. This repo does not currently
+   ship an automated backup script.
 3. **Upgrade one component at a time.** Validate with a health check
    (`curl http://<XIAOZHI_HOST>:8090/health` and `:8081/health`) plus a live
    voice turn before moving to the next component.
-4. **Tail logs during validation.** Watch both the xiaozhi-server container
-   logs and the bridge journal simultaneously to catch mismatches early.
+4. **Tail logs during validation.** Watch the xiaozhi-server, dotty-pi,
+   dotty-behaviour, and bridge container logs together to catch mismatches.
 5. **Roll back if broken.** Restore from the backup taken in step 2 and
    revert to the previous image or binary.
 
@@ -106,4 +112,4 @@ versions work with which firmware versions.
 
 ---
 
-Last verified: 2026-05-22.
+Last verified against the repository and `fw-v1.3.3` pin: 2026-07-16.

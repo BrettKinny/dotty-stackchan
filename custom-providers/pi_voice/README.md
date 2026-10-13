@@ -168,3 +168,20 @@ Conversation logging and explicit memory writes are implemented by the
 - [`../../dotty-pi-ext/README.md`](../../dotty-pi-ext/README.md) — voice-tool extension.
 - [`../textUtils.py`](../textUtils.py) — the shared `build_turn_suffix` sandwich + emoji map.
 - [#36](https://github.com/BrettKinny/dotty-stackchan/issues/36) — cutover plan + soak rule.
+
+## Dashboard reporting
+
+The bridge dashboard never sees a voice turn on its own (turns go straight
+from this provider to `dotty-pi`), so `PiVoiceLLM` reports each completed
+turn to the bridge at `POST /api/voice/turn`, and each kid-mode filter hit at
+`POST /api/voice/filter-hit`. That feeds the dashboard's Turns tab, error
+toast, Errors count/report and Content filter card.
+
+- Fire-and-forget on a daemon thread with a 2 s timeout; failures are
+  swallowed, so a missing dashboard never delays or breaks a turn.
+- Target: `DOTTY_DASHBOARD_URL` if set, otherwise the host from `BRIDGE_URL`
+  / `VISION_BRIDGE_URL` on port 8081. With none set, reporting is off.
+- Sends `X-Admin-Token` when `DOTTY_ADMIN_TOKEN` is set (the bridge enforces
+  it when its own copy is set).
+- The bridge keeps turns in memory only (last 200); nothing is written to
+  disk and the list empties on a bridge restart.

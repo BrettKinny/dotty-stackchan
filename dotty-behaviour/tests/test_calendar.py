@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 
+import config
 from calendar_ import (
     CalendarCache,
     Event,
@@ -143,9 +144,12 @@ def test_cache_set_and_flush() -> None:
     assert c.calendar_date == "2026-05-19"
 
 
-def test_calendar_today_route_returns_shape() -> None:
+def test_calendar_today_route_returns_shape(monkeypatch) -> None:
     """With CALENDAR_IDS unset (test env), the route should respond
     with the empty-cache shape and not blow up trying to fetch."""
+    # Keep this route-shape test hermetic. WEATHER_LOCATION defaults to
+    # Brisbane in production, which would otherwise contact wttr.in.
+    monkeypatch.setattr(config, "WEATHER_LOCATION", "")
     with TestClient(app) as client:
         r = client.get("/api/calendar/today")
         assert r.status_code == 200

@@ -67,7 +67,7 @@ Symptom-first lookup table covering common and obscure failure modes. Pair with 
 **Fix:**
 1. Check the bridge health endpoint: `curl http://<XIAOZHI_HOST>:8081/health`. If the bridge is down, restart it.
 2. Check xiaozhi-server logs: `docker logs -f xiaozhi-esp32-server` on the server. Look for connection attempts from the robot.
-3. Verify the robot's OTA URL hasn't changed. After a firmware update, re-enter the OTA URL (`http://<XIAOZHI_HOST>:8003/xiaozhi/ota/`) in the robot's Advanced Options if needed.
+3. Verify which OTA URL the firmware was built with. The StackChan's on-device Settings app has no OTA URL field. For another self-hosted server, rebuild with `CONFIG_OTA_URL="http://<XIAOZHI_HOST>:8003/xiaozhi/ota/"` and re-flash using [SETUP.md](../SETUP.md#2-build-and-flash-open-firmware). If the device is currently exposing the optional Xiaozhi SoftAP captive portal, its browser-based **Advanced** tab can persist an `ota_url` override instead.
 4. Open the browser test page (`repo/main/xiaozhi-server/test/test_page.html`) and point it at `ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/`. If the browser page works but the robot doesn't, it's a robot-side configuration issue.
 
 ---
