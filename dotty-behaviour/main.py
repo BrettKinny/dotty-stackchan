@@ -62,6 +62,14 @@ log = logging.getLogger("dotty-behaviour")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("dotty-behaviour starting (version=%s)", config.VERSION)
+    if config.LOCAL_ONLY:
+        log.info(
+            "DOTTY_LOCAL_ONLY=1 — outbound routes are LAN-only "
+            "(vlm=%s audio_caption=%s narrative=%s; weather + calendar off)",
+            config.VLM_API_URL or "disabled",
+            config.AUDIO_CAPTION_API_URL or "disabled",
+            config.NARRATIVE_LLM_URL or "disabled",
+        )
     log.info(
         "config: port=%d xiaozhi=%s narrative_model=%s state_dir=%s log_dir=%s",
         config.PORT,

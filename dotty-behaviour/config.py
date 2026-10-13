@@ -9,8 +9,11 @@ dotty_behaviour.config or use the helpers in tests/.
 
 from __future__ import annotations
 
+import ipaddress
+import logging
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 # Version stamp surfaced on /health and in startup logs.
@@ -44,6 +47,60 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+# ---------------------------------------------------------------------------
+# Local-only guard (opt-in). The shipped defaults route vision and audio
+# captioning through a cloud provider so the stack works without a local
+# multimodal model. A deployment that must keep camera frames and room
+# audio on the LAN sets DOTTY_LOCAL_ONLY=1: every outbound URL below that
+# does not point at loopback / a private address / a LAN-only hostname is
+# blanked at import time, so a missing or mistyped override fails closed
+# (the clients refuse to send) instead of falling back to the cloud
+# default. Weather (wttr.in) and Google Calendar are switched off too.
+# ---------------------------------------------------------------------------
+LOCAL_ONLY: bool = os.environ.get("DOTTY_LOCAL_ONLY", "0") in (
+    "1", "true", "True"
+)
+
+_LAN_HOST_SUFFIXES: tuple[str, ...] = (
+    ".local", ".lan", ".internal", ".home.arpa",
+)
+
+
+def is_lan_url(url: str) -> bool:
+    """True when ``url``'s host is loopback, a private / link-local IP,
+    or a hostname that cannot resolve off the LAN (``localhost``, a
+    single-label name, or an mDNS / private-TLD suffix). Never resolves
+    DNS — a public hostname that happens to point at a private IP is
+    treated as not-LAN."""
+    try:
+        host = (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return False
+    if not host:
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return (
+            host == "localhost"
+            or "." not in host
+            or host.endswith(_LAN_HOST_SUFFIXES)
+        )
+    return ip.is_loopback or ip.is_private or ip.is_link_local
+
+
+def _local_only_url(name: str, url: str) -> str:
+    """Blank a non-LAN URL when DOTTY_LOCAL_ONLY is on."""
+    if LOCAL_ONLY and url and not is_lan_url(url):
+        logging.getLogger("dotty-behaviour.config").error(
+            "DOTTY_LOCAL_ONLY=1: %s points off the LAN (%s) — disabled. "
+            "Set it to a local endpoint to re-enable this route.",
+            name, url,
+        )
+        return ""
+    return url
+
+
 # HTTP server
 HOST: str = os.environ.get("DOTTY_BEHAVIOUR_HOST", "0.0.0.0")
 PORT: int = _env_int("DOTTY_BEHAVIOUR_PORT", 8090)
@@ -56,8 +113,9 @@ XIAOZHI_HTTP_PORT: int = _env_int("XIAOZHI_OTA_PORT", 8003)
 
 # Outbound: llama-swap for narrative LLM (dreams, dance reflections,
 # scene synthesis). Mirrors bridge.py's NARRATIVE_LLM_URL.
-NARRATIVE_LLM_URL: str = os.environ.get(
-    "NARRATIVE_LLM_URL", "http://127.0.0.1:8080/v1"
+NARRATIVE_LLM_URL: str = _local_only_url(
+    "NARRATIVE_LLM_URL",
+    os.environ.get("NARRATIVE_LLM_URL", "http://127.0.0.1:8080/v1"),
 )
 NARRATIVE_MODEL: str = os.environ.get("NARRATIVE_MODEL", "qwen3.6:27b-think")
 NARRATIVE_TIMEOUT_SEC: float = _env_float("NARRATIVE_TIMEOUT_SEC", 90.0)
@@ -184,8 +242,11 @@ DREAM_INSPIRATIONS: tuple[str, ...] = (
 VISION_MODEL: str = os.environ.get(
     "VISION_MODEL", "google/gemini-3.1-flash-lite"
 )
-VISION_API_URL: str = os.environ.get(
-    "VISION_API_URL", "https://openrouter.ai/api/v1/chat/completions"
+VISION_API_URL: str = _local_only_url(
+    "VISION_API_URL",
+    os.environ.get(
+        "VISION_API_URL", "https://openrouter.ai/api/v1/chat/completions"
+    ),
 )
 VISION_API_KEY: str = os.environ.get(
     "VISION_API_KEY", os.environ.get("OPENROUTER_API_KEY", "")
@@ -197,7 +258,9 @@ VISION_TIMEOUT_SEC: float = _env_float("VISION_TIMEOUT", 15.0)
 # narrative LLM. Defaults to the legacy VISION_* values.
 VLM_MODEL: str = os.environ.get("VLM_MODEL", VISION_MODEL)
 VLM_API_KEY: str = os.environ.get("VLM_API_KEY", VISION_API_KEY)
-VLM_API_URL: str = os.environ.get("VLM_API_URL", VISION_API_URL)
+VLM_API_URL: str = _local_only_url(
+    "VLM_API_URL", os.environ.get("VLM_API_URL", VISION_API_URL)
+)
 
 # How long an idle-photo room_view cache entry is fresh enough that
 # subsequent triggers within the window skip the VLM call.
@@ -225,9 +288,12 @@ AUDIO_CAPTION_MODEL: str = os.environ.get(
 AUDIO_CAPTION_API_KEY: str = os.environ.get(
     "AUDIO_CAPTION_API_KEY", VISION_API_KEY
 )
-AUDIO_CAPTION_API_URL: str = os.environ.get(
+AUDIO_CAPTION_API_URL: str = _local_only_url(
     "AUDIO_CAPTION_API_URL",
-    "https://openrouter.ai/api/v1/chat/completions",
+    os.environ.get(
+        "AUDIO_CAPTION_API_URL",
+        "https://openrouter.ai/api/v1/chat/completions",
+    ),
 )
 AUDIO_CAPTION_TIMEOUT_SEC: float = _env_float("AUDIO_CAPTION_TIMEOUT", 20.0)
 
@@ -320,11 +386,14 @@ HOUSEHOLD_YAML_PATH: str = os.environ.get(
 # prompt and the dashboard /api/calendar/today route. CALENDAR_IDS
 # empty (default) → calendar surface is a quiet no-op.
 # ---------------------------------------------------------------------------
-WEATHER_LOCATION: str = os.environ.get("WEATHER_LOCATION", "Brisbane")
+# Empty location makes fetch_weather a no-op (no wttr.in request).
+WEATHER_LOCATION: str = (
+    "" if LOCAL_ONLY else os.environ.get("WEATHER_LOCATION", "Brisbane")
+)
 WEATHER_TTL_SEC: float = _env_float("WEATHER_TTL_SEC", 1800.0)
 
 CALENDAR_TTL_SEC: float = _env_float("CALENDAR_TTL_SEC", 7200.0)
-CALENDAR_IDS: tuple[str, ...] = tuple(
+CALENDAR_IDS: tuple[str, ...] = () if LOCAL_ONLY else tuple(
     c.strip() for c in os.environ.get("CALENDAR_ID", "").split(",") if c.strip()
 )
 CALENDAR_SA_PATH: str = os.environ.get(

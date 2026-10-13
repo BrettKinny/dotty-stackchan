@@ -115,3 +115,14 @@ def test_caption_strips_response_content() -> None:
         client.caption("AAA", "wav", "q", system_prompt="s")
     )
     assert out == "hi there"
+
+
+def test_fallback_when_no_url() -> None:
+    rec = _Recorder()
+    _install(rec)
+    client = AudioCaptionClient("", "m", api_key="sk-or-fake")
+    out = asyncio.run(
+        client.caption("AAA", "wav", "what?", system_prompt="be brief")
+    )
+    assert out == AUDIO_FALLBACK_DESCRIPTION
+    assert rec.calls == []

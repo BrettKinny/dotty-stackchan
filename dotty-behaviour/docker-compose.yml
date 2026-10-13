@@ -40,7 +40,10 @@ services:
       - XIAOZHI_OTA_PORT=8003
       # llama-swap for narrative LLM (dreams, dance reflections, scene synth)
       - NARRATIVE_LLM_URL=http://127.0.0.1:8080/v1
-      - NARRATIVE_MODEL=qwen3.6:27b-think
+      # Overridable from the host-resident .env (compose reads it for
+      # interpolation too) — e.g. point narrative writes at a model that is
+      # already resident so they don't evict the voice model.
+      - NARRATIVE_MODEL=${NARRATIVE_MODEL:-qwen3.6:27b-think}
       - NARRATIVE_TIMEOUT_SEC=90
       # NDJSON log root
       - CONVO_LOG_DIR=/var/lib/dotty-behaviour/logs

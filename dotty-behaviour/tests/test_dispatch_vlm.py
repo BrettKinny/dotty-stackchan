@@ -135,3 +135,14 @@ def test_configured_property() -> None:
     assert VLMClient("u", "m", api_key="").configured is False
     assert VLMClient("", "m", api_key="k").configured is False
     assert VLMClient("u", "", api_key="k").configured is False
+
+
+def test_offline_sentinel_when_no_url() -> None:
+    rec = _Recorder()
+    _install(rec)
+    client = VLMClient("", "m", api_key="sk-or-fake")
+    out = asyncio.run(
+        client.describe_image("AAAA", "what?", system_prompt="be brief")
+    )
+    assert out == VLM_OFFLINE_SENTINEL
+    assert rec.calls == []  # no HTTP attempt

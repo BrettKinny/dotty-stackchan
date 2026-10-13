@@ -10,7 +10,7 @@ description: Single-host architecture and message flow for the self-hosted voice
 - Two hosts: **robot** (StackChan on your desk) and a **single Docker host** (`<XIAOZHI_HOST>`) that runs all four server-side services.
 - Audio goes robot → xiaozhi-server → (text) → dotty-pi → (response text) → xiaozhi-server → (audio) → robot. The Docker host never sends audio to the robot — xiaozhi-server handles that.
 - The default voice provider is **`PiVoiceLLM`**, selected via `selected_module.LLM` in `.config.yaml`. One documented alternate exists (`OpenAICompat`) — see [llm-backends.md](./llm-backends.md).
-- Everything is LAN-local **except** cloud-routed LLM calls (smart-mode, VLM, audio caption). EdgeTTS is cloud when selected; Piper is fully local.
+- Everything is LAN-local **except** cloud-routed LLM calls (smart-mode, VLM, audio caption). EdgeTTS is cloud when selected; Piper is fully local. Setting `DOTTY_LOCAL_ONLY=1` on dotty-behaviour makes that fail closed: any VLM, audio-caption or narrative URL that is not on the LAN is disabled at startup, and weather and calendar fetches are switched off.
 - The robot speaks the **Xiaozhi WebSocket protocol** (see [protocols.md](./protocols.md)). It has no knowledge of the services running on the Docker host.
 
 > **Cutover note (2026-05-19, issue #36):** The stack previously ran on three hosts — a separate ZeroClaw host (Raspberry Pi) ran the ZeroClaw Rust agent + a FastAPI bridge under systemd. That host has been retired. The brain is now the `dotty-pi` container; the voice provider is `PiVoiceLLM`. See [cutover-behaviour.md](./cutover-behaviour.md) for the historical runbook.

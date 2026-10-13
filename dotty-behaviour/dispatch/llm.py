@@ -40,7 +40,9 @@ class NarrativeLLMClient:
         # http://127.0.0.1:8080/v1. We append /chat/completions here so
         # callers pass the OpenAI-compatible base URL the same way the
         # rest of the dotty stack uses.
-        self._url = url.rstrip("/") + "/chat/completions"
+        # An empty base (unset, or blanked by DOTTY_LOCAL_ONLY) stays
+        # empty so `configured` is False and chat() skips the request.
+        self._url = url.rstrip("/") + "/chat/completions" if url else ""
         self._model = model
         self._api_key = api_key
         self._timeout_s = timeout_s
