@@ -118,6 +118,21 @@ Local on the same llama-swap, separate alias. ~18 tok/s generation, ~30–50 s c
 - **VLM (`take_photo`, security camera frames):** `google/gemini-3.1-flash-lite` (`VLM_MODEL`). Served by dotty-behaviour.
 - **Audio captioning (security mode):** `google/gemini-2.5-flash` (`AUDIO_CAPTION_MODEL`). Served by dotty-behaviour.
 
+## Keeping vision and audio on the LAN
+
+The cloud routes above are defaults, not requirements. Set `DOTTY_LOCAL_ONLY=1` in dotty-behaviour's `.env` and any `VLM_API_URL`, `VISION_API_URL`, `AUDIO_CAPTION_API_URL` or `NARRATIVE_LLM_URL` that is not loopback or a private address is disabled at startup; weather (wttr.in) and Google Calendar are switched off too. A disabled route fails closed: the camera reports itself offline and audio captioning returns its fallback string, with nothing sent.
+
+To keep the camera working, point the VLM at a local OpenAI-compatible vision model:
+
+```
+DOTTY_LOCAL_ONLY=1
+VLM_API_URL=http://127.0.0.1:8080/v1/chat/completions
+VLM_MODEL=<your-local-vision-model>
+VLM_API_KEY=local
+```
+
+Notes for the local model: the VLM request carries `max_tokens: 200` and no reasoning parameter, so serve the model with thinking off (a thinking model spends the budget reasoning and returns empty content), and keep it resident, because a cold load will exceed the 15 s `VISION_TIMEOUT`. There is no local audio-caption route; under `DOTTY_LOCAL_ONLY` it stays off unless you supply a LAN endpoint that accepts `input_audio`.
+
 ## OpenRouter
 
 Routing: OpenRouter fronts cloud models (`SMART_MODEL`, `VLM_MODEL`, `AUDIO_CAPTION_MODEL`). It handles multiple upstream providers and exposes an OpenAI-compatible API. The bridge reads `OPENROUTER_API_KEY` from its container environment for dashboard-adjacent calls; dotty-behaviour reads its own copy for vision and audio-caption calls.
