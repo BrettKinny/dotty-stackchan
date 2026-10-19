@@ -649,8 +649,9 @@ class SimpleHttpServer:
         # The puts are sync on a thread-safe queue, but we hop a thread
         # so the aiohttp loop never blocks on producer-side contention.
         await asyncio.to_thread(_enqueue)
-        # Consumers need the marker through text synthesis and audio queuing,
-        # but not forever. Expiry bounds per-connection state without risking
+        # Consumers need the marker through text synthesis, audio queuing and
+        # sendAudioMessage's stale-sentence check (both patched at image build
+        # by scripts/patch-tts-server-push.py), but not forever. Expiry bounds per-connection state without risking
         # eviction of an active push during a short burst.
         asyncio.get_running_loop().call_later(
             120.0, server_push_ids.discard, sentence_id,
