@@ -100,6 +100,62 @@ class PerceptionFeedProxyTests(_StateSaver):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(asyncio.run(_drain(resp)), b"retry: 5000\n\n")
 
+    def test_disconnect_mid_read_does_not_block_event_loop(self):
+        """Browser leaves while a worker thread is blocked on the upstream
+        (dotty-behaviour idles 15 s between keepalives). Closing the
+        upstream must not wait for that read, or the whole bridge stalls
+        (seen live: /ui/manifest.json timing out after a feed check)."""
+        import threading
+        import time
+
+        release = threading.Event()
+        read_lock = threading.Lock()  # stands in for the response's buffer lock
+
+        class _BlockingUpstream:
+            closed = False
+
+            def iter_lines(self, chunk_size=None):
+                yield b'data: {"name":"face_detected"}'
+                with read_lock:
+                    release.wait(5)
+                return
+
+            def close(self):
+                with read_lock:
+                    self.closed = True
+
+        upstream = _BlockingUpstream()
+        dash._state["perception_feed_opener"] = lambda: upstream
+
+        async def go() -> float:
+            resp = await dash.perception_feed_proxy(_req())
+            it = resp.body_iterator
+            await it.__anext__()  # retry hint
+            await it.__anext__()  # first event
+            task = asyncio.ensure_future(it.__anext__())  # now blocked upstream
+            await asyncio.sleep(0.1)
+            started = time.monotonic()
+            task.cancel()  # Starlette cancels the stream on disconnect
+            try:
+                await task
+            except (asyncio.CancelledError, StopAsyncIteration):
+                pass
+            await asyncio.sleep(0)  # the loop is still free to run others
+            elapsed = time.monotonic() - started
+            release.set()  # let the parked worker finish before loop shutdown
+            return elapsed
+
+        try:
+            elapsed = asyncio.run(go())
+        finally:
+            release.set()
+        self.assertLess(elapsed, 1.0)
+        for _ in range(50):  # closed off-loop once the read lets go
+            if upstream.closed:
+                break
+            time.sleep(0.02)
+        self.assertTrue(upstream.closed)
+
     def test_page_subscribes_to_the_relay_route(self):
         html = (_repo_root / "bridge/templates/dashboard.html").read_text()
         self.assertIn("new EventSource('/ui/perception/feed')", html)
