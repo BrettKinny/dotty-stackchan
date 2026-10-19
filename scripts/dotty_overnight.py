@@ -1085,6 +1085,11 @@ def preflight(session, config):
         data["songs"] = admin(config["host"], "songs").get("files", [])
     except Exception as exc:
         data["deployment_probe_error"] = type(exc).__name__
+    try:
+        # Read-only probe of the brain.db reader that T02/T04 evidence needs.
+        data["brain_rows_probe"] = len(brain_rows(config["host"], 0, time.time() + 86400))
+    except Exception as exc:
+        data["brain_rows_probe"] = "FAIL: " + type(exc).__name__
     write_json(session / "preflight.json", data)
     return data
 
