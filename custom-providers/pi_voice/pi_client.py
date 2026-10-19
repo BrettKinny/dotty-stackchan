@@ -56,6 +56,11 @@ _DEFAULT_PI_FLAGS = (
     "--no-skills",
     "--no-prompt-templates",
     "--no-themes",
+    # Keep the seven voice tools, drop pi's coding tools (read, bash, edit,
+    # write). A voice-driven agent has no use for them, and their schemas
+    # cost a 4K-context 4B model room and pull it towards being a coding
+    # assistant (#165). It also means a spoken prompt cannot reach a shell.
+    "--no-builtin-tools",
     "--thinking", "off",
 )
 
@@ -170,6 +175,15 @@ class PiClient:
                 daemon=True,
             )
             self._stderr_reader.start()
+            # Every voice turn starts a fresh session, so compaction has
+            # nothing to save. With a 4096-token model and pi's default
+            # 16384-token reserve it fired after every turn (#165), spending
+            # a model call while the next turn waited. The `response` frame
+            # is dropped like any other unmatched frame.
+            try:
+                self._send({"type": "set_auto_compaction", "enabled": False})
+            except PiClientError:
+                logger.warning("PiClient: could not disable auto-compaction")
 
     def close(self) -> None:
         with self._lock:
@@ -435,15 +449,19 @@ def _run_container_voice_tool(
         "remember": ("remember.ts", "runRemember", "fact"),
         "memory_lookup": ("memory_lookup.ts", "runMemoryLookup", "query"),
         "think_hard": ("think_hard.ts", "runThinkHard", "question"),
+        # No argument: reads the latest cached camera description, and
+        # dotty-behaviour applies the Kid Mode camera policy.
+        "take_photo": ("take_photo.ts", "runTakePhoto", None),
     }
     if name not in modules:
         raise PiClientError(f"unsupported direct voice tool: {name}")
     module, function, argument = modules[name]
+    call_args = f"input[{json.dumps(argument)}]" if argument else ""
     script = (
         'import fs from "node:fs";'
         f'import {{ {function} }} from "/root/.pi/extensions/dotty-pi-ext/src/tools/{module}";'
         'const input=JSON.parse(fs.readFileSync(0,"utf8"));'
-        f'const result=await {function}(input[{json.dumps(argument)}]);'
+        f'const result=await {function}({call_args});'
         'process.stdout.write(JSON.stringify({result}));'
     )
     proc = subprocess.run(
