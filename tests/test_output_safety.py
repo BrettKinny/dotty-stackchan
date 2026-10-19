@@ -164,5 +164,162 @@ class TestProviderText(unittest.TestCase):
         self.assertEqual(_filtered([tu.ProviderText("😊 cocaine")]), [REPLACEMENT])
 
 
+def _faced(chunks):
+    return list(tu.enforce_face_stream(iter(chunks)))
+
+
+class TestLeadingFace(unittest.TestCase):
+    """#168: exactly one supported face, on the first chunk."""
+
+    def test_allowed_face_passes_unchanged(self):
+        for face in tu.ALLOWED_EMOJIS:
+            with self.subTest(face=face):
+                self.assertEqual(_faced([f"{face} Hello."]), [f"{face} Hello."])
+
+    def test_near_misses_map_onto_supported_faces(self):
+        cases = {
+            "😲": "😮", "😱": "😮", "🤯": "😮", "😯": "😮",
+            "🧐": "🤔", "🤨": "🤔", "😕": "🤔",
+            "😂": "😆", "🤣": "😆", "😭": "😢", "😡": "😠",
+            "🥰": "😍", "❤️": "😍", "🥱": "😴", "🙂": "😊", "😑": "😐",
+        }
+        for near, face in cases.items():
+            with self.subTest(near=near):
+                self.assertEqual(_faced([f"{near} Hi."]), [f"{face} Hi."])
+
+    def test_every_alias_targets_a_supported_face(self):
+        self.assertTrue(set(tu.FACE_ALIASES.values()) <= set(tu.ALLOWED_EMOJIS))
+        self.assertFalse(set(tu.FACE_ALIASES) & set(tu.ALLOWED_EMOJIS))
+
+    def test_missing_face_gets_fallback_in_the_first_chunk(self):
+        self.assertEqual(_faced(["Twelve plus ten is twenty-two."]),
+                         [f"{tu.FALLBACK_EMOJI} Twelve plus ten is twenty-two."])
+
+    def test_unmistakable_openers_pick_a_face(self):
+        self.assertEqual(_faced(["Wow, a comet!"])[0], "😮 Wow, a comet!")
+        self.assertEqual(_faced(["Hmm, good question."])[0], "🤔 Hmm, good question.")
+        self.assertEqual(_faced(["Haha, silly!"])[0], "😆 Haha, silly!")
+        # A half-word is not a hint: no waiting for more tokens.
+        self.assertEqual(_faced(["Wo", "rms wiggle."])[0], f"{tu.FALLBACK_EMOJI} Wo")
+
+    def test_unmappable_emoji_becomes_fallback_not_a_second_face(self):
+        self.assertEqual("".join(_faced(["🐶 Woof!"])), f"{tu.FALLBACK_EMOJI} Woof!")
+        self.assertEqual("".join(_faced(["🤦‍♂️ Oops."])), f"{tu.FALLBACK_EMOJI} Oops.")
+
+    def test_exactly_one_face_when_the_model_stacks_emoji(self):
+        self.assertEqual("".join(_faced(["😊😆 Hi"])), "😊 Hi")
+        # Extra head emoji arriving in later chunks are consumed too.
+        self.assertEqual(_faced(["😮", " 😱", "️", " Wow!"]), ["😮 ", "Wow!"])
+        # First mappable emoji wins over an unknown one ahead of it.
+        self.assertEqual("".join(_faced(["🚀😮 Liftoff!"])), "😮 Liftoff!")
+
+    def test_body_emoji_are_stripped(self):
+        out = "".join(_faced(["😊 I love ", "space 🚀 and stars ✨!"]))
+        self.assertEqual(out, "😊 I love space and stars!")
+        faces = [ch for ch in out if tu._EMOJI_CHAR_RE.match(ch)]
+        self.assertEqual(faces, ["😊"])
+
+    def test_plain_text_symbols_survive(self):
+        self.assertEqual("".join(_faced(["😊 It is 20° today."])), "😊 It is 20° today.")
+
+    def test_whitespace_never_precedes_the_face(self):
+        self.assertEqual(_faced(["  ", "\n", "Hi"]), [f"{tu.FALLBACK_EMOJI} Hi"])
+        self.assertEqual(_faced(["  ", "\n"]), [f"{tu.FALLBACK_EMOJI} (no response)"])
+
+    def test_no_latency_beyond_the_first_token(self):
+        pulled = []
+
+        def source():
+            for chunk in ["😲", " Wow", " a comet!"]:
+                pulled.append(chunk)
+                yield chunk
+
+        stream = tu.enforce_face_stream(source())
+        self.assertEqual(next(stream), "😮 ")
+        self.assertEqual(pulled, ["😲"], "face must go out before token two")
+        self.assertEqual(next(stream), "Wow")
+        self.assertEqual(pulled, ["😲", " Wow"])
+
+    def test_guard_keeps_face_and_filters_in_kid_mode(self):
+        self.assertEqual(list(tu.guard_tts_stream(iter(["😲 Wow!"]), True)), ["😮 Wow!"])
+        self.assertEqual(
+            list(tu.guard_tts_stream(iter(["😲 co", "caine!"]), True)), [REPLACEMENT],
+        )
+        # Kid mode off still streams face-first and unfiltered.
+        self.assertEqual(
+            list(tu.guard_tts_stream(iter(["😲", " Wow"]), False)), ["😮 ", "Wow"],
+        )
+
+
+class TestPiVoiceOutputHook(unittest.TestCase):
+    """Every PiVoiceLLM output path goes through guard_tts_stream."""
+
+    @classmethod
+    def setUpClass(cls):
+        import sys
+        sys.path.insert(0, str(_REPO_ROOT / "custom-providers"))
+        from pi_voice import LLMProvider
+        cls.LLMProvider = LLMProvider
+
+    class _Client:
+        def __init__(self, chunks=(), tool_result=None):
+            self.chunks = list(chunks)
+            self.tool_result = tool_result
+
+        def new_session(self):
+            pass
+
+        def iter_turn_text(self, prompt):
+            yield from self.chunks
+
+        def invoke_voice_tool(self, name, arguments):
+            return self.tool_result
+
+        def recent_stderr(self):
+            return []
+
+        def close(self):
+            pass
+
+    def _turn(self, client, text, kid_mode):
+        import os
+        import tempfile
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {
+                "DOTTY_KID_MODE": "true" if kid_mode else "false",
+                "DOTTY_KID_MODE_STATE": str(Path(tmp) / "missing"),
+                "DOTTY_DASHBOARD_URL": "",
+                "BRIDGE_URL": "",
+                "VISION_BRIDGE_URL": "",
+            }
+            with patch.dict(os.environ, env):
+                provider = self.LLMProvider({}, client=client)
+                return list(provider.response("s", [{"role": "user", "content": text}]))
+
+    def test_think_hard_result_is_filtered_in_kid_mode(self):
+        # Direct tool results used to reach TTS without the kid filter.
+        client = self._Client(tool_result="Cocaine is a stimulant.")
+        out = self._turn(client, "Think hard about: what is cocaine?", True)
+        self.assertEqual(out[0], "🤔 Let me think hard about that. ")
+        self.assertNotIn("Cocaine", "".join(out))
+        self.assertTrue(out[-1].startswith("Let's talk about something fun"))
+
+    def test_think_hard_preamble_still_streams_first_in_kid_mode(self):
+        client = self._Client(tool_result="Forty-two.")
+        out = self._turn(client, "Think hard about: six times seven", True)
+        self.assertEqual(out, ["🤔 Let me think hard about that. ", "Forty-two."])
+
+    def test_near_miss_face_survives_kid_mode(self):
+        out = self._turn(self._Client(["😲", " Wow, a comet!"]), "look", True)
+        self.assertEqual("".join(out), "😮 Wow, a comet!")
+
+    def test_danger_imagery_replaced_on_the_live_path(self):
+        out = self._turn(self._Client([
+            "😊 I love zooming up to the ceiling fan ", "and dancing around the blades!",
+        ]), "tell me a joke about being a small robot", True)
+        self.assertEqual(out, [REPLACEMENT])
+
+
 if __name__ == "__main__":
     unittest.main()

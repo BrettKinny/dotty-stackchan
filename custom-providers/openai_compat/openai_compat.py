@@ -15,10 +15,10 @@ import requests
 from config.logger import setup_logging
 from core.providers.llm.base import LLMProviderBase
 from core.utils.textUtils import (
-    ALLOWED_EMOJIS,
     FALLBACK_EMOJI,
     _SENTENCE_BOUNDARY,
     build_turn_suffix,
+    enforce_face_stream,
     filter_tts_stream,
 )
 
@@ -155,6 +155,12 @@ class LLMProvider(LLMProviderBase):
     # ------------------------------------------------------------------
 
     def _response_stream(self, messages):
+        """The model stream with the leading-face contract applied (#168):
+        exactly one supported face at the head of the first chunk, near-miss
+        emoji mapped onto the supported set (shared textUtils guard)."""
+        return enforce_face_stream(self._raw_stream(messages))
+
+    def _raw_stream(self, messages):
         """POST to /v1/chat/completions with stream=true, yield chunks."""
         payload = {
             "model": self.model,
@@ -191,10 +197,7 @@ class LLMProvider(LLMProviderBase):
             yield f"{FALLBACK_EMOJI} Something went wrong, please try again."
             return
 
-        # Accumulate full text so we can do emoji-prefix enforcement on the
-        # first real content chunk (before yielding anything).
         full_text = []
-        emoji_checked = False
 
         try:
             for line in resp.iter_lines(decode_unicode=True):
@@ -225,26 +228,8 @@ class LLMProvider(LLMProviderBase):
                     continue
 
                 full_text.append(content)
-
-                # Emoji prefix enforcement on the first non-whitespace content.
-                # Until we've seen non-whitespace, buffer rather than yield — a
-                # leading whitespace-only delta must never reach TTS/firmware
-                # before the emoji (the firmware parses the leading glyph into a
-                # face animation, so whitespace-first breaks the contract).
-                if not emoji_checked:
-                    so_far = "".join(full_text).lstrip()
-                    if not so_far:
-                        continue  # still all whitespace — keep buffering
-                    emoji_checked = True
-                    if not any(so_far.startswith(e) for e in ALLOWED_EMOJIS):
-                        # Prepend fallback emoji + space as a separate chunk so
-                        # the face animation fires immediately.
-                        yield f"{FALLBACK_EMOJI} "
-                    # Flush the accumulated leading text (minus the meaningless
-                    # leading whitespace) as the first real chunk.
-                    yield so_far
-                    continue
-
+                # Leading whitespace and the face emoji are handled by
+                # enforce_face_stream in _response_stream.
                 yield content
 
         except requests.exceptions.ChunkedEncodingError:
@@ -274,9 +259,10 @@ class LLMProvider(LLMProviderBase):
         Uses streaming by default.  The interface matches LLMProviderBase.
         #157: in kid mode the stream is wrapped in the shared blocked-content
         filter (full-turn buffered, so nothing reaches TTS before the complete
-        response is checked; a hit replaces the whole turn). The emoji-prefix
-        enforcement inside _response_stream runs first, so the filter sees —
-        and preserves — the leading-emoji contract.
+        response is checked; a hit replaces the whole turn; a filter error
+        fails closed). The face enforcement inside _response_stream runs
+        first, so the filter sees — and preserves — the leading-emoji
+        contract. Together this is textUtils.guard_tts_stream.
         """
         messages = self._build_messages(dialogue)
         yield from filter_tts_stream(

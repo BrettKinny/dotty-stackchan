@@ -273,6 +273,156 @@ def _cf_safe_check(parts, on_hit):
             _cf_log.exception("content filter on_hit callback failed")
     return hit
 
+
+# ── Leading-face contract (#168) ──────────────────────────────────────────
+# xiaozhi-server reads the face from the FIRST non-empty chunk the provider
+# yields (get_emotion below), and the firmware only has faces for the nine
+# ALLOWED_EMOJIS. The prompt asks for exactly one of them up front; this is
+# the deterministic backstop for when the model doesn't comply. Models
+# often reach for a near-miss (😲 for surprise, 🧐 for thinking): those map
+# onto the supported face instead of collapsing to neutral, which is why
+# surprise/thinking faces never showed on the robot.
+FACE_ALIASES = {
+    # 😊 smile
+    "🙂": "😊", "😀": "😊", "😃": "😊", "😄": "😊", "☺": "😊", "🤗": "😊",
+    "😇": "😊", "😉": "😊", "😋": "😊", "😌": "😊", "😎": "😊", "🙃": "😊",
+    "🤖": "😊", "👍": "😊", "👋": "😊", "✨": "😊", "🌟": "😊", "⭐": "😊",
+    "🌈": "😊", "☀": "😊", "🌞": "😊", "💪": "😊", "👏": "😊", "🙌": "😊",
+    "😺": "😊",
+    # 😆 laugh
+    "😂": "😆", "🤣": "😆", "😁": "😆", "😅": "😆", "😹": "😆", "😝": "😆",
+    "😜": "😆", "😛": "😆", "🤪": "😆", "🥳": "😆", "🎉": "😆", "😸": "😆",
+    # 😢 sad
+    "😭": "😢", "😞": "😢", "😔": "😢", "😟": "😢", "🙁": "😢", "☹": "😢",
+    "😥": "😢", "😿": "😢", "😓": "😢", "💔": "😢", "🥺": "😢", "😩": "😢",
+    "😫": "😢", "😣": "😢", "😖": "😢", "🥲": "😢",
+    # 😮 surprise
+    "😯": "😮", "😲": "😮", "😱": "😮", "😳": "😮", "🤯": "😮", "😦": "😮",
+    "😧": "😮", "🙀": "😮", "😵": "😮", "🫢": "😮", "🫨": "😮", "👀": "😮",
+    "🤩": "😮", "‼": "😮", "⁉": "😮", "❗": "😮", "❕": "😮",
+    # 🤔 thinking
+    "🧐": "🤔", "🤨": "🤔", "💭": "🤔", "🤓": "🤔", "😕": "🤔", "🫤": "🤔",
+    "❓": "🤔", "❔": "🤔", "🤷": "🤔", "💡": "🤔",
+    # 😠 angry
+    "😡": "😠", "🤬": "😠", "😤": "😠", "👿": "😠", "😾": "😠", "💢": "😠",
+    # 😐 neutral
+    "😑": "😐", "😶": "😐", "🙄": "😐", "😬": "😐", "😒": "😐", "🫥": "😐",
+    "😏": "😐",
+    # 😍 love
+    "🥰": "😍", "😘": "😍", "😻": "😍", "😚": "😍", "😙": "😍", "❤": "😍",
+    "♥": "😍", "💕": "😍", "💖": "😍", "💗": "😍", "💓": "😍", "💞": "😍",
+    "💘": "😍", "💝": "😍", "💜": "😍", "💙": "😍", "💚": "😍", "💛": "😍",
+    "🧡": "😍", "🤍": "😍", "🫶": "😍",
+    # 😴 sleepy
+    "😪": "😴", "🥱": "😴", "💤": "😴", "🛌": "😴",
+}
+
+# Emoji codepoints plus the joiners/selectors that glue sequences together
+# (❤️ = U+2764 U+FE0F, 🤦‍♂️ uses U+200D). Plain text symbols such as ° ©
+# are deliberately outside this class so they survive in reply bodies.
+_EMOJI_CHARS = (
+    "\U0001F000-\U0001FAFF☀-➿⌀-⏿⬀-⯿"
+    "‼⁉︎️‍⃣\U000E0020-\U000E007F"
+)
+_EMOJI_CHAR_RE = re.compile(f"[{_EMOJI_CHARS}]")
+_BODY_EMOJI_RE = re.compile(f"[ \t]?[{_EMOJI_CHARS}]+")
+
+# When the model leads with words instead of a face, a few unmistakable
+# openers still pick the right face. Decided on the first chunk only, so it
+# never holds text back waiting for more tokens.
+_TEXT_FACE_HINTS = (
+    (re.compile(r"(?:hmm+|hm+|let me think|i wonder)\b", re.IGNORECASE), "🤔"),
+    (re.compile(r"(?:wow+|whoa+|woah|ooh+|oh my|oops|yikes|gosh)\b|really\?",
+                re.IGNORECASE), "😮"),
+    (re.compile(r"(?:ha(?:ha)+|he(?:he)+|lol)\b", re.IGNORECASE), "😆"),
+)
+
+
+def canonical_face(char: str) -> "str | None":
+    """Map one emoji codepoint onto the supported face set, or None."""
+    if char in ALLOWED_EMOJIS:
+        return char
+    return FACE_ALIASES.get(char)
+
+
+def _is_head_char(char: str) -> bool:
+    return char.isspace() or _EMOJI_CHAR_RE.match(char) is not None
+
+
+def _split_leading_face(text: str) -> "tuple[str, str]":
+    """Split ``text`` (no leading whitespace) into (face, rest).
+
+    Consumes the whole leading run of emoji and spaces, choosing the first
+    one that maps onto a supported face; an unmappable run becomes the
+    neutral fallback. With no leading emoji, a text hint or the fallback.
+    """
+    face = None
+    i = 0
+    while i < len(text) and _is_head_char(text[i]):
+        if face is None and not text[i].isspace():
+            face = canonical_face(text[i])
+        i += 1
+    rest = text[i:]
+    if face is None and i == 0:
+        for pattern, hinted in _TEXT_FACE_HINTS:
+            if pattern.match(rest):
+                face = hinted
+                break
+    return face or FALLBACK_EMOJI, rest
+
+
+def _same_kind(template: str, text: str) -> str:
+    # Keep the ProviderText marker through the face guard.
+    return ProviderText(text) if isinstance(template, ProviderText) else text
+
+
+def enforce_face_stream(chunks):
+    """Guarantee exactly one supported face emoji, at the head of the first chunk.
+
+    Streaming, with no added latency: the first chunk that has any
+    non-whitespace text is rewritten and yielded at once as
+    ``"<face> <text>"``. Leading whitespace-only chunks are dropped, extra
+    leading emoji are consumed (also when they arrive in the next chunk),
+    near-miss emoji map onto the supported set, and emoji later in the
+    reply are stripped so the face stays the only one. An empty stream
+    yields ``"😐 (no response)"``.
+    """
+    state = "start"   # start → face_sent (still trimming the head) → body
+    for chunk in chunks:
+        if not chunk:
+            continue
+        if state == "start":
+            text = chunk.lstrip()
+            if not text:
+                continue
+            face, rest = _split_leading_face(text)
+            rest = _BODY_EMOJI_RE.sub("", rest)
+            state = "body" if rest else "face_sent"
+            yield _same_kind(chunk, f"{face} {rest}")
+            continue
+        if state == "face_sent":
+            i = 0
+            while i < len(chunk) and _is_head_char(chunk[i]):
+                i += 1
+            if i == len(chunk):
+                continue
+            chunk = _same_kind(chunk, chunk[i:])
+            state = "body"
+        text = _BODY_EMOJI_RE.sub("", chunk)
+        if text:
+            yield _same_kind(chunk, text)
+    if state == "start":
+        yield f"{FALLBACK_EMOJI} (no response)"
+
+
+def guard_tts_stream(chunks, kid_mode, on_hit=None):
+    """The voice-output pipeline both live LLM providers run before TTS:
+    the leading-face contract, then (kid mode only) the fail-closed
+    blocked-content filter. The filter sees face-normalised text, and its
+    replacement starts with a supported face too."""
+    yield from filter_tts_stream(enforce_face_stream(chunks), kid_mode, on_hit=on_hit)
+
+
 # Enforced subset (bridge.py ALLOWED_EMOJIS): 😊 😆 😢 😮 🤔 😠 😐 😍 😴
 EMOJI_MAP = {
     "😂": "funny",

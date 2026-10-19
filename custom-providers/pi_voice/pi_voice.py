@@ -38,7 +38,6 @@ import os
 import re
 import threading
 import time
-import unicodedata
 import urllib.request
 from pathlib import Path
 from typing import Iterator
@@ -71,8 +70,11 @@ try:
     from core.utils.textUtils import (  # type: ignore
         ALLOWED_EMOJIS,
         FALLBACK_EMOJI,
+        ProviderText,
         build_turn_suffix,
+        enforce_face_stream,
         filter_tts_stream,
+        guard_tts_stream,
     )
 except ImportError:  # pragma: no cover — dev workstation fallback
     import importlib.util as _ilu
@@ -87,6 +89,9 @@ except ImportError:  # pragma: no cover — dev workstation fallback
     FALLBACK_EMOJI = _tu.FALLBACK_EMOJI  # type: ignore[attr-defined]
     build_turn_suffix = _tu.build_turn_suffix  # type: ignore[attr-defined]
     filter_tts_stream = _tu.filter_tts_stream  # type: ignore[attr-defined]
+    ProviderText = _tu.ProviderText  # type: ignore[attr-defined]
+    enforce_face_stream = _tu.enforce_face_stream  # type: ignore[attr-defined]
+    guard_tts_stream = _tu.guard_tts_stream  # type: ignore[attr-defined]
 
 
 TAG = __name__
@@ -212,7 +217,8 @@ _MEMORY_CONTEXT = (
 )
 
 
-_THINKING_PREAMBLE = "\U0001F914 Let me think hard about that. "
+# ProviderText: a fixed phrase, so kid mode may speak it before the wait.
+_THINKING_PREAMBLE = ProviderText("\U0001F914 Let me think hard about that. ")
 
 
 def _wrap_with_sandwich(user_text: str, kid_mode: bool) -> str:
@@ -226,46 +232,13 @@ def _wrap_with_sandwich(user_text: str, kid_mode: bool) -> str:
 
 
 def _enforce_leading_emoji(chunks: Iterator[str]) -> Iterator[str]:
-    """Guarantee the firmware's leading-glyph face contract.
+    """Guarantee the firmware's leading-glyph face contract (#168).
 
-    Pi is prompted to start with an allowed emoji, but model compliance is not
-    an output guarantee. Buffer only leading whitespace, then either pass an
-    allowed emoji through or replace a missing/disallowed leading glyph with
-    the neutral fallback before the model text.
+    Delegates to the shared textUtils.enforce_face_stream: exactly one
+    supported face at the head of the first chunk, near-miss emoji mapped
+    onto the supported set, no added streaming latency.
     """
-    leading: list[str] = []
-    saw_content = False
-    for chunk in chunks:
-        if not chunk:
-            continue
-        if not saw_content:
-            leading.append(chunk)
-            so_far = "".join(leading).lstrip()
-            if not so_far:
-                continue
-            saw_content = True
-            if not any(so_far.startswith(emoji) for emoji in ALLOWED_EMOJIS):
-                yield f"{FALLBACK_EMOJI} "
-                # Do not leave a disallowed model emoji after the fallback:
-                # `😐 ❤️ hello` still violates the exactly-one-face contract.
-                # Consume the leading symbol plus emoji presentation/joiner
-                # codepoints, while leaving ordinary punctuation and text.
-                if so_far and unicodedata.category(so_far[0]) == "So":
-                    end = 1
-                    while end < len(so_far) and (
-                        so_far[end] in ("\ufe0f", "\u200d")
-                        or 0x1F3FB <= ord(so_far[end]) <= 0x1F3FF
-                        or unicodedata.category(so_far[end]) == "So"
-                    ):
-                        end += 1
-                    so_far = so_far[end:].lstrip()
-            if so_far:
-                yield so_far
-            continue
-        yield chunk
-
-    if not saw_content:
-        yield f"{FALLBACK_EMOJI} (no response)"
+    yield from enforce_face_stream(chunks)
 
 
 _REMEMBER_INTENT_RE = re.compile(
@@ -327,7 +300,13 @@ class LLMProvider(LLMProviderBase):
         errors: list[str] = []
         started = time.monotonic()
         try:
-            for chunk in self._respond(user_text, errors):
+            # Output safety for every path below (model text, direct tool
+            # results, fixed phrases): one leading face, and in kid mode the
+            # fail-closed blocked-content filter. See textUtils.guard_tts_stream.
+            for chunk in guard_tts_stream(
+                self._respond(user_text, errors), self._kid_mode,
+                on_hit=self._on_filter_hit,
+            ):
                 spoken.append(chunk)
                 yield chunk
         finally:
