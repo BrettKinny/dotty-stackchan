@@ -27,6 +27,13 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingRes
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
+from bridge.devices import (
+    candidate_devices,
+    is_probe_device,
+    pick_live_device,
+    sensor_health,
+)
+
 log = logging.getLogger("dashboard")
 
 # Bridge wires its in-process message handler in via configure(). Lets the
@@ -453,24 +460,34 @@ _SONGS_BASE_PATH = "/opt/xiaozhi-esp32-server/config/assets/songs"
 _SONG_OK_EXT = {".opus", ".ogg", ".wav", ".mp3"}
 
 
-async def _xiaozhi_device_count() -> int | None:
-    """Count active StackChan WS connections via the admin endpoint.
-    Returns None if xiaozhi is unreachable."""
+async def _xiaozhi_connected_devices() -> list[str] | None:
+    """Device ids holding a live StackChan WS, via the admin endpoint.
+    Returns None if xiaozhi is unreachable (unknown, not "none")."""
     if not XIAOZHI_HOST:
         return None
     url = f"http://{XIAOZHI_HOST}:{XIAOZHI_OTA_PORT}/xiaozhi/admin/devices"
     import urllib.request
-    def _fetch() -> int | None:
+    def _fetch() -> list[str] | None:
         try:
             req = urllib.request.Request(url, headers=_xiaozhi_admin_headers())
             with urllib.request.urlopen(req, timeout=2) as r:
                 if r.status != 200:
                     return None
                 data = json.loads(r.read())
-                return len(data.get("devices", []))
+                devices = data.get("devices", [])
+                if not isinstance(devices, list):
+                    return None
+                return [str(d) for d in devices]
         except Exception:
             return None
     return await asyncio.to_thread(_fetch)
+
+
+async def _xiaozhi_device_count() -> int | None:
+    """Count active StackChan WS connections via the admin endpoint.
+    Returns None if xiaozhi is unreachable."""
+    devices = await _xiaozhi_connected_devices()
+    return None if devices is None else len(devices)
 
 
 @router.get("/device-status", response_class=HTMLResponse, include_in_schema=False)
@@ -1115,11 +1132,13 @@ def _pick_perception_device_id() -> str | None:
     to feed into the Perception card builder. Priority:
       1. The device with a fresh _vision_cache entry (most likely the one
          actively perceiving).
-      2. Any device in _perception_state (single robot ➜ single key).
+      2. The most recently active real device in dotty-behaviour's
+         per-device state (test probes / the "unknown" id are skipped).
     Returns None when the bridge has not yet seen any device — the card
     then renders empty states across the board.
     """
-    vc = _vision_cache_snapshot()
+    vc = {did: e for did, e in _vision_cache_snapshot().items()
+          if not is_probe_device(did)}
     if vc:
         try:
             return max(vc.items(), key=lambda kv: kv[1].get("wall_ts", 0.0))[0]
@@ -1131,8 +1150,7 @@ def _pick_perception_device_id() -> str | None:
             states = psg() or {}
         except Exception:
             states = {}
-        for did in states.keys():
-            return did
+        return pick_live_device(states)
     return None
 
 
@@ -1636,25 +1654,24 @@ async def status_strip(request: Request, placement: str = "header") -> Any:
         # (face/sound events stopped flowing past PERCEPTION_STALE_THRESHOLD_S
         # in bridge.py). This is the only path that can degrade the robot
         # dot below "ok" in the redesigned binary model.
+        #
+        # Only real devices that have streamed since dotty-behaviour started
+        # and (when xiaozhi answers) hold a live WS are judged — test
+        # probes, the "unknown" fallback id, devices restored from disk and
+        # a robot that is simply offline/asleep must not raise the warning.
         psg = _state.get("perception_state_getter")
         if psg is not None:
             try:
                 pstate = psg() or {}
             except Exception:
                 pstate = {}
-            stale_devs = [
-                did for did, s in pstate.items()
-                if s and s.get("sensor_stale")
-            ]
-            fresh_devs = [
-                did for did, s in pstate.items()
-                if s and not s.get("sensor_stale")
-            ]
+            connected = await _xiaozhi_connected_devices()
+            judged, stale_devs, fresh_devs = sensor_health(pstate, connected)
             if stale_devs and sc_status in ("ok", "unknown"):
                 sc_status = "warn"
                 sc_tip = (
                     f"Dotty: perception sensors stale "
-                    f"({len(stale_devs)}/{len(pstate)} dev) — "
+                    f"({len(stale_devs)}/{len(judged)} dev) — "
                     f"firmware bus may be hung"
                 )
             elif fresh_devs and sc_status == "unknown":
@@ -1824,7 +1841,8 @@ async def host_detail(request: Request, slug: str) -> Any:
             seen = f"{_humanize_age(time.time() - last_seen_ts)} ago"
         getter = _state.get("state_getter")
         current = (getter() if getter else None) or "idle"
-        n = await _xiaozhi_device_count()
+        connected = await _xiaozhi_connected_devices()
+        n = None if connected is None else len(connected)
         # Perception bus liveness — separate from voice activity. Stale
         # means firmware-side face/sound events have stopped flowing
         # (face_detected, sound_event, state_changed) past the bridge's
@@ -1838,31 +1856,33 @@ async def host_detail(request: Request, slug: str) -> Any:
                 pstate = psg() or {}
             except Exception:
                 pstate = {}
-            if pstate:
-                stale = [
-                    did for did, s in pstate.items()
-                    if s and s.get("sensor_stale")
-                ]
+            judged, stale, fresh = sensor_health(pstate, connected)
+            if not judged and candidate_devices(pstate):
+                perception_label = (
+                    "not streaming (robot offline or idle)"
+                    if connected is not None else "no events since restart"
+                )
+            elif judged:
                 if stale:
-                    ages = [
-                        s.get("sensor_age_s") for _, s in pstate.items()
-                        if s and s.get("sensor_stale")
+                    ages = [pstate[did].get("sensor_age_s") for did in stale]
+                    finite_ages = [
+                        a for a in ages
+                        if isinstance(a, (int, float)) and a != float("inf")
                     ]
-                    finite_ages = [a for a in ages if a not in (None, float("inf"))]
                     if finite_ages:
                         oldest = max(finite_ages)
                         perception_label = (
-                            f"stale ({len(stale)}/{len(pstate)} dev, "
+                            f"stale ({len(stale)}/{len(judged)} dev, "
                             f"oldest {_humanize_age(oldest)})"
                         )
                     else:
                         perception_label = (
-                            f"stale ({len(stale)}/{len(pstate)} dev, never)"
+                            f"stale ({len(stale)}/{len(judged)} dev, never)"
                         )
                 else:
                     youngest = min(
-                        (s.get("sensor_age_s", float("inf"))
-                         for s in pstate.values() if s),
+                        (pstate[did].get("sensor_age_s", float("inf"))
+                         for did in fresh),
                         default=float("inf"),
                     )
                     if youngest != float("inf"):

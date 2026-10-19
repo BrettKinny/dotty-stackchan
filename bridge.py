@@ -44,6 +44,7 @@ from textUtils import (  # noqa: F401  (re-exported for downstream tools)
 )
 
 from bridge.csrf import CSRFMiddleware
+from bridge.devices import candidate_devices, pick_live_device
 from bridge.text import (  # noqa: F401  (used by bridge.dashboard via re-imports)
     CONTENT_FILTER_REPLACEMENT,
     MAX_SENTENCES,
@@ -577,20 +578,22 @@ def _dashboard_perception_recent_getter(
 
 
 def _dashboard_state_getter() -> str:
-    """Return the current State mirrored by dotty-behaviour.
+    """Return the robot's current State as mirrored by dotty-behaviour.
 
-    The deployment has one robot, so use the first valid per-device state.
-    If behaviour is unavailable or has not observed a state transition yet,
-    retain the dashboard's historical safe fallback of ``idle``.
+    dotty-behaviour tracks ``current_state`` per device from the firmware's
+    ``state_changed`` events. Its state also holds ids no robot owns (test
+    probes, the ``unknown`` fallback), so pick the most recently active
+    real device rather than whichever key comes first. If behaviour is
+    unavailable or has not observed a state transition yet, keep the
+    dashboard's historical safe fallback of ``idle``.
     """
     states = _dashboard_perception_state_getter()
-    for device_state in states.values():
-        if not isinstance(device_state, dict):
-            continue
-        current = device_state.get("current_state")
-        if isinstance(current, str) and current:
-            return current
-    return "idle"
+    with_state = {
+        did: s for did, s in candidate_devices(states).items()
+        if isinstance(s.get("current_state"), str) and s["current_state"]
+    }
+    did = pick_live_device(with_state)
+    return with_state[did]["current_state"] if did else "idle"
 
 
 def _dashboard_last_user_line_getter(device_id: str) -> dict | None:
