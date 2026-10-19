@@ -16,6 +16,8 @@ import logging
 import os
 import re
 import secrets
+import socket
+import threading
 import time
 import requests
 from datetime import datetime
@@ -2080,6 +2082,28 @@ async def security_recent(request: Request, device_id: str) -> Any:
 
 # --- Perception feed proxy ------------------------------------------------
 
+def _abort_upstream(upstream: Any) -> None:
+    """Shut down a streaming ``requests`` response's socket (waking any
+    thread blocked reading it), then close the response. Best-effort."""
+    for path in (("raw", "_connection", "sock"),
+                 ("raw", "_fp", "fp", "raw", "_sock")):
+        obj = upstream
+        for attr in path:
+            obj = getattr(obj, attr, None)
+            if obj is None:
+                break
+        if isinstance(obj, socket.socket):
+            try:
+                obj.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            break
+    try:
+        upstream.close()
+    except Exception:
+        pass
+
+
 @router.get("/perception/feed", include_in_schema=False)
 async def perception_feed_proxy(request: Request) -> StreamingResponse:
     """Relay dotty-behaviour's perception SSE stream to the browser.
@@ -2101,20 +2125,35 @@ async def perception_feed_proxy(request: Request) -> StreamingResponse:
             log.warning("perception feed upstream unavailable: %s", exc)
             return
         lines = upstream.iter_lines(chunk_size=1)
+        reader_idle = True  # False while a worker thread is inside next()
         try:
             while True:
                 if await request.is_disconnected():
                     break
+                reader_idle = False
                 try:
                     line = await asyncio.to_thread(next, lines, None)
                 except Exception as exc:
                     log.warning("perception feed upstream dropped: %s", exc)
                     break
+                reader_idle = True
                 if line is None:
                     break
                 yield line + b"\n"
         finally:
-            upstream.close()
+            if reader_idle:
+                upstream.close()
+            else:
+                # The browser left while a worker thread is blocked reading
+                # the upstream (dotty-behaviour only sends a keepalive every
+                # 15 s). Closing here would wait on that read's buffer lock
+                # and freeze the event loop — every other dashboard request
+                # with it — until the next upstream line. Unblock the read
+                # with a socket shutdown and close off the loop instead.
+                threading.Thread(
+                    target=_abort_upstream, args=(upstream,),
+                    name="perception-feed-close", daemon=True,
+                ).start()
 
     return StreamingResponse(
         gen(),
