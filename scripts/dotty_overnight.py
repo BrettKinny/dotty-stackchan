@@ -20,7 +20,9 @@ import shlex
 import shutil
 import signal
 import subprocess
+import threading
 import time
+import urllib.parse
 import uuid
 from zoneinfo import ZoneInfo
 
@@ -167,7 +169,7 @@ def wake_events(log_text):
     return events
 
 
-def evaluate(case, transcript, log_text, playback_end, after, device, before=None):
+def evaluate(case, transcript, log_text, playback_end, after, device, before=None, recovered_override=None):
     # Only response-window words count. Prompt and response transcribed separately
     # to prevent Whisper concatenating both speakers into a single segment.
     segments = transcript.get("segments", [])
@@ -230,6 +232,9 @@ def evaluate(case, transcript, log_text, playback_end, after, device, before=Non
                      and tts_completed
                      and ((state.get("current_state") == "idle" and state.get("listening") is False)
                           or (state.get("current_state") == "talk" and state.get("listening") is True)))
+    if recovered_override is not None:
+        # State cases: recovery is the verified escape back to the resting state.
+        recovered = recovered_override
     failure = None
     if requires_wake and not wake_ready:
         failure = "wake_precondition"
@@ -250,7 +255,9 @@ def evaluate(case, transcript, log_text, playback_end, after, device, before=Non
     elif not within_limit:
         failure = "response_too_long"
     elif not recovered:
-        failure = "not_ready_for_followup" if case.get("recovery_policy") == "ready_for_followup" else "no_idle_recovery"
+        failure = ("state_not_restored" if recovered_override is not None else
+                   "not_ready_for_followup" if case.get("recovery_policy") == "ready_for_followup"
+                   else "no_idle_recovery")
     if extra_speech and failure not in ("wake_precondition", "no_wake_event"):
         # Someone else spoke (or the robot answered room noise) inside the
         # capture; neither a pass nor a failure can be attributed to the prompt.
@@ -612,12 +619,174 @@ def host_epoch(local_iso, clock, margin=0):
     return datetime.fromisoformat(local_iso).timestamp() + clock["offset_seconds"] + margin
 
 
-def case_cleanup(session, config, case):
+def perception_recent(host, device):
+    """Newest-first firmware events relayed to dotty-behaviour (ring of 50)."""
+    return json.loads(ssh(host, ["curl", "-fsS", "--max-time", "5",
+                                 "http://localhost:8090/api/perception/recent/"
+                                 + urllib.parse.quote(device, safe="") + "?limit=50"]))
+
+
+def perception_device_state(host, device):
+    state = json.loads(ssh(host, ["curl", "-fsS", "--max-time", "5",
+                                  "http://localhost:8090/api/perception/state?device_id="
+                                  + urllib.parse.quote(device, safe="")]))
+    return state.get(device, {})
+
+
+class PerceptionRecorder:
+    """Poll the recent-event ring during a capture so a burst (dance sound
+    events) cannot push the state_changed record out before it is read."""
+
+    def __init__(self, host, device, interval=3):
+        self.host, self.device, self.interval = host, device, interval
+        self.seen = {}
+        self.errors = 0
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+
+    def poll(self):
+        try:
+            for event in perception_recent(self.host, self.device):
+                key = (event.get("ts"), event.get("name"), json.dumps(event.get("data"), sort_keys=True))
+                self.seen[key] = event
+        except Exception:
+            self.errors += 1
+
+    def _loop(self):
+        while not self._stop.wait(self.interval):
+            self.poll()
+
+    def __enter__(self):
+        self.poll()
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        self._thread.join(timeout=10)
+        self.poll()
+
+    def events(self):
+        return sorted(self.seen.values(), key=lambda e: float(e.get("ts") or 0))
+
+
+def state_changes(events, start, end):
+    return [(float(e["ts"]), (e.get("data") or {}).get("state")) for e in events
+            if e.get("name") == "state_changed" and isinstance(e.get("ts"), (int, float))
+            and start <= e["ts"] <= end]
+
+
+def apply_state(config, clock, target, attempts=3, timeout=12):
+    """Dashboard-path state change, confirmed by a fresh firmware echo.
+
+    set-state of the current state still emits state_changed (resync), so a
+    stale event can never satisfy this: only an echo after the send counts.
+    """
+    tried = []
+    for attempt in range(1, attempts + 1):
+        sent = time.time() + clock["offset_seconds"] - clock["uncertainty_seconds"] - .5
+        try:
+            admin(config["host"], "set-state", {"device_id": config["device"], "state": target})
+        except Exception as exc:
+            tried.append(type(exc).__name__)
+            time.sleep(2)
+            continue
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            try:
+                echoes = [ts for ts, state in state_changes(perception_recent(config["host"], config["device"]),
+                                                            sent, float("inf")) if state == target]
+                current = perception_device_state(config["host"], config["device"]).get("current_state")
+            except Exception:
+                echoes, current = [], None
+            if echoes and current == target:
+                return {"verified": True, "method": "admin_set_state", "target": target,
+                        "attempts": attempt, "echo_ts": echoes[0], "errors": tried}
+            time.sleep(1)
+        tried.append("no_echo")
+    return {"verified": False, "method": "admin_set_state", "target": target,
+            "attempts": attempts, "errors": tried}
+
+
+def restore_state(session, config, case, clock):
+    target = case["cleanup_state"]
+    end = time.monotonic() + case.get("cleanup_grace_seconds", 0)
+    while time.monotonic() < end:
+        # A dance ends on its own; forcing it early would hide a stuck ending.
+        try:
+            if perception_device_state(config["host"], config["device"]).get("current_state") == target:
+                return {"verified": True, "method": "natural", "target": target}
+        except Exception:
+            pass
+        time.sleep(2)
+    out = {}
+    if case.get("force_admin"):
+        out["force_admin"] = run_cleanup_admin(config, case["force_admin"])
+    out.update(apply_state(config, clock, target))
+    if not out["verified"]:
+        # Guaranteed escape failed: stop prompting rather than test a robot
+        # that may be asleep with its microphone disabled.
+        write_json(session / "PAUSE", {"reason": f"robot not confirmed {target} after {case['id']}; "
+                                                 "restore by dashboard or head touch before resuming",
+                                       "at": now()})
+        journal(session, {"event": "state_restore_failed", "case_id": case["id"], "target": target})
+    return out
+
+
+def case_cleanup(session, config, case, clock=None):
     """Always-run per-case restoration (music stop, state escape)."""
     out = {}
     if case.get("cleanup_admin"):
         out["admin"] = run_cleanup_admin(config, case["cleanup_admin"])
+    if case.get("cleanup_state"):
+        out["state"] = restore_state(session, config, case,
+                                     clock or {"offset_seconds": 0, "uncertainty_seconds": 1})
     return out
+
+
+def await_cold(config, seconds, poll=3):
+    """Passively wait for the open conversation to time out. Changes nothing."""
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        snap = snapshot(config["host"])
+        if wake_precondition(snap, config["device"]):
+            return snap
+        time.sleep(poll)
+    return None
+
+
+def evaluate_silence(case, transcript, log_text, events, window, after, device):
+    """Negative test: the robot is asleep, so a spoken prompt must do nothing."""
+    segments = transcript.get("segments", [])
+    response = " ".join(s["text"].strip() for s in segments
+                        if s.get("end", 0) > s.get("start", 0) and s.get("no_speech_prob", 1) < .8
+                        and s.get("avg_logprob", -10) > -1.2)
+    asr = re.findall(r"结果: (.*)", log_text) + re.findall(r"识别文本: (.*)", log_text)
+    tts = "SentenceType.FIRST" in log_text or "发送第一段语音:" in log_text
+    held = case["setup_state"]
+    moved = [state for _, state in state_changes(events, *window) if state != held]
+    state = after.get("perception", {}).get(device, {}).get("current_state")
+    if asr:
+        failure = "voice_processed_while_" + held
+    elif tts:
+        failure = "spoke_while_" + held
+    elif moved or state != held:
+        failure = "voice_left_" + held
+    elif response:
+        failure = "speech_in_silence_window"
+    else:
+        failure = None
+    interaction = ("PASS" if failure is None else
+                   "INCONCLUSIVE" if failure in INCONCLUSIVE_FAILURES else "FAIL")
+    return {"asr": asr, "asr_match": False, "response_transcript": response, "response_match": not response,
+            "tts_evidence": tts, "tts_completed": False, "service_tts_text": "", "service_tts_match": False,
+            "extra_speech": [], "silence_contract": "PASS" if failure is None else "FAIL",
+            "states_during_capture": moved, "state_after_capture": state,
+            "wake_precondition": "NOT_REQUIRED", "wake_event": "NOT_REQUIRED",
+            "expected_tool_call": "NOT_REQUIRED", "expression": "INCONCLUSIVE",
+            "failure": failure, "interaction": interaction, "visual": "INCONCLUSIVE",
+            "verdict": "INCONCLUSIVE" if interaction == "PASS" else interaction,
+            "note": "Silence is the pass condition; the reference microphone must still hear the prompt."}
 
 
 def host_timestamp(local_iso, clock, margin=0):
@@ -704,6 +873,14 @@ def run_case(session, config, case):
             raise CaseBlocked("pi_tool_call_logger_not_deployed")
         if case.get("requires_song") and not song_available(config["host"], case["requires_song"]):
             raise CaseBlocked("song_not_in_catalogue")
+        if (case.get("require_wake_event") and not wake_precondition(before, config["device"])
+                and case.get("await_cold_seconds")):
+            # Passive: wait for the open conversation's no-voice timeout.
+            result["awaited_cold_seconds"] = case["await_cold_seconds"]
+            cold = await_cold(config, case["await_cold_seconds"])
+            if cold:
+                before = cold
+                write_json(directory / "before.json", before)
         if case.get("require_wake_event") and not wake_precondition(before, config["device"]):
             raise CaseBlocked("wake_precondition")
         if require_warm:
@@ -739,18 +916,36 @@ def run_case(session, config, case):
         result["prompt_provenance"] = prepare_prompt(session, directory, config, case, env)
         write_json(directory / "result.json", result)
         media = directory / "raw.mp4"
-        result["host_clock"] = host_clock(config["host"])
+        clock = result["host_clock"] = host_clock(config["host"])
+        if case.get("setup_state"):
+            cleanup_due = True
+            result["setup"] = apply_state(config, clock, case["setup_state"])
+            write_json(directory / "result.json", result)
+            if not result["setup"]["verified"]:
+                raise RuntimeError("setup_state_not_confirmed")
+            time.sleep(case.get("setup_settle_seconds", 6))
+        watch = any(case.get(k) for k in ("expect_states", "expect_silence", "cleanup_state", "setup_state"))
+        recorder = PerceptionRecorder(config["host"], config["device"]) if watch else contextlib.nullcontext()
         result["capture_started"] = now()
         cleanup_due = True
-        guarded_process([ROOT / "scripts/dotty-av-test.sh", "run", case["prompt"],
-                         case.get("seconds", 50), media], directory / "capture.log", session, 185, env,
-                        datetime.fromisoformat(config["stop_prompts_at"]).timestamp())
-        result["capture_ended"] = now()
-        # Snapshot before transcription: evaluator runtime must not give a stuck
-        # robot extra minutes to recover unnoticed.
-        clock = result["host_clock"]
+        try:
+            with recorder:
+                guarded_process([ROOT / "scripts/dotty-av-test.sh", "run", case["prompt"],
+                                 case.get("seconds", 50), media], directory / "capture.log", session, 185, env,
+                                datetime.fromisoformat(config["stop_prompts_at"]).timestamp())
+        finally:
+            result["capture_ended"] = now()
+        window = (host_epoch(result["capture_started"], clock, -clock["uncertainty_seconds"] - 1),
+                  host_epoch(result["capture_ended"], clock, clock["uncertainty_seconds"] + 1))
+        events = recorder.events() if watch else []
+        if watch:
+            write_json(directory / "perception-events.json", events)
+            result["perception_poll_errors"] = recorder.errors
+        result["observed_states"] = [state for _, state in state_changes(events, *window)]
+        # Clean up before transcription: evaluator runtime must not leave a
+        # sleeping robot (microphone disabled) or a song running for minutes.
         cleanup_due = False
-        result["cleanup"] = case_cleanup(session, config, case)
+        result["cleanup"] = case_cleanup(session, config, case, clock)
         if result["cleanup"]:
             # Judge recovery after the music stop / state escape has settled.
             time.sleep(case.get("cleanup_settle_seconds", 5))
@@ -809,9 +1004,19 @@ def run_case(session, config, case):
                 if key in analysis}
         heard = " ".join(s["text"] for s in load(directory / "prompt-heard.json")["segments"])
         result["prompt_heard"] = heard
-        result.update(evaluate(case, load(directory / "response.json"),
-                               (directory / "xiaozhi-esp32-server.log").read_text(),
-                               offset, after, config["device"], before=before))
+        restored = (result["cleanup"].get("state", {}).get("verified", False)
+                    if case.get("cleanup_state") else None)
+        log_text = (directory / "xiaozhi-esp32-server.log").read_text()
+        if case.get("expect_silence"):
+            result.update(evaluate_silence(case, load(directory / "response.json"), log_text,
+                                           events, window, after, config["device"]))
+            result["recovery"] = "PASS" if restored else "FAIL"
+            if result["failure"] is None and not restored:
+                set_failure(result, "state_not_restored", case)
+        else:
+            result.update(evaluate(case, load(directory / "response.json"), log_text,
+                                   offset, after, config["device"], before=before,
+                                   recovered_override=restored))
         response_rms = (result["native_audio_windows"].get("container_audio", {})
                         .get("response", {}).get("rms_dbfs"))
         apply_contract(result, case, assess_contract(case, result, evidence_logs, rows), response_rms)
@@ -834,7 +1039,7 @@ def run_case(session, config, case):
             # Capture was interrupted (STOP, deadline, crash in a subprocess):
             # still stop music and restore the robot's resting state.
             try:
-                result["cleanup"] = case_cleanup(session, config, case)
+                result["cleanup"] = case_cleanup(session, config, case, result.get("host_clock"))
             except Exception as exc:
                 result["cleanup"] = {"error": type(exc).__name__}
         result["ended"] = now()
@@ -918,6 +1123,8 @@ def restore_checkpoint(session):
             raise RuntimeError("interrupted case identity unknown; manual evidence review required")
         if case_id not in checkpoint["quarantined"]:
             checkpoint["quarantined"].append(case_id)
+        # The runner died mid-case: its state escape may never have run.
+        checkpoint["needs_restore"] = case_id
         if result:
             result.update(verdict="INCONCLUSIVE", failure="interrupted_case_requires_review",
                           ended=now())
@@ -977,6 +1184,13 @@ def eligible_cases(bank, checkpoint):
 def run(session, config, catalogue, selected=None, once=False):
     with lock(session), device_lock(config):
         checkpoint = restore_checkpoint(session)
+        interrupted = next((c for c in catalogue if c["id"] == checkpoint.get("needs_restore")), None)
+        if interrupted and (interrupted.get("cleanup_state") or interrupted.get("cleanup_admin")):
+            restored = case_cleanup(session, config, interrupted, host_clock(config["host"]))
+            journal(session, {"event": "interrupted_case_cleanup", "case_id": interrupted["id"],
+                              "cleanup": restored})
+        checkpoint.pop("needs_restore", None)
+        write_json(session / "checkpoint.json", checkpoint)
         deadline = datetime.fromisoformat(config["stop_prompts_at"]).timestamp()
         rng = random.Random(config["seed"] + checkpoint["soak"])
         bank = [c for c in catalogue if c.get("enabled", True) and (not selected or c["id"] in selected)]
