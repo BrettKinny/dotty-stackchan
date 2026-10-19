@@ -132,5 +132,48 @@ class ToggleSetterTests(unittest.TestCase):
         self.assertEqual(result, {"ok": True, "device_pushed": True})
 
 
+class StartupResyncTests(unittest.TestCase):
+    """#21: a bridge restart pushes the persisted toggles back to the robot."""
+
+    def setUp(self):
+        tmp = Path(tempfile.mkdtemp(prefix="dotty-resync-"))
+        for name, fname, value in (("_KID_STATE_FILE", "kid-mode", "false"),
+                                   ("_SMART_STATE_FILE", "smart-mode", "true")):
+            original = getattr(bridge_app, name)
+            self.addCleanup(lambda n=name, o=original: setattr(bridge_app, n, o))
+            path = tmp / fname
+            path.write_text(value)
+            setattr(bridge_app, name, path)
+        for name in ("_dispatch_set_toggle", "_XIAOZHI_HOST"):
+            original = getattr(bridge_app, name)
+            self.addCleanup(lambda n=name, o=original: setattr(bridge_app, n, o))
+        self.calls: list[tuple[str, bool]] = []
+        self.ack = True
+
+        async def _fake_dispatch(device_id, name, enabled):
+            self.calls.append((name, enabled))
+            return self.ack
+
+        bridge_app._dispatch_set_toggle = _fake_dispatch
+        bridge_app._XIAOZHI_HOST = "xiaozhi.test"
+
+    def test_pushes_persisted_toggles(self):
+        result = asyncio.run(bridge_app._startup_resync())
+        self.assertEqual(self.calls, [("kid_mode", False), ("smart_mode", True)])
+        self.assertEqual(result, {"kid_mode": False, "smart_mode": True, "pushed": True})
+
+    def test_robot_offline_is_not_an_error(self):
+        self.ack = False
+        result = asyncio.run(bridge_app._startup_resync())
+        self.assertFalse(result["pushed"])
+        self.assertEqual(len(self.calls), 2)
+
+    def test_no_xiaozhi_host_skips_push(self):
+        bridge_app._XIAOZHI_HOST = ""
+        result = asyncio.run(bridge_app._startup_resync())
+        self.assertEqual(self.calls, [])
+        self.assertFalse(result["pushed"])
+
+
 if __name__ == "__main__":
     unittest.main()

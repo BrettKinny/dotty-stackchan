@@ -413,6 +413,44 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("dotty-bridge")
 
 
+_STARTUP_RESYNC = os.environ.get("DOTTY_BRIDGE_STARTUP_RESYNC", "1") != "0"
+_STARTUP_RESYNC_DELAY_SEC = float(
+    os.environ.get("DOTTY_BRIDGE_STARTUP_RESYNC_DELAY_SEC", "3")
+)
+
+
+async def _startup_resync() -> dict:
+    """Bring the robot back in line with persisted state after a restart (#21).
+
+    The bridge keeps no state of its own any more: the State card reads
+    dotty-behaviour's per-device ``current_state`` live (persisted across
+    behaviour restarts by #173) and the toggles live in the shared state
+    files. What a restart can leave diverged is the firmware's kid / smart
+    LED pips, e.g. after a flip that landed while the robot held no WS. So
+    push both persisted toggles once. Best-effort: with no robot connected
+    xiaozhi answers 503 and receiveAudioHandle repaints the pips on the
+    next connection anyway. Returns what was pushed, for tests and logs."""
+    kid_on = _read_kid_mode()
+    smart_on = _read_smart_mode()
+    result = {"kid_mode": kid_on, "smart_mode": smart_on, "pushed": False}
+    if not _XIAOZHI_HOST:
+        return result
+    kid_ok = await _dispatch_set_toggle("", "kid_mode", kid_on)
+    smart_ok = await _dispatch_set_toggle("", "smart_mode", smart_on)
+    result["pushed"] = kid_ok and smart_ok
+    if result["pushed"]:
+        log.info(
+            "startup resync: pushed kid_mode=%s smart_mode=%s to the robot",
+            kid_on, smart_on,
+        )
+    else:
+        log.info(
+            "startup resync: robot not connected; pips sync on its next "
+            "connection (kid_mode=%s smart_mode=%s)", kid_on, smart_on,
+        )
+    return result
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan slimmed to dashboard-only.
@@ -420,12 +458,25 @@ async def lifespan(app: FastAPI):
     The voice / perception / VLM machinery that used to spin up here moved
     to dotty-pi and dotty-behaviour in the #36 cutover; PR #109 then
     containerized this file, and #111 ripped the dormant code paths so the
-    container doesn't double-fire consumers. The startup voice-model
-    reconcile was dropped in the 2026-05-29 alignment pass along with
-    Tier1Slim — the live PiVoiceLLM path has no runtime model swap (v2
-    scope), so there is no startup work left to do.
+    container doesn't double-fire consumers. The only startup work left is
+    the one-shot toggle resync (#21), run in the background so a slow or
+    absent xiaozhi never delays the dashboard coming up.
     """
-    yield
+    task: asyncio.Task | None = None
+    if _STARTUP_RESYNC:
+        async def _delayed() -> None:
+            await asyncio.sleep(_STARTUP_RESYNC_DELAY_SEC)
+            try:
+                await _startup_resync()
+            except Exception:
+                log.exception("startup resync failed")
+
+        task = asyncio.create_task(_delayed(), name="bridge-startup-resync")
+    try:
+        yield
+    finally:
+        if task is not None and not task.done():
+            task.cancel()
 
 
 app = FastAPI(title="Dotty Bridge", lifespan=lifespan)
