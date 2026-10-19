@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import TYPE_CHECKING
 
@@ -73,6 +74,8 @@ def build_turn_suffix(kid_mode: bool) -> str:
 # the callers' logging/metrics:
 #
 #   redirect — common profanity / slurs
+#   danger   — imitable physical danger (#178): a child copying the reply
+#              could get hurt (fan blades, sockets, fire, heights, ...)
 #   log      — explicit sexual / graphic violence
 #   alert    — hard drugs
 #
@@ -85,11 +88,55 @@ _CF_TIER_REDIRECT_RE = re.compile(
     re.IGNORECASE,
 )
 _CF_TIER_LOG_RE = re.compile(
-    r"\b(penis|vagina|orgasm|porn\w*|hentai|decapitat\w*|dismember\w*|mutilat\w*)\b",
+    r"\b(penis|vagina|orgasm|porn\w*|hentai|decapitat\w*|dismember\w*|mutilat\w*"
+    r"|behead\w*|murder\w*|massacr\w*|stabb(?:ed|ing)|disembowel\w*)\b",
     re.IGNORECASE,
 )
 _CF_TIER_ALERT_RE = re.compile(
     r"\b(cocaine|heroin|methamphetamine|fentanyl|ecstasy)\b",
+    re.IGNORECASE,
+)
+
+# #178: the 4B model told a child "I love zooming up to the ceiling fan and
+# dancing around the blades". No blocked WORD is involved, so this tier
+# matches imitable-danger PHRASES: an action a child could copy, close to
+# the hazard, inside one sentence ([^.!?\n] keeps the gap in-sentence).
+# Kept deliberately narrow — "a fan spins its blades to push air" or
+# "blades of grass" must still pass. See _CF_DANGER_SAFETY_CUE_RE for the
+# one exemption (safety advice).
+_GAP = r"[^.!?\n]{0,40}?"
+_CF_TIER_DANGER_RE = re.compile(
+    r"\b(?:"
+    # spinning blades / ceiling fans
+    r"(?:zoom|fly|flew|flies|climb|swing|hang|hung|danc|ride|rode|jump|touch|grab|poke|reach|play)\w*"
+    + _GAP + r"\b(?:ceiling fans?|fan blades?|blades?\b(?! of grass))"
+    r"|(?:around|between|through|into|onto|near) (?:the |those |its |spinning |sharp )*(?:fan )?blades\b(?! of grass)"
+    # electricity
+    r"|(?:poke|stick|put|lick|touch|push|jam)\w*" + _GAP
+    + r"\b(?:power ?points?|power sockets?|sockets?|outlets?|electrical wires?|live wires?|plug holes?)"
+    # fire and sharp things
+    r"|play\w* with (?:fire|flames?|matches|lighters?|knives|a knife|scissors|candles?|razors?)"
+    r"|(?:light|lit|strike|struck)\w* (?:a |the |some )?(?:matches|match|lighters?|fires?)\b"
+    # hot things
+    r"|touch\w*" + _GAP + r"\b(?:stoves?|ovens?|heaters?|irons?|hot ?plates?|burners?|kettles?|flames?|fire)\b"
+    # swallowing hazards / poisons
+    r"|(?:swallow|eat|ate|lick|taste|tasting|drink|drank|sip)\w*" + _GAP
+    + r"\b(?:batter(?:y|ies)|magnets?|coins?|pills?|tablets?|medicines?|bleach|detergent|cleaning (?:stuff|liquid|spray))"
+    # heights and windows
+    r"|(?:jump|leap|fall|fell|lean)\w* (?:off|out of|out|from) (?:the |a |my |your |our )?"
+    r"(?:roof|balcony|window|bridge|cliff|top bunk)"
+    r"|climb\w*" + _GAP + r"\b(?:roof|balcony|window|bookshel(?:f|ves)|ceiling|railing)"
+    # suffocation
+    r"|bags? over (?:your|my|his|her|their|its) heads?"
+    r")",
+    re.IGNORECASE,
+)
+# Safety advice ("never touch the stove", "ask a grown-up first") mentions
+# the same hazards. A danger match is exempt only when its own sentence
+# carries one of these cues; the other tiers have no exemption.
+_CF_DANGER_SAFETY_CUE_RE = re.compile(
+    r"\b(?:never|don'?t|do not|shouldn'?t|should not|mustn'?t|must not|"
+    r"not safe|isn'?t safe|unsafe|grown-?ups?|adults?)\b",
     re.IGNORECASE,
 )
 
@@ -103,8 +150,23 @@ CONTENT_FILTER_REPLACEMENT = (
 _CF_TIERS = [
     (_CF_TIER_ALERT_RE, "alert"),
     (_CF_TIER_LOG_RE, "log"),
+    (_CF_TIER_DANGER_RE, "danger"),
     (_CF_TIER_REDIRECT_RE, "redirect"),
 ]
+
+_cf_log = logging.getLogger(TAG)
+
+_CF_SENTENCE_END = re.compile(r"[.!?\n]")
+
+
+def _danger_is_safety_advice(match: "re.Match") -> bool:
+    text = match.string
+    start = 0
+    for end in _CF_SENTENCE_END.finditer(text, 0, match.start()):
+        start = end.end()
+    stop = _CF_SENTENCE_END.search(text, match.end())
+    sentence = text[start:stop.start() if stop else len(text)]
+    return _CF_DANGER_SAFETY_CUE_RE.search(sentence) is not None
 
 
 def content_filter_match(text: str) -> "tuple[str, re.Match] | None":
@@ -112,10 +174,28 @@ def content_filter_match(text: str) -> "tuple[str, re.Match] | None":
     term in `text`, or None when clean. No logging, no metrics — callers
     layer their own side effects on top."""
     for pattern, tier in _CF_TIERS:
+        if tier == "danger":
+            for match in pattern.finditer(text):
+                if not _danger_is_safety_advice(match):
+                    return tier, match
+            continue
         match = pattern.search(text)
         if match:
             return tier, match
     return None
+
+
+class ProviderText(str):
+    """A provider-authored fixed phrase, not model output.
+
+    Kid mode normally holds the whole turn until it has been checked. A
+    provider can mark a constant it wrote itself (e.g. PiVoiceLLM's
+    "Let me think hard about that." before a 30-60 s reasoner call) so it is
+    spoken straight away. It is still matched, and it is only released early
+    when nothing unchecked is buffered ahead of it.
+    """
+
+    __slots__ = ()
 
 
 def filter_tts_stream(chunks, kid_mode, on_hit=None):
@@ -125,10 +205,16 @@ def filter_tts_stream(chunks, kid_mode, on_hit=None):
     the safety decision atomic and, critically for PiVoiceLLM, drains the RPC
     iterator through its ``agent_end`` frame instead of abandoning a live pi
     turn as soon as a blocked sentence is found. Clean streams retain their
-    original chunking after the full-turn check.
+    original chunking after the full-turn check, and a blocked word split
+    across chunks is still caught because the joined text is matched.
 
     On a hit: call on_hit(tier, match) if given, emit
     CONTENT_FILTER_REPLACEMENT and replace the whole turn.
+
+    Fail closed: if the matcher itself raises, the buffered text is dropped
+    and the replacement is spoken instead. An exception from ``chunks``
+    propagates with nothing buffered emitted. A failing ``on_hit`` callback
+    never stops the replacement.
 
     kid_mode False → transparent passthrough, zero behaviour change.
     """
@@ -136,15 +222,56 @@ def filter_tts_stream(chunks, kid_mode, on_hit=None):
         yield from chunks
         return
 
-    buffered = [chunk for chunk in chunks if chunk]
-    hit = content_filter_match("".join(buffered))
-    if hit is not None:
-        if on_hit is not None:
-            on_hit(*hit)
-        yield CONTENT_FILTER_REPLACEMENT
-        return
+    released: list[str] = []   # ProviderText already spoken this turn
+    buffered: list[str] = []
+    for chunk in chunks:
+        if not chunk:
+            continue
+        if isinstance(chunk, ProviderText) and not buffered:
+            if _cf_safe_check(released + [chunk], on_hit) is not None:
+                yield _cf_replacement(released)
+                _drain(chunks)
+                return
+            released.append(chunk)
+            yield chunk
+            continue
+        buffered.append(chunk)
 
+    if _cf_safe_check(released + buffered, on_hit) is not None:
+        yield _cf_replacement(released)
+        return
     yield from buffered
+
+
+def _drain(chunks) -> None:
+    # Keep PiVoiceLLM's RPC stream in step: consume through agent_end even
+    # when the turn has already been replaced.
+    for _ in chunks:
+        pass
+
+
+def _cf_replacement(released) -> str:
+    """The replacement, minus its face emoji when the turn already has one."""
+    if not released:
+        return CONTENT_FILTER_REPLACEMENT
+    return CONTENT_FILTER_REPLACEMENT[len(FALLBACK_EMOJI):].lstrip()
+
+
+def _cf_safe_check(parts, on_hit):
+    """Run the matcher; return a truthy marker when the text must not be spoken."""
+    try:
+        hit = content_filter_match("".join(parts))
+    except Exception:  # fail closed — never speak text we could not check
+        _cf_log.exception("content filter errored; replacing turn")
+        return "error"
+    if hit is None:
+        return None
+    if on_hit is not None:
+        try:
+            on_hit(*hit)
+        except Exception:
+            _cf_log.exception("content filter on_hit callback failed")
+    return hit
 
 # Enforced subset (bridge.py ALLOWED_EMOJIS): 😊 😆 😢 😮 🤔 😠 😐 😍 😴
 EMOJI_MAP = {
