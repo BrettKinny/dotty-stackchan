@@ -719,9 +719,22 @@ _DASHBOARD_TURNS_MAX = 200
 _dashboard_recent_turns: "deque[dict]" = deque(maxlen=_DASHBOARD_TURNS_MAX)
 
 
+_dashboard_last_turn_id = 0
+
+
 def _dashboard_publish_turn(record: dict) -> None:
     """Record a completed turn and fan it out to /ui/events subscribers.
-    A slow subscriber's full queue drops the event rather than blocking."""
+    A slow subscriber's full queue drops the event rather than blocking.
+
+    Each turn gets an ``id`` (milliseconds since the epoch, bumped to stay
+    strictly increasing) that /ui/events sends as the SSE event id, so a
+    reconnecting browser's Last-Event-ID replays only what it missed, even
+    across a bridge restart."""
+    global _dashboard_last_turn_id
+    _dashboard_last_turn_id = max(
+        _dashboard_last_turn_id + 1, int(time.time() * 1000),
+    )
+    record = {**record, "id": _dashboard_last_turn_id}
     _dashboard_recent_turns.append(record)
     for q in list(_dashboard_event_listeners):
         try:

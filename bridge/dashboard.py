@@ -2128,38 +2128,75 @@ async def perception_feed_proxy(request: Request) -> StreamingResponse:
 
 # --- P13 + P12: SSE event stream for live log + error toasts -------------
 
+# Turns replayed to a freshly opened page so the Turns tab is not blank
+# until the next voice turn.
+_EVENTS_REPLAY_MAX = 20
+
 @router.get("/events", include_in_schema=False)
 async def events_stream(request: Request) -> StreamingResponse:
     """Server-Sent Events stream of completed conversation turns.
 
-    Each event is one JSON object: {ts, channel, request_text, response_text,
-    latency_ms, error}. Published when the voice provider reports a turn to
-    /api/voice/turn. Heartbeats every 15s keep proxies / browsers awake.
+    Each event is one JSON object: {id, ts, channel, request_text,
+    response_text, latency_ms, error}. Published when the voice provider
+    reports a turn to /api/voice/turn. Heartbeats every 15s keep proxies /
+    browsers awake.
+
+    On connect the stream first replays recent turns from the in-memory
+    ring, flagged ``"replay": true`` so the page shows them without raising
+    the error toast: the last _EVENTS_REPLAY_MAX turns for a fresh page, or
+    only the turns newer than the browser's Last-Event-ID on a reconnect.
     """
     subscribe = _state.get("subscribe_events")
     unsubscribe = _state.get("unsubscribe_events")
     if subscribe is None or unsubscribe is None:
         raise HTTPException(503, "event broadcast not configured")
+    try:
+        last_seen_id: int | None = int(request.headers.get("last-event-id", ""))
+    except ValueError:
+        last_seen_id = None
+    # Subscribe before reading the ring so a turn landing in between is
+    # caught by the queue; the id check below drops the overlap.
     queue = subscribe()
+    backlog = [t for t in _recent_turns() if isinstance(t.get("id"), int)]
+    if last_seen_id is None:
+        backlog = backlog[-_EVENTS_REPLAY_MAX:]
+    else:
+        backlog = [t for t in backlog if t["id"] > last_seen_id]
+
+    def _frame(event: dict, *, replay: bool) -> bytes:
+        # Strip the heavy [Context] block before pushing — clients only
+        # want the cleaned user payload.
+        event = {**event,
+                 "request_text": _clean_request_text(
+                     event.get("request_text") or "")}
+        if replay:
+            event["replay"] = True
+        payload = json.dumps(event, ensure_ascii=False)
+        event_id = event.get("id")
+        prefix = f"id: {event_id}\n" if isinstance(event_id, int) else ""
+        return f"{prefix}data: {payload}\n\n".encode()
 
     async def gen():
+        sent_id = max((t["id"] for t in backlog), default=0)
         try:
             # Tell EventSource how long to wait before reconnecting on drop.
             yield "retry: 5000\n\n".encode()
+            for turn in backlog:
+                yield _frame(turn, replay=True)
             while True:
                 if await request.is_disconnected():
                     break
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=15.0)
-                    # Strip the heavy [Context] block before pushing — clients
-                    # only want the cleaned user payload.
-                    event = {**event,
-                             "request_text": _clean_request_text(
-                                 event.get("request_text") or "")}
-                    payload = json.dumps(event, ensure_ascii=False)
-                    yield f"data: {payload}\n\n".encode()
                 except asyncio.TimeoutError:
                     yield b": heartbeat\n\n"
+                    continue
+                event_id = event.get("id")
+                if isinstance(event_id, int):
+                    if event_id <= sent_id:
+                        continue
+                    sent_id = event_id
+                yield _frame(event, replay=False)
         finally:
             unsubscribe(queue)
 

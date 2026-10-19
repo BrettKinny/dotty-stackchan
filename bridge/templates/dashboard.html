@@ -655,6 +655,9 @@
       var data;
       try { data = JSON.parse(ev.data); } catch (e) { return; }
       prependFeedTurn(data);
+      // Replayed turns (history sent on connect / reconnect) fill the feed
+      // only — no card refresh storm and no toast for an old error.
+      if (data && data.replay) return;
       // Trigger refresh on polling tiles (status-strip, etc.) so they
       // pick up new state immediately on every turn.
       window.dispatchEvent(new CustomEvent('dotty-refresh'));
