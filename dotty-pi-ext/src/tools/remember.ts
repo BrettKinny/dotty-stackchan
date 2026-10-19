@@ -48,8 +48,9 @@ export const rememberTool = {
   label: "Remember",
   description:
     "Store a durable fact about the user, the household, or something " +
-    "Dotty has learned that should persist across conversations. Use " +
-    "sparingly — short, specific facts only (≤300 chars).",
+    "Dotty has learned that should persist across conversations. Call it " +
+    "whenever the user asks you to remember something, before saying you " +
+    "will. Short, specific facts only (≤300 chars).",
   promptSnippet:
     "Persist a short fact to Dotty's long-term memory.",
   promptGuidelines: [
