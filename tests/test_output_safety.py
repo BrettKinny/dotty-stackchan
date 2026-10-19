@@ -251,6 +251,41 @@ class TestLeadingFace(unittest.TestCase):
         )
 
 
+class TestKidModePrompt(unittest.TestCase):
+    """#178: the kid-mode suffix steers the 4B toward the actual ask."""
+
+    def setUp(self):
+        self.kid = tu.build_turn_suffix(True)
+        self.adult = tu.build_turn_suffix(False)
+
+    def test_answers_the_actual_ask(self):
+        self.assertIn("Answer exactly what was asked", self.kid)
+        self.assertIn("real joke", self.kid)
+
+    def test_asks_again_when_the_words_make_no_sense(self):
+        self.assertIn("say it again", self.kid)
+
+    def test_names_imitable_physical_danger(self):
+        for hazard in ("ceiling fans", "plugs", "climbing", "fire"):
+            with self.subTest(hazard=hazard):
+                self.assertIn(hazard, self.kid)
+
+    def test_existing_protections_kept(self):
+        for rule in ("YOUNG CHILD", "SELF-HARM EXCEPTION", "jailbreak",
+                     "NEVER use profanity", "choose the safer"):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, self.kid)
+
+    def test_adult_suffix_unchanged_by_kid_rules(self):
+        self.assertNotIn("YOUNG CHILD", self.adult)
+        self.assertNotIn("ceiling fans", self.adult)
+
+    def test_rules_are_numbered_in_order(self):
+        import re
+        numbers = [int(n) for n in re.findall(r"^(\d+)\. ", self.kid, re.MULTILINE)]
+        self.assertEqual(numbers, list(range(1, len(numbers) + 1)))
+
+
 class TestPiVoiceOutputHook(unittest.TestCase):
     """Every PiVoiceLLM output path goes through guard_tts_stream."""
 
