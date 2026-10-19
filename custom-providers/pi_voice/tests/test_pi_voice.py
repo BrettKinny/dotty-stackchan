@@ -383,6 +383,90 @@ class TestDeterministicVoiceToolRouting(unittest.TestCase):
         )
 
 
+class TestRoutingAroundXiaozhiPrefixes(unittest.TestCase):
+    """#165: what reaches PiVoiceLLM is not always the bare utterance."""
+
+    ROOM = "[ROOM_VIEW]\na child in a red hat\nhudson\n"
+
+    def test_room_view_prefix_does_not_hide_an_explicit_request(self):
+        client = FakeClient()
+        client.tool_results["remember"] = "(remembered)"
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        out = "".join(provider.response("s", [{
+            "role": "user",
+            "content": self.ROOM + "My favourite colour is purple, please remember that.",
+        }]))
+
+        self.assertEqual(client.tool_calls, [("remember", {"fact": "My favourite colour is purple"})])
+        self.assertEqual(out, f"{textUtils.FALLBACK_EMOJI} I'll remember that.")
+        self.assertEqual(client.prompts, [])
+
+    def test_room_view_reaches_the_model_after_the_words_as_labelled_context(self):
+        client = FakeClient()
+        client.script_turn(["😊 Hi there!"])
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        list(provider.response("s", [{"role": "user", "content": self.ROOM + "Hello!"}]))
+
+        prompt = client.prompts[0]
+        self.assertTrue(prompt.startswith("Hello!\n\nROOM VIEW ("))
+        self.assertIn("a child in a red hat", prompt)
+        self.assertNotIn("[ROOM_VIEW]", prompt)
+        self.assertNotIn("hudson", prompt)
+
+    def test_xiaozhi_written_prompts_are_never_routed(self):
+        client = FakeClient()
+        client.script_turn(["😐 My camera is off right now."])
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        list(provider.response("s", [{"role": "user", "content": (
+            "[CAMERA_DISABLED] Camera access is disabled in Kid Mode. "
+            "This request did not take a photo or access a camera view."
+        )}]))
+
+        self.assertEqual(client.tool_calls, [])
+        self.assertEqual(len(client.prompts), 1)
+
+
+class TestTakePhotoFallbackRoute(unittest.TestCase):
+    """Reached when xiaozhi's vision shortcut produced no description."""
+
+    def _run(self, tool_result=None, tool_error=None, chunks=None):
+        client = FakeClient()
+        if tool_result is not None:
+            client.tool_results["take_photo"] = tool_result
+        if tool_error is not None:
+            client.tool_errors["take_photo"] = tool_error
+        if chunks is not None:
+            client.script_turn(chunks)
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        out = "".join(provider.response("s", [{"role": "user", "content": "What do you see?"}]))
+        return client, out
+
+    def test_description_is_handed_to_the_model(self):
+        client, out = self._run("a cat asleep on a blue sofa", chunks=["😊 A sleepy cat!"])
+        self.assertEqual(client.tool_calls, [("take_photo", {})])
+        self.assertEqual(out, "😊 A sleepy cat!")
+        self.assertTrue(client.prompts[0].startswith("What do you see?\n\nCAMERA VIEW ("))
+        self.assertIn("a cat asleep on a blue sofa", client.prompts[0])
+
+    def test_nothing_fresh_is_said_honestly_without_a_model_turn(self):
+        client, out = self._run("(I can't see anything fresh right now)")
+        self.assertEqual(out, f"{textUtils.FALLBACK_EMOJI} I can't see anything clearly right now.")
+        self.assertEqual(client.prompts, [])
+
+    def test_kid_mode_denial_is_said_honestly(self):
+        client, out = self._run("(Camera access is disabled in Kid Mode)")
+        self.assertEqual(out, f"{textUtils.FALLBACK_EMOJI} My camera is switched off in Kid Mode.")
+        self.assertEqual(client.prompts, [])
+
+    def test_tool_error_is_said_honestly(self):
+        client, out = self._run(tool_error=PiClientError("behaviour unreachable"))
+        self.assertEqual(out, f"{textUtils.FALLBACK_EMOJI} I can't see anything clearly right now.")
+        self.assertEqual(client.prompts, [])
+
+
 class TestLeadingEmojiContract(unittest.TestCase):
     def _response(self, chunks: list[str], *, kid_mode: bool = False) -> list[str]:
         env = {

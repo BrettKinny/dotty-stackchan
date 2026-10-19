@@ -461,6 +461,46 @@ class TestContainerVoiceToolRunner(unittest.TestCase):
 
 
 
+class TestVoiceSessionSetup(unittest.TestCase):
+    """#165: the voice agent sees only its voice tools and never compacts."""
+
+    def test_pi_coding_tools_are_disabled_by_default(self):
+        from pi_client import _DEFAULT_PI_FLAGS
+        self.assertIn("--no-builtin-tools", _DEFAULT_PI_FLAGS)
+        self.assertNotIn("--no-tools", _DEFAULT_PI_FLAGS)  # would drop the voice tools too
+
+    def test_auto_compaction_is_disabled_once_per_spawn(self):
+        fake = FakePopen()
+        client = make_client(fake)
+        try:
+            _auto_respond(fake, turn_text="hi")
+            list(client.iter_turn_text("hello"))
+            _auto_respond(fake, turn_text="again")
+            list(client.iter_turn_text("hello again"))
+            toggles = [c for c in fake.stdin_lines if c.get("type") == "set_auto_compaction"]
+            self.assertEqual(toggles, [{"type": "set_auto_compaction", "enabled": False}])
+            self.assertEqual(fake.stdin_lines[0]["type"], "set_auto_compaction")
+        finally:
+            client.close()
+
+
+class TestTakePhotoDirectRunner(unittest.TestCase):
+    def test_take_photo_runs_without_an_argument(self):
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen["script"] = argv[-1]
+            return SimpleNamespace(
+                returncode=0, stdout=json.dumps({"result": "a cat"}), stderr="",
+            )
+
+        with patch("pi_client.subprocess.run", fake_run):
+            result = _run_container_voice_tool("dotty-pi", "take_photo", {})
+        self.assertEqual(result, "a cat")
+        self.assertIn("take_photo.ts", seen["script"])
+        self.assertIn("await runTakePhoto()", seen["script"])
+
+
 class TestDirectToolTimeouts(unittest.TestCase):
     """think_hard may wait for a cold 27B load; quick tools must stay quick."""
 

@@ -36,7 +36,10 @@ def _spawn(coro, *, name: str | None = None):
 # Override with DOTTY_PLAY_ASSET_ROOTS (os.pathsep-separated absolute paths).
 import os as _os_mod
 
-_ASSET_OK_EXT = {".opus", ".ogg", ".wav", ".mp3"}
+# MIDI is rendered server-side (fluidsynth, as dance mode does); the firmware
+# only ever receives Opus frames, so it needs no MIDI support of its own.
+_MIDI_EXT = {".mid", ".midi"}
+_ASSET_OK_EXT = {".opus", ".ogg", ".wav", ".mp3"} | _MIDI_EXT
 _DEFAULT_ASSET_ROOTS = (
     "/opt/xiaozhi-esp32-server/config/assets",
     "/var/lib/dotty-behaviour/assets",
@@ -353,8 +356,10 @@ class SimpleHttpServer:
             names = sorted(_os.listdir(base))
         except OSError as exc:
             return web.json_response({"error": str(exc), "base": base}, status=500)
-        ok_ext = {".opus", ".ogg", ".wav", ".mp3"}
-        files = [n for n in names if _os.path.splitext(n)[1].lower() in ok_ext]
+        # Same set play-asset accepts. MIDI used to be filtered out here, so
+        # the dashboard and play_song listed only purr.opus while the songs
+        # dir held six .mid tunes.
+        files = [n for n in names if _os.path.splitext(n)[1].lower() in _ASSET_OK_EXT]
         return web.json_response({"base": base, "files": files})
 
     async def _dotty_play_asset(self, request: "web.Request") -> "web.Response":
@@ -454,7 +459,13 @@ class SimpleHttpServer:
                 return pkts
 
             try:
-                pkts = await asyncio.get_running_loop().run_in_executor(None, _decode)
+                if _os.path.splitext(asset_path)[1].lower() in _MIDI_EXT:
+                    # ffmpeg cannot decode MIDI; reuse dance mode's
+                    # fluidsynth renderer (cached by path + mtime + rate).
+                    from core.handle.receiveAudioHandle import _encode_midi_to_opus
+                    pkts = await _encode_midi_to_opus(asset_path, conn.sample_rate)
+                else:
+                    pkts = await asyncio.get_running_loop().run_in_executor(None, _decode)
             except Exception as exc:
                 self.logger.bind(tag=TAG).warning(
                     f"play-asset decode failed {asset_path!r}: {exc}"

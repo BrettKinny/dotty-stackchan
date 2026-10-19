@@ -7,7 +7,12 @@
 // Each marker is matched only at the start of a line after a blank/new line,
 // exactly as the provider emits it, so a person saying the words is untouched.
 const SCAFFOLD_START =
-  /\n+(?:MEMORY SEARCH RESULTS \(|VOICE TOOL ROUTING:|---\nHARD CONSTRAINTS for THIS reply)/;
+  /\n+(?:MEMORY SEARCH RESULTS \(|CAMERA VIEW \(|ROOM VIEW \(|VOICE TOOL ROUTING:|---\nHARD CONSTRAINTS for THIS reply)/;
+
+// xiaozhi-server prefixes a turn with "[ROOM_VIEW]\n<description>\n<person id
+// or blank>\n" while a face is cached. PiVoiceLLM now moves it out of the way,
+// but rows logged before that start with it.
+const ROOM_VIEW_PREFIX = /^\[ROOM_VIEW\]\n[^\n]*\n[a-z0-9_-]*\n/i;
 
 /** Unwrap the legacy ASR envelope `{"content": "..."}` if that is all there is. */
 function unwrapAsrEnvelope(text: string): string {
@@ -26,7 +31,7 @@ function unwrapAsrEnvelope(text: string): string {
 
 /** The user's own words from a prompt as pi received it. */
 export function stripTurnBoilerplate(text: string): string {
-  const raw = text ?? "";
+  const raw = (text ?? "").replace(ROOM_VIEW_PREFIX, "");
   const cut = raw.search(SCAFFOLD_START);
   const spoken = cut === -1 ? raw : raw.slice(0, cut);
   return unwrapAsrEnvelope(spoken).trim();

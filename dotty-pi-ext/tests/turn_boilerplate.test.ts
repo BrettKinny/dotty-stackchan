@@ -31,6 +31,17 @@ assertEq("legacy ASR JSON wrapper unwrapped",
   stripTurnBoilerplate('{"content": "Dotty, what is my favourite colour?"}\n---\nHARD CONSTRAINTS for THIS reply'),
   "Dotty, what is my favourite colour?");
 assertEq("ordinary braces are not treated as a wrapper", stripTurnBoilerplate("{not json} hello"), "{not json} hello");
+assertEq("camera view block removed",
+  stripTurnBoilerplate("What do you see?\n\nCAMERA VIEW (what your camera saw):\na cat" + ROUTING + RULES),
+  "What do you see?");
+assertEq("room view block removed",
+  stripTurnBoilerplate("Hello!\n\nROOM VIEW (who your camera saw):\na child" + ROUTING + RULES), "Hello!");
+assertEq("legacy room-view prefix removed",
+  stripTurnBoilerplate("[ROOM_VIEW]\na child in a red hat\nhudson\nremember that I like cats" + RULES),
+  "remember that I like cats");
+assertEq("legacy room-view prefix with blank person id removed",
+  cleanStoredTurn("user: [ROOM_VIEW]\nan adult\n\nHello | assistant: 😊 Hi!"),
+  "user: Hello | assistant: 😊 Hi!");
 assertEq("a user merely saying the words keeps their sentence",
   stripTurnBoilerplate("what are hard constraints for this reply"), "what are hard constraints for this reply");
 
