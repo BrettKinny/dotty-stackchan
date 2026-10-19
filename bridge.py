@@ -92,24 +92,48 @@ _SMART_STATE_FILE = Path(
 )
 
 
+def _read_toggle_file(path: Path) -> bool | None:
+    """Parse a "true"/"false" toggle state file; None when it is missing,
+    unreadable or holds anything else."""
+    try:
+        v = path.read_text().strip().lower()
+    except (OSError, UnicodeError):
+        return None
+    if v in ("true", "1", "yes"):
+        return True
+    if v in ("false", "0", "no"):
+        return False
+    return None
+
+
+def _write_toggle_file(path: Path, enabled: bool) -> None:
+    """Atomically replace a toggle state file. xiaozhi-server, PiVoiceLLM
+    and dotty-behaviour re-read it on every turn from their own mounts, so
+    a reader must never catch it empty or half-written."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text("true" if enabled else "false")
+    os.replace(tmp, path)
+
+
+def _kid_mode_saved() -> bool | None:
+    """The persisted guardian policy, or None when nothing is saved yet."""
+    return _read_toggle_file(_KID_STATE_FILE)
+
+
 def _read_kid_mode() -> bool:
     """State file overrides env var so the dashboard can flip kid-mode and
-    survive a restart without editing the unit. Format: "true" or "false"."""
-    if _KID_STATE_FILE.exists():
-        try:
-            v = _KID_STATE_FILE.read_text().strip().lower()
-            if v in ("true", "1", "yes"):
-                return True
-            if v in ("false", "0", "no"):
-                return False
-        except OSError:
-            pass
+    survive a restart without editing the unit. Format: "true" or "false".
+    Same precedence as PiVoiceLLM's reader, so the dashboard shows what the
+    voice path enforces."""
+    saved = _kid_mode_saved()
+    if saved is not None:
+        return saved
     return os.environ.get("DOTTY_KID_MODE", "true").lower() in ("1", "true", "yes")
 
 
 def _write_kid_mode(enabled: bool) -> None:
-    _KID_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _KID_STATE_FILE.write_text("true" if enabled else "false")
+    _write_toggle_file(_KID_STATE_FILE, enabled)
     if _METRICS_AVAILABLE:
         _safe_metric(dotty_kid_mode_active.set, 1 if enabled else 0)
 
@@ -134,21 +158,25 @@ if _METRICS_AVAILABLE:
 
 
 def _read_smart_mode() -> bool:
-    if _SMART_STATE_FILE.exists():
-        try:
-            v = _SMART_STATE_FILE.read_text().strip().lower()
-            if v in ("true", "1", "yes"):
-                return True
-            if v in ("false", "0", "no"):
-                return False
-        except OSError:
-            pass
-    return False
+    saved = _read_toggle_file(_SMART_STATE_FILE)
+    return bool(saved)
 
 
 def _write_smart_mode(enabled: bool) -> None:
-    _SMART_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _SMART_STATE_FILE.write_text("true" if enabled else "false")
+    _write_toggle_file(_SMART_STATE_FILE, enabled)
+
+
+def _dashboard_kid_mode_getter() -> bool:
+    """Kid Mode as the dashboard shows it: re-read from the persisted policy
+    on every poll, so a flip made elsewhere (POST /admin/kid-mode, a hand
+    edit, another bridge) shows within one refresh. Re-applies the
+    kid-derived globals and the Prometheus gauge when the file moved."""
+    enabled = _read_kid_mode()
+    if enabled != KID_MODE:
+        _apply_kid_mode(enabled)
+        if _METRICS_AVAILABLE:
+            _safe_metric(dotty_kid_mode_active.set, 1 if enabled else 0)
+    return enabled
 
 
 # ---------------------------------------------------------------------------
@@ -677,13 +705,18 @@ if _configure_dashboard is not None:
         custom-providers/textUtils.py and the persona prompts."""
         _write_kid_mode(enabled)
         _apply_kid_mode(enabled)
-        ok = await _dispatch_set_toggle("", "kid_mode", enabled)
-        if not ok:
-            return {
-                "ok": False,
-                "error": "firmware did not acknowledge — LED + on-device toggle stale; bridge state is flipped",
-            }
-        return {"ok": True}
+        # The saved policy is what every voice turn and camera request
+        # reads, so the flip is in force once the file is written. The pip
+        # push only fails when the robot holds no WS (xiaozhi's WS is
+        # session-scoped); receiveAudioHandle repaints it on reconnect.
+        pushed = await _dispatch_set_toggle("", "kid_mode", enabled)
+        result: dict = {"ok": True, "device_pushed": pushed}
+        if not pushed:
+            result["note"] = (
+                "saved and in force; the robot's LED pip updates when it "
+                "next connects"
+            )
+        return result
 
     async def _dashboard_abort_device(*, device_id: str = "") -> dict:
         """Fire-and-forget POST to xiaozhi-server's admin abort route."""
@@ -745,13 +778,13 @@ if _configure_dashboard is not None:
         Tier1Slim hot-swap path was removed in the 2026-05-29 alignment
         pass."""
         _write_smart_mode(enabled)
-        dispatch_ok = await _dispatch_set_toggle("", "smart_mode", enabled)
-        if not dispatch_ok:
-            return {
-                "ok": False,
-                "error": "firmware did not acknowledge set_toggle (LED pip stale)",
-            }
-        return {"ok": True}
+        pushed = await _dispatch_set_toggle("", "smart_mode", enabled)
+        result: dict = {"ok": True, "device_pushed": pushed}
+        if not pushed:
+            result["note"] = (
+                "saved; the robot's LED pip updates when it next connects"
+            )
+        return result
 
     async def _dashboard_memory_records() -> list[dict]:
         """All per-person memory rows (approved + pending) for /ui/memory."""
@@ -773,7 +806,8 @@ if _configure_dashboard is not None:
         vision_cache_getter=_dashboard_vision_cache_getter,
         audio_cache_getter=_dashboard_audio_cache_getter,
         scene_synthesis_cache_getter=_dashboard_scene_synthesis_cache_getter,
-        kid_mode_getter=_read_kid_mode,
+        kid_mode_getter=_dashboard_kid_mode_getter,
+        kid_mode_saved_getter=_kid_mode_saved,
         kid_mode_setter=_dashboard_set_kid_mode,
         smart_mode_getter=_read_smart_mode,
         smart_mode_setter=_dashboard_set_smart_mode,

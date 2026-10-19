@@ -44,6 +44,7 @@ _state: dict[str, Any] = {
     "audio_cache_getter": None,
     "scene_synthesis_cache_getter": None,
     "kid_mode_getter": None,
+    "kid_mode_saved_getter": None,
     "kid_mode_setter": None,
     "smart_mode_getter": None,
     "smart_mode_setter": None,
@@ -70,6 +71,7 @@ def configure(*, send_message: Any = None, vision_cache_getter: Any = None,
               audio_cache_getter: Any = None,
               scene_synthesis_cache_getter: Any = None,
               kid_mode_getter: Any = None, kid_mode_setter: Any = None,
+              kid_mode_saved_getter: Any = None,
               smart_mode_getter: Any = None, smart_mode_setter: Any = None,
               state_getter: Any = None, state_setter: Any = None,
               inject_to_device: Any = None, abort_device: Any = None,
@@ -98,6 +100,8 @@ def configure(*, send_message: Any = None, vision_cache_getter: Any = None,
         _state["kid_mode_getter"] = kid_mode_getter
     if kid_mode_setter is not None:
         _state["kid_mode_setter"] = kid_mode_setter
+    if kid_mode_saved_getter is not None:
+        _state["kid_mode_saved_getter"] = kid_mode_saved_getter
     if smart_mode_getter is not None:
         _state["smart_mode_getter"] = smart_mode_getter
     if smart_mode_setter is not None:
@@ -894,11 +898,25 @@ def _host_detail_llm_label(smart_on: bool | None = None) -> str:
 
 @router.get("/kid-mode", response_class=HTMLResponse, include_in_schema=False)
 async def kid_mode_partial(request: Request) -> Any:
+    """Kid Mode card. Re-read from the persisted guardian policy on every
+    poll (the same file PiVoiceLLM, the camera gate and dotty-behaviour
+    read each turn), so it always shows what is being enforced. ``saved``
+    is False when no policy file exists yet: the voice path then falls back
+    to its startup default while the camera gate stays denied."""
     getter = _state.get("kid_mode_getter")
-    enabled = bool(getter()) if getter else True
+    try:
+        enabled = bool(getter()) if getter else True
+    except Exception:
+        log.exception("kid_mode getter failed")
+        enabled = True
+    saved_getter = _state.get("kid_mode_saved_getter")
+    try:
+        saved = (saved_getter() is not None) if saved_getter else True
+    except Exception:
+        saved = False
     return templates.TemplateResponse(
         request, "kid_mode.html",
-        {"enabled": enabled, "available": getter is not None},
+        {"enabled": enabled, "available": getter is not None, "saved": saved},
     )
 
 
@@ -1394,9 +1412,10 @@ async def smart_mode_set(request: Request, enabled: str = Form("")) -> Any:
             request, "smart_mode_result.html",
             {"ok": False, "error": err or "Smart mode toggle failed."},
         )
+    note = result.get("note") if isinstance(result, dict) else None
     return templates.TemplateResponse(
         request, "smart_mode_result.html",
-        {"ok": True, "new_state": new_state},
+        {"ok": True, "new_state": new_state, "note": note},
     )
 
 
@@ -1429,9 +1448,10 @@ async def kid_mode_set(request: Request, enabled: str = Form("")) -> Any:
             request, "kid_mode_result.html",
             {"ok": False, "error": err or "Kid mode toggle failed."},
         )
+    note = result.get("note") if isinstance(result, dict) else None
     return templates.TemplateResponse(
         request, "kid_mode_result.html",
-        {"ok": True, "new_state": new_state},
+        {"ok": True, "new_state": new_state, "note": note},
     )
 
 

@@ -1,4 +1,4 @@
-<div class="card-body p-3">
+<div class="card-body p-3" data-kid-mode="{{ 'on' if enabled else 'off' }}" data-kid-mode-saved="{{ 'yes' if saved else 'no' }}">
   <form hx-post="/ui/actions/kid-mode" hx-target="#kid-result" hx-swap="innerHTML"
         hx-disabled-elt="find input"
         class="flex items-center justify-between gap-3">
@@ -6,6 +6,7 @@
       <div class="font-semibold text-sm">Kid Mode</div>
       <div class="text-xs text-base-content/60">
         {% if enabled %}content sandwich, camera denied, kid persona{% else %}guardrails off{% endif %}
+        {% if not saved %}<span class="text-warning" title="No saved policy file yet: the voice path uses its startup default and the camera stays denied. Toggle once to save it.">· default, not saved</span>{% endif %}
       </div>
     </div>
     <input type="hidden" name="enabled" value="{{ 'false' if enabled else 'true' }}">
