@@ -450,7 +450,7 @@ _EMOJI_FACE_NAMES = {
 # never touches the files itself — it asks xiaozhi to list them via the admin
 # endpoint, and asks xiaozhi to play one via /xiaozhi/admin/play-asset.
 _SONGS_BASE_PATH = "/opt/xiaozhi-esp32-server/config/assets/songs"
-_SONG_OK_EXT = {".opus", ".ogg", ".wav", ".mp3"}
+_SONG_OK_EXT = {".opus", ".ogg", ".wav", ".mp3", ".mid", ".midi"}  # = xiaozhi play-asset
 
 
 async def _xiaozhi_device_count() -> int | None:

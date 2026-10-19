@@ -18,6 +18,8 @@ Example registry entry (in `dances.py`):
 
 MIDI files are gitignored — most public MIDI transcriptions are derivative works of copyrighted compositions. Source them yourself (BitMidi, MidiWorld, etc.) and drop into this directory. For Macarena specifically: any sequence at any source tempo works; the runtime helper rewrites it via mido.
 
+The same files appear in the dashboard song picker and the `play_song` voice tool's catalogue (`/xiaozhi/admin/songs`); `/xiaozhi/admin/play-asset` renders them with the same helper, audio only, no choreography.
+
 ## Pre-rendered WAV (`.wav`)
 
 24 kHz mono 16-bit signed PCM. Used for songs that need vocal synthesis (Sinsy, DiffSinger output) or any non-MIDI source. The `_encode_song_to_opus()` helper resamples + Opus-encodes at request time.

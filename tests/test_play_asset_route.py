@@ -241,5 +241,81 @@ class TestPlayAssetRoute(unittest.TestCase):
         self.assertEqual(resp.status, 503)
 
 
+class TestMidiSongs(unittest.TestCase):
+    """The songs dir holds .mid tunes; they must be listed and playable.
+
+    AI-assisted (Claude). The catalogue used to filter to opus/ogg/wav/mp3,
+    so the dashboard and play_song saw only purr.opus.
+    """
+
+    def setUp(self):
+        _mock_active.clear()
+        self.srv = _make_server()
+        self.root = os.path.realpath(tempfile.mkdtemp())
+        self._prev_roots = os.environ.get("DOTTY_PLAY_ASSET_ROOTS")
+        os.environ["DOTTY_PLAY_ASSET_ROOTS"] = self.root
+
+    def tearDown(self):
+        _mock_active.clear()
+        if self._prev_roots is None:
+            os.environ.pop("DOTTY_PLAY_ASSET_ROOTS", None)
+        else:
+            os.environ["DOTTY_PLAY_ASSET_ROOTS"] = self._prev_roots
+        import shutil
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_catalogue_lists_midi_alongside_opus(self):
+        names = ["README.md", "macarena.mid", "macarena_lyrics.txt", "purr.opus", "tetris.mid"]
+        with patch("os.listdir", return_value=names):
+            resp = _run(self.srv._dotty_list_songs(MagicMock()))
+        self.assertEqual(_body(resp)["files"], ["macarena.mid", "purr.opus", "tetris.mid"])
+
+    def test_midi_asset_is_rendered_with_fluidsynth_and_streamed(self):
+        path = os.path.join(self.root, "tetris.mid")
+        with open(path, "wb") as f:
+            f.write(b"MThd")
+        conn = MagicMock()
+        conn.headers = {"device-id": "dev1"}
+        conn.sample_rate = 24000
+        conn.session_id = "sess"
+        conn.client_abort = False
+        conn.is_exiting = False
+        conn.client_is_speaking = False
+        conn.websocket.send = AsyncMock()
+        _mock_active["dev1"] = conn
+
+        rendered = []
+
+        async def fake_render(midi_path, target_rate, **_kw):
+            rendered.append((midi_path, target_rate))
+            return [b"pkt1", b"pkt2"]
+
+        handle_mod = MagicMock()
+        handle_mod._encode_midi_to_opus = fake_render
+        fake_modules = {
+            "core.handle": MagicMock(receiveAudioHandle=handle_mod),
+            "core.handle.receiveAudioHandle": handle_mod,
+            "scipy": MagicMock(),
+            "pydub": MagicMock(),
+        }
+        spawned = []
+
+        async def go():
+            with patch("asyncio.create_task", side_effect=lambda coro, **_kw: spawned.append(coro) or MagicMock()):
+                resp = await self.srv._dotty_play_asset(
+                    _FakeRequest(data={"asset": path, "device_id": "dev1"}))
+            self.assertEqual(resp.status, 200)
+            await spawned[0]
+
+        with patch.dict(sys.modules, fake_modules), patch("asyncio.sleep", AsyncMock()):
+            _run(go())
+
+        self.assertEqual(rendered, [(path, 24000)])
+        sent = [c.args[0] for c in conn.websocket.send.await_args_list]
+        self.assertEqual([s for s in sent if isinstance(s, bytes)], [b"pkt1", b"pkt2"])
+        self.assertEqual(json.loads(sent[0])["state"], "sentence_start")
+        self.assertEqual(json.loads(sent[-1])["state"], "stop")
+
+
 if __name__ == "__main__":
     unittest.main()
