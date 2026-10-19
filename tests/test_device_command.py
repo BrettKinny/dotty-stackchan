@@ -347,6 +347,36 @@ class TestHttpServerWiring(unittest.TestCase):
         self.assertIn("_dotty_server_push_sentence_ids", updated)
         self.assertIn("continue", updated)
 
+    def test_build_patch_keeps_server_push_audio_past_the_send_filter(self):
+        """#104: sendAudioMessage re-checks sentence_id after synthesis, so a
+        chat turn starting mid-say used to drop the say's audio frames."""
+        script = pathlib.Path(__file__).parent.parent / "scripts" / "patch-tts-server-push.py"
+        spec = _ilu.spec_from_file_location("tts_push_patch_send_under_test", script)
+        module = _ilu.module_from_spec(spec)  # type: ignore[arg-type]
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+        # Head of upstream v0.9.3 core/handle/sendAudioHandle.sendAudioMessage.
+        upstream = (
+            "async def sendAudioMessage(conn, sentenceType, audios, text, sentence_id=None):\n"
+            "    # skip stale sentence audio\n"
+            "    if sentence_id is not None and sentence_id != conn.sentence_id:\n"
+            "        return\n"
+            "    conn.sent.append(sentence_id)\n"
+        )
+        patched = module.patch_send_audio_source(upstream)
+        self.assertEqual(module.patch_send_audio_source(patched), patched, "idempotent")
+        with self.assertRaises(ValueError):
+            module.patch_send_audio_source("async def sendAudioMessage(): pass\n")
+        ns: dict = {}
+        exec(compile(patched, "sendAudioHandle_patched", "exec"), ns)
+        conn = types.SimpleNamespace(
+            sentence_id="chat-2", sent=[],
+            _dotty_server_push_sentence_ids={"say-1"},
+        )
+        for sid in ("say-1", "chat-1", "chat-2", None):
+            asyncio.run(ns["sendAudioMessage"](conn, "middle", b"", None, sid))
+        self.assertEqual(conn.sent, ["say-1", "chat-2", None],
+                         "server push and current chat pass; stale chat drops")
+
     def test_no_ms_truncated_ids_left_anywhere(self):
         # The collision-prone id pattern must not reappear in either
         # patch surface (the audit found it at twelve sites).

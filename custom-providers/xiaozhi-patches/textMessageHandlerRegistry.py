@@ -68,11 +68,6 @@ class EventTextMessageHandler(TextMessageHandler):
             os.environ.get("BRIDGE_URL")
             or os.environ.get("VISION_BRIDGE_URL", "")
         )
-        if not bridge_url:
-            conn.logger.bind(tag=TAG).warning(
-                "no BRIDGE_URL/VISION_BRIDGE_URL set, dropping perception event"
-            )
-            return
 
         # Description-based identity hooks — see
         # `receiveAudioHandle._capture_room_description_async`.
@@ -112,6 +107,11 @@ class EventTextMessageHandler(TextMessageHandler):
                 if new_state:
                     conn.current_state = new_state
                     conn._dotty_desired_state = new_state
+                    # Survives this WebSocket so a reconnect still knows a
+                    # sticky state (#170). Imported lazily like the
+                    # receiveAudioHandle hook below.
+                    from core.portal_bridge import record_device_state
+                    record_device_state(device_id, new_state)
             except Exception:
                 pass
         # Listen on `face_detected`. Prior firmware also emitted
@@ -160,6 +160,14 @@ class EventTextMessageHandler(TextMessageHandler):
                     f"room_view: failed to start capture: {exc}"
                 )
 
+        # The in-process hooks above (state tracking, room-view cache) run
+        # regardless; only the relay to dotty-behaviour needs the URL.
+        if not bridge_url:
+            conn.logger.bind(tag=TAG).warning(
+                "no BRIDGE_URL/VISION_BRIDGE_URL set, dropping perception event"
+            )
+            return
+
         # Firmware ts is ms-since-boot, not wall-clock — useless for
         # consumer "last N seconds" comparisons across the relay hop.
         # Use server wall-clock and preserve the firmware value in
@@ -194,6 +202,18 @@ class EventTextMessageHandler(TextMessageHandler):
         _spawn(asyncio.to_thread(_post), name="perception_event_post")
 
 
+class _CountingAbortTextMessageHandler(AbortTextMessageHandler):
+    """Device abort frame — same handling, but an abort that cuts off a reply
+    counts toward the barge-in storm that ends the session (#105)."""
+
+    async def handle(self, conn, msg_json: Dict[str, Any]) -> None:
+        was_speaking = bool(getattr(conn, "client_is_speaking", False))
+        await super().handle(conn, msg_json)
+        if was_speaking:
+            from core.handle.receiveAudioHandle import _note_barge_in
+            _note_barge_in(conn)
+
+
 class TextMessageHandlerRegistry:
     """消息处理器注册表 — Dotty override adds the EVENT relay handler."""
 
@@ -204,7 +224,7 @@ class TextMessageHandlerRegistry:
     def _register_default_handlers(self) -> None:
         handlers = [
             HelloTextMessageHandler(),
-            AbortTextMessageHandler(),
+            _CountingAbortTextMessageHandler(),  # Dotty: counts barge-ins (#105)
             ListenTextMessageHandler(),
             IotTextMessageHandler(),
             McpTextMessageHandler(),

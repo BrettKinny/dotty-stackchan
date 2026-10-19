@@ -106,23 +106,17 @@ def _write_smart_mode_state(enabled: bool) -> None:
 _LETTERS_RE = re.compile(r'[a-zA-Z一-鿿぀-ゟ゠-ヿ]')
 
 _ASR_CORRECTIONS: dict[str, str] = {
+    # Spellings of the wake-name that are not ordinary words, so rewriting
+    # them anywhere cannot change what was meant. "Duddy" is from the
+    # 2026-07-11 filmed UAT ("Good night, Duddy.").
     "doty": "Dotty",
     "dottie": "Dotty",
-    # Close phonetic substitutions observed in the 2026-07-11 filmed UAT.
-    # Keep this list conservative: broader variants such as Donny, Jody/Jodi,
-    # and Claudia are real names and must not be rewritten globally.
     "duddy": "Dotty",
     "dotie": "Dotty",
     "dotti": "Dotty",
     "dody": "Dotty",
     "daughty": "Dotty",
-    "haughty": "Dotty",
-    "naughty": "Dotty",
-    "hardy": "Dotty",
     "darty": "Dotty",
-    "dolly": "Dotty",
-    "dougie": "Dotty",
-    "dory": "Dotty",
     "foto": "photo",
     "pitcher": "picture",
     "pikture": "picture",
@@ -209,10 +203,33 @@ def _is_noise(text: str) -> bool:
     return len(_LETTERS_RE.findall(stripped)) < MIN_UTTERANCE_CHARS
 
 
+# Mishearings of the wake-name that are real words or names (#164: Jody,
+# Jodi, Donny and Claudia were observed in the 2026-07-11 UAT; the others
+# are older children's-speech garbles). They are rewritten only in the
+# wake-name position — addressing Dotty at the start of a sentence, with
+# the comma Whisper writes after a vocative ("Jody, what's the hardest
+# question?") — never mid-sentence ("say hello to Jody") or after "good
+# night", where "goodnight Dolly" to a doll must not put Dotty to sleep.
+_ADDRESS_ONLY_ALIASES: tuple[str, ...] = (
+    "jody", "jodi", "donny", "claudia",
+    "naughty", "haughty", "hardy", "dolly", "dougie", "dory",
+)
+_ADDRESS_ALIAS_RE = re.compile(
+    r'(^|[.!?]\s+)'                                  # utterance/sentence start
+    r'((?:(?:hey|hi|hello|okay|ok|oh)\b[\s,]*)?)'     # optional interjection
+    r'(' + '|'.join(_ADDRESS_ONLY_ALIASES) + r')'
+    r'(?=\s*,)',                                     # vocative comma
+    re.IGNORECASE,
+)
+
+
 def _apply_asr_corrections(text: str) -> str:
     def _repl(m):
         return _ASR_CORRECTIONS.get(m.group(0).lower(), m.group(0))
-    return _ASR_CORRECTION_RE.sub(_repl, text)
+    text = _ASR_CORRECTION_RE.sub(_repl, text)
+    return _ADDRESS_ALIAS_RE.sub(lambda m: m.group(1) + m.group(2) + "Dotty", text)
+
+
 VISION_PHRASES = (
     "look at", "what do you see", "what is this", "what's this",
     "take a photo", "take a picture", "can you see", "what's in front",
@@ -1038,6 +1055,64 @@ async def _stream_singing(conn: "ConnectionHandler", opus_packets: list) -> None
         conn.logger.bind(tag=TAG).info(f"Singing stream complete ({sent} packets sent)")
 
 
+# ---------- Barge-in storm → end the session (#105) ----------
+# Room audio (TV, podcast) keeps an open session busy: every snippet is
+# transcribed and starts a reply, and the next snippet interrupts it. On
+# 2026-10-06 that was 18 recognitions and 19 aborts in three minutes, at
+# levels overlapping a quiet child's real speech, so no energy gate can
+# separate them. The maintainer's direction is to close the session rather
+# than keep listening (touch / wake word reopens it). A person rarely cuts
+# Dotty off this often, so N interrupted replies within a window ends the
+# session the way the no-voice timeout does. Admin aborts (face-lost,
+# dashboard) do not count. Config: `dotty_barge_in_close: {aborts, window_s}`
+# in .config.yaml; aborts: 0 disables.
+_BARGE_IN_CLOSE_ABORTS = 4
+_BARGE_IN_CLOSE_WINDOW_S = 60.0
+_BACKGROUND_TASKS: set = set()
+
+
+def _barge_in_close_limits(conn: "ConnectionHandler") -> tuple[int, float]:
+    config = getattr(conn, "config", None)
+    cfg = config.get("dotty_barge_in_close") if isinstance(config, dict) else None
+    cfg = cfg if isinstance(cfg, dict) else {}
+    try:
+        aborts = int(cfg.get("aborts", _BARGE_IN_CLOSE_ABORTS))
+        window_s = float(cfg.get("window_s", _BARGE_IN_CLOSE_WINDOW_S))
+    except (TypeError, ValueError):
+        return _BARGE_IN_CLOSE_ABORTS, _BARGE_IN_CLOSE_WINDOW_S
+    return aborts, window_s
+
+
+def _note_barge_in(conn: "ConnectionHandler", now: float | None = None) -> bool:
+    """Record that the user's audio cut off a reply in flight.
+
+    Returns True when this interruption completes a storm; the caller should
+    then drop the turn, because the session is being closed.
+    """
+    aborts, window_s = _barge_in_close_limits(conn)
+    if aborts <= 0 or window_s <= 0:
+        return False
+    now = time.monotonic() if now is None else now
+    recent = [t for t in getattr(conn, "_dotty_barge_ins", []) if now - t < window_s]
+    recent.append(now)
+    conn._dotty_barge_ins = recent
+    if len(recent) < aborts:
+        return False
+    conn._dotty_barge_ins = []
+    try:
+        conn.logger.bind(tag=TAG).info(
+            f"barge-in storm: {len(recent)} interrupted replies in "
+            f"{window_s:.0f}s - ending session (#105)"
+        )
+    except Exception:
+        pass
+    from core.utils.device_command import end_session
+    task = asyncio.create_task(end_session(conn, reason="barge-in storm"))
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    return True
+
+
 async def handleAudioMessage(conn: "ConnectionHandler", audio):
     if getattr(conn, "is_exiting", False):
         return
@@ -1050,6 +1125,8 @@ async def handleAudioMessage(conn: "ConnectionHandler", audio):
     if have_voice:
         if conn.client_is_speaking and conn.client_listen_mode != "manual":
             await handleAbortMessage(conn)
+            if _note_barge_in(conn):
+                return
     await no_voice_close_connect(conn, have_voice)
     await conn.asr.receive_audio(conn, audio, have_voice)
 
@@ -1111,6 +1188,8 @@ async def startToChat(conn: "ConnectionHandler", text):
         if dance_task and not dance_task.done():
             await _cancel_active_dance(conn, dance_task)
         await handleAbortMessage(conn)
+        if _note_barge_in(conn):
+            return
 
     intent_handled = await handle_user_intent(conn, actual_text)
 
