@@ -37,6 +37,9 @@ from core.utils.modules_initialize import initialize_modules
 from core.utils.util import check_vad_update, check_asr_update
 # DOTTY-PATCH: shared registry consumed by the admin /inject-text route.
 from core.portal_bridge import active_connections as _dotty_active_connections
+# DOTTY-PATCH: last firmware-reported state per device, restored onto each
+# new connection so sticky-state wake phrases survive a reconnect (#170).
+from core.portal_bridge import restore_device_state as _dotty_restore_device_state
 
 TAG = __name__
 
@@ -130,6 +133,11 @@ class WebSocketServer:
         _dotty_dev_id = websocket.request.headers.get("device-id", "") or ""
         if _dotty_dev_id:
             _dotty_active_connections[_dotty_dev_id] = handler
+            _restored = _dotty_restore_device_state(handler, _dotty_dev_id)
+            if _restored:
+                self.logger.bind(tag=TAG).info(
+                    f"restored device state {_restored!r} for {_dotty_dev_id}"
+                )
         try:
             await handler.handle_connection(websocket)
         except Exception as e:

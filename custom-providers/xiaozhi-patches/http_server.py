@@ -7,6 +7,7 @@ from core.api.vision_handler import VisionHandler
 # and consumed by the /xiaozhi/admin/inject-text route below. Lets the
 # Dotty admin dashboard fire `startToChat` against an active device WS.
 from core.portal_bridge import active_connections as _dotty_active_connections
+from core.portal_bridge import record_device_state as _dotty_record_device_state
 # DOTTY-PATCH: DeviceCommand seam — monotonic MCP request ids + the
 # envelope + per-conn serialized sends live in one module shared with
 # receiveAudioHandle.py (mounted at core/utils/device_command.py).
@@ -127,6 +128,9 @@ async def _dotty_set_state_then_maybe_end(conn, state: str, end_session: bool) -
         conn, "self.robot.set_state", {"state": state},
     )
     if end_session:
+        # The firmware's state_changed echo may not arrive before the socket
+        # closes; remember the requested state for the next connection (#170).
+        _dotty_record_device_state(_dotty_conn_device_id(conn), state)
         await _dotty_device_command.end_session(
             conn,
             reason=f"admin set-state {state}",
