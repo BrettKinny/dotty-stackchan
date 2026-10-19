@@ -259,5 +259,102 @@ class FetcherTests(unittest.TestCase):
         self.assertEqual(_SSEHandler.methods, ["GET"])
 
 
+class _LingeringSSEHandler(BaseHTTPRequestHandler):
+    """Streams keepalives until the client goes away. Served by a
+    single-threaded HTTPServer, so a client that leaves the stream half-open
+    blocks every later request, like a single-worker bridge."""
+    disconnected = threading.Event()
+
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        if self.path == "/ui/events":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            try:
+                self.wfile.write(b"retry: 5000\n\n")
+                for _ in range(200):  # gives up after ~10 s regardless
+                    self.wfile.write(b": heartbeat\n\n")
+                    self.wfile.flush()
+                    time.sleep(0.05)
+            except OSError:
+                type(self).disconnected.set()
+            return
+        body = b'{"name":"Dotty"}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class StreamTeardownTests(unittest.TestCase):
+    """A stream check must close its connection so the next check runs."""
+
+    def test_stream_close_frees_a_single_worker_server(self):
+        from http.server import HTTPServer
+        _LingeringSSEHandler.disconnected.clear()
+        server = HTTPServer(("127.0.0.1", 0), _LingeringSSEHandler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        fetch = smoke.make_fetcher(f"http://127.0.0.1:{server.server_port}",
+                                   timeout=2.0, stream_window=0.3)
+        stream = fetch("/ui/events", True)
+        self.assertTrue(stream.body.startswith(b"retry: 5000"))
+        started = time.monotonic()
+        page = fetch("/ui/manifest.json", False)
+        self.assertEqual(page.status, 200)
+        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertTrue(_LingeringSSEHandler.disconnected.wait(1.0))
+
+    def test_streams_run_after_every_plain_check(self):
+        calls: list[bool] = []
+
+        def fetch(path, stream):
+            calls.append(stream)
+            return R(404, "text/plain", b"")
+
+        smoke.run(fetch)
+        first_stream = calls.index(True)
+        self.assertTrue(all(calls[first_stream:]))
+        self.assertEqual(calls.count(True), sum(c[3] for c in smoke.CHECKS))
+
+
+class OldBuildTests(unittest.TestCase):
+    """Against a bridge older than the data attributes, say so instead of FAIL."""
+
+    def _run(self, chip: str) -> dict:
+        old_kid = ('<div class="card-body p-3"><div class="font-semibold text-sm">'
+                   'Kid Mode</div></div>')
+        old_strip = '<span class="status-dot status-ok" aria-hidden="true"></span>'
+
+        def fetch(path, stream):
+            if path == "/ui/kid-mode":
+                return _html(old_kid)
+            if path.startswith("/ui/status-strip"):
+                return _html(old_strip)
+            if path == "/ui/version-chip":
+                return _html(chip)
+            return R(500, "text/plain", b"")
+
+        return {r.name: r for r in smoke.run(fetch)}
+
+    def test_missing_attributes_warn_with_running_commit(self):
+        chip = '<a href="https://github.com/BrettKinny/dotty-stackchan/commit/7844b30">7844b30</a>'
+        results = self._run(chip)
+        for name, attr in (("kid mode", "data-kid-mode"), ("status strip", "data-dot")):
+            self.assertEqual(results[name].verdict, smoke.WARN, name)
+            self.assertIn(f"no {attr}: old dashboard build? running 7844b30",
+                          results[name].detail)
+        self.assertEqual(results["health"].verdict, smoke.FAIL)  # real failures stay
+
+    def test_unknown_commit_when_chip_unreadable(self):
+        results = self._run("<span>?</span>")
+        self.assertIn("running unknown", results["kid mode"].detail)
+
+
 if __name__ == "__main__":
     unittest.main()

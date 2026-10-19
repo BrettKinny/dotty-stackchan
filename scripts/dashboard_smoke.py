@@ -22,13 +22,16 @@ from __future__ import annotations
 import argparse
 import base64
 import html
+import http.client
 import json
 import os
 import re
+import socket
 import sys
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 from dataclasses import dataclass
 from typing import Callable
 
@@ -360,56 +363,122 @@ def make_fetcher(base_url: str, *, timeout: float = 5.0,
                  stream_window: float = 2.0,
                  auth: tuple[str, str] | None = None) -> Fetcher:
     """GET-only fetcher. Streams are read for ``stream_window`` seconds and
-    then closed, which is enough for the retry hint and the turn replay."""
+    then torn down with a socket shutdown, so the server sees the client
+    go away at once: an SSE handler left running on a half-open socket can
+    otherwise hold a single-worker bridge and starve the next request."""
     base = base_url.rstrip("/")
     headers = {"User-Agent": "dotty-dashboard-smoke/1"}
     if auth:
         token = base64.b64encode(f"{auth[0]}:{auth[1]}".encode()).decode()
         headers["Authorization"] = f"Basic {token}"
 
-    def fetch(path: str, stream: bool) -> Response:
+    def fetch_page(path: str) -> Response:
         req = urllib.request.Request(base + path, headers=headers, method="GET")
         try:
-            resp = urllib.request.urlopen(req, timeout=timeout)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return Response(resp.status, resp.headers.get("Content-Type", ""),
+                                resp.read())
         except urllib.error.HTTPError as exc:
-            return Response(exc.code, exc.headers.get("Content-Type", ""),
-                            exc.read() or b"")
-        with resp:
+            with exc:
+                return Response(exc.code, exc.headers.get("Content-Type", ""),
+                                exc.read() or b"")
+
+    def fetch_stream(path: str) -> Response:
+        parts = urlsplit(base)
+        conn_cls = (http.client.HTTPSConnection if parts.scheme == "https"
+                    else http.client.HTTPConnection)
+        conn = conn_cls(parts.hostname or "", parts.port, timeout=timeout)
+        sock: socket.socket | None = None
+        resp: http.client.HTTPResponse | None = None
+        try:
+            conn.connect()
+            sock = conn.sock
+            conn.request("GET", parts.path + path, headers={
+                **headers, "Accept": "text/event-stream", "Connection": "close",
+            })
+            resp = conn.getresponse()
             ctype = resp.headers.get("Content-Type", "")
-            if not stream:
-                return Response(resp.status, ctype, resp.read())
             body = b""
             deadline = time.monotonic() + stream_window
-            sock = getattr(getattr(resp.fp, "raw", None), "_sock", None)
             while (remaining := deadline - time.monotonic()) > 0:
                 if sock is not None:
                     sock.settimeout(remaining)
                 try:
-                    line = resp.readline()
-                except (TimeoutError, OSError):
+                    chunk = resp.read1(65536)
+                except (TimeoutError, OSError, http.client.HTTPException):
                     break  # window over; a timed-out socket is unusable
-                if not line:
+                if not chunk:
                     break
-                body += line
+                body += chunk
             return Response(resp.status, ctype, body)
+        finally:
+            if sock is not None:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            if resp is not None:
+                resp.close()
+            conn.close()
+            if sock is not None:
+                sock.close()
+
+    def fetch(path: str, stream: bool) -> Response:
+        return fetch_stream(path) if stream else fetch_page(path)
 
     return fetch
 
 
+# Fragments whose stable data attribute was added after 7844b30. Against an
+# older bridge the attribute is simply absent: say so instead of failing.
+NEW_MARKERS: dict[str, tuple[str, str]] = {
+    "kid mode": ("data-kid-mode", "80fae86"),
+    "smart mode": ("data-smart-mode", "80fae86"),
+    "status strip": ("data-dot", "cf183ee"),
+}
+
+
+def running_commit(version_chip: Response | None) -> str:
+    """The bridge build the version chip links to, or "unknown"."""
+    if version_chip is None:
+        return "unknown"
+    m = re.search(r"/commit/([0-9a-fA-F]{7,40})", version_chip.text)
+    return m.group(1)[:12] if m else "unknown"
+
+
+def _old_build(result: Result, resp: Response | None, commit: str) -> Result:
+    marker = NEW_MARKERS.get(result.name)
+    if (marker is None or result.verdict != FAIL or resp is None
+            or resp.status != 200 or marker[0] in resp.text):
+        return result
+    return Result(result.name, result.path, WARN, result.http,
+                  f"no {marker[0]}: old dashboard build? running {commit}, "
+                  f"attribute added in {marker[1]}")
+
+
 def run(fetch: Fetcher) -> list[Result]:
+    """Run every check. Plain fetches go first and the SSE streams last,
+    one at a time, so a stream that lingers server-side cannot starve the
+    page and fragment checks."""
     results: list[Result] = []
-    robot_modal: Response | None = None
-    for name, path, parser, stream in CHECKS:
-        result, resp = _check(fetch, name, path, parser, stream)
-        results.append(result)
-        if path == "/ui/host/robot":
-            robot_modal = resp
+    responses: dict[str, Response | None] = {}
+
+    def _run(checks) -> None:
+        for name, path, parser, stream in checks:
+            result, resp = _check(fetch, name, path, parser, stream)
+            results.append(result)
+            responses[name] = resp
+
+    _run([c for c in CHECKS if not c[3]])
     # The robot modal's scene panel is only rendered once a photo exists.
+    robot_modal = responses.get("host: robot")
     sec = security_path(robot_modal) if robot_modal else None
     if sec:
         results.append(_check(fetch, "robot scene panel", sec,
                               parse_ok_200("rendered"), False)[0])
-    return results
+    _run([c for c in CHECKS if c[3]])
+    commit = running_commit(responses.get("version chip"))
+    return [_old_build(r, responses.get(r.name), commit) for r in results]
 
 
 def _check(fetch: Fetcher, name: str, path: str,
