@@ -1,6 +1,7 @@
 import os
 import time
 import asyncio
+import inspect
 
 import numpy as np
 from faster_whisper import WhisperModel
@@ -25,6 +26,27 @@ def _no_speech_threshold(config: dict) -> float:
     except (TypeError, ValueError):
         return DEFAULT_NO_SPEECH_THRESHOLD
     return value if 0.0 <= value <= 1.0 else DEFAULT_NO_SPEECH_THRESHOLD
+
+
+def _hotwords(config: dict) -> Optional[str]:
+    """Decoder bias for rare words such as the wake-name (#164). None = off."""
+    value = config.get("hotwords")
+    if isinstance(value, (list, tuple)):
+        value = " ".join(str(v) for v in value if v)
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    # An unrendered template placeholder ("<ROBOT_NAME>") is not a hotword.
+    if not value or (value.startswith("<") and value.endswith(">")):
+        return None
+    return value
+
+
+def _supports_kwarg(func, name: str) -> bool:
+    try:
+        return name in inspect.signature(func).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 class ASRProvider(ASRProviderBase):
@@ -53,6 +75,7 @@ class ASRProvider(ASRProviderBase):
         self.beam_size = int(config.get("beam_size", 1))
         self.cpu_threads = int(config.get("cpu_threads", 0))
         self.initial_prompt = config.get("initial_prompt", None)
+        self.hotwords = _hotwords(config)
         self.no_speech_threshold = _no_speech_threshold(config)
         self.delete_audio_file = delete_audio_file
 
@@ -76,6 +99,19 @@ class ASRProvider(ASRProviderBase):
             cpu_threads=self.cpu_threads,
         )
 
+        # `hotwords` arrived in faster-whisper 1.0. Passing it to an older
+        # build would raise on every utterance, so drop it there instead.
+        self._decode_options = {}
+        if self.hotwords:
+            if _supports_kwarg(self.model.transcribe, "hotwords"):
+                self._decode_options["hotwords"] = self.hotwords
+                logger.bind(tag=TAG).info(f"faster-whisper hotwords: {self.hotwords!r}")
+            else:
+                logger.bind(tag=TAG).warning(
+                    "faster-whisper build has no hotwords support; ignoring "
+                    f"hotwords={self.hotwords!r}"
+                )
+
         # Warm-up: transcribe 1 s of silence so the lazy model load + first
         # CTranslate2 init cost is paid here, not on the first real utterance.
         # Wrapped in try/except — a warm-up failure shouldn't kill init; the
@@ -90,6 +126,7 @@ class ASRProvider(ASRProviderBase):
                 condition_on_previous_text=False,
                 vad_filter=False,
                 initial_prompt=self.initial_prompt,
+                **self._decode_options,
             )
             for _ in warm_segments:
                 pass
@@ -191,5 +228,6 @@ class ASRProvider(ASRProviderBase):
             condition_on_previous_text=False,
             vad_filter=False,
             initial_prompt=self.initial_prompt,
+            **self._decode_options,
         )
         return list(segments_iter), info

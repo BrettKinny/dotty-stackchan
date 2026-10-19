@@ -106,23 +106,17 @@ def _write_smart_mode_state(enabled: bool) -> None:
 _LETTERS_RE = re.compile(r'[a-zA-Z一-鿿぀-ゟ゠-ヿ]')
 
 _ASR_CORRECTIONS: dict[str, str] = {
+    # Spellings of the wake-name that are not ordinary words, so rewriting
+    # them anywhere cannot change what was meant. "Duddy" is from the
+    # 2026-07-11 filmed UAT ("Good night, Duddy.").
     "doty": "Dotty",
     "dottie": "Dotty",
-    # Close phonetic substitutions observed in the 2026-07-11 filmed UAT.
-    # Keep this list conservative: broader variants such as Donny, Jody/Jodi,
-    # and Claudia are real names and must not be rewritten globally.
     "duddy": "Dotty",
     "dotie": "Dotty",
     "dotti": "Dotty",
     "dody": "Dotty",
     "daughty": "Dotty",
-    "haughty": "Dotty",
-    "naughty": "Dotty",
-    "hardy": "Dotty",
     "darty": "Dotty",
-    "dolly": "Dotty",
-    "dougie": "Dotty",
-    "dory": "Dotty",
     "foto": "photo",
     "pitcher": "picture",
     "pikture": "picture",
@@ -209,10 +203,33 @@ def _is_noise(text: str) -> bool:
     return len(_LETTERS_RE.findall(stripped)) < MIN_UTTERANCE_CHARS
 
 
+# Mishearings of the wake-name that are real words or names (#164: Jody,
+# Jodi, Donny and Claudia were observed in the 2026-07-11 UAT; the others
+# are older children's-speech garbles). They are rewritten only in the
+# wake-name position — addressing Dotty at the start of a sentence, with
+# the comma Whisper writes after a vocative ("Jody, what's the hardest
+# question?") — never mid-sentence ("say hello to Jody") or after "good
+# night", where "goodnight Dolly" to a doll must not put Dotty to sleep.
+_ADDRESS_ONLY_ALIASES: tuple[str, ...] = (
+    "jody", "jodi", "donny", "claudia",
+    "naughty", "haughty", "hardy", "dolly", "dougie", "dory",
+)
+_ADDRESS_ALIAS_RE = re.compile(
+    r'(^|[.!?]\s+)'                                  # utterance/sentence start
+    r'((?:(?:hey|hi|hello|okay|ok|oh)\b[\s,]*)?)'     # optional interjection
+    r'(' + '|'.join(_ADDRESS_ONLY_ALIASES) + r')'
+    r'(?=\s*,)',                                     # vocative comma
+    re.IGNORECASE,
+)
+
+
 def _apply_asr_corrections(text: str) -> str:
     def _repl(m):
         return _ASR_CORRECTIONS.get(m.group(0).lower(), m.group(0))
-    return _ASR_CORRECTION_RE.sub(_repl, text)
+    text = _ASR_CORRECTION_RE.sub(_repl, text)
+    return _ADDRESS_ALIAS_RE.sub(lambda m: m.group(1) + m.group(2) + "Dotty", text)
+
+
 VISION_PHRASES = (
     "look at", "what do you see", "what is this", "what's this",
     "take a photo", "take a picture", "can you see", "what's in front",

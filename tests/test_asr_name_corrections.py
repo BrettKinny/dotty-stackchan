@@ -100,6 +100,55 @@ class TestAsrNameCorrections(unittest.TestCase):
         self.assertEqual(_module._apply_asr_corrections(text), text)
 
 
+class TestWakeNamePositionAliases(unittest.TestCase):
+    """#164 (AI-assisted, Claude Opus 5.5): real-name mishearings from the
+    2026-07-11 UAT are corrected only where Dotty is being addressed."""
+
+    def test_observed_vocative_mishearings_are_corrected(self):
+        for heard, expected in (
+            ("Jody, what's the hardest question?", "Dotty, what's the hardest question?"),
+            ("Donny, what do you see right now?", "Dotty, what do you see right now?"),
+            ("Jodi, tell me a joke.", "Dotty, tell me a joke."),
+            ("Claudia, are you awake?", "Dotty, are you awake?"),
+            ("Hey Jody, how are you?", "Hey Dotty, how are you?"),
+            ("Okay. Donny, look at this.", "Okay. Dotty, look at this."),
+        ):
+            with self.subTest(heard=heard):
+                self.assertEqual(_module._apply_asr_corrections(heard), expected)
+
+    def test_vision_request_still_routes_after_correction(self):
+        corrected = _module._apply_asr_corrections("Donny, what do you see right now?")
+        self.assertTrue(_module._is_vision_request(corrected))
+
+    def test_real_names_and_words_elsewhere_are_left_alone(self):
+        for text in (
+            "Jody is coming over later.",
+            "Can you say hi to Jody, please?",
+            "My friend Donny, he likes robots.",
+            "Don't be naughty, it's bedtime.",
+            "Naughty dogs chew shoes.",
+            "Finding Dory is my favourite movie.",
+            "Hello Dolly.",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(_module._apply_asr_corrections(text), text)
+
+    def test_goodnight_to_someone_else_is_not_a_sleep_command(self):
+        for text in ("Good night, Jody.", "Goodnight Dolly.", "Good night, naughty.",
+                     "Good night, Donny.", "Good night, Claudia."):
+            with self.subTest(text=text):
+                corrected = _module._apply_phrase_corrections(
+                    _module._apply_asr_corrections(text))
+                self.assertIsNone(_module._detect_state_phrase(corrected))
+
+    def test_vocative_correction_cannot_manufacture_a_state_command(self):
+        for text in ("Jody, good night.", "Dolly, what is a story?", "Donny, I keep watching TV."):
+            with self.subTest(text=text):
+                corrected = _module._apply_phrase_corrections(
+                    _module._apply_asr_corrections(text))
+                self.assertIsNone(_module._detect_state_phrase(corrected))
+
+
 class TestAsrEnvelope(unittest.TestCase):
     """AI-assisted GPT-6: exercise the actual post-ASR call boundary."""
 
