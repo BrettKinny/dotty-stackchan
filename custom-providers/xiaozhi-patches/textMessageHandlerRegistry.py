@@ -202,6 +202,18 @@ class EventTextMessageHandler(TextMessageHandler):
         _spawn(asyncio.to_thread(_post), name="perception_event_post")
 
 
+class _CountingAbortTextMessageHandler(AbortTextMessageHandler):
+    """Device abort frame — same handling, but an abort that cuts off a reply
+    counts toward the barge-in storm that ends the session (#105)."""
+
+    async def handle(self, conn, msg_json: Dict[str, Any]) -> None:
+        was_speaking = bool(getattr(conn, "client_is_speaking", False))
+        await super().handle(conn, msg_json)
+        if was_speaking:
+            from core.handle.receiveAudioHandle import _note_barge_in
+            _note_barge_in(conn)
+
+
 class TextMessageHandlerRegistry:
     """消息处理器注册表 — Dotty override adds the EVENT relay handler."""
 
@@ -212,7 +224,7 @@ class TextMessageHandlerRegistry:
     def _register_default_handlers(self) -> None:
         handlers = [
             HelloTextMessageHandler(),
-            AbortTextMessageHandler(),
+            _CountingAbortTextMessageHandler(),  # Dotty: counts barge-ins (#105)
             ListenTextMessageHandler(),
             IotTextMessageHandler(),
             McpTextMessageHandler(),

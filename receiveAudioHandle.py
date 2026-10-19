@@ -1055,6 +1055,64 @@ async def _stream_singing(conn: "ConnectionHandler", opus_packets: list) -> None
         conn.logger.bind(tag=TAG).info(f"Singing stream complete ({sent} packets sent)")
 
 
+# ---------- Barge-in storm → end the session (#105) ----------
+# Room audio (TV, podcast) keeps an open session busy: every snippet is
+# transcribed and starts a reply, and the next snippet interrupts it. On
+# 2026-10-06 that was 18 recognitions and 19 aborts in three minutes, at
+# levels overlapping a quiet child's real speech, so no energy gate can
+# separate them. The maintainer's direction is to close the session rather
+# than keep listening (touch / wake word reopens it). A person rarely cuts
+# Dotty off this often, so N interrupted replies within a window ends the
+# session the way the no-voice timeout does. Admin aborts (face-lost,
+# dashboard) do not count. Config: `dotty_barge_in_close: {aborts, window_s}`
+# in .config.yaml; aborts: 0 disables.
+_BARGE_IN_CLOSE_ABORTS = 4
+_BARGE_IN_CLOSE_WINDOW_S = 60.0
+_BACKGROUND_TASKS: set = set()
+
+
+def _barge_in_close_limits(conn: "ConnectionHandler") -> tuple[int, float]:
+    config = getattr(conn, "config", None)
+    cfg = config.get("dotty_barge_in_close") if isinstance(config, dict) else None
+    cfg = cfg if isinstance(cfg, dict) else {}
+    try:
+        aborts = int(cfg.get("aborts", _BARGE_IN_CLOSE_ABORTS))
+        window_s = float(cfg.get("window_s", _BARGE_IN_CLOSE_WINDOW_S))
+    except (TypeError, ValueError):
+        return _BARGE_IN_CLOSE_ABORTS, _BARGE_IN_CLOSE_WINDOW_S
+    return aborts, window_s
+
+
+def _note_barge_in(conn: "ConnectionHandler", now: float | None = None) -> bool:
+    """Record that the user's audio cut off a reply in flight.
+
+    Returns True when this interruption completes a storm; the caller should
+    then drop the turn, because the session is being closed.
+    """
+    aborts, window_s = _barge_in_close_limits(conn)
+    if aborts <= 0 or window_s <= 0:
+        return False
+    now = time.monotonic() if now is None else now
+    recent = [t for t in getattr(conn, "_dotty_barge_ins", []) if now - t < window_s]
+    recent.append(now)
+    conn._dotty_barge_ins = recent
+    if len(recent) < aborts:
+        return False
+    conn._dotty_barge_ins = []
+    try:
+        conn.logger.bind(tag=TAG).info(
+            f"barge-in storm: {len(recent)} interrupted replies in "
+            f"{window_s:.0f}s - ending session (#105)"
+        )
+    except Exception:
+        pass
+    from core.utils.device_command import end_session
+    task = asyncio.create_task(end_session(conn, reason="barge-in storm"))
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    return True
+
+
 async def handleAudioMessage(conn: "ConnectionHandler", audio):
     if getattr(conn, "is_exiting", False):
         return
@@ -1067,6 +1125,8 @@ async def handleAudioMessage(conn: "ConnectionHandler", audio):
     if have_voice:
         if conn.client_is_speaking and conn.client_listen_mode != "manual":
             await handleAbortMessage(conn)
+            if _note_barge_in(conn):
+                return
     await no_voice_close_connect(conn, have_voice)
     await conn.asr.receive_audio(conn, audio, have_voice)
 
@@ -1128,6 +1188,8 @@ async def startToChat(conn: "ConnectionHandler", text):
         if dance_task and not dance_task.done():
             await _cancel_active_dance(conn, dance_task)
         await handleAbortMessage(conn)
+        if _note_barge_in(conn):
+            return
 
     intent_handled = await handle_user_intent(conn, actual_text)
 
