@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import threading
 import time
 import unicodedata
@@ -45,6 +44,7 @@ from typing import Iterator
 from urllib.parse import urlparse
 
 from .pi_client import PiClient, PiClientError, make_default_pi_client
+from .voice_intents import match_voice_intent, split_room_view
 
 
 try:
@@ -212,6 +212,18 @@ _MEMORY_CONTEXT = (
 )
 
 
+# Same contract as _MEMORY_CONTEXT: turn_text.ts strips from these markers.
+_CAMERA_CONTEXT = (
+    "\n\nCAMERA VIEW (what your camera saw in the last few seconds):\n{view}\n"
+    "Answer from this view only. Do not add anything it does not say."
+)
+_ROOM_VIEW_CONTEXT = (
+    "\n\nROOM VIEW (who your camera saw in front of you recently; mention it "
+    "only if it helps):\n{view}"
+)
+_CAMERA_DENIED = "(Camera access is disabled in Kid Mode)"
+
+
 _THINKING_PREAMBLE = "\U0001F914 Let me think hard about that. "
 
 
@@ -268,21 +280,6 @@ def _enforce_leading_emoji(chunks: Iterator[str]) -> Iterator[str]:
         yield f"{FALLBACK_EMOJI} (no response)"
 
 
-_REMEMBER_INTENT_RE = re.compile(
-    r"^\s*(?:please\s+)?remember\s+(?:that\s+)?(?P<fact>.+?)\s*[.!?]?\s*$",
-    re.IGNORECASE,
-)
-_RECALL_INTENT_RE = re.compile(
-    r"^\s*(?:what did i (?:tell|say to) you about|do you remember)\s+"
-    r"(?P<query>.+?)\s*[?!.]?\s*$",
-    re.IGNORECASE,
-)
-_THINK_HARD_INTENT_RE = re.compile(
-    r"^\s*(?:please\s+)?think hard (?:about\s*:?)?\s*(?P<question>.+?)\s*[?!.]?\s*$",
-    re.IGNORECASE,
-)
-
-
 class LLMProvider(LLMProviderBase):
     """xiaozhi-server LLM provider backed by the dotty-pi container."""
 
@@ -317,8 +314,8 @@ class LLMProvider(LLMProviderBase):
     def _response_serialized(self, session_id, dialogue, **kwargs) -> Iterator[str]:
         """Run one complete Pi RPC transaction while ``_turn_lock`` is held."""
         self._kid_mode = _read_kid_mode()
-        user_text = _last_user_text(dialogue)
-        if not user_text:
+        room_view, user_text = split_room_view(_last_user_text(dialogue))
+        if not user_text.strip():
             yield f"{FALLBACK_EMOJI} (empty turn)"
             return
         # Everything spoken this turn is reported to the dashboard when the
@@ -327,7 +324,7 @@ class LLMProvider(LLMProviderBase):
         errors: list[str] = []
         started = time.monotonic()
         try:
-            for chunk in self._respond(user_text, errors):
+            for chunk in self._respond(user_text, errors, room_view):
                 spoken.append(chunk)
                 yield chunk
         finally:
@@ -338,24 +335,26 @@ class LLMProvider(LLMProviderBase):
                 "error": "; ".join(errors) or None,
             })
 
-    def _respond(self, user_text: str, errors: list[str]) -> Iterator[str]:
+    def _respond(
+        self, user_text: str, errors: list[str], room_view: str = "",
+    ) -> Iterator[str]:
         """One turn's TTS chunks. Failures are appended to `errors` so
-        response() can report them alongside the spoken fallback."""
-        memory_context = ""
-        remember_intent = _REMEMBER_INTENT_RE.match(user_text)
-        if remember_intent:
-            fact = remember_intent.group("fact").strip()
-            result = self._invoke_voice_tool("remember", {"fact": fact}, errors)
+        response() can report them alongside the spoken fallback.
+
+        Explicit tool requests (voice_intents.py) run their tool directly
+        instead of trusting the 4B to call it (#165)."""
+        context = ""
+        intent = match_voice_intent(user_text)
+        if intent is not None and intent.tool == "remember":
+            result = self._invoke_voice_tool("remember", {"fact": intent.argument}, errors)
             if result == "(remembered)":
                 yield f"{FALLBACK_EMOJI} I'll remember that."
             else:
                 yield f"{FALLBACK_EMOJI} I couldn't save that memory."
             return
-        recall_intent = _RECALL_INTENT_RE.match(user_text)
-        if recall_intent:
-            query = recall_intent.group("query").strip()
+        if intent is not None and intent.tool == "memory_lookup":
             result = self._invoke_voice_tool(
-                "memory_lookup", {"query": query}, errors,
+                "memory_lookup", {"query": intent.argument}, errors,
             )
             if result is None:
                 yield f"{FALLBACK_EMOJI} I couldn't check my memory right now."
@@ -366,23 +365,34 @@ class LLMProvider(LLMProviderBase):
             # The lookup is deterministic; the wording is not. Search output is
             # raw stored rows ("user: … | assistant: …"), never fit to be
             # spoken as-is, so hand it to the model as context for this turn.
-            memory_context = _MEMORY_CONTEXT.format(results=result)
-        think_intent = None if memory_context else _THINK_HARD_INTENT_RE.match(user_text)
-        if think_intent:
-            question = think_intent.group("question").strip()
+            context = _MEMORY_CONTEXT.format(results=result)
+        if intent is not None and intent.tool == "think_hard":
             # The reasoner unloads when idle and takes 30-60 s to come back.
             # Say so first: this chunk carries the turn's one emoji (the
             # thinking face) and reaches TTS before the wait starts.
             yield _THINKING_PREAMBLE
             result = self._invoke_voice_tool(
-                "think_hard", {"question": question}, errors,
+                "think_hard", {"question": intent.argument}, errors,
             )
             if result is None or result.startswith("("):
                 yield "I couldn't finish the deeper reasoning."
             else:
                 yield result
             return
-        prompt = _wrap_with_sandwich(user_text + memory_context, self._kid_mode)
+        if intent is not None and intent.tool == "take_photo":
+            # Reached only when xiaozhi's own vision shortcut produced nothing;
+            # the 4B would otherwise describe a room it has not seen.
+            result = self._invoke_voice_tool("take_photo", {}, errors)
+            if result == _CAMERA_DENIED:
+                yield f"{FALLBACK_EMOJI} My camera is switched off in Kid Mode."
+                return
+            if result is None or result.startswith("("):
+                yield f"{FALLBACK_EMOJI} I can't see anything clearly right now."
+                return
+            context = _CAMERA_CONTEXT.format(view=result)
+        if room_view and intent is None:
+            context = _ROOM_VIEW_CONTEXT.format(view=room_view)
+        prompt = _wrap_with_sandwich(user_text + context, self._kid_mode)
 
         # Reset pi state between voice turns. First turn skips this —
         # the freshly-spawned process is already clean.
