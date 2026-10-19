@@ -229,6 +229,7 @@ def prompt_capture_boundary(monkeypatch):
     monkeypatch.setattr(runner, "snapshot", lambda host: {**after(), "devices": ["robot"]})
     monkeypatch.setattr(runner, "host_clock", lambda host: {"offset_seconds": 0, "uncertainty_seconds": 0})
     monkeypatch.setattr(runner, "guarded_process", capture)
+    monkeypatch.setattr(runner, "brain_rows", lambda host, start, end: [])
     return {"host": "unused", "device": "robot", "sink": "fixture-speaker", "volume": 35,
             "stop_prompts_at": "2099-01-01T00:00:00+00:00"}, captured
 

@@ -20,7 +20,9 @@ import shlex
 import shutil
 import signal
 import subprocess
+import threading
 import time
+import urllib.parse
 import uuid
 from zoneinfo import ZoneInfo
 
@@ -167,7 +169,7 @@ def wake_events(log_text):
     return events
 
 
-def evaluate(case, transcript, log_text, playback_end, after, device, before=None):
+def evaluate(case, transcript, log_text, playback_end, after, device, before=None, recovered_override=None):
     # Only response-window words count. Prompt and response transcribed separately
     # to prevent Whisper concatenating both speakers into a single segment.
     segments = transcript.get("segments", [])
@@ -230,6 +232,9 @@ def evaluate(case, transcript, log_text, playback_end, after, device, before=Non
                      and tts_completed
                      and ((state.get("current_state") == "idle" and state.get("listening") is False)
                           or (state.get("current_state") == "talk" and state.get("listening") is True)))
+    if recovered_override is not None:
+        # State cases: recovery is the verified escape back to the resting state.
+        recovered = recovered_override
     failure = None
     if requires_wake and not wake_ready:
         failure = "wake_precondition"
@@ -250,7 +255,9 @@ def evaluate(case, transcript, log_text, playback_end, after, device, before=Non
     elif not within_limit:
         failure = "response_too_long"
     elif not recovered:
-        failure = "not_ready_for_followup" if case.get("recovery_policy") == "ready_for_followup" else "no_idle_recovery"
+        failure = ("state_not_restored" if recovered_override is not None else
+                   "not_ready_for_followup" if case.get("recovery_policy") == "ready_for_followup"
+                   else "no_idle_recovery")
     if extra_speech and failure not in ("wake_precondition", "no_wake_event"):
         # Someone else spoke (or the robot answered room noise) inside the
         # capture; neither a pass nor a failure can be attributed to the prompt.
@@ -298,6 +305,187 @@ def playback_verdict(heard, asr_ok, groups):
     if asr_ok:
         return "PASS", "robot_asr"
     return "INCONCLUSIVE", None
+
+
+INCONCLUSIVE_FAILURES = {"response_transcription_unavailable", "response_transcript_disagrees_with_tts",
+                         "extra_speech_in_capture", "speech_in_silence_window"}
+# Failures that mean the prompt itself never reached the robot as intended;
+# downstream contract evidence cannot then be attributed to it.
+PROMPT_FAILURES = {"wake_precondition", "no_wake_event", "no_asr_or_no_wake", "asr_mismatch"}
+STATES = ("idle", "talk", "story_time", "security", "sleep", "dance")
+
+
+def set_failure(result, failure, case):
+    """Recompute interaction/verdict for a contract-adjusted failure."""
+    result["failure"] = failure
+    if failure is None:
+        tool_ok = not case.get("expected_tool") or result.get("expected_tool_call") == "PASS"
+        result["interaction"] = "PASS" if tool_ok else "INCONCLUSIVE"
+        result["verdict"] = "INCONCLUSIVE"  # visual review remains open
+    elif failure in INCONCLUSIVE_FAILURES:
+        result["interaction"] = result["verdict"] = "INCONCLUSIVE"
+    else:
+        result["interaction"] = result["verdict"] = "FAIL"
+
+
+def validate_case(case):
+    """Reject malformed contract fields before the robot is touched."""
+    for item in case.get("server_evidence", []):
+        if not isinstance(item, dict) or not isinstance(item.get("label"), str) or not item["label"]:
+            raise ValueError("server_evidence items need a label")
+        kinds = [key for key in ("any", "none", "memory_row") if key in item]
+        if len(kinds) != 1:
+            raise ValueError(f"server_evidence {item['label']}: exactly one of any/none/memory_row")
+        if "memory_row" in item:
+            spec = item["memory_row"]
+            if not spec.get("contains") or not all(isinstance(s, str) and s for s in spec["contains"]):
+                raise ValueError(f"server_evidence {item['label']}: memory_row.contains required")
+        else:
+            if item.get("service", SERVICES[0]) not in SERVICES:
+                raise ValueError(f"server_evidence {item['label']}: unknown service")
+            for pattern in item[kinds[0]]:
+                re.compile(pattern)
+    for key in ("after_cases", "forbidden_reply"):
+        if key in case and not all(isinstance(v, str) and v for v in case[key]):
+            raise ValueError(f"{key} must be a list of strings")
+    for key in ("expect_states",):
+        if any(state not in STATES for state in case.get(key, [])):
+            raise ValueError(f"{key} names an unknown state")
+    for key in ("cleanup_state", "setup_state"):
+        if key in case and case[key] not in STATES:
+            raise ValueError(f"{key} names an unknown state")
+    for step in case.get("cleanup_admin", []) + case.get("force_admin", []):
+        if step.get("route") not in ("abort", "set-state"):
+            raise ValueError("cleanup admin steps may only abort or set state")
+
+
+
+def check_evidence_item(item, logs, rows):
+    if "memory_row" in item:
+        spec = item["memory_row"]
+        needles = [s.lower() for s in spec["contains"]]
+        hits = [r for r in rows
+                if all(n in (r.get("content") or "").lower() for n in needles)
+                and (r.get("namespace") or "").startswith(spec.get("namespace_prefix", ""))
+                and (spec.get("category") is None or r.get("category") == spec["category"])]
+        ok = not hits if spec.get("absent") else bool(hits)
+        return {"label": item["label"], "status": "PASS" if ok else "FAIL",
+                "rows": [{k: r.get(k) for k in ("id", "key", "namespace", "created_at")} for r in hits]}
+    text = logs.get(item.get("service", SERVICES[0]), "")
+    if "any" in item:
+        found = [p for p in item["any"] if re.search(p, text)]
+        return {"label": item["label"], "status": "PASS" if found else "FAIL", "matched": found}
+    found = [p for p in item["none"] if re.search(p, text)]
+    return {"label": item["label"], "status": "FAIL" if found else "PASS", "matched": found}
+
+
+def assess_contract(case, result, logs, rows):
+    """Server/state/forbidden evidence beyond the acoustic reply checks."""
+    items = [check_evidence_item(item, logs, rows) for item in case.get("server_evidence", [])]
+    forbidden = [option for option in case.get("forbidden_reply", [])
+                 if matches(result.get("response_transcript", ""), [[option]])
+                 or matches(result.get("service_tts_text", ""), [[option]])]
+    contract = {"server_evidence_items": items,
+                "server_evidence": ("NOT_REQUIRED" if not items else
+                                    "PASS" if all(i["status"] == "PASS" for i in items) else "FAIL"),
+                "forbidden_reply_matched": forbidden,
+                "forbidden_reply": "NOT_REQUIRED" if not case.get("forbidden_reply") else
+                                   "FAIL" if forbidden else "PASS"}
+    if items and contract["server_evidence"] == "PASS":
+        # Concrete server-side records of the tool running, not just a reply.
+        contract["tool_execution"] = "PASS"
+    return contract
+
+
+def apply_contract(result, case, contract, response_rms_dbfs=None):
+    result.update(contract)
+    base = result.get("failure")
+    if base in PROMPT_FAILURES:
+        return
+    failure = None
+    if contract["forbidden_reply"] == "FAIL":
+        failure = "forbidden_content_spoken"
+    elif contract["server_evidence"] == "FAIL":
+        missing = next(i["label"] for i in contract["server_evidence_items"] if i["status"] == "FAIL")
+        failure = "server_evidence_missing:" + missing
+    for state in case.get("expect_states", []):
+        if failure is None and state not in result.get("observed_states", []):
+            failure = "expected_state_not_observed:" + state
+    if failure and (result.get("asr_match") or case.get("expect_silence")):
+        set_failure(result, failure, case)
+        return
+    if base == "response_transcription_unavailable" and case.get("speech_reply_optional"):
+        floor = case.get("response_audio_min_rms_dbfs")
+        result["response_audio_rms_dbfs"] = response_rms_dbfs
+        if floor is None or (response_rms_dbfs is not None and response_rms_dbfs >= floor):
+            result["response_requirement"] = "OPTIONAL_NOT_TRANSCRIBED"
+            set_failure(result, None if result.get("recovery") == "PASS" else
+                        "state_not_restored" if case.get("cleanup_state") else "not_ready_for_followup", case)
+
+
+_DEPLOYED = {}
+
+
+def tool_logger_deployed(host):
+    """Does the deployed PiVoiceLLM log `PiClient: tool call name=…`? Cached per process."""
+    if host not in _DEPLOYED:
+        result = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host, shlex.join(
+            ["docker", "exec", "xiaozhi-esp32-server", "grep", "-rqs", "PiClient: tool call name",
+             "/opt/xiaozhi-esp32-server/core/providers/llm/pi_voice/"])], capture_output=True, timeout=20)
+        _DEPLOYED[host] = result.returncode == 0
+    return _DEPLOYED[host]
+
+
+def song_available(host, name):
+    files = admin(host, "songs").get("files", [])
+    return any(name.lower() in f.lower().rsplit(".", 1)[0] for f in files)
+
+
+# Read-only: newest brain.db rows, so a case can prove a write and so every
+# test-created row ID is recorded for targeted cleanup (never a DB restore).
+_BRAIN_ROWS_JS = (
+    'import fs from "node:fs";import {createRequire} from "node:module";'
+    'const require=createRequire("/root/.pi/extensions/dotty-pi-ext/package.json");'
+    'const Database=require("better-sqlite3");'
+    'const db=new Database(process.env.DOTTY_BRAIN_DB??"/root/.pi/memory/brain.db",'
+    '{readonly:true,fileMustExist:true});'
+    'const rows=db.prepare("SELECT id,key,namespace,category,created_at,substr(content,1,300) AS content '
+    'FROM memories ORDER BY rowid DESC LIMIT 60").all();'
+    'process.stdout.write(JSON.stringify(rows));'
+)
+
+
+def parse_time(value):
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def brain_rows(host, start_epoch, end_epoch):
+    rows = json.loads(ssh(host, ["docker", "exec", "-i", "dotty-pi", "node", "--input-type=module",
+                                 "-e", _BRAIN_ROWS_JS], timeout=30))
+    return [r for r in rows if (t := parse_time(r.get("created_at"))) is not None
+            and start_epoch <= t <= end_epoch]
+
+
+def record_test_rows(session, ident, case_id, rows):
+    with (session / "test-rows.jsonl").open("a") as f:
+        for r in rows:
+            f.write(json.dumps({"attempt": ident, "case_id": case_id,
+                                **{k: r.get(k) for k in ("id", "key", "namespace", "category", "created_at")}})
+                    + "\n")
+
+
+def run_cleanup_admin(config, steps):
+    done = []
+    for step in steps:
+        try:
+            admin(config["host"], step["route"], {"device_id": config["device"], **step.get("body", {})})
+            done.append({"route": step["route"], "status": "OK"})
+        except Exception as exc:
+            done.append({"route": step["route"], "status": type(exc).__name__})
+    return done
 
 
 MIC_OPEN_POLLS = 90
@@ -427,6 +615,180 @@ def host_clock(host):
             "uncertainty_seconds": (ended - started) / 2}
 
 
+def host_epoch(local_iso, clock, margin=0):
+    return datetime.fromisoformat(local_iso).timestamp() + clock["offset_seconds"] + margin
+
+
+def perception_recent(host, device):
+    """Newest-first firmware events relayed to dotty-behaviour (ring of 50)."""
+    return json.loads(ssh(host, ["curl", "-fsS", "--max-time", "5",
+                                 "http://localhost:8090/api/perception/recent/"
+                                 + urllib.parse.quote(device, safe="") + "?limit=50"]))
+
+
+def perception_device_state(host, device):
+    state = json.loads(ssh(host, ["curl", "-fsS", "--max-time", "5",
+                                  "http://localhost:8090/api/perception/state?device_id="
+                                  + urllib.parse.quote(device, safe="")]))
+    return state.get(device, {})
+
+
+class PerceptionRecorder:
+    """Poll the recent-event ring during a capture so a burst (dance sound
+    events) cannot push the state_changed record out before it is read."""
+
+    def __init__(self, host, device, interval=3):
+        self.host, self.device, self.interval = host, device, interval
+        self.seen = {}
+        self.errors = 0
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+
+    def poll(self):
+        try:
+            for event in perception_recent(self.host, self.device):
+                key = (event.get("ts"), event.get("name"), json.dumps(event.get("data"), sort_keys=True))
+                self.seen[key] = event
+        except Exception:
+            self.errors += 1
+
+    def _loop(self):
+        while not self._stop.wait(self.interval):
+            self.poll()
+
+    def __enter__(self):
+        self.poll()
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        self._thread.join(timeout=10)
+        self.poll()
+
+    def events(self):
+        return sorted(self.seen.values(), key=lambda e: float(e.get("ts") or 0))
+
+
+def state_changes(events, start, end):
+    return [(float(e["ts"]), (e.get("data") or {}).get("state")) for e in events
+            if e.get("name") == "state_changed" and isinstance(e.get("ts"), (int, float))
+            and start <= e["ts"] <= end]
+
+
+def apply_state(config, clock, target, attempts=3, timeout=12):
+    """Dashboard-path state change, confirmed by a fresh firmware echo.
+
+    set-state of the current state still emits state_changed (resync), so a
+    stale event can never satisfy this: only an echo after the send counts.
+    """
+    tried = []
+    for attempt in range(1, attempts + 1):
+        sent = time.time() + clock["offset_seconds"] - clock["uncertainty_seconds"] - .5
+        try:
+            admin(config["host"], "set-state", {"device_id": config["device"], "state": target})
+        except Exception as exc:
+            tried.append(type(exc).__name__)
+            time.sleep(2)
+            continue
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            try:
+                echoes = [ts for ts, state in state_changes(perception_recent(config["host"], config["device"]),
+                                                            sent, float("inf")) if state == target]
+                current = perception_device_state(config["host"], config["device"]).get("current_state")
+            except Exception:
+                echoes, current = [], None
+            if echoes and current == target:
+                return {"verified": True, "method": "admin_set_state", "target": target,
+                        "attempts": attempt, "echo_ts": echoes[0], "errors": tried}
+            time.sleep(1)
+        tried.append("no_echo")
+    return {"verified": False, "method": "admin_set_state", "target": target,
+            "attempts": attempts, "errors": tried}
+
+
+def restore_state(session, config, case, clock):
+    target = case["cleanup_state"]
+    end = time.monotonic() + case.get("cleanup_grace_seconds", 0)
+    while time.monotonic() < end:
+        # A dance ends on its own; forcing it early would hide a stuck ending.
+        try:
+            if perception_device_state(config["host"], config["device"]).get("current_state") == target:
+                return {"verified": True, "method": "natural", "target": target}
+        except Exception:
+            pass
+        time.sleep(2)
+    out = {}
+    if case.get("force_admin"):
+        out["force_admin"] = run_cleanup_admin(config, case["force_admin"])
+    out.update(apply_state(config, clock, target))
+    if not out["verified"]:
+        # Guaranteed escape failed: stop prompting rather than test a robot
+        # that may be asleep with its microphone disabled.
+        write_json(session / "PAUSE", {"reason": f"robot not confirmed {target} after {case['id']}; "
+                                                 "restore by dashboard or head touch before resuming",
+                                       "at": now()})
+        journal(session, {"event": "state_restore_failed", "case_id": case["id"], "target": target})
+    return out
+
+
+def case_cleanup(session, config, case, clock=None):
+    """Always-run per-case restoration (music stop, state escape)."""
+    out = {}
+    if case.get("cleanup_admin"):
+        out["admin"] = run_cleanup_admin(config, case["cleanup_admin"])
+    if case.get("cleanup_state"):
+        out["state"] = restore_state(session, config, case,
+                                     clock or {"offset_seconds": 0, "uncertainty_seconds": 1})
+    return out
+
+
+def await_cold(config, seconds, poll=3):
+    """Passively wait for the open conversation to time out. Changes nothing."""
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        snap = snapshot(config["host"])
+        if wake_precondition(snap, config["device"]):
+            return snap
+        time.sleep(poll)
+    return None
+
+
+def evaluate_silence(case, transcript, log_text, events, window, after, device):
+    """Negative test: the robot is asleep, so a spoken prompt must do nothing."""
+    segments = transcript.get("segments", [])
+    response = " ".join(s["text"].strip() for s in segments
+                        if s.get("end", 0) > s.get("start", 0) and s.get("no_speech_prob", 1) < .8
+                        and s.get("avg_logprob", -10) > -1.2)
+    asr = re.findall(r"结果: (.*)", log_text) + re.findall(r"识别文本: (.*)", log_text)
+    tts = "SentenceType.FIRST" in log_text or "发送第一段语音:" in log_text
+    held = case["setup_state"]
+    moved = [state for _, state in state_changes(events, *window) if state != held]
+    state = after.get("perception", {}).get(device, {}).get("current_state")
+    if asr:
+        failure = "voice_processed_while_" + held
+    elif tts:
+        failure = "spoke_while_" + held
+    elif moved or state != held:
+        failure = "voice_left_" + held
+    elif response:
+        failure = "speech_in_silence_window"
+    else:
+        failure = None
+    interaction = ("PASS" if failure is None else
+                   "INCONCLUSIVE" if failure in INCONCLUSIVE_FAILURES else "FAIL")
+    return {"asr": asr, "asr_match": False, "response_transcript": response, "response_match": not response,
+            "tts_evidence": tts, "tts_completed": False, "service_tts_text": "", "service_tts_match": False,
+            "extra_speech": [], "silence_contract": "PASS" if failure is None else "FAIL",
+            "states_during_capture": moved, "state_after_capture": state,
+            "wake_precondition": "NOT_REQUIRED", "wake_event": "NOT_REQUIRED",
+            "expected_tool_call": "NOT_REQUIRED", "expression": "INCONCLUSIVE",
+            "failure": failure, "interaction": interaction, "visual": "INCONCLUSIVE",
+            "verdict": "INCONCLUSIVE" if interaction == "PASS" else interaction,
+            "note": "Silence is the pass condition; the reference microphone must still hear the prompt."}
+
+
 def host_timestamp(local_iso, clock, margin=0):
     stamp = datetime.fromisoformat(local_iso).timestamp() + clock["offset_seconds"] + margin
     return datetime.fromtimestamp(stamp, timezone.utc).isoformat()
@@ -490,7 +852,9 @@ def run_case(session, config, case):
     write_json(directory / "result.json", result)
     write_json(session / "active.json", {"case": ident, "case_id": case["id"], "started": result["started"]})
     journal(session, {"event": "case_started", "id": ident})
+    cleanup_due = False
     try:
+        validate_case(case)
         result["response_vad_threshold"] = response_vad_threshold(config)
         require_warm = case.get("require_warm_listening",
                                 case.get("recovery_policy") == "ready_for_followup"
@@ -504,6 +868,19 @@ def run_case(session, config, case):
         write_json(directory / "before.json", before)
         if before["errors"] or not before.get("services_running") or config["device"] not in before.get("devices", []):
             raise RuntimeError("infrastructure_down_or_device_disconnected")
+        if case.get("requires_tool_logger") and not tool_logger_deployed(config["host"]):
+            # Without the marker a model tool call is unobservable: block, do not fail.
+            raise CaseBlocked("pi_tool_call_logger_not_deployed")
+        if case.get("requires_song") and not song_available(config["host"], case["requires_song"]):
+            raise CaseBlocked("song_not_in_catalogue")
+        if (case.get("require_wake_event") and not wake_precondition(before, config["device"])
+                and case.get("await_cold_seconds")):
+            # Passive: wait for the open conversation's no-voice timeout.
+            result["awaited_cold_seconds"] = case["await_cold_seconds"]
+            cold = await_cold(config, case["await_cold_seconds"])
+            if cold:
+                before = cold
+                write_json(directory / "before.json", before)
         if case.get("require_wake_event") and not wake_precondition(before, config["device"]):
             raise CaseBlocked("wake_precondition")
         if require_warm:
@@ -539,20 +916,67 @@ def run_case(session, config, case):
         result["prompt_provenance"] = prepare_prompt(session, directory, config, case, env)
         write_json(directory / "result.json", result)
         media = directory / "raw.mp4"
-        result["host_clock"] = host_clock(config["host"])
+        clock = result["host_clock"] = host_clock(config["host"])
+        if case.get("setup_state"):
+            cleanup_due = True
+            result["setup"] = apply_state(config, clock, case["setup_state"])
+            write_json(directory / "result.json", result)
+            if not result["setup"]["verified"]:
+                raise RuntimeError("setup_state_not_confirmed")
+            time.sleep(case.get("setup_settle_seconds", 6))
+        watch = any(case.get(k) for k in ("expect_states", "expect_silence", "cleanup_state", "setup_state"))
+        recorder = PerceptionRecorder(config["host"], config["device"]) if watch else contextlib.nullcontext()
         result["capture_started"] = now()
-        guarded_process([ROOT / "scripts/dotty-av-test.sh", "run", case["prompt"],
-                         case.get("seconds", 50), media], directory / "capture.log", session, 185, env,
-                        datetime.fromisoformat(config["stop_prompts_at"]).timestamp())
-        result["capture_ended"] = now()
-        # Snapshot before transcription: evaluator runtime must not give a stuck
-        # robot extra minutes to recover unnoticed.
+        cleanup_due = True
+        try:
+            with recorder:
+                guarded_process([ROOT / "scripts/dotty-av-test.sh", "run", case["prompt"],
+                                 case.get("seconds", 50), media], directory / "capture.log", session, 185, env,
+                                datetime.fromisoformat(config["stop_prompts_at"]).timestamp())
+        finally:
+            result["capture_ended"] = now()
+        window = (host_epoch(result["capture_started"], clock, -clock["uncertainty_seconds"] - 1),
+                  host_epoch(result["capture_ended"], clock, clock["uncertainty_seconds"] + 1))
+        events = recorder.events() if watch else []
+        if watch:
+            write_json(directory / "perception-events.json", events)
+            result["perception_poll_errors"] = recorder.errors
+        result["observed_states"] = [state for _, state in state_changes(events, *window)]
+        # Clean up before transcription: evaluator runtime must not leave a
+        # sleeping robot (microphone disabled) or a song running for minutes.
+        cleanup_due = False
+        result["cleanup"] = case_cleanup(session, config, case, clock)
+        if result["cleanup"]:
+            # Judge recovery after the music stop / state escape has settled.
+            time.sleep(case.get("cleanup_settle_seconds", 5))
+        cleanup_ended = now()
         after = snapshot(config["host"])
         write_json(directory / "after.json", after)
-        clock = result["host_clock"]
         read_log_window(config["host"],
                         host_timestamp(result["capture_started"], clock, -clock["uncertainty_seconds"]),
                         host_timestamp(result["capture_ended"], clock, clock["uncertainty_seconds"]), directory)
+        evidence_logs = {}
+        if case.get("server_evidence"):
+            # Tool side effects (song completion, aborted playback) can land after
+            # the capture; markers are specific, so search through cleanup.
+            evidence_dir = directory / "evidence-logs"
+            evidence_dir.mkdir(exist_ok=True)
+            read_log_window(config["host"],
+                            host_timestamp(result["capture_started"], clock, -clock["uncertainty_seconds"]),
+                            host_timestamp(cleanup_ended, clock, clock["uncertainty_seconds"] + 2), evidence_dir)
+            evidence_logs = {svc: (evidence_dir / f"{svc}.log").read_text() for svc in SERVICES
+                             if (evidence_dir / f"{svc}.log").exists()}
+        rows = []
+        try:
+            rows = brain_rows(config["host"],
+                              host_epoch(result["capture_started"], clock, -clock["uncertainty_seconds"] - 2),
+                              host_epoch(cleanup_ended, clock, clock["uncertainty_seconds"] + 5))
+            record_test_rows(session, ident, case["id"], rows)
+            result["brain_rows_created"] = [{k: r.get(k) for k in ("id", "namespace", "category")} for r in rows]
+        except Exception as exc:
+            result["brain_rows_error"] = type(exc).__name__
+            if any("memory_row" in item for item in case.get("server_evidence", [])):
+                raise RuntimeError("brain_row_evidence_unavailable") from exc
         result["media"] = verify(media, expected=case.get("seconds", 50))
         result["capture"] = "PASS"
         result["playback_process"] = "PASS"
@@ -580,9 +1004,22 @@ def run_case(session, config, case):
                 if key in analysis}
         heard = " ".join(s["text"] for s in load(directory / "prompt-heard.json")["segments"])
         result["prompt_heard"] = heard
-        result.update(evaluate(case, load(directory / "response.json"),
-                               (directory / "xiaozhi-esp32-server.log").read_text(),
-                               offset, after, config["device"], before=before))
+        restored = (result["cleanup"].get("state", {}).get("verified", False)
+                    if case.get("cleanup_state") else None)
+        log_text = (directory / "xiaozhi-esp32-server.log").read_text()
+        if case.get("expect_silence"):
+            result.update(evaluate_silence(case, load(directory / "response.json"), log_text,
+                                           events, window, after, config["device"]))
+            result["recovery"] = "PASS" if restored else "FAIL"
+            if result["failure"] is None and not restored:
+                set_failure(result, "state_not_restored", case)
+        else:
+            result.update(evaluate(case, load(directory / "response.json"), log_text,
+                                   offset, after, config["device"], before=before,
+                                   recovered_override=restored))
+        response_rms = (result["native_audio_windows"].get("container_audio", {})
+                        .get("response", {}).get("rms_dbfs"))
+        apply_contract(result, case, assess_contract(case, result, evidence_logs, rows), response_rms)
         result["playback"], result["playback_evidence"] = playback_verdict(
             heard, result["asr_match"], case.get("asr", []))
         if result["playback"] != "PASS" and result["interaction"] == "PASS":
@@ -598,6 +1035,13 @@ def run_case(session, config, case):
     except Exception as exc:
         result.update(verdict="FAIL", failure=str(exc), exception=type(exc).__name__)
     finally:
+        if cleanup_due:
+            # Capture was interrupted (STOP, deadline, crash in a subprocess):
+            # still stop music and restore the robot's resting state.
+            try:
+                result["cleanup"] = case_cleanup(session, config, case, result.get("host_clock"))
+            except Exception as exc:
+                result["cleanup"] = {"error": type(exc).__name__}
         result["ended"] = now()
         write_json(directory / "result.json", result)
         # Caller clears active only after checkpoint fsync. A crash between these
@@ -636,6 +1080,16 @@ def preflight(session, config):
         data[binary] = shutil.which(binary)
     data["model_exists"] = (Path(config["model"]) / "model.bin").is_file()
     data["camera_exists"] = Path("/dev/v4l/by-id/usb-046d_HD_Pro_Webcam_C920_7B90DC9F-video-index0").exists()
+    try:
+        data["pi_tool_call_logger"] = tool_logger_deployed(config["host"])
+        data["songs"] = admin(config["host"], "songs").get("files", [])
+    except Exception as exc:
+        data["deployment_probe_error"] = type(exc).__name__
+    try:
+        # Read-only probe of the brain.db reader that T02/T04 evidence needs.
+        data["brain_rows_probe"] = len(brain_rows(config["host"], 0, time.time() + 86400))
+    except Exception as exc:
+        data["brain_rows_probe"] = "FAIL: " + type(exc).__name__
     write_json(session / "preflight.json", data)
     return data
 
@@ -674,6 +1128,8 @@ def restore_checkpoint(session):
             raise RuntimeError("interrupted case identity unknown; manual evidence review required")
         if case_id not in checkpoint["quarantined"]:
             checkpoint["quarantined"].append(case_id)
+        # The runner died mid-case: its state escape may never have run.
+        checkpoint["needs_restore"] = case_id
         if result:
             result.update(verdict="INCONCLUSIVE", failure="interrupted_case_requires_review",
                           ended=now())
@@ -723,14 +1179,23 @@ def record_attempt(checkpoint, case, result):
 
 
 def eligible_cases(bank, checkpoint):
+    # `after_cases`: a lookup cannot pass before its store has passed (T02 -> T01).
     return [c for c in bank if c["id"] not in checkpoint["quarantined"]
             and c["id"] not in checkpoint["blocked"]
-            and c["id"] not in checkpoint.get("unresolved", [])]
+            and c["id"] not in checkpoint.get("unresolved", [])
+            and all(dep in checkpoint["completed"] for dep in c.get("after_cases", []))]
 
 
 def run(session, config, catalogue, selected=None, once=False):
     with lock(session), device_lock(config):
         checkpoint = restore_checkpoint(session)
+        interrupted = next((c for c in catalogue if c["id"] == checkpoint.get("needs_restore")), None)
+        if interrupted and (interrupted.get("cleanup_state") or interrupted.get("cleanup_admin")):
+            restored = case_cleanup(session, config, interrupted, host_clock(config["host"]))
+            journal(session, {"event": "interrupted_case_cleanup", "case_id": interrupted["id"],
+                              "cleanup": restored})
+        checkpoint.pop("needs_restore", None)
+        write_json(session / "checkpoint.json", checkpoint)
         deadline = datetime.fromisoformat(config["stop_prompts_at"]).timestamp()
         rng = random.Random(config["seed"] + checkpoint["soak"])
         bank = [c for c in catalogue if c.get("enabled", True) and (not selected or c["id"] in selected)]
