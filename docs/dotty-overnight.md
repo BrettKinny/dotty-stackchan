@@ -37,6 +37,52 @@ Only cases explicitly marked `soak_safe` may be chosen for ten-minute repeats.
 Each ordinary case needs three consecutive acoustic passes before coverage is
 considered provisionally demonstrated. Missing visual evidence is inconclusive.
 
+## Release coverage run (tools, states, cold wake)
+
+*AI-assisted: Claude (Opus 5.5), 2026-10-19. Synthetic-log tests only; nothing
+here has yet been run against the robot.*
+
+```bash
+S=uat-sessions/$(date +%F)/overnight
+python scripts/dotty_overnight.py init --session $S --host root@tower \
+  --device 1c:db:d4:ba:58:94 --mic-opener admin_say
+# init expects $S/evaluator-venv and $S/models/whisper-small.en-ct2; reuse a
+# previous session's by symlink. That venv also has piper-tts 1.8.0. Otherwise:
+#   python -m venv ~/.cache/dotty-piper && ~/.cache/dotty-piper/bin/pip install piper-tts==1.8.0
+$S/evaluator-venv/bin/python scripts/dotty_render_prompts.py --session $S \
+  --voice PATH/en_US-ryan-high.onnx           # binds text+sha256 into config.json
+python scripts/dotty_integration_check.py --host root@tower --json $S/integration.json
+python scripts/dotty_overnight.py preflight --session $S   # pi_tool_call_logger, songs
+python scripts/dotty_overnight.py run --session $S
+```
+
+The integration check needs no audio. It moves the head a little, flips each
+toggle pip, takes one photo and sets idle, then puts each one back.
+
+Case contracts (all also need the existing ASR, reply, TTS and recovery checks):
+
+| Case | Passes only if, in the case window |
+|---|---|
+| T02-remember | TTS "I'll remember that", no failure string, a new `voice`/`core` brain.db row containing pineapple+lantern |
+| T01-memory-lookup (after T02) | TTS and reply contain "pineapple"; no "couldn't check"/"don't remember" |
+| T05-think-hard | direct route: TTS "think hard about that", no reasoner failure, answer five cents |
+| V07-hard-thinking | the pi agent itself calls `think_hard` (`PiClient: tool call` marker); answer "no" |
+| T04-remember-person | marker, behaviour `person_review_status` 200, row in `person_pending:` and none in `person:` |
+| T03-recall-person (after T04) | marker `recall_person`; reply/TTS never says "cracker" |
+| T06-take-photo | marker, behaviour `GET /api/voice/take_photo` 200 (Kid Mode answers "camera disabled": still a pass) |
+| T07-play-song | marker, `play-asset complete … tetris … sent>0`, music above -50 dBFS; abort always runs |
+| S02/S03/S06 | `state_changed` story_time/security/dance seen; idle restored and echoed (dance may end itself) |
+| W01-cold-wake | waits up to 200 s for a real timeout to idle, then wake frame plus idle->talk; 10 passes |
+| S04-sleep | `state_changed` sleep; set-state idle wakes it and the echo is confirmed |
+| S05-sleep-ignores-voice | admin sleep, spoken "Wake up": no ASR, no TTS, state stays sleep; then idle |
+
+Model-tool cases are BLOCKED (not failed) when the deployed provider lacks
+the tool-call logger, T07 when the catalogue has no tetris file, and W01 when
+another device is connected. Every brain.db row created inside a case window
+is listed in `$S/test-rows.jsonl` for deleting those rows by ID. If an idle
+escape cannot be confirmed, the runner writes `PAUSE`. Head-touch wake, a real
+face, approved-adult person memory and reminder dismissal still need a human.
+
 ## Capture correction established on this bench
 
 Direct FFmpeg ALSA input reported a 36-second AAC duration but decoded only
