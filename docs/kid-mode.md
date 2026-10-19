@@ -47,8 +47,8 @@ by deterministic output backstops where those backstops are implemented.
 
 > **Layering on the live `PiVoiceLLM` path:**
 > - **Prompt policy** is the per-turn **sandwich suffix** — `build_turn_suffix(kid_mode)` from `custom-providers/textUtils.py`, applied by `custom-providers/pi_voice/pi_voice.py` (`_wrap_with_sandwich`). It includes the kid-mode topic constraints (rules below) when kid-mode is on.
-> - **Emoji backstop** is `_enforce_leading_emoji()` in `pi_voice.py`, which guarantees an allowed leading face glyph independently of model compliance.
-> - **Output backstop:** `filter_tts_stream()` in `custom-providers/textUtils.py` buffers the complete Kid Mode reply, checks the shared blocked-words tiers, and replaces a matching turn before TTS. Both `PiVoiceLLM` and `OpenAICompat` use it. This is a thin, bypassable word-level backstop, not a content-safety guarantee; live red-team verification remains tracked in #157.
+> - **Emoji backstop** is `enforce_face_stream()` in `custom-providers/textUtils.py`, which guarantees exactly one supported leading face glyph independently of model compliance (near-miss emoji are mapped onto the supported set).
+> - **Output backstop:** `filter_tts_stream()` in `custom-providers/textUtils.py` buffers the complete Kid Mode reply, checks the shared blocked-words and imitable-danger tiers, and replaces a matching turn before TTS. It fails closed: if the check itself errors, the turn is replaced rather than spoken. Both `PiVoiceLLM` and `OpenAICompat` run both backstops through `guard_tts_stream()`; on PiVoiceLLM that covers every output path, including direct tool results such as `think_hard`. This is a thin, bypassable word-level backstop, not a content-safety guarantee; live red-team verification remains tracked in #157.
 >
 > PiVoiceLLM forwards only the last user message plus this per-turn policy. Its
 > Pi command uses `--no-context-files`; neither `personas/dotty_voice.md` nor
@@ -74,7 +74,7 @@ at the very end of the prompt -- the position with the highest attention
 weight in transformer models. This means the hard constraints in the suffix
 are the last thing the model reads before generating its reply, making them
 the hardest to override. When `kid_mode` is true the suffix carries the full
-child-safe topic constraints (rules 4-9 below); when false, only the
+child-safe topic constraints (rules 4-12 below); when false, only the
 English-only / emoji-leader / length rules remain.
 
 **Why a suffix?** PiVoiceLLM does not forward xiaozhi's system dialogue and
@@ -86,8 +86,10 @@ it disproportionate influence on the model's output.
 
 In Kid Mode, both live LLM providers pass their TTS-bound response through
 the shared `filter_tts_stream()` core. It consumes the complete response,
-checks three regex tiers, and replaces a matching turn with a cheerful
-redirect before any of it is spoken. Full-turn buffering also lets PiVoiceLLM
+checks four regex tiers, and replaces a matching turn with a cheerful
+redirect before any of it is spoken. Matching runs on the joined turn, so a
+word split across streamed chunks is still caught, and a matcher error
+replaces the turn instead of speaking unchecked text. Full-turn buffering also lets PiVoiceLLM
 drain its RPC stream through `agent_end`. The regex is intentionally described
 as a backstop: clean paraphrases, confusables, and concepts outside the small
 word list can bypass it. Prompt steering remains the primary defence.
@@ -141,7 +143,25 @@ HARD CONSTRAINTS for THIS reply (overrides everything else):
 
 9. If unsure whether something is appropriate: choose the safer, more
    cheerful option.
+
+10. Answer exactly what was asked, about the thing they named. A joke
+    request gets a real joke with a set-up and a punchline; a question gets
+    its answer.
+
+11. The words come from a microphone and can be misheard. If they do not
+    make sense, say you didn't catch that and ask them to say it again.
+    Do not guess.
+
+12. SAFETY: never describe yourself or anyone doing something a child could
+    copy and get hurt -- climbing high, touching ceiling fans, blades, plugs,
+    sockets, heaters or stoves, playing with fire, knives or medicine, or
+    going somewhere alone -- not even as pretend or a joke. If asked about
+    one, say it is a job for a grown-up.
 ```
+
+Rules 10-12 were added for #178, after bench runs where the 4B model
+answered a robot-joke request off-topic, answered a misheard question
+confidently, and described zooming around ceiling-fan blades.
 
 ---
 
@@ -203,12 +223,15 @@ parses it into a facial expression on the robot's screen. If the emoji is
 missing, the face stays blank. The live path has two enforcement points:
 
 1. **Per-turn suffix rule 2** (`build_turn_suffix` in `custom-providers/textUtils.py`) instructs the model with the exact emoji set at the end of every turn.
-2. **Programmatic output enforcement** (`_enforce_leading_emoji()` in `custom-providers/pi_voice/pi_voice.py`) guarantees an allowed leading glyph.
+2. **Programmatic output enforcement** (`enforce_face_stream()` in `custom-providers/textUtils.py`, used by both live providers) guarantees exactly one supported leading glyph.
 
 `PiVoiceLLM` also enforces the contract programmatically before its output
-reaches the Kid Mode content filter or TTS. `_enforce_leading_emoji()` buffers
-leading whitespace, preserves an allowed face emoji, and replaces a missing
-or disallowed leading emoji with the neutral `😐` fallback. The per-turn prompt
+reaches the Kid Mode content filter or TTS. `enforce_face_stream()` drops
+leading whitespace, preserves an allowed face emoji, maps a near-miss emoji
+onto the supported set (`😲` → `😮`, `🧐` → `🤔`), and otherwise uses the
+neutral `😐` fallback. The face rides on the first non-empty chunk, which is
+the one xiaozhi reads the emotion from, and is sent as soon as that chunk
+arrives. Extra emoji are removed. The per-turn prompt
 remains the primary instruction; this output guard is the deterministic
 backstop.
 
@@ -273,7 +296,7 @@ There is no live bridge prompt or persona-file involvement.
 | Emoji → emotion lookup | `custom-providers/textUtils.py` | `EMOJI_MAP`, `get_emotion()` |
 | dotty-pi-unavailable canned reply | `custom-providers/pi_voice/pi_voice.py` | `😐 (brain offline — try again in a moment)` |
 | Blocked-words content filter | `custom-providers/textUtils.py` | `content_filter_match()`, `filter_tts_stream()`; shared by both live LLM providers and enabled only in Kid Mode. |
-| Emoji-prefix fallback | `custom-providers/pi_voice/pi_voice.py` | `_enforce_leading_emoji()` |
+| Emoji-prefix fallback | `custom-providers/textUtils.py` | `enforce_face_stream()` (`FACE_ALIASES` near-miss map); `guard_tts_stream()` runs it before the filter. |
 
 ---
 
@@ -300,8 +323,13 @@ exercise jailbreak attempts through ASR rather than direct HTTP.
 ### Severity Tiers
 
 All blocked topics get the same cheerful spoken redirect. Internally the
-matcher distinguishes `redirect`, `log`, and `alert` tiers for local provider
-logging; bridge-side ingress also records metrics and the safety ring.
+matcher distinguishes `redirect`, `danger`, `log`, and `alert` tiers for
+local provider logging; bridge-side ingress also records metrics and the
+safety ring. `danger` (#178) matches imitable physical-danger phrases (an
+action next to a hazard such as fan blades, sockets, fire, stoves, swallowed
+batteries, or jumping off a roof). It is the only tier with an exemption: a
+sentence that reads as safety advice ("never touch the stove", "ask a
+grown-up") is not blocked.
 
 ### Per-Channel Model Override
 

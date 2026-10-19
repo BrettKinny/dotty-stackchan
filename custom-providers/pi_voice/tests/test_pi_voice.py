@@ -395,9 +395,10 @@ class TestLeadingEmojiContract(unittest.TestCase):
             provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
             return list(provider.response("s", [{"role": "user", "content": "hello"}]))
 
-    def test_missing_emoji_gets_fallback_before_first_text(self):
+    def test_missing_emoji_gets_fallback_in_the_first_chunk(self):
+        # xiaozhi reads the face from the first non-empty chunk only.
         out = self._response(["Hello", " there"])
-        self.assertEqual(out[0], f"{textUtils.FALLBACK_EMOJI} ")
+        self.assertEqual(out[0], f"{textUtils.FALLBACK_EMOJI} Hello")
         self.assertEqual("".join(out), f"{textUtils.FALLBACK_EMOJI} Hello there")
 
     def test_leading_whitespace_never_precedes_emoji(self):
@@ -409,12 +410,22 @@ class TestLeadingEmojiContract(unittest.TestCase):
         out = self._response(["😊 Hello"])
         self.assertEqual(out, ["😊 Hello"])
 
-    def test_disallowed_leading_emoji_is_replaced_not_retained(self):
+    def test_near_miss_sequence_emoji_is_mapped_not_retained(self):
+        # #168: ❤️ (U+2764 U+FE0F) is a near-miss for the love face.
         out = self._response(["❤️ Hello"])
-        self.assertEqual("".join(out), f"{textUtils.FALLBACK_EMOJI} Hello")
+        self.assertEqual("".join(out), "😍 Hello")
 
-    def test_disallowed_single_codepoint_emoji_is_replaced(self):
+    def test_near_miss_single_codepoint_emoji_is_mapped(self):
         out = self._response(["😂 Hello"])
+        self.assertEqual("".join(out), "😆 Hello")
+
+    def test_near_miss_surprise_and_thinking_faces_survive(self):
+        # #168: these faces never rendered because near-misses became 😐.
+        self.assertEqual(self._response(["😲 Wow!"])[0], "😮 Wow!")
+        self.assertEqual(self._response(["🧐 Let me see."])[0], "🤔 Let me see.")
+
+    def test_unmappable_leading_emoji_is_replaced_not_retained(self):
+        out = self._response(["🐶 Hello"])
         self.assertEqual("".join(out), f"{textUtils.FALLBACK_EMOJI} Hello")
 
     def test_empty_model_stream_gets_emoji_fallback(self):

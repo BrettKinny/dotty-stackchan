@@ -104,10 +104,12 @@ def truncate_sentences(text: str, max_sentences: int = MAX_SENTENCES) -> str:
 #
 #   redirect — common profanity / slurs             → log.warning
 #   log      — explicit sexual / graphic violence   → log.warning
+#   danger   — imitable physical danger (#178)      → log.warning
 #   alert    — hard drugs                           → log.error  (alert on this label)
 _CF_TIER_LEVELS = {
     "alert": logging.ERROR,
     "log": logging.WARNING,
+    "danger": logging.WARNING,
     "redirect": logging.WARNING,
 }
 
