@@ -1,9 +1,11 @@
 {% if ok %}
 <div class="alert alert-info dotty-alert"
-     hx-get="/ui/smart-mode" hx-trigger="load delay:300ms" hx-swap="innerHTML" hx-target="#smart-card-body">
+     hx-get="/ui/smart-mode" hx-trigger="load delay:{{ '5s' if note else '300ms' }}" hx-swap="innerHTML" hx-target="#smart-card-body">
   Smart Mode → <span class="font-semibold">{{ "on" if new_state else "off" }}</span>
+  {% if note %}<span class="text-xs">({{ note }})</span>{% endif %}
 </div>
-<script>window.dispatchEvent(new CustomEvent('dotty-refresh'));</script>
+{# A dotty-refresh would reload this card at once and hide the note. #}
+{% if not note %}<script>window.dispatchEvent(new CustomEvent('dotty-refresh'));</script>{% endif %}
 {% else %}
 <div class="alert alert-error dotty-alert">{{ error or "Smart mode toggle failed." }}</div>
 {% endif %}

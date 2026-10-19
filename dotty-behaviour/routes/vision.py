@@ -3,7 +3,8 @@
 The explain endpoint accepts a JPEG upload, base64-encodes it, asks
 the VLM to describe it (using the kid-mode-aware system prompt), and
 caches the description under perception_state.vision_cache[device_id].
-The latest endpoint blocks until a fresh result lands.
+The latest endpoint blocks until a result newer than the request lands,
+without consuming the cached entry.
 
 Wire-compatible with bridge.py's /api/vision/{explain,latest/...} so
 xiaozhi-patches can retarget by URL swap.
@@ -321,31 +322,47 @@ async def vision_photo_route(
     )
 
 
+# How long GET /api/vision/latest waits for a fresh capture. Module-level
+# so tests can shorten it.
+VISION_LATEST_TIMEOUT_SEC = 15.0
+
+
 @router.get("/api/vision/latest/{device_id}")
 async def vision_latest(
     device_id: str,
+    since: Optional[float] = None,
     state: PerceptionState = Depends(get_perception_state),
 ):
-    # Drop any stale entry first so the waiter won't immediately
-    # return last-turn's cache.
-    state.vision_cache.pop(device_id, None)
-    event = state.register_vision_waiter(device_id)
-    try:
-        await asyncio.wait_for(event.wait(), timeout=15.0)
+    """Wait for a vision result newer than the request.
+
+    Non-destructive: the cached entry is never removed, so the dashboard's
+    photo and "Sees:" line survive any number of reads. The caller gets the
+    first entry whose ``wall_ts`` is at or after ``since`` (epoch seconds;
+    defaults to the moment this request arrived), so last turn's capture is
+    still never mistaken for this one. A caller that triggers the capture
+    before polling can pass ``since`` from just before the trigger to close
+    the race where the result lands before the GET does.
+    """
+    floor = since if since is not None else time.time()
+    deadline = perf_counter() + VISION_LATEST_TIMEOUT_SEC
+    while True:
         entry = state.vision_cache.get(device_id)
-        if entry:
+        if entry and entry.get("wall_ts", 0.0) >= floor:
             return {
                 "description": entry["description"],
                 "room_match_person_id": entry.get("room_match_person_id"),
             }
-        return JSONResponse(
-            status_code=500,
-            content={"error": "vision processing failed"},
-        )
-    except asyncio.TimeoutError:
-        return JSONResponse(
-            status_code=404,
-            content={"error": "no vision result in time"},
-        )
-    finally:
-        state.unregister_vision_waiter(device_id, event)
+        remaining = deadline - perf_counter()
+        if remaining <= 0:
+            break
+        event = state.register_vision_waiter(device_id)
+        try:
+            await asyncio.wait_for(event.wait(), timeout=remaining)
+        except asyncio.TimeoutError:
+            break
+        finally:
+            state.unregister_vision_waiter(device_id, event)
+    return JSONResponse(
+        status_code=404,
+        content={"error": "no vision result in time"},
+    )

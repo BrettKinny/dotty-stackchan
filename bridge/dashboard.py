@@ -27,6 +27,13 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingRes
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
+from bridge.devices import (
+    candidate_devices,
+    is_probe_device,
+    pick_live_device,
+    sensor_health,
+)
+
 log = logging.getLogger("dashboard")
 
 # Bridge wires its in-process message handler in via configure(). Lets the
@@ -37,6 +44,7 @@ _state: dict[str, Any] = {
     "audio_cache_getter": None,
     "scene_synthesis_cache_getter": None,
     "kid_mode_getter": None,
+    "kid_mode_saved_getter": None,
     "kid_mode_setter": None,
     "smart_mode_getter": None,
     "smart_mode_setter": None,
@@ -63,6 +71,7 @@ def configure(*, send_message: Any = None, vision_cache_getter: Any = None,
               audio_cache_getter: Any = None,
               scene_synthesis_cache_getter: Any = None,
               kid_mode_getter: Any = None, kid_mode_setter: Any = None,
+              kid_mode_saved_getter: Any = None,
               smart_mode_getter: Any = None, smart_mode_setter: Any = None,
               state_getter: Any = None, state_setter: Any = None,
               inject_to_device: Any = None, abort_device: Any = None,
@@ -91,6 +100,8 @@ def configure(*, send_message: Any = None, vision_cache_getter: Any = None,
         _state["kid_mode_getter"] = kid_mode_getter
     if kid_mode_setter is not None:
         _state["kid_mode_setter"] = kid_mode_setter
+    if kid_mode_saved_getter is not None:
+        _state["kid_mode_saved_getter"] = kid_mode_saved_getter
     if smart_mode_getter is not None:
         _state["smart_mode_getter"] = smart_mode_getter
     if smart_mode_setter is not None:
@@ -453,24 +464,34 @@ _SONGS_BASE_PATH = "/opt/xiaozhi-esp32-server/config/assets/songs"
 _SONG_OK_EXT = {".opus", ".ogg", ".wav", ".mp3", ".mid", ".midi"}  # = xiaozhi play-asset
 
 
-async def _xiaozhi_device_count() -> int | None:
-    """Count active StackChan WS connections via the admin endpoint.
-    Returns None if xiaozhi is unreachable."""
+async def _xiaozhi_connected_devices() -> list[str] | None:
+    """Device ids holding a live StackChan WS, via the admin endpoint.
+    Returns None if xiaozhi is unreachable (unknown, not "none")."""
     if not XIAOZHI_HOST:
         return None
     url = f"http://{XIAOZHI_HOST}:{XIAOZHI_OTA_PORT}/xiaozhi/admin/devices"
     import urllib.request
-    def _fetch() -> int | None:
+    def _fetch() -> list[str] | None:
         try:
             req = urllib.request.Request(url, headers=_xiaozhi_admin_headers())
             with urllib.request.urlopen(req, timeout=2) as r:
                 if r.status != 200:
                     return None
                 data = json.loads(r.read())
-                return len(data.get("devices", []))
+                devices = data.get("devices", [])
+                if not isinstance(devices, list):
+                    return None
+                return [str(d) for d in devices]
         except Exception:
             return None
     return await asyncio.to_thread(_fetch)
+
+
+async def _xiaozhi_device_count() -> int | None:
+    """Count active StackChan WS connections via the admin endpoint.
+    Returns None if xiaozhi is unreachable."""
+    devices = await _xiaozhi_connected_devices()
+    return None if devices is None else len(devices)
 
 
 @router.get("/device-status", response_class=HTMLResponse, include_in_schema=False)
@@ -877,11 +898,25 @@ def _host_detail_llm_label(smart_on: bool | None = None) -> str:
 
 @router.get("/kid-mode", response_class=HTMLResponse, include_in_schema=False)
 async def kid_mode_partial(request: Request) -> Any:
+    """Kid Mode card. Re-read from the persisted guardian policy on every
+    poll (the same file PiVoiceLLM, the camera gate and dotty-behaviour
+    read each turn), so it always shows what is being enforced. ``saved``
+    is False when no policy file exists yet: the voice path then falls back
+    to its startup default while the camera gate stays denied."""
     getter = _state.get("kid_mode_getter")
-    enabled = bool(getter()) if getter else True
+    try:
+        enabled = bool(getter()) if getter else True
+    except Exception:
+        log.exception("kid_mode getter failed")
+        enabled = True
+    saved_getter = _state.get("kid_mode_saved_getter")
+    try:
+        saved = (saved_getter() is not None) if saved_getter else True
+    except Exception:
+        saved = False
     return templates.TemplateResponse(
         request, "kid_mode.html",
-        {"enabled": enabled, "available": getter is not None},
+        {"enabled": enabled, "available": getter is not None, "saved": saved},
     )
 
 
@@ -1115,11 +1150,13 @@ def _pick_perception_device_id() -> str | None:
     to feed into the Perception card builder. Priority:
       1. The device with a fresh _vision_cache entry (most likely the one
          actively perceiving).
-      2. Any device in _perception_state (single robot ➜ single key).
+      2. The most recently active real device in dotty-behaviour's
+         per-device state (test probes / the "unknown" id are skipped).
     Returns None when the bridge has not yet seen any device — the card
     then renders empty states across the board.
     """
-    vc = _vision_cache_snapshot()
+    vc = {did: e for did, e in _vision_cache_snapshot().items()
+          if not is_probe_device(did)}
     if vc:
         try:
             return max(vc.items(), key=lambda kv: kv[1].get("wall_ts", 0.0))[0]
@@ -1131,8 +1168,7 @@ def _pick_perception_device_id() -> str | None:
             states = psg() or {}
         except Exception:
             states = {}
-        for did in states.keys():
-            return did
+        return pick_live_device(states)
     return None
 
 
@@ -1376,9 +1412,10 @@ async def smart_mode_set(request: Request, enabled: str = Form("")) -> Any:
             request, "smart_mode_result.html",
             {"ok": False, "error": err or "Smart mode toggle failed."},
         )
+    note = result.get("note") if isinstance(result, dict) else None
     return templates.TemplateResponse(
         request, "smart_mode_result.html",
-        {"ok": True, "new_state": new_state},
+        {"ok": True, "new_state": new_state, "note": note},
     )
 
 
@@ -1411,9 +1448,10 @@ async def kid_mode_set(request: Request, enabled: str = Form("")) -> Any:
             request, "kid_mode_result.html",
             {"ok": False, "error": err or "Kid mode toggle failed."},
         )
+    note = result.get("note") if isinstance(result, dict) else None
     return templates.TemplateResponse(
         request, "kid_mode_result.html",
-        {"ok": True, "new_state": new_state},
+        {"ok": True, "new_state": new_state, "note": note},
     )
 
 
@@ -1636,25 +1674,24 @@ async def status_strip(request: Request, placement: str = "header") -> Any:
         # (face/sound events stopped flowing past PERCEPTION_STALE_THRESHOLD_S
         # in bridge.py). This is the only path that can degrade the robot
         # dot below "ok" in the redesigned binary model.
+        #
+        # Only real devices that have streamed since dotty-behaviour started
+        # and (when xiaozhi answers) hold a live WS are judged — test
+        # probes, the "unknown" fallback id, devices restored from disk and
+        # a robot that is simply offline/asleep must not raise the warning.
         psg = _state.get("perception_state_getter")
         if psg is not None:
             try:
                 pstate = psg() or {}
             except Exception:
                 pstate = {}
-            stale_devs = [
-                did for did, s in pstate.items()
-                if s and s.get("sensor_stale")
-            ]
-            fresh_devs = [
-                did for did, s in pstate.items()
-                if s and not s.get("sensor_stale")
-            ]
+            connected = await _xiaozhi_connected_devices()
+            judged, stale_devs, fresh_devs = sensor_health(pstate, connected)
             if stale_devs and sc_status in ("ok", "unknown"):
                 sc_status = "warn"
                 sc_tip = (
                     f"Dotty: perception sensors stale "
-                    f"({len(stale_devs)}/{len(pstate)} dev) — "
+                    f"({len(stale_devs)}/{len(judged)} dev) — "
                     f"firmware bus may be hung"
                 )
             elif fresh_devs and sc_status == "unknown":
@@ -1824,7 +1861,8 @@ async def host_detail(request: Request, slug: str) -> Any:
             seen = f"{_humanize_age(time.time() - last_seen_ts)} ago"
         getter = _state.get("state_getter")
         current = (getter() if getter else None) or "idle"
-        n = await _xiaozhi_device_count()
+        connected = await _xiaozhi_connected_devices()
+        n = None if connected is None else len(connected)
         # Perception bus liveness — separate from voice activity. Stale
         # means firmware-side face/sound events have stopped flowing
         # (face_detected, sound_event, state_changed) past the bridge's
@@ -1838,31 +1876,33 @@ async def host_detail(request: Request, slug: str) -> Any:
                 pstate = psg() or {}
             except Exception:
                 pstate = {}
-            if pstate:
-                stale = [
-                    did for did, s in pstate.items()
-                    if s and s.get("sensor_stale")
-                ]
+            judged, stale, fresh = sensor_health(pstate, connected)
+            if not judged and candidate_devices(pstate):
+                perception_label = (
+                    "not streaming (robot offline or idle)"
+                    if connected is not None else "no events since restart"
+                )
+            elif judged:
                 if stale:
-                    ages = [
-                        s.get("sensor_age_s") for _, s in pstate.items()
-                        if s and s.get("sensor_stale")
+                    ages = [pstate[did].get("sensor_age_s") for did in stale]
+                    finite_ages = [
+                        a for a in ages
+                        if isinstance(a, (int, float)) and a != float("inf")
                     ]
-                    finite_ages = [a for a in ages if a not in (None, float("inf"))]
                     if finite_ages:
                         oldest = max(finite_ages)
                         perception_label = (
-                            f"stale ({len(stale)}/{len(pstate)} dev, "
+                            f"stale ({len(stale)}/{len(judged)} dev, "
                             f"oldest {_humanize_age(oldest)})"
                         )
                     else:
                         perception_label = (
-                            f"stale ({len(stale)}/{len(pstate)} dev, never)"
+                            f"stale ({len(stale)}/{len(judged)} dev, never)"
                         )
                 else:
                     youngest = min(
-                        (s.get("sensor_age_s", float("inf"))
-                         for s in pstate.values() if s),
+                        (pstate[did].get("sensor_age_s", float("inf"))
+                         for did in fresh),
                         default=float("inf"),
                     )
                     if youngest != float("inf"):
@@ -2088,38 +2128,75 @@ async def perception_feed_proxy(request: Request) -> StreamingResponse:
 
 # --- P13 + P12: SSE event stream for live log + error toasts -------------
 
+# Turns replayed to a freshly opened page so the Turns tab is not blank
+# until the next voice turn.
+_EVENTS_REPLAY_MAX = 20
+
 @router.get("/events", include_in_schema=False)
 async def events_stream(request: Request) -> StreamingResponse:
     """Server-Sent Events stream of completed conversation turns.
 
-    Each event is one JSON object: {ts, channel, request_text, response_text,
-    latency_ms, error}. Published when the voice provider reports a turn to
-    /api/voice/turn. Heartbeats every 15s keep proxies / browsers awake.
+    Each event is one JSON object: {id, ts, channel, request_text,
+    response_text, latency_ms, error}. Published when the voice provider
+    reports a turn to /api/voice/turn. Heartbeats every 15s keep proxies /
+    browsers awake.
+
+    On connect the stream first replays recent turns from the in-memory
+    ring, flagged ``"replay": true`` so the page shows them without raising
+    the error toast: the last _EVENTS_REPLAY_MAX turns for a fresh page, or
+    only the turns newer than the browser's Last-Event-ID on a reconnect.
     """
     subscribe = _state.get("subscribe_events")
     unsubscribe = _state.get("unsubscribe_events")
     if subscribe is None or unsubscribe is None:
         raise HTTPException(503, "event broadcast not configured")
+    try:
+        last_seen_id: int | None = int(request.headers.get("last-event-id", ""))
+    except ValueError:
+        last_seen_id = None
+    # Subscribe before reading the ring so a turn landing in between is
+    # caught by the queue; the id check below drops the overlap.
     queue = subscribe()
+    backlog = [t for t in _recent_turns() if isinstance(t.get("id"), int)]
+    if last_seen_id is None:
+        backlog = backlog[-_EVENTS_REPLAY_MAX:]
+    else:
+        backlog = [t for t in backlog if t["id"] > last_seen_id]
+
+    def _frame(event: dict, *, replay: bool) -> bytes:
+        # Strip the heavy [Context] block before pushing — clients only
+        # want the cleaned user payload.
+        event = {**event,
+                 "request_text": _clean_request_text(
+                     event.get("request_text") or "")}
+        if replay:
+            event["replay"] = True
+        payload = json.dumps(event, ensure_ascii=False)
+        event_id = event.get("id")
+        prefix = f"id: {event_id}\n" if isinstance(event_id, int) else ""
+        return f"{prefix}data: {payload}\n\n".encode()
 
     async def gen():
+        sent_id = max((t["id"] for t in backlog), default=0)
         try:
             # Tell EventSource how long to wait before reconnecting on drop.
             yield "retry: 5000\n\n".encode()
+            for turn in backlog:
+                yield _frame(turn, replay=True)
             while True:
                 if await request.is_disconnected():
                     break
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=15.0)
-                    # Strip the heavy [Context] block before pushing — clients
-                    # only want the cleaned user payload.
-                    event = {**event,
-                             "request_text": _clean_request_text(
-                                 event.get("request_text") or "")}
-                    payload = json.dumps(event, ensure_ascii=False)
-                    yield f"data: {payload}\n\n".encode()
                 except asyncio.TimeoutError:
                     yield b": heartbeat\n\n"
+                    continue
+                event_id = event.get("id")
+                if isinstance(event_id, int):
+                    if event_id <= sent_id:
+                        continue
+                    sent_id = event_id
+                yield _frame(event, replay=False)
         finally:
             unsubscribe(queue)
 

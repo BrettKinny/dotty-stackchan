@@ -158,11 +158,87 @@ def test_vision_latest_waits_then_returns_cache() -> None:
         assert result["body"]["description"] == "A spinning top."
 
 
-# NOTE: A wire-level "/api/vision/latest returns 404 on timeout" test
-# was considered but skipped — the route's wait_for timeout is 15 s,
-# and dropping that to a tunable knob would add config surface for one
-# test. The signal-path is exercised by test_signal_vision_waiters_*
-# below and the live container will catch a regression in seconds.
+def _seed_cache(client: TestClient, device_id: str, *, wall_ts: float) -> None:
+    from time import perf_counter
+
+    client.app.state.perception.vision_cache[device_id] = {
+        "description": "An old chair.",
+        "timestamp": perf_counter(),
+        "wall_ts": wall_ts,
+        "jpeg_bytes": b"\xff\xd8old",
+        "question": "What do you see?",
+        "room_match_person_id": None,
+        "source": "v1",
+    }
+
+
+def test_vision_latest_read_does_not_wipe_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A read that times out must leave the cached photo in place — the
+    dashboard's photo and "Sees:" line are served from the same cache."""
+    import time as _time
+
+    import routes.vision as vision_routes
+
+    monkeypatch.setattr(vision_routes, "VISION_LATEST_TIMEOUT_SEC", 0.1)
+    with TestClient(app) as client:
+        _seed_cache(client, "dev-keep", wall_ts=_time.time() - 30)
+        r = client.get("/api/vision/latest/dev-keep")
+        assert r.status_code == 404
+        assert r.json() == {"error": "no vision result in time"}
+        cache = client.app.state.perception.vision_cache
+        assert cache["dev-keep"]["description"] == "An old chair."
+        photo = client.get("/api/vision/photo/dev-keep")
+        assert photo.status_code == 200
+        assert photo.content == b"\xff\xd8old"
+
+
+def test_vision_latest_ignores_entry_older_than_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Last turn's capture is never returned as this turn's answer."""
+    import threading
+    import time as _time
+
+    import routes.vision as vision_routes
+
+    monkeypatch.setattr(vision_routes, "VISION_LATEST_TIMEOUT_SEC", 3.0)
+    with TestClient(app) as client:
+        _override_vlm(client, _FakeVLM(description="A new lamp."))
+        _seed_cache(client, "dev-new", wall_ts=_time.time() - 30)
+        result: dict = {}
+
+        def _poll() -> None:
+            r = client.get("/api/vision/latest/dev-new")
+            result["status"] = r.status_code
+            result["body"] = r.json()
+
+        t = threading.Thread(target=_poll, daemon=True)
+        t.start()
+        _time.sleep(0.05)
+        client.post(
+            "/api/vision/explain",
+            files={"file": _jpeg_file()},
+            headers={"device-id": "dev-new"},
+        )
+        t.join(timeout=3.0)
+        assert not t.is_alive(), "vision/latest never returned"
+        assert result["status"] == 200
+        assert result["body"]["description"] == "A new lamp."
+
+
+def test_vision_latest_since_returns_entry_that_beat_the_poll() -> None:
+    """A result that landed after `since` but before the GET is returned
+    straight away instead of being waited past."""
+    import time as _time
+
+    with TestClient(app) as client:
+        before = _time.time() - 5
+        _seed_cache(client, "dev-race", wall_ts=before + 1)
+        r = client.get(f"/api/vision/latest/dev-race?since={before}")
+        assert r.status_code == 200
+        assert r.json()["description"] == "An old chair."
 
 
 def test_signal_vision_waiters_wakes_pending_listener() -> None:

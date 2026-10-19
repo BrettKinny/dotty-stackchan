@@ -151,6 +151,18 @@ PERCEPTION_RECENT_MAX: int = _env_int("PERCEPTION_RECENT_MAX", 50)
 PERCEPTION_STALE_THRESHOLD_SEC: float = _env_float(
     "PERCEPTION_STALE_THRESHOLD_SEC", 300.0
 )
+# Test / automation device ids (acceptance probes, smoke runs, the
+# "unknown" fallback id) are tracked like any device but expire after
+# PERCEPTION_EPHEMERAL_TTL_SEC without activity, so a probe left behind on a
+# production daemon stops showing up in /api/perception/state and in the
+# dashboard's stale-sensor check. Matched against the whole device id.
+PERCEPTION_EPHEMERAL_DEVICE_RE: str = os.environ.get(
+    "PERCEPTION_EPHEMERAL_DEVICE_RE",
+    r"(automation|test|probe|smoke|ci|uat)[-_].*|unknown",
+)
+PERCEPTION_EPHEMERAL_TTL_SEC: float = _env_float(
+    "PERCEPTION_EPHEMERAL_TTL_SEC", 3600.0
+)
 
 # ---------------------------------------------------------------------------
 # Consumer knobs (all mirror bridge.py defaults — env-name compatible so an

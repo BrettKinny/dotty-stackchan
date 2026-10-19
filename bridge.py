@@ -44,6 +44,7 @@ from textUtils import (  # noqa: F401  (re-exported for downstream tools)
 )
 
 from bridge.csrf import CSRFMiddleware
+from bridge.devices import candidate_devices, pick_live_device
 from bridge.text import (  # noqa: F401  (used by bridge.dashboard via re-imports)
     CONTENT_FILTER_REPLACEMENT,
     MAX_SENTENCES,
@@ -91,24 +92,48 @@ _SMART_STATE_FILE = Path(
 )
 
 
+def _read_toggle_file(path: Path) -> bool | None:
+    """Parse a "true"/"false" toggle state file; None when it is missing,
+    unreadable or holds anything else."""
+    try:
+        v = path.read_text().strip().lower()
+    except (OSError, UnicodeError):
+        return None
+    if v in ("true", "1", "yes"):
+        return True
+    if v in ("false", "0", "no"):
+        return False
+    return None
+
+
+def _write_toggle_file(path: Path, enabled: bool) -> None:
+    """Atomically replace a toggle state file. xiaozhi-server, PiVoiceLLM
+    and dotty-behaviour re-read it on every turn from their own mounts, so
+    a reader must never catch it empty or half-written."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text("true" if enabled else "false")
+    os.replace(tmp, path)
+
+
+def _kid_mode_saved() -> bool | None:
+    """The persisted guardian policy, or None when nothing is saved yet."""
+    return _read_toggle_file(_KID_STATE_FILE)
+
+
 def _read_kid_mode() -> bool:
     """State file overrides env var so the dashboard can flip kid-mode and
-    survive a restart without editing the unit. Format: "true" or "false"."""
-    if _KID_STATE_FILE.exists():
-        try:
-            v = _KID_STATE_FILE.read_text().strip().lower()
-            if v in ("true", "1", "yes"):
-                return True
-            if v in ("false", "0", "no"):
-                return False
-        except OSError:
-            pass
+    survive a restart without editing the unit. Format: "true" or "false".
+    Same precedence as PiVoiceLLM's reader, so the dashboard shows what the
+    voice path enforces."""
+    saved = _kid_mode_saved()
+    if saved is not None:
+        return saved
     return os.environ.get("DOTTY_KID_MODE", "true").lower() in ("1", "true", "yes")
 
 
 def _write_kid_mode(enabled: bool) -> None:
-    _KID_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _KID_STATE_FILE.write_text("true" if enabled else "false")
+    _write_toggle_file(_KID_STATE_FILE, enabled)
     if _METRICS_AVAILABLE:
         _safe_metric(dotty_kid_mode_active.set, 1 if enabled else 0)
 
@@ -133,21 +158,25 @@ if _METRICS_AVAILABLE:
 
 
 def _read_smart_mode() -> bool:
-    if _SMART_STATE_FILE.exists():
-        try:
-            v = _SMART_STATE_FILE.read_text().strip().lower()
-            if v in ("true", "1", "yes"):
-                return True
-            if v in ("false", "0", "no"):
-                return False
-        except OSError:
-            pass
-    return False
+    saved = _read_toggle_file(_SMART_STATE_FILE)
+    return bool(saved)
 
 
 def _write_smart_mode(enabled: bool) -> None:
-    _SMART_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _SMART_STATE_FILE.write_text("true" if enabled else "false")
+    _write_toggle_file(_SMART_STATE_FILE, enabled)
+
+
+def _dashboard_kid_mode_getter() -> bool:
+    """Kid Mode as the dashboard shows it: re-read from the persisted policy
+    on every poll, so a flip made elsewhere (POST /admin/kid-mode, a hand
+    edit, another bridge) shows within one refresh. Re-applies the
+    kid-derived globals and the Prometheus gauge when the file moved."""
+    enabled = _read_kid_mode()
+    if enabled != KID_MODE:
+        _apply_kid_mode(enabled)
+        if _METRICS_AVAILABLE:
+            _safe_metric(dotty_kid_mode_active.set, 1 if enabled else 0)
+    return enabled
 
 
 # ---------------------------------------------------------------------------
@@ -384,6 +413,44 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("dotty-bridge")
 
 
+_STARTUP_RESYNC = os.environ.get("DOTTY_BRIDGE_STARTUP_RESYNC", "1") != "0"
+_STARTUP_RESYNC_DELAY_SEC = float(
+    os.environ.get("DOTTY_BRIDGE_STARTUP_RESYNC_DELAY_SEC", "3")
+)
+
+
+async def _startup_resync() -> dict:
+    """Bring the robot back in line with persisted state after a restart (#21).
+
+    The bridge keeps no state of its own any more: the State card reads
+    dotty-behaviour's per-device ``current_state`` live (persisted across
+    behaviour restarts by #173) and the toggles live in the shared state
+    files. What a restart can leave diverged is the firmware's kid / smart
+    LED pips, e.g. after a flip that landed while the robot held no WS. So
+    push both persisted toggles once. Best-effort: with no robot connected
+    xiaozhi answers 503 and receiveAudioHandle repaints the pips on the
+    next connection anyway. Returns what was pushed, for tests and logs."""
+    kid_on = _read_kid_mode()
+    smart_on = _read_smart_mode()
+    result = {"kid_mode": kid_on, "smart_mode": smart_on, "pushed": False}
+    if not _XIAOZHI_HOST:
+        return result
+    kid_ok = await _dispatch_set_toggle("", "kid_mode", kid_on)
+    smart_ok = await _dispatch_set_toggle("", "smart_mode", smart_on)
+    result["pushed"] = kid_ok and smart_ok
+    if result["pushed"]:
+        log.info(
+            "startup resync: pushed kid_mode=%s smart_mode=%s to the robot",
+            kid_on, smart_on,
+        )
+    else:
+        log.info(
+            "startup resync: robot not connected; pips sync on its next "
+            "connection (kid_mode=%s smart_mode=%s)", kid_on, smart_on,
+        )
+    return result
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan slimmed to dashboard-only.
@@ -391,12 +458,25 @@ async def lifespan(app: FastAPI):
     The voice / perception / VLM machinery that used to spin up here moved
     to dotty-pi and dotty-behaviour in the #36 cutover; PR #109 then
     containerized this file, and #111 ripped the dormant code paths so the
-    container doesn't double-fire consumers. The startup voice-model
-    reconcile was dropped in the 2026-05-29 alignment pass along with
-    Tier1Slim — the live PiVoiceLLM path has no runtime model swap (v2
-    scope), so there is no startup work left to do.
+    container doesn't double-fire consumers. The only startup work left is
+    the one-shot toggle resync (#21), run in the background so a slow or
+    absent xiaozhi never delays the dashboard coming up.
     """
-    yield
+    task: asyncio.Task | None = None
+    if _STARTUP_RESYNC:
+        async def _delayed() -> None:
+            await asyncio.sleep(_STARTUP_RESYNC_DELAY_SEC)
+            try:
+                await _startup_resync()
+            except Exception:
+                log.exception("startup resync failed")
+
+        task = asyncio.create_task(_delayed(), name="bridge-startup-resync")
+    try:
+        yield
+    finally:
+        if task is not None and not task.done():
+            task.cancel()
 
 
 app = FastAPI(title="Dotty Bridge", lifespan=lifespan)
@@ -577,20 +657,22 @@ def _dashboard_perception_recent_getter(
 
 
 def _dashboard_state_getter() -> str:
-    """Return the current State mirrored by dotty-behaviour.
+    """Return the robot's current State as mirrored by dotty-behaviour.
 
-    The deployment has one robot, so use the first valid per-device state.
-    If behaviour is unavailable or has not observed a state transition yet,
-    retain the dashboard's historical safe fallback of ``idle``.
+    dotty-behaviour tracks ``current_state`` per device from the firmware's
+    ``state_changed`` events. Its state also holds ids no robot owns (test
+    probes, the ``unknown`` fallback), so pick the most recently active
+    real device rather than whichever key comes first. If behaviour is
+    unavailable or has not observed a state transition yet, keep the
+    dashboard's historical safe fallback of ``idle``.
     """
     states = _dashboard_perception_state_getter()
-    for device_state in states.values():
-        if not isinstance(device_state, dict):
-            continue
-        current = device_state.get("current_state")
-        if isinstance(current, str) and current:
-            return current
-    return "idle"
+    with_state = {
+        did: s for did, s in candidate_devices(states).items()
+        if isinstance(s.get("current_state"), str) and s["current_state"]
+    }
+    did = pick_live_device(with_state)
+    return with_state[did]["current_state"] if did else "idle"
 
 
 def _dashboard_last_user_line_getter(device_id: str) -> dict | None:
@@ -637,9 +719,22 @@ _DASHBOARD_TURNS_MAX = 200
 _dashboard_recent_turns: "deque[dict]" = deque(maxlen=_DASHBOARD_TURNS_MAX)
 
 
+_dashboard_last_turn_id = 0
+
+
 def _dashboard_publish_turn(record: dict) -> None:
     """Record a completed turn and fan it out to /ui/events subscribers.
-    A slow subscriber's full queue drops the event rather than blocking."""
+    A slow subscriber's full queue drops the event rather than blocking.
+
+    Each turn gets an ``id`` (milliseconds since the epoch, bumped to stay
+    strictly increasing) that /ui/events sends as the SSE event id, so a
+    reconnecting browser's Last-Event-ID replays only what it missed, even
+    across a bridge restart."""
+    global _dashboard_last_turn_id
+    _dashboard_last_turn_id = max(
+        _dashboard_last_turn_id + 1, int(time.time() * 1000),
+    )
+    record = {**record, "id": _dashboard_last_turn_id}
     _dashboard_recent_turns.append(record)
     for q in list(_dashboard_event_listeners):
         try:
@@ -674,13 +769,18 @@ if _configure_dashboard is not None:
         custom-providers/textUtils.py and the persona prompts."""
         _write_kid_mode(enabled)
         _apply_kid_mode(enabled)
-        ok = await _dispatch_set_toggle("", "kid_mode", enabled)
-        if not ok:
-            return {
-                "ok": False,
-                "error": "firmware did not acknowledge — LED + on-device toggle stale; bridge state is flipped",
-            }
-        return {"ok": True}
+        # The saved policy is what every voice turn and camera request
+        # reads, so the flip is in force once the file is written. The pip
+        # push only fails when the robot holds no WS (xiaozhi's WS is
+        # session-scoped); receiveAudioHandle repaints it on reconnect.
+        pushed = await _dispatch_set_toggle("", "kid_mode", enabled)
+        result: dict = {"ok": True, "device_pushed": pushed}
+        if not pushed:
+            result["note"] = (
+                "saved and in force; the robot's LED pip updates when it "
+                "next connects"
+            )
+        return result
 
     async def _dashboard_abort_device(*, device_id: str = "") -> dict:
         """Fire-and-forget POST to xiaozhi-server's admin abort route."""
@@ -742,13 +842,13 @@ if _configure_dashboard is not None:
         Tier1Slim hot-swap path was removed in the 2026-05-29 alignment
         pass."""
         _write_smart_mode(enabled)
-        dispatch_ok = await _dispatch_set_toggle("", "smart_mode", enabled)
-        if not dispatch_ok:
-            return {
-                "ok": False,
-                "error": "firmware did not acknowledge set_toggle (LED pip stale)",
-            }
-        return {"ok": True}
+        pushed = await _dispatch_set_toggle("", "smart_mode", enabled)
+        result: dict = {"ok": True, "device_pushed": pushed}
+        if not pushed:
+            result["note"] = (
+                "saved; the robot's LED pip updates when it next connects"
+            )
+        return result
 
     async def _dashboard_memory_records() -> list[dict]:
         """All per-person memory rows (approved + pending) for /ui/memory."""
@@ -770,7 +870,8 @@ if _configure_dashboard is not None:
         vision_cache_getter=_dashboard_vision_cache_getter,
         audio_cache_getter=_dashboard_audio_cache_getter,
         scene_synthesis_cache_getter=_dashboard_scene_synthesis_cache_getter,
-        kid_mode_getter=_read_kid_mode,
+        kid_mode_getter=_dashboard_kid_mode_getter,
+        kid_mode_saved_getter=_kid_mode_saved,
         kid_mode_setter=_dashboard_set_kid_mode,
         smart_mode_getter=_read_smart_mode,
         smart_mode_setter=_dashboard_set_smart_mode,
