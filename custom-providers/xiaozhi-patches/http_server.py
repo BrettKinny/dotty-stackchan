@@ -113,6 +113,27 @@ def _dotty_conn_device_id(conn, fallback: str = "") -> str:
     return (getattr(conn, "headers", {}) or {}).get("device-id", "") or fallback
 
 
+# States whose admin transition also ends the listening session by default.
+_END_SESSION_STATES = ("idle", "sleep")
+
+
+async def _dotty_set_state_then_maybe_end(conn, state: str, end_session: bool) -> None:
+    """Send set_state, then (optionally) close the listening session.
+
+    One task, so the WebSocket close can never overtake the MCP frame; the
+    grace period lets the firmware apply it and echo state_changed first.
+    """
+    await _dotty_device_command.call_tool(
+        conn, "self.robot.set_state", {"state": state},
+    )
+    if end_session:
+        await _dotty_device_command.end_session(
+            conn,
+            reason=f"admin set-state {state}",
+            grace_s=_dotty_device_command.DEFAULT_END_SESSION_GRACE_S,
+        )
+
+
 class SimpleHttpServer:
     def __init__(self, config: dict):
         self.config = config
@@ -218,6 +239,12 @@ class SimpleHttpServer:
         Direct MCP self.robot.set_state call. Phase 4 — voice phrases and the
         dashboard route through here (and through the bridge) so the state pip
         and idle profile flip without a daemon restart.
+
+        `idle` and `sleep` also end the listening session (optional
+        `"end_session": false` opts out). StateManager changes the state arc,
+        but xiaozhi's own device state stays LISTENING with the mic open until
+        the WebSocket closes — previously that meant until the 120 s no-voice
+        timeout, answering room audio in the meantime.
         """
         try:
             data = await request.json()
@@ -227,6 +254,9 @@ class SimpleHttpServer:
         state = (data.get("state") or "").strip()
         if state not in ("idle", "talk", "story_time", "security", "sleep", "dance"):
             return web.json_response({"error": f"unknown state: {state!r}"}, status=400)
+        end_session = data.get("end_session", state in _END_SESSION_STATES)
+        if not isinstance(end_session, bool):
+            return web.json_response({"error": "end_session must be a bool"}, status=400)
         conn, err = _dotty_resolve_conn(device_id)
         if err is not None:
             return err
@@ -235,15 +265,39 @@ class SimpleHttpServer:
         # change while the firmware state_changed echo is still in flight.
         conn._dotty_desired_state = state
         _spawn(
-            _dotty_device_command.call_tool(
-                conn, "self.robot.set_state", {"state": state},
-            ),
+            _dotty_set_state_then_maybe_end(conn, state, end_session),
             name="set_state_send",
         )
         return web.json_response({
             "ok": True,
             "device_id": _dotty_conn_device_id(conn, device_id),
             "state": state,
+            "end_session": end_session,
+        })
+
+    async def _dotty_end_session(self, request: "web.Request") -> "web.Response":
+        """POST /xiaozhi/admin/end-session  Body: {"device_id": "<optional>"}
+
+        Ends the device's listening session without changing its State: stops
+        any reply in flight and closes the WebSocket exactly as the no-voice
+        timeout does, so the firmware drops to idle with the mic closed.
+        Fire-and-forget.
+        """
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        device_id = (data.get("device_id") or "").strip() if isinstance(data, dict) else ""
+        conn, err = _dotty_resolve_conn(device_id)
+        if err is not None:
+            return err
+        _spawn(
+            _dotty_device_command.end_session(conn, reason="admin end-session"),
+            name="end_session",
+        )
+        return web.json_response({
+            "ok": True,
+            "device_id": _dotty_conn_device_id(conn, device_id),
         })
 
     async def _dotty_set_toggle(self, request: "web.Request") -> "web.Response":
@@ -664,6 +718,10 @@ class SimpleHttpServer:
                         web.post(
                             "/xiaozhi/admin/set-state",
                             self._dotty_set_state,
+                        ),
+                        web.post(
+                            "/xiaozhi/admin/end-session",
+                            self._dotty_end_session,
                         ),
                         web.post(
                             "/xiaozhi/admin/set-toggle",
