@@ -291,6 +291,55 @@ class TestThinkingFilter(unittest.TestCase):
             client.close()
 
 
+class TestRepeatedTurnText(unittest.TestCase):
+    def _run(self, turns):
+        fake = FakePopen()
+        client = make_client(fake)
+        try:
+            def feed():
+                fake.emit({
+                    "id": "turn-1", "type": "response",
+                    "command": "prompt", "success": True,
+                })
+                for deltas in turns:
+                    fake.emit({"type": "turn_start"})
+                    for delta in deltas:
+                        fake.emit({
+                            "type": "message_update",
+                            "assistantMessageEvent": {"type": "text_delta", "delta": delta},
+                        })
+                    fake.emit({"type": "turn_end"})
+                fake.emit({"type": "agent_end"})
+
+            threading.Thread(target=feed, daemon=True).start()
+            return "".join(client.iter_turn_text("play tetris"))
+        finally:
+            client.close()
+
+    def test_post_tool_turn_repeating_the_pre_tool_line_is_dropped(self):
+        self.assertEqual(
+            self._run([["😊 Let me play ", "that song for you."],
+                       ["Let me play that ", "song for you!"]]),
+            "😊 Let me play that song for you.",
+        )
+
+    def test_new_words_after_a_repeat_are_spoken(self):
+        self.assertEqual(
+            self._run([["Let me play that song for you."],
+                       ["Let me play that song for you.", " Here is Tetris!"]]),
+            "Let me play that song for you. Here is Tetris!",
+        )
+
+    def test_a_different_post_tool_reply_is_spoken_whole(self):
+        self.assertEqual(
+            self._run([["Let me check."], ["Let me", " see, it is nineteen."]]),
+            "Let me check.Let me see, it is nineteen.",
+        )
+
+    def test_silent_tool_turn_does_not_hold_back_the_reply(self):
+        self.assertEqual(self._run([[], ["Here is Tetris!"]]), "Here is Tetris!")
+
+
 class TestToolCallTelemetry(unittest.TestCase):
     def test_completed_tool_call_is_logged_at_info_without_arguments(self):
         fake = FakePopen()

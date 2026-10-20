@@ -36,6 +36,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import threading
 import time
@@ -104,6 +105,12 @@ def local_exec_subprocess_factory(
 
 SubprocessFactory = Callable[[], subprocess.Popen]
 VoiceToolRunner = Callable[[str, dict[str, str]], str]
+
+
+def _normalise_reply(text: str) -> str:
+    """Words only, lowercased: compares replies regardless of face emoji,
+    punctuation and spacing."""
+    return " ".join(re.findall(r"\w+", text.lower()))
 
 
 class PiClientError(Exception):
@@ -241,6 +248,14 @@ class PiClient:
 
         deadline = time.time() + self._turn_timeout_sec
         saw_accept = False
+        # After a tool call the 4B model often says its pre-tool line again
+        # ("Let me play that song for you" twice). Hold each later agent
+        # turn's text while it only repeats the previous turn's, and drop
+        # the repeat; speak whatever it adds beyond that.
+        previous = ""  # previous agent turn's text, normalised
+        current = ""   # this agent turn's raw text
+        held = None    # raw text held back while it still repeats `previous`
+        repeat_end = None  # length of `held` at which it repeated all of `previous`
         while time.time() < deadline:
             try:
                 frame = self._event_queue.get(timeout=1.0)
@@ -273,7 +288,19 @@ class PiClient:
                     if ame.get("type") == "text_delta":
                         delta = ame.get("delta")
                         if isinstance(delta, str) and delta:
-                            yield delta
+                            current += delta
+                            if held is None:
+                                yield delta
+                                continue
+                            held += delta
+                            norm = _normalise_reply(held)
+                            if norm == previous:
+                                repeat_end = len(held)
+                            if not previous.startswith(norm):
+                                out = held[repeat_end:] if repeat_end else held
+                                held = None
+                                if out:
+                                    yield out
                     elif ame.get("type") == "toolcall_end":
                         tool_call = ame.get("toolCall")
                         if isinstance(tool_call, dict):
@@ -286,9 +313,20 @@ class PiClient:
                 # other message_update sub-types are filtered out here.
                 continue
 
+            if ftype == "turn_start":
+                if held:
+                    logger.info("PiClient: dropped a reply repeating the previous turn")
+                if _normalise_reply(current):
+                    previous = _normalise_reply(current)
+                current = ""
+                held, repeat_end = ("" if previous else None), None
+                continue
+
             if ftype == "agent_end":
                 if not saw_accept:
                     raise PiClientError("agent_end before prompt-accept")
+                if held:
+                    logger.info("PiClient: dropped a reply repeating the previous turn")
                 return
 
             # Unknown frame — drop silently. Logging at debug level keeps
