@@ -40,7 +40,7 @@ import threading
 import time
 import urllib.request
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 from urllib.parse import urlparse
 
 from .pi_client import PiClient, PiClientError, make_default_pi_client
@@ -273,14 +273,19 @@ _CAMERA_DENIED = "(Camera access is disabled in Kid Mode)"
 _THINKING_PREAMBLE = ProviderText("\U0001F914 Let me think hard about that. ")
 
 
-def _wrap_with_sandwich(user_text: str, kid_mode: bool) -> str:
-    """Append the HARD CONSTRAINTS suffix to the user's text via the shared
-    textUtils.build_turn_suffix contract — emoji-prefix
-    rule, English-only, length caps, kid-mode topic filtering. Without
-    this Dotty drifts into Chinese, multi-paragraph replies, and (in
-    kid_mode) unsafe topics, since qwen3.5:4b's base behaviour doesn't
-    encode any of those constraints."""
-    return user_text + _VOICE_TOOL_ROUTING + build_turn_suffix(kid_mode)
+def _turn_rules(kid_mode: bool) -> str:
+    """Voice tool routing plus the shared textUtils.build_turn_suffix HARD
+    CONSTRAINTS — emoji-prefix rule, English-only, length caps, kid-mode
+    topic filtering. Without them Dotty drifts into Chinese, multi-paragraph
+    replies, and (in kid_mode) unsafe topics, since qwen3.5:4b's base
+    behaviour doesn't encode any of those constraints.
+
+    They go in pi's system prompt, not after the user's words: appended to
+    each turn (~2.8K characters ending on reply-format rules) they stopped
+    the 4B calling tools at all — 0/6 play_song calls against 2/2 with the
+    same rules in the system prompt (2026-10-20 A/V run). The system prompt
+    is fixed when pi spawns, so a Kid Mode change respawns pi."""
+    return (_VOICE_TOOL_ROUTING + build_turn_suffix(kid_mode)).strip()
 
 
 def _enforce_leading_emoji(chunks: Iterator[str]) -> Iterator[str]:
@@ -296,16 +301,26 @@ def _enforce_leading_emoji(chunks: Iterator[str]) -> Iterator[str]:
 class LLMProvider(LLMProviderBase):
     """xiaozhi-server LLM provider backed by the dotty-pi container."""
 
-    def __init__(self, config: dict, *, client: PiClient | None = None):
+    def __init__(
+        self, config: dict, *, client: PiClient | None = None,
+        client_factory: Callable[[str], PiClient] | None = None,
+    ):
         self._container = config.get("container_name") or os.environ.get(
             "DOTTY_PI_CONTAINER", "dotty-pi",
         )
         # Initial value is logged for diagnostics. response() refreshes this
         # from the bridge/xiaozhi shared state file on every turn.
         self._kid_mode = _read_kid_mode()
-        # `client` is injected by tests; production passes None to get
-        # the env-configured default.
-        self._client: PiClient = client if client is not None else make_default_pi_client()
+        # `client` (fixed) or `client_factory` is injected by tests;
+        # production passes neither to get the env-configured default. The
+        # factory takes the turn rules for pi's system prompt.
+        if client is not None:
+            self._client_factory = None
+            self._client: PiClient = client
+        else:
+            self._client_factory = client_factory or make_default_pi_client
+            self._client = self._client_factory(_turn_rules(self._kid_mode))
+        self._client_kid_mode = self._kid_mode
         # A connection can submit multiple chat jobs to its thread pool. Pi RPC
         # is one ordered stream, so keep the complete new_session -> prompt ->
         # agent_end transaction exclusive; per-write locking cannot prevent one
@@ -331,6 +346,14 @@ class LLMProvider(LLMProviderBase):
         if not user_text.strip():
             yield f"{FALLBACK_EMOJI} (empty turn)"
             return
+        if self._kid_mode != self._client_kid_mode and self._client_factory is not None:
+            # pi's rules live in its system prompt; respawn so this turn runs
+            # under the Kid Mode it was asked in.
+            logger.info(f"PiVoiceLLM kid_mode -> {self._kid_mode}; respawning pi with its rules")
+            self._client.close()
+            self._client = self._client_factory(_turn_rules(self._kid_mode))
+            self._client_kid_mode = self._kid_mode
+            self._first_turn = True
         # Everything spoken this turn is reported to the dashboard when the
         # generator finishes — including when xiaozhi closes it early.
         spoken: list[str] = []
@@ -411,7 +434,7 @@ class LLMProvider(LLMProviderBase):
             context = _CAMERA_CONTEXT.format(view=result)
         if room_view and intent is None:
             context = _ROOM_VIEW_CONTEXT.format(view=room_view)
-        prompt = _wrap_with_sandwich(user_text + context, self._kid_mode)
+        prompt = user_text + context
 
         # Reset pi state between voice turns. First turn skips this —
         # the freshly-spawned process is already clean.

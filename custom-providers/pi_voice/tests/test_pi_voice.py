@@ -1,6 +1,7 @@
 """Unit tests for PiVoiceLLM — the xiaozhi LLMProvider subclass.
 
-Focus: prompt construction (last-user extraction + sandwich injection),
+Focus: prompt construction (last-user extraction; turn rules in pi's
+system prompt, respawned on a Kid Mode change),
 first-turn / nth-turn lifecycle, error fallback path. Live pi not
 required — uses a fake PiClient.
 """
@@ -31,7 +32,7 @@ import textUtils  # noqa: E402
 from pi_voice import (  # noqa: E402
     LLMProvider,
     PiClientError,
-    _wrap_with_sandwich,
+    _turn_rules,
 )
 from pi_voice.pi_voice import _last_user_text  # noqa: E402
 
@@ -79,39 +80,50 @@ class FakeClient:
         self.closed = True
 
 
-class TestSandwichInjection(unittest.TestCase):
-    def test_suffix_appended_kid_mode_on(self):
+class SpawningFactory:
+    """client_factory stand-in: records the rules each spawn got."""
+
+    def __init__(self):
+        self.rules: list[str] = []
+        self.clients: list[FakeClient] = []
+
+    def __call__(self, rules: str) -> FakeClient:
+        self.rules.append(rules)
+        self.clients.append(FakeClient())
+        return self.clients[-1]
+
+
+class TestTurnRules(unittest.TestCase):
+    def test_rules_go_to_system_prompt_kid_mode_on(self):
         os.environ["DOTTY_KID_MODE"] = "true"
-        client = FakeClient()
-        client.script_turn(["😊 ", "Hi"])
-        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        factory = SpawningFactory()
+        provider = LLMProvider({}, client_factory=factory)  # type: ignore[arg-type]
+        factory.clients[0].script_turn(["😊 ", "Hi"])
         list(provider.response("sess-1", [{"role": "user", "content": "Hello"}]))
-        self.assertEqual(len(client.prompts), 1)
-        self.assertTrue(client.prompts[0].startswith("Hello\n\nVOICE TOOL ROUTING:"))
-        self.assertTrue(client.prompts[0].endswith(textUtils.build_turn_suffix(True)))
-        # Sanity: the kid-mode-specific bullets must be in the suffix.
-        self.assertIn("YOUNG CHILD", client.prompts[0])
-        self.assertIn("SELF-HARM EXCEPTION", client.prompts[0])
+        # The user's words reach pi bare; the rules were set at spawn.
+        self.assertEqual(factory.clients[0].prompts, ["Hello"])
+        self.assertEqual(len(factory.rules), 1)
+        self.assertTrue(factory.rules[0].startswith("VOICE TOOL ROUTING:"))
+        self.assertTrue(factory.rules[0].endswith(textUtils.build_turn_suffix(True).strip()))
+        self.assertIn("YOUNG CHILD", factory.rules[0])
+        self.assertIn("SELF-HARM EXCEPTION", factory.rules[0])
 
-    def test_suffix_appended_kid_mode_off(self):
+    def test_rules_go_to_system_prompt_kid_mode_off(self):
         os.environ["DOTTY_KID_MODE"] = "false"
-        client = FakeClient()
-        client.script_turn(["😐 OK"])
-        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        factory = SpawningFactory()
+        provider = LLMProvider({}, client_factory=factory)  # type: ignore[arg-type]
+        factory.clients[0].script_turn(["😐 OK"])
         list(provider.response("sess-1", [{"role": "user", "content": "Hi"}]))
-        self.assertTrue(client.prompts[0].startswith("Hi\n\nVOICE TOOL ROUTING:"))
-        self.assertTrue(client.prompts[0].endswith(textUtils.build_turn_suffix(False)))
-        # Adult mode: still has emoji-prefix / English-only / no-Markdown
-        # bullets, but NOT the kid-specific ones.
-        self.assertIn("EXACTLY ONE emoji", client.prompts[0])
-        self.assertNotIn("YOUNG CHILD", client.prompts[0])
+        self.assertEqual(factory.clients[0].prompts, ["Hi"])
+        self.assertIn("EXACTLY ONE emoji", factory.rules[0])
+        self.assertNotIn("YOUNG CHILD", factory.rules[0])
 
-    def test_wrap_helper_pure(self):
+    def test_turn_rules_pure(self):
         # Tool routing must precede the final spoken-output constraints.
-        wrapped = _wrap_with_sandwich("hi", True)
-        self.assertTrue(wrapped.startswith("hi"))
-        self.assertLess(wrapped.index("VOICE TOOL ROUTING"), wrapped.index("HARD CONSTRAINTS"))
-        self.assertIn("not to tool calls", wrapped)
+        rules = _turn_rules(True)
+        self.assertLess(rules.index("VOICE TOOL ROUTING"), rules.index("HARD CONSTRAINTS"))
+        self.assertIn("not to tool calls", rules)
+        self.assertEqual(rules, rules.strip())
 
     def test_json_wrapped_user_content_is_unwrapped(self):
         dialogue = [{"role": "user", "content": '{"content": "remember purple"}'}]
@@ -142,17 +154,24 @@ class TestSandwichInjection(unittest.TestCase):
                 )
             )
 
-            client = FakeClient()
-            client.script_turn(["😊 first"])
-            client.script_turn(["😐 second"])
-            provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+            factory = SpawningFactory()
+            provider = LLMProvider({}, client_factory=factory)  # type: ignore[arg-type]
+            factory.clients[0].script_turn(["😊 first"])
+            factory.clients[0].script_turn(["😊 again"])
             list(provider.response("s", [{"role": "user", "content": "one"}]))
+            list(provider.response("s", [{"role": "user", "content": "two"}]))
+            self.assertEqual(len(factory.clients), 1, "no respawn while Kid Mode is unchanged")
 
             state_file.write_text("false")
-            list(provider.response("s", [{"role": "user", "content": "two"}]))
+            list(provider.response("s", [{"role": "user", "content": "three"}]))
 
-            self.assertIn("YOUNG CHILD", client.prompts[0])
-            self.assertNotIn("YOUNG CHILD", client.prompts[1])
+            self.assertEqual(len(factory.clients), 2)
+            self.assertTrue(factory.clients[0].closed)
+            self.assertIn("YOUNG CHILD", factory.rules[0])
+            self.assertNotIn("YOUNG CHILD", factory.rules[1])
+            self.assertEqual(factory.clients[1].prompts, ["three"])
+            # A fresh pi is already clean: no new_session on its first turn.
+            self.assertEqual(factory.clients[1].new_session_calls, 0)
 
     def test_malformed_shared_state_falls_back_to_environment(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -174,12 +193,12 @@ class TestSandwichInjection(unittest.TestCase):
                         os.environ[name] = value
 
             self.addCleanup(restore_env)
-            client = FakeClient()
-            client.script_turn(["😐 adult mode"])
-            provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+            factory = SpawningFactory()
+            provider = LLMProvider({}, client_factory=factory)  # type: ignore[arg-type]
             list(provider.response("s", [{"role": "user", "content": "hello"}]))
 
-            self.assertNotIn("YOUNG CHILD", client.prompts[0])
+            self.assertNotIn("YOUNG CHILD", factory.rules[0])
+            self.assertEqual(len(factory.clients), 1)
 
 
 class TestEmptyTurn(unittest.TestCase):
@@ -316,7 +335,7 @@ class TestDeterministicVoiceToolRouting(unittest.TestCase):
         self.assertTrue(prompt.startswith(
             "What did I tell you about my calibration color?\n\nMEMORY SEARCH RESULTS ("))
         self.assertIn("My calibration color is ultraviolet.", prompt)
-        self.assertLess(prompt.index("MEMORY SEARCH RESULTS"), prompt.index("HARD CONSTRAINTS"))
+        self.assertNotIn("HARD CONSTRAINTS", prompt)
 
     def test_recall_with_no_matches_does_not_spend_a_model_turn(self):
         client = FakeClient()

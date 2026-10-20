@@ -129,7 +129,7 @@ xiaozhi-server doesn't run an emotion classifier. It **strips the leading emoji*
 
 The TTS provider receives text **with the emoji already stripped**. The device receives the emotion and sets the face animation; the speaker plays the clean text.
 
-**Wire consequence**: the text reaching emotion dispatch must begin with an allowed emoji. On PiVoiceLLM, the per-turn suffix requests one and `_enforce_leading_emoji()` guarantees an allowed prefix, using neutral `😐` when the model omits it. Persona files and `.config.yaml`'s system prompt are not forwarded on this path. See [protocols.md](./protocols.md#emotion-protocol).
+**Wire consequence**: the text reaching emotion dispatch must begin with an allowed emoji. On PiVoiceLLM, the system-prompt rules request one and `_enforce_leading_emoji()` guarantees an allowed prefix, using neutral `😐` when the model omits it. Only `personas/pi_voice.md` and those rules form pi's system prompt; `.config.yaml`'s system prompt is not forwarded on this path. See [protocols.md](./protocols.md#emotion-protocol).
 
 **Note — we don't use SenseVoice's built-in SER.** The model card advertises speech emotion recognition and audio-event detection (bgm / applause / laughter / crying / coughing / sneezing). xiaozhi-server's FunASR provider returns only the transcription text; the SER/AED fields aren't piped through. That's a genuine latent capability — see [latent-capabilities.md](./latent-capabilities.md#voice-pipeline-unused).
 

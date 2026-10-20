@@ -437,12 +437,14 @@ class PiClient:
 DEFAULT_SYSTEM_PROMPT_FILE = "/opt/xiaozhi-esp32-server/personas/pi_voice.md"
 
 
-def _system_prompt_args() -> list[str]:
-    """`--system-prompt <persona>` from DOTTY_PI_SYSTEM_PROMPT_FILE.
+def _system_prompt_args(turn_rules: str = "") -> list[str]:
+    """`--system-prompt <persona>` from DOTTY_PI_SYSTEM_PROMPT_FILE, followed
+    by `turn_rules` (the voice tool routing and HARD CONSTRAINTS).
 
-    Without it pi uses its built-in coding-assistant prompt, and that identity
-    leaks into spoken replies (#177). A missing or empty file keeps the old
-    behaviour rather than breaking the voice path.
+    Without a persona pi uses its built-in coding-assistant prompt, and that
+    identity leaks into spoken replies (#177). A missing or empty file keeps
+    the old behaviour rather than breaking the voice path; the rules are still
+    passed.
     """
     path = os.environ.get("DOTTY_PI_SYSTEM_PROMPT_FILE", DEFAULT_SYSTEM_PROMPT_FILE)
     try:
@@ -450,17 +452,18 @@ def _system_prompt_args() -> list[str]:
             text = handle.read().strip()
     except OSError:
         logger.warning("PiClient: no voice persona at %s; pi default prompt in use", path)
-        return []
-    if not text:
-        logger.warning("PiClient: voice persona %s is empty; pi default prompt in use", path)
-        return []
-    return ["--system-prompt", text]
+        text = ""
+    else:
+        if not text:
+            logger.warning("PiClient: voice persona %s is empty; pi default prompt in use", path)
+    text = "\n\n".join(part for part in (text, turn_rules.strip()) if part)
+    return ["--system-prompt", text] if text else []
 
 
-def make_default_pi_client() -> PiClient:
+def make_default_pi_client(turn_rules: str = "") -> PiClient:
     container = os.environ.get("DOTTY_PI_CONTAINER", "dotty-pi")
     pi_args: list[str] = list(_DEFAULT_PI_FLAGS)
-    pi_args.extend(_system_prompt_args())
+    pi_args.extend(_system_prompt_args(turn_rules))
     extra = os.environ.get("DOTTY_PI_EXTRA_FLAGS", "").split()
     if extra:
         pi_args.extend(extra)

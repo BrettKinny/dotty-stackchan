@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pi_client  # noqa: E402
 
 
-def _spawned_args(env: dict[str, str]) -> list[str]:
+def _spawned_args(env: dict[str, str], turn_rules: str = "") -> list[str]:
     captured: dict[str, list[str]] = {}
 
     def fake_factory(container, pi_args):
@@ -25,7 +25,7 @@ def _spawned_args(env: dict[str, str]) -> list[str]:
 
     with patch.dict(os.environ, env, clear=False), \
          patch.object(pi_client, "local_exec_subprocess_factory", fake_factory):
-        client = pi_client.make_default_pi_client()
+        client = pi_client.make_default_pi_client(turn_rules)
         try:
             client._spawn()
         except RuntimeError:
@@ -51,6 +51,20 @@ class SystemPromptTests(unittest.TestCase):
         self.addCleanup(os.unlink, handle.name)
         self.assertNotIn("--system-prompt",
                          _spawned_args({"DOTTY_PI_SYSTEM_PROMPT_FILE": handle.name}))
+
+    def test_turn_rules_follow_the_persona(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as handle:
+            handle.write("You are Dotty.\n")
+        self.addCleanup(os.unlink, handle.name)
+        args = _spawned_args({"DOTTY_PI_SYSTEM_PROMPT_FILE": handle.name},
+                             "  HARD CONSTRAINTS: be brief.\n")
+        self.assertEqual(args[args.index("--system-prompt") + 1],
+                         "You are Dotty.\n\nHARD CONSTRAINTS: be brief.")
+
+    def test_turn_rules_survive_a_missing_persona(self):
+        args = _spawned_args({"DOTTY_PI_SYSTEM_PROMPT_FILE": "/nonexistent/persona.md"},
+                             "HARD CONSTRAINTS: be brief.")
+        self.assertEqual(args[args.index("--system-prompt") + 1], "HARD CONSTRAINTS: be brief.")
 
     def test_shipped_voice_persona_names_dotty_and_not_a_coding_assistant(self):
         repo = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))

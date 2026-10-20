@@ -31,7 +31,7 @@ asks). Only the child-specific rules (4-9) are removed.
 
 Both the bridge dashboard's `POST /admin/kid-mode` endpoint and the dashboard toggle persist the new value to the shared `DOTTY_KID_MODE_STATE` file and call `_apply_kid_mode(enabled)`, which re-binds the dashboard's kid-mode globals (`KID_MODE`, `VOICE_TURN_SUFFIX` via `build_turn_suffix(enabled)`). **No dashboard restart is required** to flip the persisted value at runtime.
 
-The xiaozhi-server container mounts the same state file read-only. On the live `PiVoiceLLM` path, `pi_voice.py` re-reads it at the start of every voice turn and passes the result to both `build_turn_suffix(kid_mode)` and the output filter. A dashboard toggle therefore changes the live voice guardrails on the next turn without restarting either container. If the state file is absent, unreadable, or malformed, the provider falls back to `DOTTY_KID_MODE` (which defaults to `true`). Pi is invoked with `--no-context-files`, so files in the dotty-pi persona directory are not loaded into live voice turns.
+The xiaozhi-server container mounts the same state file read-only. On the live `PiVoiceLLM` path, `pi_voice.py` re-reads it at the start of every voice turn and passes the result to the output filter. The prompt rules (`build_turn_suffix(kid_mode)`) live in pi's system prompt, which is fixed when pi spawns, so when the value has changed `pi_voice.py` closes pi and spawns a new one with the matching rules before running the turn. A dashboard toggle therefore changes the live voice guardrails on the next turn without restarting either container; that first turn is a little slower. If the state file is absent, unreadable, or malformed, the provider falls back to `DOTTY_KID_MODE` (which defaults to `true`). Pi is invoked with `--no-context-files`, so files in the dotty-pi persona directory are not loaded into live voice turns.
 
 ## Guardrail details
 
@@ -46,11 +46,12 @@ Every live `PiVoiceLLM` turn uses one versioned prompt-policy layer followed
 by deterministic output backstops where those backstops are implemented.
 
 > **Layering on the live `PiVoiceLLM` path:**
-> - **Prompt policy** is the per-turn **sandwich suffix** — `build_turn_suffix(kid_mode)` from `custom-providers/textUtils.py`, applied by `custom-providers/pi_voice/pi_voice.py` (`_wrap_with_sandwich`). It includes the kid-mode topic constraints (rules below) when kid-mode is on.
+> - **Prompt policy** is `build_turn_suffix(kid_mode)` from `custom-providers/textUtils.py`, placed in pi's **system prompt** after the voice persona by `custom-providers/pi_voice/pi_voice.py` (`_turn_rules`) and respawned on a Kid Mode change. It includes the kid-mode topic constraints (rules below) when kid-mode is on. Until 2026-10 it was appended after the user's words on every turn; that stopped the 4B model calling tools, so it moved.
 > - **Emoji backstop** is `enforce_face_stream()` in `custom-providers/textUtils.py`, which guarantees exactly one supported leading face glyph independently of model compliance (near-miss emoji are mapped onto the supported set).
 > - **Output backstop:** `filter_tts_stream()` in `custom-providers/textUtils.py` buffers the complete Kid Mode reply, checks the shared blocked-words and imitable-danger tiers, and replaces a matching turn before TTS. It fails closed: if the check itself errors, the turn is replaced rather than spoken. Both `PiVoiceLLM` and `OpenAICompat` run both backstops through `guard_tts_stream()`; on PiVoiceLLM that covers every output path, including direct tool results such as `think_hard`. This is a thin, bypassable word-level backstop, not a content-safety guarantee; live red-team verification remains tracked in #157.
 >
-> PiVoiceLLM forwards only the last user message plus this per-turn policy. Its
+> PiVoiceLLM forwards only the last user message; the policy is in pi's system
+> prompt with `personas/pi_voice.md`. Its
 > Pi command uses `--no-context-files`; neither `personas/dotty_voice.md` nor
 > xiaozhi-server's top-level `.config.yaml` `prompt:` is injected into this RPC
 > request. Those files may apply to other providers but are not live
