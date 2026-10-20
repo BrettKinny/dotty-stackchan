@@ -594,6 +594,27 @@ def playback_window(directory, media_seconds):
     return start, end + .4
 
 
+def corrected_response_offset(prompt_start, offset, prompt_segments):
+    """Move the reply crop earlier by the recording's measured startup lag.
+
+    playback_window() times are relative to the recorder launch, which comes
+    about a second before the first sample, so the crop starts that much
+    after the prompt ends. With quick short replies ("My name is Dotty") that
+    cut the first word. The prompt's first heard segment gives the lag; keep
+    0.2 s of it as margin, and never start before the last heard prompt word
+    ends plus 0.3 s, so prompt words cannot count as the reply.
+    Returns (offset, lag estimate or None).
+    """
+    spoken = [s for s in prompt_segments if str(s.get("text", "")).strip()]
+    if not spoken:
+        return offset, None
+    lag = prompt_start - float(spoken[0]["start"])
+    if not 0 < lag < prompt_start:
+        return offset, round(lag, 2)
+    earliest = float(spoken[-1]["end"]) + .3
+    return round(min(offset, max(offset - (lag - .2), earliest)), 3), round(lag, 2)
+
+
 def capture_window_metrics(media, media_seconds, prompt_end, response_start):
     """Keep short loud prompts visible instead of diluting them across silence.
 
@@ -991,12 +1012,9 @@ def run_case(session, config, case):
         # Compute actual playback offset from persisted timestamps and recording
         # duration. Crop conservatively after playback, never use prompt audio as answer.
         prompt_offset, offset = playback_window(directory, result["media"]["audio_seconds"])
-        result["response_offset"] = offset
         result["timing_note"] = "Recording-launch timestamp precedes first sample; response crop is conservatively late. Early reply/latency may be lost."
-        result["native_audio_windows"] = capture_window_metrics(
-            media, result["media"]["audio_seconds"], offset - .4, offset)
-        for label, options in (("response", ["-ss", str(offset)]),
-                               ("prompt-heard", ["-ss", "0", "-t", str(offset - .4)])):
+
+        def transcribe_window(label, options):
             wav = directory / f"{label}.wav"
             command(["ffmpeg", "-nostdin", "-n", "-v", "error", *options, "-i", media,
                      "-vn", "-ar", "16000", "-ac", "1", wav])
@@ -1010,6 +1028,19 @@ def run_case(session, config, case):
             result.setdefault("transcription_analysis", {})[label] = {
                 key: analysis[key] for key in ("model", "analysis", "vad_filter", "vad_parameters")
                 if key in analysis}
+
+        # The prompt goes first: where it lands in the audio measures the
+        # recording's startup lag, so the reply crop can start nearer the reply.
+        transcribe_window("prompt-heard", ["-ss", "0", "-t", str(offset - .4)])
+        result["response_offset_uncorrected"] = offset
+        if not case.get("expect_silence"):
+            # A silence case keeps the late crop: prompt reverb must not count as speech.
+            offset, result["capture_lag_estimate"] = corrected_response_offset(
+                prompt_offset, offset, load(directory / "prompt-heard.json").get("segments", []))
+        result["response_offset"] = offset
+        result["native_audio_windows"] = capture_window_metrics(
+            media, result["media"]["audio_seconds"], offset - .4, offset)
+        transcribe_window("response", ["-ss", str(offset)])
         # VAD sometimes drops a short quiet reply whole. Retry without it, but
         # never for silence cases: Whisper invents words on an empty crop.
         if not case.get("expect_silence") and not transcript_text(load(directory / "response.json")):
@@ -1023,7 +1054,7 @@ def run_case(session, config, case):
             if used:
                 (directory / "response.json").replace(directory / "response-vad.json")
                 (directory / "response-novad.json").replace(directory / "response.json")
-        heard =" ".join(s["text"] for s in load(directory / "prompt-heard.json")["segments"])
+        heard = " ".join(s["text"] for s in load(directory / "prompt-heard.json")["segments"])
         result["prompt_heard"] = heard
         restored = (result["cleanup"].get("state", {}).get("verified", False)
                     if case.get("cleanup_state") else None)

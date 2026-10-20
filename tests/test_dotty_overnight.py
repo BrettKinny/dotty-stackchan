@@ -411,6 +411,26 @@ def test_response_vad_threshold_does_not_change_prompt_transcription(tmp_path, m
     assert result["transcription_analysis"]["prompt-heard"]["vad_parameters"] == {"threshold": .5}
 
 
+@pytest.mark.parametrize("segments, expected", [
+    # 2026-10-21 V01: prompt played at 2.00-4.85 s after launch, heard at 1.04-3.94 s.
+    ([{"text": "What is your name?", "start": 1.04, "end": 3.94}], (4.49, .96)),
+    # V02: a long prompt; the crop still moves by the lag less the margin.
+    ([{"text": "Repeat these", "start": 1.04, "end": 2.9}, {"text": "banana", "start": 3.6, "end": 6.08}],
+     (6.56, .96)),
+    # A late-heard prompt word bounds the crop: never before its end + 0.3 s.
+    ([{"text": "What is your name?", "start": 1.04, "end": 4.6}], (4.9, .96)),
+    # Nothing heard, or a lag that cannot be right: leave the crop alone.
+    ([], (None, None)),
+    ([{"text": " ", "start": 0.5, "end": 1}], (None, None)),
+    ([{"text": "late", "start": 2.5, "end": 4}], (None, -.5)),
+])
+def test_response_crop_corrected_by_capture_lag(segments, expected):
+    offset = 5.25 if not any(s["end"] > 5 for s in segments) else 7.32
+    got = runner.corrected_response_offset(2.0, offset, segments)
+    assert got == ((offset if expected[0] is None else expected[0]), expected[1])
+    assert got[0] <= offset
+
+
 @pytest.mark.parametrize("novad_text, used", [("nineteen", True), ("", False)])
 def test_empty_vad_response_retried_without_vad(tmp_path, monkeypatch, prompt_capture_boundary, novad_text, used):
     config, _ = prompt_capture_boundary
@@ -440,7 +460,7 @@ def test_empty_vad_response_retried_without_vad(tmp_path, monkeypatch, prompt_ca
     monkeypatch.setattr(runner, "guarded_process", process)
     result = runner.run_case(tmp_path, config, {"id": "arithmetic", "prompt": "Twelve plus seven?",
                                                "asr": [["twelve"], ["seven"]], "reply": [["nineteen"]]})
-    assert calls == ["response.json", "prompt-heard.json", "response-novad.json"]
+    assert calls == ["prompt-heard.json", "response.json", "response-novad.json"]
     assert result["transcription_analysis"]["response_fallback"] == {"vad_filter": False, "used": used}
     if used:
         assert result["interaction"] == "PASS", result
