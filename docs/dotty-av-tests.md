@@ -51,7 +51,7 @@ scripts/dotty-av-test.sh run "Hi E S P. What is your name?" 20
 
 # ASR clarity: five distinct words and a constrained reply.
 scripts/dotty-av-test.sh run \
-  "Hi E S P. Repeat these five words: purple, robot, seven, window, Brisbane." 20
+  "Hi E S P. Repeat these five words: purple, robot, seven, window, banana." 20
 
 # Emotion-prefix/display path.
 scripts/dotty-av-test.sh run \
