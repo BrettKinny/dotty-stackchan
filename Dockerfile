@@ -3,6 +3,11 @@ FROM ghcr.io/xinnan-tech/xiaozhi-esp32-server@sha256:3accd82a7d1a6c01c58f32f6199
 
 RUN pip install --no-cache-dir piper-tts scipy numpy mido faster-whisper sherpa-onnx==1.13.2
 
+# CTranslate2 (faster-whisper) dlopens libcublas.so.12 and cuDNN by name and
+# doesn't look inside the pip CUDA wheels, so WhisperLocal on device=cuda fails
+# every utterance with "libcublas.so.12 is not found" without this.
+ENV LD_LIBRARY_PATH=/usr/local/lib/python3.10/site-packages/nvidia/cublas/lib:/usr/local/lib/python3.10/site-packages/nvidia/cudnn/lib
+
 # Patch upstream TTS consumers and the audio sender to treat explicitly
 # registered server-push sentence IDs as independent from chat-turn
 # stale-message arbitration (#104).

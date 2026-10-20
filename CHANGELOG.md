@@ -31,6 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`docs/multi-daemon-split.md`, `docs/advanced/multi-host.md`** — both documented ZeroClaw-host topologies that no longer exist.
 
 ### Fixed
+- **WhisperLocal works on the GPU after an image rebuild**: CTranslate2 loads `libcublas.so.12` by name and never found the copy in the pip CUDA wheels, so a freshly built xiaozhi image failed every utterance ("libcublas.so.12 is not found"). The Dockerfile now puts those library directories on `LD_LIBRARY_PATH`.
 - **Explicit tool requests route reliably** (#165): xiaozhi's `[ROOM_VIEW]` and speaker prefixes stopped the direct tool routes matching and were written into memory. pi now runs with only the seven voice tools (no file or shell tools) and without auto-compaction, which had fired every turn on the 4B model. Camera and room views are kept out of `brain.db`.
 - **`play_song` works again**: `dotty-pi` had no `XIAOZHI_HOST`, so the tool always answered "can't reach xiaozhi-server". The songs catalogue now lists and plays the MIDI songs (rendered with fluidsynth), not only `purr.opus`. A song requested mid-reply now starts after the reply finishes (`play-asset` `after_turn`); before, the reply's own speech state dropped it. **Bench: T07.**
 - **Server-pushed speech is no longer dropped** (#104): `admin/say` and greeter audio were discarded by `sendAudioMessage`'s stale-turn check. Needs the xiaozhi image rebuilt (the patch is applied at build time).
