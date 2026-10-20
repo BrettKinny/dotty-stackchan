@@ -11,7 +11,10 @@ spec.loader.exec_module(check)
 class FakeRemote:
     """Scripted Docker host: records admin calls, echoes state changes."""
 
-    def __init__(self, state="idle", kid="true", smart="false", fail_route=None):
+    def __init__(self, state="idle", kid="true", smart="false", fail_route=None, asr_log=None):
+        self.asr_log = asr_log if asr_log is not None else [
+            "INFO-Loading faster-whisper model: id=models/whisper device=cuda compute_type=float16",
+            "INFO-faster-whisper warm-up complete in 0.412s"]
         self.calls = []
         self.state = state
         self.policy = {"kid-mode": kid, "smart-mode": smart}
@@ -33,6 +36,8 @@ class FakeRemote:
             r.stdout = self.policy[argv[-1].rsplit("/", 1)[1]]
         elif argv[:3] == ["docker", "exec", "dotty-pi"]:
             r.stdout = "\n".join(t + ".ts" for t in check_module().TOOLS)
+        elif argv[0] == "sh" and "faster-whisper" in argv[2]:
+            r.stdout = "\n".join(self.asr_log)
         return r
 
     def get_json(self, url):
@@ -121,6 +126,29 @@ def test_unreadable_policy_never_flips_toggle(monkeypatch):
     remote = FakeRemote(kid="garbage")
     run(remote, monkeypatch)
     assert not any(r == "set-toggle" and b["name"] == "kid_mode" for r, b in remote.calls)
+
+
+def asr_row(result):
+    return next(row for row in result.rows if row["check"] == "WhisperLocal warm-up")
+
+
+def test_whisper_warmup_passes_on_its_device(monkeypatch):
+    row = asr_row(run(FakeRemote(), monkeypatch))
+    assert row["status"] == "PASS" and "cuda" in row["detail"]
+
+
+def test_missing_cuda_library_fails_the_asr_check(monkeypatch):
+    remote = FakeRemote(asr_log=[
+        "INFO-faster-whisper warm-up complete in 0.4s",  # an older start, superseded
+        "INFO-Loading faster-whisper model: id=models/whisper device=cuda compute_type=float16",
+        "WARNING-faster-whisper warm-up failed (non-fatal): Library libcublas.so.12 is not found"])
+    result = run(remote, monkeypatch)
+    assert asr_row(result)["status"] == "FAIL" and "libcublas" in asr_row(result)["detail"]
+    assert result.failed
+
+
+def test_other_asr_skips_the_whisper_check(monkeypatch):
+    assert asr_row(run(FakeRemote(asr_log=[]), monkeypatch))["status"] == "SKIP"
 
 
 def test_token_is_read_inside_container_only():

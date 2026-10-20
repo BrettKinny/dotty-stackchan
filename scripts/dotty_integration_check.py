@@ -212,6 +212,25 @@ def check(remote, device, skip_photo=False, skip_motion=False):
         return ("PASS" if found else "FAIL"), "deployed PiClient logs tool calls" if found else "marker absent"
     checks.run("pi tool-call logger deployed", tool_logger)
 
+    def asr_warmup():
+        # WhisperLocal transcribes 1 s of silence on its device at startup; a
+        # missing CUDA library fails there and then on every utterance, while
+        # every other check still passes.
+        lines = remote.run(["sh", "-c", "docker logs xiaozhi-esp32-server 2>&1 | grep -E "
+                            "'Loading faster-whisper model|faster-whisper warm-up|libcublas|libcudnn' | tail -40"],
+                           check=False).stdout.splitlines()
+        loads = [i for i, line in enumerate(lines) if "Loading faster-whisper model" in line]
+        if not loads:
+            return "SKIP", "WhisperLocal not loaded in this container's log"
+        since = lines[loads[-1]:]
+        device = since[0].split("device=")[1].split()[0] if "device=" in since[0] else "?"
+        failed = [line for line in since if "warm-up failed" in line or "libcublas" in line or "libcudnn" in line]
+        if failed:
+            return "FAIL", failed[0].split("-WARNING-")[-1][-160:]
+        done = [line for line in since if "warm-up complete" in line]
+        return ("PASS", f"warm-up transcribed on {device}") if done else ("FAIL", "no warm-up result after model load")
+    checks.run("WhisperLocal warm-up", asr_warmup)
+
     def pi_tools():
         listed = set(remote.run(["docker", "exec", "dotty-pi", "ls",
                                  "/root/.pi/extensions/dotty-pi-ext/src/tools"]).stdout.split())
