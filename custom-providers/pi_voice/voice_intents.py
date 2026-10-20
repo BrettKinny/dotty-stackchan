@@ -147,7 +147,12 @@ _PHOTO_RE = re.compile(
     r"|look (?:at (?:this|that|me|us|it)|around)\b"
     r"|what (?:do|can) you see\b"
     r"|what(?:'s| is) in front of you\b"
-    r"|(?:can|do) you see (?:this|that|me|us|anything)\b)",
+    r"|(?:can|do) you see (?:this|that|me|us|anything)\b"
+    # "Please use your camera and tell me about the room": left to the 4B
+    # model it described a room it never photographed (robot, 2026-10-20).
+    r"|use (?:your|the) camera\b"
+    r"|(?:describe|tell me (?:about|what(?:'s| is) in)) (?:the|this) room"
+    r"(?:[\s,.!?]*$|\s+in (?:one|two|a|a few) ))",
     re.IGNORECASE,
 )
 

@@ -62,6 +62,11 @@ ROUTED = [
     ("What do you see?", VoiceIntent("take_photo", "What do you see?")),
     ("Dotty, can you look at this?", VoiceIntent("take_photo", "can you look at this?")),
     ("What's in front of you?", VoiceIntent("take_photo", "What's in front of you?")),
+    ("Please use your camera and tell me about the room in one short sentence.",
+     VoiceIntent("take_photo",
+                 "Please use your camera and tell me about the room in one short sentence.")),
+    ("Can you describe the room?", VoiceIntent("take_photo", "Can you describe the room?")),
+    ("Tell me what's in the room", VoiceIntent("take_photo", "Tell me what's in the room")),
 ]
 
 LEFT_TO_THE_MODEL = [
@@ -79,6 +84,8 @@ LEFT_TO_THE_MODEL = [
     "Don't think hard about it",
     "I think hard work pays off",
     "Tell me a joke",
+    "Tell me about the room you were built in",   # not a request to look
+    "My camera is broken",
     "Hello Dotty",
     "Dotty",
     "",

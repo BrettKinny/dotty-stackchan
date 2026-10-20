@@ -31,6 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`docs/multi-daemon-split.md`, `docs/advanced/multi-host.md`** — both documented ZeroClaw-host topologies that no longer exist.
 
 ### Fixed
+- **"Use your camera" takes a photo instead of inventing a room**: "Please use your camera and tell me about the room" did not match the direct camera route, and the 4B model replied "I took a snapshot and see a cozy room…" without calling `take_photo`. "Use your camera", "describe the room" and "tell me about the room" now route to `take_photo`. PiVoiceLLM's own log lines are f-strings, since loguru ignores `%s` arguments, and successful direct tools are logged.
 - **PiClient log lines reach the xiaozhi log**: `PiClient` logs through stdlib `logging`, which xiaozhi-server leaves at WARNING, so `PiClient: tool call name=…` and the other INFO lines were dropped and the A/V cases could not see which tool the agent chose. They now go to the provider's logger.
 - **Memory lookup survives one misheard word**: `memory_lookup` is an exact phrase search, so "the test work for tonight" found nothing for "the test word for tonight". When the phrase misses, it now retries on the query's content words and keeps only memories containing at least two of them and 60%; pending person facts stay excluded (#53).
 - **No reply to a phantom "Dotty"** (#105, #164): the Whisper hotword bias turned idle servo noise into a lone "Dotty" (no-speech 0.43) and Dotty answered it. A transcript that is only the hotword now has to score no-speech 0.3 or below.
