@@ -169,14 +169,17 @@ def wake_events(log_text):
     return events
 
 
+def transcript_text(transcript):
+    return " ".join(s["text"].strip() for s in transcript.get("segments", [])
+                    if s.get("end", 0) > s.get("start", 0)
+                    and s.get("no_speech_prob", 1) < .8
+                    and s.get("avg_logprob", -10) > -1.2)
+
+
 def evaluate(case, transcript, log_text, playback_end, after, device, before=None, recovered_override=None):
     # Only response-window words count. Prompt and response transcribed separately
     # to prevent Whisper concatenating both speakers into a single segment.
-    segments = transcript.get("segments", [])
-    response = " ".join(s["text"].strip() for s in segments
-                        if s.get("end", 0) > s.get("start", 0)
-                        and s.get("no_speech_prob", 1) < .8
-                        and s.get("avg_logprob", -10) > -1.2)
+    response = transcript_text(transcript)
     asr = re.findall(r"结果: (.*)", log_text)
     # 识别文本 is logged only for recognitions handed to the chat path, so
     # empty and ASR-REJECTed results never appear here.
@@ -1007,7 +1010,20 @@ def run_case(session, config, case):
             result.setdefault("transcription_analysis", {})[label] = {
                 key: analysis[key] for key in ("model", "analysis", "vad_filter", "vad_parameters")
                 if key in analysis}
-        heard = " ".join(s["text"] for s in load(directory / "prompt-heard.json")["segments"])
+        # VAD sometimes drops a short quiet reply whole. Retry without it, but
+        # never for silence cases: Whisper invents words on an empty crop.
+        if not case.get("expect_silence") and not transcript_text(load(directory / "response.json")):
+            guarded_process([config["python"], ROOT / "scripts/dotty_av_media.py", "transcribe",
+                            directory / "response.wav", "--model", config["model"],
+                            "--output", directory / "response-novad.json", "--normalize", "--no-vad"],
+                            directory / "response-novad-transcribe.log", session, 120,
+                            deadline=datetime.fromisoformat(config["finish_at"]).timestamp())
+            used = bool(transcript_text(load(directory / "response-novad.json")))
+            result["transcription_analysis"]["response_fallback"] = {"vad_filter": False, "used": used}
+            if used:
+                (directory / "response.json").replace(directory / "response-vad.json")
+                (directory / "response-novad.json").replace(directory / "response.json")
+        heard =" ".join(s["text"] for s in load(directory / "prompt-heard.json")["segments"])
         result["prompt_heard"] = heard
         restored = (result["cleanup"].get("state", {}).get("verified", False)
                     if case.get("cleanup_state") else None)

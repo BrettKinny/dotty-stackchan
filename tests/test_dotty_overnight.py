@@ -411,6 +411,43 @@ def test_response_vad_threshold_does_not_change_prompt_transcription(tmp_path, m
     assert result["transcription_analysis"]["prompt-heard"]["vad_parameters"] == {"threshold": .5}
 
 
+@pytest.mark.parametrize("novad_text, used", [("nineteen", True), ("", False)])
+def test_empty_vad_response_retried_without_vad(tmp_path, monkeypatch, prompt_capture_boundary, novad_text, used):
+    config, _ = prompt_capture_boundary
+    config.update(python="fixture-python", model="fixture-model",
+                  finish_at="2099-01-01T01:00:00+00:00")
+    boundary_command = runner.command
+    monkeypatch.setattr(runner, "command", lambda argv, **kwargs:
+                        "" if argv[0] == "ffmpeg" else boundary_command(argv, **kwargs))
+    monkeypatch.setattr(runner, "verify", lambda *args, **kwargs: {"audio_seconds": 40, "video_seconds": 40})
+    monkeypatch.setattr(runner, "audio_metrics", lambda *args, **kwargs: {"fixture": True})
+    def logs(host, start, end, directory):
+        (directory / "xiaozhi-esp32-server.log").write_text(
+            "结果: Twelve plus seven\nSentenceType.FIRST, nineteen")
+    monkeypatch.setattr(runner, "read_log_window", logs)
+    calls = []
+    def process(argv, log, session, timeout, env=None, deadline=None):
+        directory = Path(log).parent
+        if "transcribe" not in argv:
+            for name, second in (("recording-start", 0), ("playback-start", 2), ("playback-end", 5)):
+                (directory / f"raw.{name}.txt").write_text(f"2026-09-12T12:00:0{second}+00:00")
+            return
+        output = Path(argv[argv.index("--output") + 1])
+        calls.append(output.name)
+        text = {"prompt-heard.json": "Twelve plus seven", "response.json": "",
+                "response-novad.json": novad_text}[output.name]
+        runner.write_json(output, transcript(text) if text else {"segments": []})
+    monkeypatch.setattr(runner, "guarded_process", process)
+    result = runner.run_case(tmp_path, config, {"id": "arithmetic", "prompt": "Twelve plus seven?",
+                                               "asr": [["twelve"], ["seven"]], "reply": [["nineteen"]]})
+    assert calls == ["response.json", "prompt-heard.json", "response-novad.json"]
+    assert result["transcription_analysis"]["response_fallback"] == {"vad_filter": False, "used": used}
+    if used:
+        assert result["interaction"] == "PASS", result
+    else:
+        assert result["failure"] == "response_transcription_unavailable"
+
+
 @pytest.mark.parametrize("threshold", [-.1, 1.1, float("nan"), float("inf"), -float("inf"),
                                         True, False, None, ".25", [], {}])
 def test_invalid_response_vad_threshold_rejected_before_capture(tmp_path, prompt_capture_boundary, threshold):
