@@ -18,6 +18,8 @@ def test_docs_do_not_claim_ota_url_is_in_on_device_advanced_options() -> None:
         "device's Advanced Options",
         "robot's Advanced Options",
         "Settings > Advanced Options",
+        # The browser portal's control is a tab named "Advanced" (#172).
+        'Click "Advanced Options"',
     )
     for stale in stale_directions:
         assert stale not in combined

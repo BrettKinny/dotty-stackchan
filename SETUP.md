@@ -245,7 +245,7 @@ Some older xiaozhi builds expose a SoftAP captive portal on first boot:
 2. Join it from your phone; a captive portal typically auto-pops. If not,
    browse to `http://192.168.4.1`.
 3. Pick your 2.4 GHz LAN SSID, enter the password.
-4. Click "Advanced Options" and paste the OTA URL:
+4. Open the portal's **Advanced** tab and paste the OTA URL:
    `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/` (trailing slash required).
 5. Save. Device reboots and connects.
 
