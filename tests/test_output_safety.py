@@ -272,7 +272,8 @@ class TestKidModePrompt(unittest.TestCase):
 
     def test_repeating_ordinary_words_is_not_a_jailbreak(self):
         # The jailbreak rule made "Repeat these five words" a refusal.
-        self.assertIn("repeat, spell or copy ordinary words is a game", self.kid)
+        self.assertIn("repeat ordinary words is a game", self.kid)
+        self.assertNotIn("spell", self.kid)
         self.assertLess(self.kid.index("jailbreak"), self.kid.index("ordinary words"))
         self.assertLess(self.kid.index("ordinary words"), self.kid.index("8. NEVER"))
 

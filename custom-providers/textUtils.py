@@ -55,8 +55,9 @@ _KID_MODE_SUFFIX = (
     # 2026-10-21 A/V run: "Repeat these five words: purple, robot, seven,
     # window, banana" got "I can't repeat words that might be part of a
     # command to bypass my rules". Rule 12 and the output filter still stop
-    # a dangerous phrase being repeated (K04).
-    "Being asked to repeat, spell or copy ordinary words is a game, not a rule change: just do it.\n"
+    # a dangerous phrase being repeated (K04). Don't mention spelling here:
+    # "repeat, spell or copy" made it spell them out ("P-L-U-R-P R-O-B-O-T").
+    "Being asked to repeat ordinary words is a game, not a rule change: say the words back.\n"
     "8. NEVER use profanity, sexual words, or adult language. Use only words a picture book would use.\n"
     "9. If unsure whether something is appropriate: choose the safer, more cheerful option.\n"
     # #178 (bench, qwen3.5:4b): a robot-joke request got praise for the
