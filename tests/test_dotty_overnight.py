@@ -438,6 +438,8 @@ def test_response_crop_corrected_by_capture_lag(segments, expected):
     # VAD dropped the short first sentence that held the answer.
     ("it is a number", "nineteen it is a number", True),
     ("it is a number", "it is a number too", False),
+    # An invented word in the silence (no-speech 0.65) is not reply evidence.
+    ("it is a number", "UNSURE:nineteen", False),
 ])
 def test_vad_response_missing_the_reply_retried_without_vad(tmp_path, monkeypatch, prompt_capture_boundary,
                                                             vad_text, novad_text, used):
@@ -464,6 +466,10 @@ def test_vad_response_missing_the_reply_retried_without_vad(tmp_path, monkeypatc
         calls.append(output.name)
         text = {"prompt-heard.json": "Twelve plus seven", "response.json": vad_text,
                 "response-novad.json": novad_text}[output.name]
+        if text.startswith("UNSURE:"):
+            runner.write_json(output, {"segments": [{"text": text[7:], "start": 30, "end": 31,
+                                                     "no_speech_prob": .65, "avg_logprob": -.7}]})
+            return
         runner.write_json(output, transcript(text) if text else {"segments": []})
     monkeypatch.setattr(runner, "guarded_process", process)
     result = runner.run_case(tmp_path, config, {"id": "arithmetic", "prompt": "Twelve plus seven?",

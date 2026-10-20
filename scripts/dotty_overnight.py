@@ -172,12 +172,13 @@ def wake_events(log_text):
 # The reference mic's Whisper hears "Dotty" as "Daddy"/"Tati"; bias it to the
 # name the way the robot's own WhisperLocal does (#164). Reply transcripts only.
 RESPONSE_HOTWORDS = "Dotty"
+NOVAD_MAX_NO_SPEECH = .5
 
 
-def transcript_text(transcript):
+def transcript_text(transcript, max_no_speech=.8):
     return " ".join(s["text"].strip() for s in transcript.get("segments", [])
                     if s.get("end", 0) > s.get("start", 0)
-                    and s.get("no_speech_prob", 1) < .8
+                    and s.get("no_speech_prob", 1) < max_no_speech
                     and s.get("avg_logprob", -10) > -1.2)
 
 
@@ -1058,12 +1059,18 @@ def run_case(session, config, case):
                              "--hotwords", RESPONSE_HOTWORDS],
                             directory / "response-novad-transcribe.log", session, 120,
                             deadline=datetime.fromisoformat(config["finish_at"]).timestamp())
-            novad_text = transcript_text(load(directory / "response-novad.json"))
+            # Stricter: without VAD the name bias can invent a lone "Dotty" in
+            # the silence after the reply (no-speech 0.65 against 0.02 for speech).
+            novad = load(directory / "response-novad.json")
+            novad["segments"] = [seg for seg in novad.get("segments", [])
+                                 if seg.get("no_speech_prob", 1) < NOVAD_MAX_NO_SPEECH]
+            novad["filtered"] = f"segments with no_speech_prob >= {NOVAD_MAX_NO_SPEECH} dropped; raw in response-novad.json"
+            novad_text = transcript_text(novad)
             used = bool(novad_text) and (not vad_text or matches(novad_text, case.get("reply", [])))
             result["transcription_analysis"]["response_fallback"] = {"vad_filter": False, "used": used}
             if used:
                 (directory / "response.json").replace(directory / "response-vad.json")
-                (directory / "response-novad.json").replace(directory / "response.json")
+                write_json(directory / "response.json", novad)
         heard = " ".join(s["text"] for s in load(directory / "prompt-heard.json")["segments"])
         result["prompt_heard"] = heard
         restored = (result["cleanup"].get("state", {}).get("verified", False)
