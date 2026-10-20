@@ -14,13 +14,13 @@ Out of the box, Dotty ships in **Kid Mode** — the persona and per-turn prompt 
 
 ## Why I built this
 
-I didn't like the idea of a camera and microphone running in my house unless I could (1) self-host the whole stack end-to-end and (2) understand the whole stack end-to-end. Off-the-shelf voice assistants fail both tests — audio leaves the house, the model is opaque, and you're trusting a vendor's privacy posture forever.
+I didn't want a camera and microphone running in my house unless I could host the whole stack myself and understand how every part of it works. Off-the-shelf voice assistants fail on both counts. Your audio leaves the house, the model is a black box, and you're stuck trusting a vendor's privacy policy for as long as you use it.
 
-So Dotty is the version that passes: every component runs on hardware I own, every seam is documented and swappable, and the only thing that can leave the LAN is whatever LLM call I explicitly route out (and even that swaps to a local model with a config change). It's also meant to be fun — a friendly desktop robot for the kids, and an interesting hobby project to keep building on.
+Dotty is my attempt at one that passes. Every component runs on hardware I own, and every piece is documented and can be swapped out. The only thing that can leave my network is an LLM call I've chosen to send out, and a config change swaps even that for a local model. It's also meant to be fun: a friendly desktop robot for the kids, and a hobby project I can keep building on.
 
 ## AI transparency
 
-**Yes — Dotty is built with AI assistance, and it says so out loud.** Coding agents help write the code, draft the docs, and triage issues — a deliberate choice, not a secret. The rule: **anything an AI agent authors is acknowledged as such** (model-named `Co-Authored-By:` trailers, AI-assisted PR notes, marked AI-drafted docs), with a human reviewing and accountable for everything that lands.
+**Yes, Dotty is built with AI assistance, and I'm open about it.** Coding agents help me write the code, draft the docs and triage issues. That's a deliberate choice, not something I'm hiding. The rule: **anything an AI agent authors is acknowledged as such** (model-named `Co-Authored-By:` trailers, AI-assisted PR notes, marked AI-drafted docs), with a human reviewing and accountable for everything that lands.
 
 Full policy: [`AI_TRANSPARENCY.md`](./AI_TRANSPARENCY.md).
 
