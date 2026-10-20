@@ -18,9 +18,13 @@ What works:
   subprocess for the 3 Step-5 invariants + prompt-rejection +
   timeout. Run with `python3 -m unittest custom-providers.pi_voice.tests.test_pi_client`.
 
-The HARD-CONSTRAINTS sandwich ships: every turn is wrapped server-side
-via `_wrap_with_sandwich` / `build_turn_suffix(KID_MODE)` (from
-`core.utils.textUtils`) before the prompt reaches pi.
+The HARD CONSTRAINTS ship in pi's system prompt: `_turn_rules(kid_mode)`
+(voice tool routing plus `build_turn_suffix(KID_MODE)` from
+`core.utils.textUtils`) is appended to the persona when pi spawns, and a
+Kid Mode change respawns pi before the next turn. The user's words reach pi
+bare. They used to be appended to every turn, which stopped the 4B calling
+tools (2026-10-20 A/V run). The fail-closed kid-mode output filter (#157)
+still checks every reply.
 
 Still open:
 - Memory write-back from xiaozhi-server (PiVoiceLLM does not yet post

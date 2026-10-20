@@ -210,7 +210,7 @@ This repo uses placeholders in place of real IPs, usernames, and filesystem path
 | `<XIAOZHI_HOSTNAME>` | Hostname or Tailscale name of the server (optional, IP works for everything). |
 | `<XIAOZHI_PATH>` | Path on the server where you clone/install this repo (e.g. `/opt/xiaozhi-server/` or `/srv/xiaozhi-server/`). |
 | `<YOUR_NAME>` | Your name / org, used by the `.config.yaml` prompt for providers that forward xiaozhi's system dialogue. |
-| `<ROBOT_NAME>` | Robot name used by that configured prompt. PiVoiceLLM's live per-turn policy is versioned separately. |
+| `<ROBOT_NAME>` | Robot name used by that configured prompt. PiVoiceLLM's live policy is versioned separately. |
 
 Port numbers (`8000`, `8003`, `8081`, `8090`) are product-generic and should not be changed unless you also reconfigure the respective services.
 
@@ -298,7 +298,7 @@ curl http://<XIAOZHI_HOST>:8081/health
 The default TTS is `LocalPiper` (offline, runs inside the container). To change the Piper voice, edit `TTS.LocalPiper.voice` and the corresponding `model_path` / `config_path` in `data/.config.yaml`. To switch to cloud EdgeTTS instead, set `selected_module.TTS: EdgeTTS` and edit `TTS.EdgeTTS.voice` (any Microsoft Edge Neural voice ID works, e.g. `en-US-AvaNeural`). Restart the container after changes.
 
 ### Changing persona (the robot's personality)
-`OpenAICompat` supports `persona_file` and the xiaozhi system prompt. The default PiVoiceLLM currently uses neither; its live voice policy is the versioned per-turn prompt in `custom-providers/pi_voice/pi_voice.py` and `custom-providers/textUtils.py`. Full instructions and limitations: [cookbook/change-persona.md](cookbook/change-persona.md).
+`OpenAICompat` supports `persona_file` and the xiaozhi system prompt. The default PiVoiceLLM uses neither; pi's system prompt is `personas/pi_voice.md` plus the versioned rules in `custom-providers/pi_voice/pi_voice.py` and `custom-providers/textUtils.py`. Full instructions and limitations: [cookbook/change-persona.md](cookbook/change-persona.md).
 
 ### Changing VAD sensitivity
 `VAD.SileroVAD.min_silence_duration_ms` in `data/.config.yaml`. Default: 700 ms. Lower = cuts off quicker. Higher = waits longer for slow speakers.

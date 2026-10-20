@@ -29,7 +29,7 @@ xiaozhi-server code.
 
 ## Enforcement on the live PiVoiceLLM path
 
-`build_turn_suffix()` requests one of the nine allowed emojis on every turn.
+`build_turn_suffix()` requests one of the nine allowed emojis in every reply.
 `enforce_face_stream()` in `custom-providers/textUtils.py` (used by
 `PiVoiceLLM` and `OpenAICompat`) then enforces the wire contract: exactly one
 supported face at the head of the first non-empty chunk, which is the chunk
@@ -52,7 +52,7 @@ See [docs/cookbook/add-emoji.md](cookbook/add-emoji.md).
 
 | Component | File | What it does |
 |-----------|------|-------------|
-| Per-turn emoji + rules suffix | `custom-providers/textUtils.py` | `build_turn_suffix()` (appended on the live `PiVoiceLLM` path) |
+| Emoji + reply rules | `custom-providers/textUtils.py` | `build_turn_suffix()` (in pi's system prompt on the live `PiVoiceLLM` path) |
 | Leading-emoji enforcement | `custom-providers/textUtils.py` | `enforce_face_stream()`, `FACE_ALIASES` |
 | Emoji → emotion | `custom-providers/textUtils.py` | `EMOJI_MAP` dict, `get_emotion()` |
 | Emotion → face | StackChan firmware | Avatar renderer, expression assets |
@@ -61,6 +61,6 @@ See [docs/cookbook/add-emoji.md](cookbook/add-emoji.md).
 
 The upstream `EMOJI_MAP` includes additional emojis that Dotty doesn't
 use in its 9-emoji set: 😂 😭 😲 😱 😌 😜 🙄 😶 🙂 😳 😉 😎 🤤 😘 😏.
-PiVoiceLLM's per-turn suffix constrains responses to the nine emojis above,
+PiVoiceLLM's system-prompt rules constrain responses to the nine emojis above,
 and `enforce_face_stream()` maps any other leading emoji onto that set
 (`FACE_ALIASES`) or, when no face fits, replaces it with `😐`.
