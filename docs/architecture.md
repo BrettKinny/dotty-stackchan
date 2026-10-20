@@ -190,7 +190,7 @@ Operations that need to touch a live device session — head servos, MCP dispatc
 | `POST /xiaozhi/admin/set-face-identified` | Light the face-identified pixel for ~4 s. |
 | `POST /xiaozhi/admin/take-photo` | Trigger a camera capture. |
 | `GET /xiaozhi/admin/songs` | List audio assets available to `play_song`. |
-| `POST /xiaozhi/admin/play-asset` | Play a named audio asset through the speaker. |
+| `POST /xiaozhi/admin/play-asset` | Play a named audio asset through the speaker. Refused (409) mid-turn, unless `after_turn: true` asks it to wait for the turn's reply to finish. |
 | `POST /xiaozhi/admin/say` | Synthesise + play arbitrary text. |
 
 ### Perception event bus

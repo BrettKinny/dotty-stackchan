@@ -345,6 +345,71 @@ class TestPiVoiceOutputHook(unittest.TestCase):
         out = self._turn(client, "Think hard about: six times seven", True)
         self.assertEqual(out, ["🤔 Let me think hard about that. ", "Forty-two."])
 
+    def test_think_hard_follows_the_live_kid_toggle(self):
+        # The dashboard toggle (state file) wins over the startup env, on the
+        # direct think_hard route too: env says off, the live toggle says on.
+        import os
+        import tempfile
+        from unittest.mock import patch
+        client = self._Client(tool_result="Cocaine is a stimulant.")
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "kid-mode"
+            state.write_text("true")
+            env = {
+                "DOTTY_KID_MODE": "false",
+                "DOTTY_KID_MODE_STATE": str(state),
+                "DOTTY_DASHBOARD_URL": "",
+                "BRIDGE_URL": "",
+                "VISION_BRIDGE_URL": "",
+            }
+            with patch.dict(os.environ, env):
+                provider = self.LLMProvider({}, client=client)
+                out = list(provider.response(
+                    "s", [{"role": "user", "content": "Think hard about: what is cocaine?"}],
+                ))
+        self.assertEqual(out[0], "🤔 Let me think hard about that. ")
+        self.assertNotIn("Cocaine", "".join(out))
+
+    def test_think_hard_filter_hit_is_reported(self):
+        from unittest.mock import patch
+        client = self._Client(tool_result="Cocaine is a stimulant.")
+        with patch.object(self.LLMProvider, "_on_filter_hit") as on_hit:
+            self._turn(client, "Think hard about: what is cocaine?", True)
+        on_hit.assert_called_once()
+        tier, match = on_hit.call_args.args
+        self.assertEqual(tier, "alert")
+        self.assertEqual(match.group().lower(), "cocaine")
+
+    def test_think_hard_result_fails_closed_when_the_matcher_errors(self):
+        # Nothing unchecked reaches TTS: a matcher error after the preamble
+        # replaces the reasoner's answer instead of speaking it.
+        import sys
+        from unittest.mock import patch
+        provider_mod = sys.modules[self.LLMProvider.__module__]
+        globs = provider_mod.filter_tts_stream.__globals__
+        calls = {"n": 0}
+        real = globs["content_filter_match"]
+
+        def flaky(text):
+            calls["n"] += 1
+            if calls["n"] > 1:  # the preamble check passes, the answer errors
+                raise RuntimeError("matcher broke")
+            return real(text)
+
+        client = self._Client(tool_result="Forty-two.")
+        with patch.dict(globs, {"content_filter_match": flaky}):
+            out = self._turn(client, "Think hard about: six times seven", True)
+        self.assertEqual(out[0], "🤔 Let me think hard about that. ")
+        self.assertNotIn("Forty-two", "".join(out))
+        self.assertTrue(out[-1].startswith("Let's talk about something fun"))
+
+    def test_think_hard_result_unfiltered_when_kid_mode_off(self):
+        client = self._Client(tool_result="Cocaine is a stimulant.")
+        out = self._turn(client, "Think hard about: what is cocaine?", False)
+        self.assertEqual(
+            out, ["🤔 Let me think hard about that. ", "Cocaine is a stimulant."],
+        )
+
     def test_near_miss_face_survives_kid_mode(self):
         out = self._turn(self._Client(["😲", " Wow, a comet!"]), "look", True)
         self.assertEqual("".join(out), "😮 Wow, a comet!")

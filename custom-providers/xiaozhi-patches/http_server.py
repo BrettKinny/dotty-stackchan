@@ -67,6 +67,45 @@ def _resolve_play_asset(asset: str) -> "str | None":
     return None
 
 
+# DOTTY-PATCH: play-asset `after_turn`. play_song runs as a pi tool call in
+# the middle of a voice turn, while that turn's reply is still to be spoken.
+# Streaming the song straight away loses it: the turn's own TTS ends with a
+# `tts stop`, the firmware leaves its speaking state and drops every song
+# frame after that. With after_turn the route accepts the request and the
+# song waits for the turn to finish speaking. A barge-in, a dropped
+# connection or a turn that never ends drops the song instead.
+_AFTER_TURN_POLL_S = 0.1
+_AFTER_TURN_MAX_WAIT_S = 120.0
+# The speaking flag clears just before the `tts stop` frame goes out; start
+# after it, or the stop would land on the song's first frames.
+_AFTER_TURN_GRACE_S = 0.5
+
+
+def _conn_interrupted(conn) -> bool:
+    return bool(getattr(conn, "client_abort", False)) or bool(
+        getattr(conn, "is_exiting", False)
+    )
+
+
+async def _wait_for_turn_end(conn) -> bool:
+    """Wait until `conn` has finished speaking its turn. True means play now;
+    False means drop the asset (barge-in, connection closing, a new turn
+    already speaking, or the wait timed out)."""
+    polls = int(_AFTER_TURN_MAX_WAIT_S / _AFTER_TURN_POLL_S)
+    for _ in range(polls):
+        if _conn_interrupted(conn):
+            return False
+        if not getattr(conn, "client_is_speaking", False):
+            break
+        await asyncio.sleep(_AFTER_TURN_POLL_S)
+    else:
+        return False
+    await asyncio.sleep(_AFTER_TURN_GRACE_S)
+    return not (
+        _conn_interrupted(conn) or getattr(conn, "client_is_speaking", False)
+    )
+
+
 # DOTTY-PATCH: admin-route authentication. The /xiaozhi/admin/* surface is
 # otherwise unauthenticated on the LAN — anyone reaching :8003 can drive the
 # robot (inject-text is a prompt-injection vector into the pi agent; set-state,
@@ -422,12 +461,17 @@ class SimpleHttpServer:
 
     async def _dotty_play_asset(self, request: "web.Request") -> "web.Response":
         """POST /xiaozhi/admin/play-asset
-        Body: {"device_id": "<optional>", "asset": "/abs/path/to/file"}
+        Body: {"device_id": "<optional>", "asset": "/abs/path/to/file",
+               "after_turn": <optional bool>}
 
         Decodes the named audio asset (WAV, Opus, MP3, etc.) and streams
         it to the device as Opus 60 ms frames using the same push path as
         dance/singing mode.  Returns 200 immediately; playback is
         fire-and-forget.  Respects conn.client_abort for barge-in.
+
+        Mid-turn, a plain request is refused (409). With after_turn (the
+        play_song voice tool) it is accepted and plays once the turn has
+        finished speaking; the response then carries "after_turn": true.
         """
         try:
             data = await request.json()
@@ -461,9 +505,11 @@ class SimpleHttpServer:
         # idle in its finally block while chat TTS is still streaming — cancelling
         # the user's barge-in and corrupting the turn. Refuse instead; a dropped
         # ambient asset is the correct outcome here.
-        if getattr(conn, "client_is_speaking", False) and not getattr(
+        mid_turn = getattr(conn, "client_is_speaking", False) and not getattr(
             conn, "client_abort", False
-        ):
+        )
+        wait_for_turn = mid_turn and data.get("after_turn") is True
+        if mid_turn and not wait_for_turn:
             return web.json_response(
                 {"error": "device busy (mid-turn)", "device_id": resolved_id},
                 status=409,
@@ -530,6 +576,13 @@ class SimpleHttpServer:
                 )
                 return
 
+            if wait_for_turn and not await _wait_for_turn_end(conn):
+                self.logger.bind(tag=TAG).info(
+                    f"play-asset dropped: turn did not end cleanly "
+                    f"device={resolved_id} asset={_os.path.basename(asset_path)}"
+                )
+                return
+
             conn.client_abort = False
             conn.client_is_speaking = True
             sent = 0
@@ -572,7 +625,10 @@ class SimpleHttpServer:
                 )
 
         _spawn(_dispatch(), name="play_asset_dispatch")
-        return web.json_response({"ok": True, "device_id": resolved_id, "asset": asset_path})
+        body = {"ok": True, "device_id": resolved_id, "asset": asset_path}
+        if wait_for_turn:
+            body["after_turn"] = True
+        return web.json_response(body)
 
     async def _dotty_say(self, request: "web.Request") -> "web.Response":
         """POST /xiaozhi/admin/say
