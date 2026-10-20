@@ -12,6 +12,12 @@ Two-stage filter that mirrors bridge.py's `_perception_face_lost_aborter`:
      the HuMan-detector's normal flicker (face_lost/face_detected
      pairs ~1 s apart) eats every turn.
 
+Only acts in idle or talk, checked when face_lost arrives and again
+when the grace expires. docs/modes.md: the sticky states (story_time,
+security, sleep, dance) ignore face_lost, so walking away must not cut
+a story or a dance short. A device that never reported a state counts
+as idle.
+
 State coupling: relies on consumers/upstream callers writing
 ``state[device_id]["last_face_greet_t"]`` so this loop knows which
 greets are recent. face_greeter (deferred to a later slice) is the
@@ -27,6 +33,9 @@ from dispatch import XiaozhiAdminClient
 from perception import PerceptionState
 
 log = logging.getLogger("dotty-behaviour.consumers.face_lost_aborter")
+
+# Camera edges only matter in these states (docs/modes.md mutex rule 3).
+_ABORT_STATES = frozenset({"idle", "talk"})
 
 
 class FaceLostAborter:
@@ -44,9 +53,20 @@ class FaceLostAborter:
         self._grace_sec = grace_sec
         self._pending: dict[str, asyncio.Task] = {}
 
+    def _abort_allowed(self, device_id: str) -> bool:
+        return (self._state.current_device_state(device_id) in _ABORT_STATES
+                and not self._state.is_dance_active(device_id))
+
     async def _delayed_abort(self, device_id: str, delay: float) -> None:
         try:
             await asyncio.sleep(delay)
+            if not self._abort_allowed(device_id):
+                log.info(
+                    "face_lost abort skipped (state=%s): device=%s",
+                    self._state.current_device_state(device_id),
+                    device_id,
+                )
+                return
             log.info(
                 "face_lost → abort: device=%s (face stayed lost %.1fs)",
                 device_id,
@@ -81,6 +101,9 @@ class FaceLostAborter:
                     continue
 
                 if event.name != "face_lost":
+                    continue
+
+                if not self._abort_allowed(device_id):
                     continue
 
                 now = event.ts
