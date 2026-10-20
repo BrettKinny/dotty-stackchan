@@ -19,6 +19,11 @@ RUN python /tmp/patch-tts-server-push.py \
         /opt/xiaozhi-esp32-server/core/providers/tts \
         /opt/xiaozhi-esp32-server/core/handle/sendAudioHandle.py
 
+# Keep ~1.2 s of audio from before the VAD fires (upstream ~0.6 s), so a soft
+# first word still reaches ASR.
+COPY scripts/patch-asr-preroll.py /tmp/patch-asr-preroll.py
+RUN python /tmp/patch-asr-preroll.py /opt/xiaozhi-esp32-server/core/providers/asr/base.py
+
 # fluidsynth + General MIDI soundfont for runtime rendering of dance/song MIDI
 # files to Opus. Installed as the LAST layer so iteration on Python deps above
 # doesn't invalidate the soundfont download (~141MB).
