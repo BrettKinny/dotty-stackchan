@@ -25,6 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
 from pi_client import PiClient, PiClientError, _run_container_voice_tool  # noqa: E402
+import pi_client  # noqa: E402
 
 
 class FakePopen:
@@ -338,6 +339,50 @@ class TestRepeatedTurnText(unittest.TestCase):
 
     def test_silent_tool_turn_does_not_hold_back_the_reply(self):
         self.assertEqual(self._run([[], ["Here is Tetris!"]]), "Here is Tetris!")
+
+
+class TestToolCallCap(unittest.TestCase):
+    def _run(self, calls, end=True, reply="Purple robot seven window banana."):
+        fake = FakePopen()
+        client = make_client(fake)
+        try:
+            def feed():
+                fake.emit({"id": "turn-1", "type": "response", "command": "prompt", "success": True})
+                for n in range(calls):
+                    fake.emit({"type": "message_update", "assistantMessageEvent": {
+                        "type": "toolcall_end",
+                        "toolCall": {"type": "toolCall", "id": f"t{n}", "name": "think_hard"}}})
+                if end:
+                    fake.emit({"type": "message_update",
+                               "assistantMessageEvent": {"type": "text_delta", "delta": reply}})
+                    fake.emit({"type": "agent_end"})
+
+            threading.Thread(target=feed, daemon=True).start()
+            started = time.monotonic()
+            text = "".join(client.iter_turn_text("Repeat these five words"))
+            return text, [c["type"] for c in fake.stdin_lines if c["type"] in ("steer", "abort")], time.monotonic() - started
+        finally:
+            client.close()
+
+    def test_few_tool_calls_are_left_alone(self):
+        text, sent, _ = self._run(2)
+        self.assertEqual(sent, [])
+        self.assertEqual(text, "Purple robot seven window banana.")
+
+    def test_third_tool_call_steers_toward_an_answer(self):
+        text, sent, _ = self._run(3)
+        self.assertEqual(sent, ["steer"])
+        self.assertEqual(text, "Purple robot seven window banana.")
+
+    def test_runaway_tool_loop_is_aborted(self):
+        _, sent, _ = self._run(19)
+        self.assertEqual(sent, ["steer", "abort"])
+
+    def test_abort_without_agent_end_does_not_hang_the_turn(self):
+        with patch.object(pi_client, "_ABORT_GRACE_SEC", 0.2):
+            text, sent, took = self._run(6, end=False)
+        self.assertEqual((text, sent), ("", ["steer", "abort"]))
+        self.assertLess(took, 2.5)
 
 
 class TestToolCallTelemetry(unittest.TestCase):

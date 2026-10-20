@@ -240,6 +240,10 @@ _VOICE_TOOL_ROUTING = (
     "composing the spoken reply. Use the matching tool when the user asks you "
     "to remember or recall, play a song, look or take a photo, or solve a "
     "question that needs careful reasoning. Call it first and use its result. "
+    # 2026-10-21: "Repeat these five words" got think_hard 19 times in a row.
+    "think_hard is only for hard questions that need several steps of "
+    "reasoning, never for repeating words, simple sums, jokes or chat. Call "
+    "each tool at most once per reply. "
     "Never claim an action succeeded unless its tool succeeded. The reply "
     "constraints below apply only to final spoken text, not to tool calls."
 )

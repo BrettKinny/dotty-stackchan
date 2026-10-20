@@ -123,6 +123,8 @@ class TestTurnRules(unittest.TestCase):
         rules = _turn_rules(True)
         self.assertLess(rules.index("VOICE TOOL ROUTING"), rules.index("HARD CONSTRAINTS"))
         self.assertIn("not to tool calls", rules)
+        self.assertIn("never for repeating words", rules)
+        self.assertIn("at most once per reply", rules)
         self.assertEqual(rules, rules.strip())
 
     def test_json_wrapped_user_content_is_unwrapped(self):

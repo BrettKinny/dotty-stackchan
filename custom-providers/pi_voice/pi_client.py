@@ -107,6 +107,15 @@ SubprocessFactory = Callable[[], subprocess.Popen]
 VoiceToolRunner = Callable[[str, dict[str, str]], str]
 
 
+TOOL_CALLS_BEFORE_STEER = 3
+TOOL_CALLS_BEFORE_ABORT = 6
+_ABORT_GRACE_SEC = 5.0
+_STOP_TOOLS_STEER = (
+    "Stop calling tools now. Using what you already have, give your short "
+    "spoken reply to the person's last message."
+)
+
+
 def _normalise_reply(text: str) -> str:
     """Words only, lowercased: compares replies regardless of face emoji,
     punctuation and spacing."""
@@ -256,7 +265,15 @@ class PiClient:
         current = ""   # this agent turn's raw text
         held = None    # raw text held back while it still repeats `previous`
         repeat_end = None  # length of `held` at which it repeated all of `previous`
+        # 2026-10-21: "Repeat these five words" made the 4B call think_hard 19
+        # times in 30 s until the context overflowed and nothing was said.
+        # Steer it to answer after TOOL_CALLS_BEFORE_STEER calls; abort the
+        # turn after TOOL_CALLS_BEFORE_ABORT.
+        tool_calls = 0
+        aborted_at = None
         while time.time() < deadline:
+            if aborted_at is not None and time.time() > aborted_at + _ABORT_GRACE_SEC:
+                return
             try:
                 frame = self._event_queue.get(timeout=1.0)
             except Empty:
@@ -309,6 +326,14 @@ class PiClient:
                                 tool_call.get("name", "unknown"),
                                 tool_call.get("id", "unknown"),
                             )
+                        tool_calls += 1
+                        if tool_calls == TOOL_CALLS_BEFORE_STEER:
+                            logger.warning("PiClient: %d tool calls this turn; steering to answer", tool_calls)
+                            self._send({"type": "steer", "message": _STOP_TOOLS_STEER})
+                        elif tool_calls >= TOOL_CALLS_BEFORE_ABORT and aborted_at is None:
+                            logger.warning("PiClient: %d tool calls this turn; aborting it", tool_calls)
+                            self._send({"type": "abort"})
+                            aborted_at = time.time()
                 # thinking_delta, thinking_start, thinking_end and any
                 # other message_update sub-types are filtered out here.
                 continue
