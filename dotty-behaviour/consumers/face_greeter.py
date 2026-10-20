@@ -7,6 +7,9 @@ household registry is non-empty, since the named greet covers the same
 intent more specifically).
 
 Bare path (face_detected):
+  * Only from idle or talk. docs/modes.md: security has no proactive
+    greet, story_time and dance own the speaker, and sleep is privacy
+    sleep. A device that never reported a state counts as idle.
   * Suppressed when current hour is outside [HOUR_START, HOUR_END)
     (sensor-noise frames at 3am should not greet an empty room).
   * Suppressed when the household has at least one roster member
@@ -20,6 +23,7 @@ Bare path (face_detected):
 
 Named path (face_recognized):
   * Looks the identity up in the household registry.
+  * Same idle/talk state gate as the bare path.
   * Suppressed if a chat happened within QUIET_AFTER_CHAT_SEC.
   * Per-identity cooldown.
   * Dispatch via `say` (bypasses ASR/LLM — Dotty's own speech, not a
@@ -41,6 +45,9 @@ from household import HouseholdRegistry
 from perception import PerceptionState
 
 log = logging.getLogger("dotty-behaviour.consumers.face_greeter")
+
+# States where docs/modes.md allows a proactive greeting.
+_GREET_STATES = frozenset({"idle", "talk"})
 
 
 class FaceGreeter:
@@ -77,12 +84,24 @@ class FaceGreeter:
         self._tasks.add(t)
         t.add_done_callback(self._tasks.discard)
 
+    def _greet_allowed_in_state(self, device_id: str, path: str) -> bool:
+        current = self._state.current_device_state(device_id)
+        if current in _GREET_STATES:
+            return True
+        log.info(
+            "%s → suppressed (state=%s): device=%s", path, current, device_id,
+        )
+        return False
+
     def _roster_has_identifiable_members(self) -> bool:
         if self._household is None:
             return False
         return bool(self._household.roster_ids_with_appearance())
 
     async def _handle_face_detected(self, device_id: str, now: float) -> None:
+        if not self._greet_allowed_in_state(device_id, "face_detected"):
+            return
+
         # Time-of-day gate
         current_hour = datetime.now(self._tz).hour
         if not (
@@ -143,6 +162,9 @@ class FaceGreeter:
             log.debug(
                 "face_recognized: identity=%s not in roster", identity
             )
+            return
+
+        if not self._greet_allowed_in_state(device_id, "face_recognized"):
             return
 
         dev_state = self._state.state.setdefault(device_id, {})
