@@ -136,6 +136,21 @@ def test_model_tool_cases_need_marker_and_downstream_record():
                     "dotty-behaviour": behaviour})["verdict"] == "FAIL"
 
 
+def test_direct_camera_route_counts_as_take_photo():
+    case = case_by_id("T06-take-photo")
+    logs = ("结果: Please use your camera and tell me about the room\nSentenceType.FIRST\n"
+            "PiVoiceLLM direct tool take_photo ok\nSentenceType.LAST")
+    behaviour = 'INFO:     127.0.0.1:5000 - "GET /api/voice/take_photo HTTP/1.1" 200 OK'
+    ok = contract(case, passing(case, "I see a desk.", logs),
+                  {"xiaozhi-esp32-server": logs, "dotty-behaviour": behaviour})
+    assert ok["interaction"] == "PASS" and ok["server_evidence"] == "PASS"
+    # A reply that merely claims a photo, with no tool run, still fails.
+    claim = logs.replace("PiVoiceLLM direct tool take_photo ok\n", "")
+    made_up = contract(case, passing(case, "I took a snapshot of a cozy room.", claim),
+                       {"xiaozhi-esp32-server": claim, "dotty-behaviour": ""})
+    assert made_up["verdict"] == "FAIL"
+
+
 def test_pending_person_fact_must_not_be_spoken():
     case = case_by_id("T03-recall-person")
     logs = ("结果: What do you know about my friend Zorbo Quill\nSentenceType.FIRST\n"

@@ -216,6 +216,9 @@ def evaluate(case, transcript, log_text, playback_end, after, device, before=Non
     # an ASR transcript or assistant answer must not satisfy it.
     tool_calls = re.findall(r"PiClient: tool call name=([a-z_][a-z0-9_]*) id=([^\s]+)", log_text)
     observed_tools = [name for name, ident in tool_calls if ident != "unknown"]
+    # PiVoiceLLM's direct routes run the tool without the model and log this
+    # only after it returned a result, which is stronger than a call marker.
+    observed_tools += re.findall(r"PiVoiceLLM direct tool ([a-z_][a-z0-9_]*) ok\b", log_text)
     tool_observed = expected_tool in observed_tools if expected_tool else None
     observed_wakes = wake_events(log_text)
     requires_wake = case.get("require_wake_event", False)
