@@ -1046,16 +1046,20 @@ def run_case(session, config, case):
         result["native_audio_windows"] = capture_window_metrics(
             media, result["media"]["audio_seconds"], offset - .4, offset)
         transcribe_window("response", ["-ss", str(offset)])
-        # VAD sometimes drops a short quiet reply whole. Retry without it, but
-        # never for silence cases: Whisper invents words on an empty crop.
-        if not case.get("expect_silence") and not transcript_text(load(directory / "response.json")):
+        # VAD sometimes drops a short quiet reply, or its first short sentence
+        # ("My name is Dotty."). Retry without it when the VAD transcript is
+        # empty or lacks the expected words, and use the retry only if it has
+        # them; never for silence cases: Whisper invents words on an empty crop.
+        vad_text = transcript_text(load(directory / "response.json"))
+        if not case.get("expect_silence") and not (vad_text and matches(vad_text, case.get("reply", []))):
             guarded_process([config["python"], ROOT / "scripts/dotty_av_media.py", "transcribe",
                             directory / "response.wav", "--model", config["model"],
                             "--output", directory / "response-novad.json", "--normalize", "--no-vad",
                              "--hotwords", RESPONSE_HOTWORDS],
                             directory / "response-novad-transcribe.log", session, 120,
                             deadline=datetime.fromisoformat(config["finish_at"]).timestamp())
-            used = bool(transcript_text(load(directory / "response-novad.json")))
+            novad_text = transcript_text(load(directory / "response-novad.json"))
+            used = bool(novad_text) and (not vad_text or matches(novad_text, case.get("reply", [])))
             result["transcription_analysis"]["response_fallback"] = {"vad_filter": False, "used": used}
             if used:
                 (directory / "response.json").replace(directory / "response-vad.json")

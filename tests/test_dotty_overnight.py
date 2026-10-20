@@ -433,8 +433,14 @@ def test_response_crop_corrected_by_capture_lag(segments, expected):
     assert got[0] <= offset
 
 
-@pytest.mark.parametrize("novad_text, used", [("nineteen", True), ("", False)])
-def test_empty_vad_response_retried_without_vad(tmp_path, monkeypatch, prompt_capture_boundary, novad_text, used):
+@pytest.mark.parametrize("vad_text, novad_text, used", [
+    ("", "nineteen", True), ("", "", False),
+    # VAD dropped the short first sentence that held the answer.
+    ("it is a number", "nineteen it is a number", True),
+    ("it is a number", "it is a number too", False),
+])
+def test_vad_response_missing_the_reply_retried_without_vad(tmp_path, monkeypatch, prompt_capture_boundary,
+                                                            vad_text, novad_text, used):
     config, _ = prompt_capture_boundary
     config.update(python="fixture-python", model="fixture-model",
                   finish_at="2099-01-01T01:00:00+00:00")
@@ -456,7 +462,7 @@ def test_empty_vad_response_retried_without_vad(tmp_path, monkeypatch, prompt_ca
             return
         output = Path(argv[argv.index("--output") + 1])
         calls.append(output.name)
-        text = {"prompt-heard.json": "Twelve plus seven", "response.json": "",
+        text = {"prompt-heard.json": "Twelve plus seven", "response.json": vad_text,
                 "response-novad.json": novad_text}[output.name]
         runner.write_json(output, transcript(text) if text else {"segments": []})
     monkeypatch.setattr(runner, "guarded_process", process)
@@ -466,6 +472,8 @@ def test_empty_vad_response_retried_without_vad(tmp_path, monkeypatch, prompt_ca
     assert result["transcription_analysis"]["response_fallback"] == {"vad_filter": False, "used": used}
     if used:
         assert result["interaction"] == "PASS", result
+    elif vad_text:
+        assert result["interaction"] != "PASS" and result["failure"].startswith("response_")
     else:
         assert result["failure"] == "response_transcription_unavailable"
 
