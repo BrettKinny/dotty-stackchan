@@ -169,6 +169,11 @@ def wake_events(log_text):
     return events
 
 
+# The reference mic's Whisper hears "Dotty" as "Daddy"/"Tati"; bias it to the
+# name the way the robot's own WhisperLocal does (#164). Reply transcripts only.
+RESPONSE_HOTWORDS = "Dotty"
+
+
 def transcript_text(transcript):
     return " ".join(s["text"].strip() for s in transcript.get("segments", [])
                     if s.get("end", 0) > s.get("start", 0)
@@ -1020,8 +1025,8 @@ def run_case(session, config, case):
                      "-vn", "-ar", "16000", "-ac", "1", wav])
             guarded_process([config["python"], ROOT / "scripts/dotty_av_media.py", "transcribe", wav,
                             "--model", config["model"], "--output", directory / f"{label}.json",
-                            *(["--normalize", "--vad-threshold", str(result["response_vad_threshold"])]
-                              if label == "response" else [])],
+                            *(["--normalize", "--vad-threshold", str(result["response_vad_threshold"]),
+                               "--hotwords", RESPONSE_HOTWORDS] if label == "response" else [])],
                             directory / f"{label}-transcribe.log", session, 120,
                             deadline=datetime.fromisoformat(config["finish_at"]).timestamp())
             analysis = load(directory / f"{label}.json")
@@ -1046,7 +1051,8 @@ def run_case(session, config, case):
         if not case.get("expect_silence") and not transcript_text(load(directory / "response.json")):
             guarded_process([config["python"], ROOT / "scripts/dotty_av_media.py", "transcribe",
                             directory / "response.wav", "--model", config["model"],
-                            "--output", directory / "response-novad.json", "--normalize", "--no-vad"],
+                            "--output", directory / "response-novad.json", "--normalize", "--no-vad",
+                             "--hotwords", RESPONSE_HOTWORDS],
                             directory / "response-novad-transcribe.log", session, 120,
                             deadline=datetime.fromisoformat(config["finish_at"]).timestamp())
             used = bool(transcript_text(load(directory / "response-novad.json")))

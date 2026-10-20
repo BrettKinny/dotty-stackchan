@@ -165,7 +165,7 @@ def validate_vad_threshold(value):
     return threshold
 
 
-def transcribe(path, model_path, output, normalize=False, vad_filter=True, vad_threshold=.5):
+def transcribe(path, model_path, output, normalize=False, vad_filter=True, vad_threshold=.5, hotwords=None):
     # Lower thresholds are explicit prospective experiments, never inferred from
     # expected words or used to reclassify existing case evidence.
     vad_parameters = {"threshold": validate_vad_threshold(vad_threshold)}
@@ -177,6 +177,7 @@ def transcribe(path, model_path, output, normalize=False, vad_filter=True, vad_t
     if normalize and analysis["original_quality"]["near_silence"]:
         result = {"model": str(model_path), "language_probability": None, "segments": [],
                   "analysis": analysis, "vad_filter": vad_filter, "vad_parameters": vad_parameters,
+                  "hotwords": hotwords,
                   "evidence_status": "INCONCLUSIVE", "reason": "original_audio_near_silent"}
         with Path(output).open("x") as file:
             json.dump(result, file, indent=2)
@@ -189,10 +190,10 @@ def transcribe(path, model_path, output, normalize=False, vad_filter=True, vad_t
     segments, info = model.transcribe(str(analysis_path), language="en", beam_size=3,
                                       vad_filter=vad_filter, vad_parameters=vad_parameters,
                                       condition_on_previous_text=False,
-                                      word_timestamps=True)
+                                      word_timestamps=True, hotwords=hotwords)
     result = {"model": str(model_path), "language_probability": info.language_probability,
               "analysis": analysis, "vad_filter": vad_filter, "vad_parameters": vad_parameters,
-              "evidence_status": "UNVERIFIED_TRANSCRIPT",
+              "hotwords": hotwords, "evidence_status": "UNVERIFIED_TRANSCRIPT",
               "note": "Transcription is evidence only, including after gain. Confirm response timing, "
                       "service TTS and content independently; noise can hallucinate words.",
               "segments": [{"start": s.start, "end": s.end, "text": s.text,
@@ -218,6 +219,7 @@ if __name__ == "__main__":
     p.add_argument("--output", required=True, type=Path)
     p.add_argument("--normalize", action="store_true", help="create bounded-gain analysis WAV; preserve original")
     p.add_argument("--no-vad", action="store_true", help="diagnostic transcription only; increases hallucination risk")
+    p.add_argument("--hotwords", help="bias decoding toward these words (the robot's name), as its own ASR does")
     p.add_argument("--vad-threshold", type=validate_vad_threshold, default=.5,
                    help="explicit VAD speech threshold 0..1 (default: 0.5); recorded in provenance")
     args = parser.parse_args()
@@ -226,4 +228,4 @@ if __name__ == "__main__":
     else:
         print(json.dumps(transcribe(args.file, args.model, args.output,
                                     normalize=args.normalize, vad_filter=not args.no_vad,
-                                    vad_threshold=args.vad_threshold)))
+                                    vad_threshold=args.vad_threshold, hotwords=args.hotwords)))
