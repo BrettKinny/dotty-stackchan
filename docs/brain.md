@@ -67,7 +67,7 @@ Appdata layout on the Docker host:
 | `remember_person(name, fact)` | Stores a durable fact in a named household member's memory namespace. |
 | `think_hard(question)` | Direct POST to llama-swap `qwen3.6:27b-think` (`enable_thinking=false`, 200-token cap, terse answer). |
 | `take_photo()` | GET to `dotty-behaviour /api/voice/take_photo` — returns latest cached vision description if ≤30 s old. |
-| `play_song(name)` | Resolves free-form name against `/xiaozhi/admin/songs` catalogue (60 s cache), then POSTs `/xiaozhi/admin/play-asset`. |
+| `play_song(name)` | Resolves free-form name against `/xiaozhi/admin/songs` catalogue (60 s cache), then POSTs `/xiaozhi/admin/play-asset` with `after_turn`, so the song starts once the turn's spoken reply has finished. |
 
 In addition, an `agent_end` handler in the extension automatically writes a `category=conversation` row to `brain.db` after every completed user prompt — the agent does not decide to log; every successful turn is recorded.
 
