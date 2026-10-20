@@ -40,6 +40,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **OpenAICompat follows the live kid-mode toggle**: it read `DOTTY_KID_MODE` once at startup, so a dashboard flip never reached the fallback provider. It now reads the shared toggle file every turn, like `PiVoiceLLM`.
 - **Wake-word head turns stay out of dance and security**: `WakeWordTurner` had no state gate. (`SoundTurner` already ran only in idle.)
 - **Face greetings only happen in idle and talk**: `FaceGreeter` only checked for a dance, so it could greet someone in security, story time or sleep. Both the bare and the named greeting now check the state first.
+- **Head pets purr only in idle and talk**: `PurrPlayer` had no state gate, so it could purr over a dance or story, in security, or when a touch woke Dotty from sleep.
 - **Dashboard State, Kid Mode and toggles stay in sync** (#169, #21): the State card and sensor staleness only judge the live robot, the Kid Mode card shows the persisted guardian policy, and the bridge pushes the toggle pips to the robot when it starts.
 - **Test probe devices expire** from dotty-behaviour's per-device state, so a leftover probe no longer turns the robot's status dot amber.
 - **Reading the latest photo no longer deletes it**: `GET /api/vision/latest/{device}` used to pop the cached photo.

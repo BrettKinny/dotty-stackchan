@@ -6,10 +6,15 @@ the sound localiser doesn't turn the head toward the speaker mid-purr
 (without that suppression the localiser would treat the purr's own
 audio as a sound event from the side).
 
+Purrs only in idle or talk (docs/modes.md): story_time and dance own
+the speaker, security keeps a serious face, and a touch in sleep is
+the wake gesture, not a pet. A device that never reported a state
+counts as idle.
+
 Firmware-side `head_pet_started` emission was a 2026-04-27 follow-up;
 this consumer was ready against the bus before the firmware caught up.
-Behaviour identical to bridge/purr_player.py — same env knobs, same
-cooldown, same last_chat_t poke.
+Ported from the retired bridge/purr_player.py (same env knobs, same
+cooldown, same last_chat_t poke), plus the state gate above.
 """
 
 from __future__ import annotations
@@ -22,6 +27,9 @@ from dispatch import XiaozhiAdminClient
 from perception import PerceptionState
 
 log = logging.getLogger("dotty-behaviour.consumers.purr_player")
+
+# States where a purr fits; elsewhere the state owns the speaker.
+_PURR_STATES = frozenset({"idle", "talk"})
 
 
 class PurrPlayer:
@@ -60,6 +68,9 @@ class PurrPlayer:
                     continue
                 device_id = event.device_id
                 if not device_id or device_id == "unknown":
+                    continue
+                if (self._state.current_device_state(device_id) not in _PURR_STATES
+                        or self._state.is_dance_active(device_id)):
                     continue
                 now = float(event.ts or time.time())
                 dev_state = self._state.state.setdefault(device_id, {})
