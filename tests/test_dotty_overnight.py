@@ -494,6 +494,18 @@ def test_blocked_prerequisite_does_not_increment_failure_threshold(tmp_path):
     assert checkpoint["completed"] == []
 
 
+def test_stale_listening_status_is_retried_not_blocked(tmp_path):
+    checkpoint = runner.restore_checkpoint(tmp_path)
+    blocked = {"verdict": "BLOCKED", "failure": "warm_listening_precondition"}
+    runner.record_attempt(checkpoint, {"id": "song"}, blocked)
+    assert checkpoint["blocked"] == {}
+    assert checkpoint["counts"]["song"]["failures"] == 0
+    assert checkpoint["consecutive_failures"] == 0
+    runner.record_attempt(checkpoint, {"id": "song"}, blocked)
+    runner.record_attempt(checkpoint, {"id": "song"}, blocked)
+    assert checkpoint["unresolved"] == ["song"]
+
+
 def test_cannot_pool_unrelated_asr_requests():
     result = runner.evaluate({"asr": [["purple"], ["robot"]]}, transcript("yes"),
                              "结果: purple\n结果: robot\nSentenceType.FIRST", 10, after(), "robot")

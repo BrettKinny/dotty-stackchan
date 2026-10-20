@@ -314,6 +314,8 @@ INCONCLUSIVE_FAILURES = {"response_transcription_unavailable", "response_transcr
                          "extra_speech_in_capture", "speech_in_silence_window"}
 # Failures that mean the prompt itself never reached the robot as intended;
 # downstream contract evidence cannot then be attributed to it.
+# BLOCKED outcomes that describe a moment, not a missing prerequisite.
+TRANSIENT_PRECONDITIONS = {"warm_listening_precondition"}
 PROMPT_FAILURES = {"wake_precondition", "no_wake_event", "no_asr_or_no_wake", "asr_mismatch"}
 STATES = ("idle", "talk", "story_time", "security", "sleep", "dance")
 
@@ -1150,6 +1152,16 @@ def record_attempt(checkpoint, case, result):
     counts = checkpoint["counts"].setdefault(case["id"], {"attempts": 0, "streak": 0, "failures": 0})
     counts["attempts"] += 1
     if result.get("verdict") == "BLOCKED":
+        if result.get("failure") in TRANSIENT_PRECONDITIONS:
+            # A stale listening status (a song still playing after the last
+            # attempt, say) clears on its own. Retry, and set the case aside
+            # as unresolved only if it keeps happening.
+            counts["streak"] = 0
+            counts["inconclusive"] = counts.get("inconclusive", 0) + 1
+            if (counts["inconclusive"] >= case.get("max_inconclusive", 3)
+                    and case["id"] not in checkpoint.setdefault("unresolved", [])):
+                checkpoint["unresolved"].append(case["id"])
+            return
         checkpoint.setdefault("blocked", {})[case["id"]] = result.get("failure", "prerequisite_missing")
         return
     fields = [result.get(k) for k in ("capture", "playback", "interaction", "recovery")]
