@@ -1,7 +1,10 @@
 # Pinned 2026-05-17 from :server_0.9.3
 FROM ghcr.io/xinnan-tech/xiaozhi-esp32-server@sha256:3accd82a7d1a6c01c58f32f6199400a11655d607780b80219493123dedbb347e
 
-RUN pip install --no-cache-dir piper-tts scipy numpy mido faster-whisper sherpa-onnx==1.13.2
+# Versions pinned to the image that passed the 2026-10-20 A/V run; an unpinned
+# rebuild could otherwise change the Whisper stack underneath WhisperLocal.
+RUN pip install --no-cache-dir piper-tts==1.8.0 scipy==1.15.3 numpy==1.26.4 mido==1.3.3 \
+        faster-whisper==1.2.1 ctranslate2==4.8.3 sherpa-onnx==1.13.2
 
 # CTranslate2 (faster-whisper) dlopens libcublas.so.12 and cuDNN by name and
 # doesn't look inside the pip CUDA wheels, so WhisperLocal on device=cuda fails

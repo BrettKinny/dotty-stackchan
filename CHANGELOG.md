@@ -31,6 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`docs/multi-daemon-split.md`, `docs/advanced/multi-host.md`** — both documented ZeroClaw-host topologies that no longer exist.
 
 ### Fixed
+- **Reproducible xiaozhi image**: the Dockerfile's pip packages were unpinned, so a rebuild could change faster-whisper or CTranslate2 underneath WhisperLocal. They are now pinned to the versions in the image that passed the 2026-10-20 A/V run.
 - **No repeated line after a tool call**: after `play_song` the 4B model often said its pre-tool line again, so Dotty said "Let me play that song for you" twice. `PiClient` now holds a later agent turn's text while it only repeats the previous turn's words and drops the repeat; anything new after it is still spoken.
 - **"Use your camera" takes a photo instead of inventing a room**: "Please use your camera and tell me about the room" did not match the direct camera route, and the 4B model replied "I took a snapshot and see a cozy room…" without calling `take_photo`. "Use your camera", "describe the room" and "tell me about the room" now route to `take_photo`. PiVoiceLLM's own log lines are f-strings, since loguru ignores `%s` arguments, and successful direct tools are logged.
 - **PiClient log lines reach the xiaozhi log**: `PiClient` logs through stdlib `logging`, which xiaozhi-server leaves at WARNING, so `PiClient: tool call name=…` and the other INFO lines were dropped and the A/V cases could not see which tool the agent chose. They now go to the provider's logger.
