@@ -17,6 +17,10 @@ logger = setup_logging()
 MAX_RETRIES = 2
 RETRY_DELAY = 1  # seconds
 DEFAULT_NO_SPEECH_THRESHOLD = 0.6  # Whisper's own default
+# The hotword bias turns servo whirr and other non-speech into a lone "Dotty"
+# (no_speech 0.43 on the robot, 2026-10-20), so a transcript that is nothing
+# but the hotword has to be clearer speech than that before it becomes a turn.
+HOTWORD_ONLY_NO_SPEECH_THRESHOLD = 0.3
 
 
 def _no_speech_threshold(config: dict) -> float:
@@ -40,6 +44,15 @@ def _hotwords(config: dict) -> Optional[str]:
     if not value or (value.startswith("<") and value.endswith(">")):
         return None
     return value
+
+
+def _is_hotword_only(content: str, hotwords: Optional[str]) -> bool:
+    if not hotwords:
+        return False
+    vocab = {w.strip(".,!?;:'\"").lower() for w in hotwords.split()}
+    words = [w.strip(".,!?;:'\"").lower() for w in content.split()]
+    words = [w for w in words if w]
+    return bool(words) and all(w in vocab for w in words)
 
 
 def _supports_kwarg(func, name: str) -> bool:
@@ -163,10 +176,13 @@ class ASRProvider(ASRProviderBase):
                 # Whisper's own no-speech score is the only signal here.
                 if segments and content:
                     mean_no_speech = sum(s.no_speech_prob for s in segments) / len(segments)
-                    if mean_no_speech > self.no_speech_threshold:
+                    threshold = self.no_speech_threshold
+                    if _is_hotword_only(content, getattr(self, "hotwords", None)):
+                        threshold = min(threshold, HOTWORD_ONLY_NO_SPEECH_THRESHOLD)
+                    if mean_no_speech > threshold:
                         logger.bind(tag=TAG).info(
                             f"ASR-REJECT no_speech={mean_no_speech:.3f} > "
-                            f"{self.no_speech_threshold:.2f} | dropped {content!r}"
+                            f"{threshold:.2f} | dropped {content!r}"
                         )
                         content = ""
                 text = {"content": content}

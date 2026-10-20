@@ -55,6 +55,7 @@ def _transcribe(no_speech_probs, text, config=None):
     module = _load()
     provider = module.ASRProvider.__new__(module.ASRProvider)
     provider.no_speech_threshold = module._no_speech_threshold(config or {})
+    provider.hotwords = module._hotwords(config or {})
     segments = [types.SimpleNamespace(text=text if i == 0 else "", no_speech_prob=p, avg_logprob=-0.5)
                 for i, p in enumerate(no_speech_probs)]
     provider._transcribe_blocking = lambda audio: (segments, types.SimpleNamespace(language_probability=1.0))
@@ -74,3 +75,20 @@ def test_real_speech_passes_through():
 def test_threshold_is_configurable_and_can_be_disabled():
     assert _transcribe([0.811], " Thank you.", {"no_speech_threshold": 1.0}) == {"content": "Thank you."}
     assert _transcribe([0.5], " Hello.", {"no_speech_threshold": 0.4}) == {"content": ""}
+
+
+def test_lone_hotword_needs_clearer_speech():
+    # 2026-10-20: idle servo noise came back as "Dotty" at no_speech 0.434 and
+    # Dotty answered it. Real utterances that night scored <= 0.114.
+    config = {"hotwords": "Dotty"}
+    assert _transcribe([0.434], " Dotty", config) == {"content": ""}
+    assert _transcribe([0.434], " Dotty!", config) == {"content": ""}
+    assert _transcribe([0.11], " Dotty.", config) == {"content": "Dotty."}
+
+
+def test_hotword_in_a_sentence_keeps_the_normal_threshold():
+    config = {"hotwords": "Dotty"}
+    assert _transcribe([0.434], " Dotty, what's the time?", config) == {
+        "content": "Dotty, what's the time?"}
+    # Without hotwords configured, a lone "Dotty" is ordinary speech.
+    assert _transcribe([0.434], " Dotty") == {"content": "Dotty"}
