@@ -34,6 +34,7 @@ LLM:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
@@ -96,6 +97,45 @@ except ImportError:  # pragma: no cover — dev workstation fallback
 
 TAG = __name__
 logger = setup_logging()
+
+
+class _ForwardToProviderLog(logging.Handler):
+    """Hands stdlib log records to the provider's loguru logger."""
+
+    def __init__(self, target) -> None:
+        super().__init__(logging.INFO)
+        self._target = target
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = record.getMessage()
+            if record.exc_info:
+                message += "\n" + logging.Formatter().formatException(record.exc_info)
+            method = getattr(self._target, record.levelname.lower(), None) or self._target.info
+            method(message)
+        except Exception:  # logging must never break a voice turn
+            pass
+
+
+def _forward_pi_client_logs(target) -> None:
+    """PiClient logs through stdlib ``logging``, but xiaozhi-server prints only
+    its loguru logger and leaves the stdlib root at WARNING, so INFO lines such
+    as ``PiClient: tool call name=...`` (the A/V runner's tool evidence) never
+    reached the container log (2026-10-20). Forward them there. On the dev
+    workstation ``setup_logging`` is stdlib already, so nothing is added."""
+    from . import pi_client as _pi_client
+
+    client_logger = _pi_client.logger
+    if isinstance(target, logging.Logger) or any(
+        isinstance(h, _ForwardToProviderLog) for h in client_logger.handlers
+    ):
+        return
+    client_logger.addHandler(_ForwardToProviderLog(target))
+    client_logger.setLevel(logging.INFO)
+    client_logger.propagate = False
+
+
+_forward_pi_client_logs(logger.bind(tag=TAG) if hasattr(logger, "bind") else logger)
 
 
 def _read_kid_mode() -> bool:

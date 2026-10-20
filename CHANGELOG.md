@@ -31,6 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`docs/multi-daemon-split.md`, `docs/advanced/multi-host.md`** — both documented ZeroClaw-host topologies that no longer exist.
 
 ### Fixed
+- **PiClient log lines reach the xiaozhi log**: `PiClient` logs through stdlib `logging`, which xiaozhi-server leaves at WARNING, so `PiClient: tool call name=…` and the other INFO lines were dropped and the A/V cases could not see which tool the agent chose. They now go to the provider's logger.
 - **Memory lookup survives one misheard word**: `memory_lookup` is an exact phrase search, so "the test work for tonight" found nothing for "the test word for tonight". When the phrase misses, it now retries on the query's content words and keeps only memories containing at least two of them and 60%; pending person facts stay excluded (#53).
 - **No reply to a phantom "Dotty"** (#105, #164): the Whisper hotword bias turned idle servo noise into a lone "Dotty" (no-speech 0.43) and Dotty answered it. A transcript that is only the hotword now has to score no-speech 0.3 or below.
 - **WhisperLocal works on the GPU after an image rebuild**: CTranslate2 loads `libcublas.so.12` by name and never found the copy in the pip CUDA wheels, so a freshly built xiaozhi image failed every utterance ("libcublas.so.12 is not found"). The Dockerfile now puts those library directories on `LD_LIBRARY_PATH`.
