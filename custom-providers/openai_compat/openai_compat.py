@@ -9,6 +9,7 @@ Config lives in .config.yaml under LLM.OpenAICompat — see the repo's
 
 import json
 import os
+from pathlib import Path
 
 import requests
 
@@ -25,8 +26,28 @@ from core.utils.textUtils import (
 TAG = __name__
 logger = setup_logging()
 
-KID_MODE = os.environ.get("DOTTY_KID_MODE", "true").lower() in ("1", "true", "yes")
-_TURN_SUFFIX = build_turn_suffix(KID_MODE)
+
+
+def _read_kid_mode() -> bool:
+    """Read the live kid-mode toggle, falling back to startup config.
+
+    Same contract as PiVoiceLLM's reader: the dashboard writes the shared
+    state file on every toggle, so reading it per turn keeps this fallback
+    provider in step with the live switch. An unreadable or unrecognised
+    file falls back to DOTTY_KID_MODE, which itself defaults to on (fail
+    closed)."""
+    state_file = Path(os.environ.get(
+        "DOTTY_KID_MODE_STATE", "/var/lib/dotty-bridge/state/kid-mode",
+    ))
+    try:
+        value = state_file.read_text().strip().lower()
+        if value in ("true", "1", "yes"):
+            return True
+        if value in ("false", "0", "no"):
+            return False
+    except OSError:
+        pass
+    return os.environ.get("DOTTY_KID_MODE", "true").lower() in ("1", "true", "yes")
 
 
 def _load_persona(path):
@@ -83,7 +104,7 @@ class LLMProvider(LLMProviderBase):
     # helpers
     # ------------------------------------------------------------------
 
-    def _build_messages(self, dialogue):
+    def _build_messages(self, dialogue, kid_mode=None):
         """Convert the xiaozhi dialogue list into OpenAI messages.
 
         The dialogue already contains system/user/assistant messages from
@@ -92,7 +113,12 @@ class LLMProvider(LLMProviderBase):
           1. The persona from the markdown file (if any) as the first system
              message.
           2. The child-safety turn suffix appended to the final user message.
+
+        ``kid_mode`` is the turn's toggle value; None reads it live.
         """
+        if kid_mode is None:
+            kid_mode = _read_kid_mode()
+        turn_suffix = build_turn_suffix(kid_mode)
         messages = []
 
         # Persona system message comes first if we have one.
@@ -116,11 +142,11 @@ class LLMProvider(LLMProviderBase):
             role = msg.get("role", "user")
             content = msg.get("content", "")
             if i == suffix_idx:
-                content = content + _TURN_SUFFIX
+                content = content + turn_suffix
             messages.append({"role": role, "content": content})
 
         if suffix_idx < 0:  # empty dialogue — nothing to append to
-            messages.append({"role": "system", "content": _TURN_SUFFIX})
+            messages.append({"role": "system", "content": turn_suffix})
 
         return messages
 
@@ -263,10 +289,14 @@ class LLMProvider(LLMProviderBase):
         fails closed). The face enforcement inside _response_stream runs
         first, so the filter sees — and preserves — the leading-emoji
         contract. Together this is textUtils.guard_tts_stream.
+
+        Kid mode is read from the live toggle once per turn, so the prompt
+        suffix and the output filter always agree.
         """
-        messages = self._build_messages(dialogue)
+        kid_mode = _read_kid_mode()
+        messages = self._build_messages(dialogue, kid_mode)
         yield from filter_tts_stream(
             self._response_stream(messages),
-            KID_MODE,
+            kid_mode,
             on_hit=self._on_filter_hit,
         )
