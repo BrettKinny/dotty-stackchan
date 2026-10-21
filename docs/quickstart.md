@@ -45,46 +45,22 @@ auto-detects the NVIDIA Docker runtime: if it's present, setup selects
 
 ## 1. Flash the firmware
 
-Download the latest release from
-[GitHub Releases](https://github.com/BrettKinny/dotty-stackchan/releases)
-(look for a tag starting with `fw-v`). Grab all six binaries:
-`bootloader.bin`, `partition-table.bin`, `ota_data_initial.bin`,
-`stack-chan.bin`, `generated_assets.bin`, and `human_face_detect.espdl`.
+Build the firmware from source and flash it over USB-C. The steps are in
+[SETUP.md](../SETUP.md#2-build-and-flash-open-firmware). They use this repo's
+pinned `BrettKinny/StackChan@dotty` submodule, and set `CONFIG_OTA_URL` to
+`http://<XIAOZHI_HOST>:8003/xiaozhi/ota/` for your own server.
 
-> **Self-hosting note:** the current `fw-v1.3.3` prebuilt was compiled for
-> the maintainer's LAN (`CONFIG_OTA_URL` points at that deployment). It is a
-> reproducible release artifact, but it is not a portable binary for another
-> self-hosted server. There is no OTA/server editor in the StackChan's
-> on-device Settings app. For your own server, build from source with
-> `CONFIG_OTA_URL="http://<XIAOZHI_HOST>:8003/xiaozhi/ota/"` before flashing;
-> [SETUP.md](../SETUP.md#2-build-and-flash-open-firmware) has the reliable
-> procedure using this repo's pinned `BrettKinny/StackChan@dotty` submodule.
-> Do not build the official `m5stack/StackChan` upstream directly: it does not
-> include Dotty's firmware changes. A browser tab named **Advanced** exists
-> only in the Xiaozhi hotspot portal.
+> There is no ready-made binary for another server: the firmware's server
+> address is compiled in, and the StackChan's on-device Settings app has no
+> OTA/server editor. The `fw-v*` binaries on GitHub Releases point at the
+> maintainer's own deployment, so don't flash them for yours. Don't build the
+> official `m5stack/StackChan` upstream either: it doesn't include Dotty's
+> firmware changes.
 
-Install esptool and flash over USB-C:
-
-```bash
-pip install esptool
-
-python -m esptool --chip esp32s3 -b 460800 \
-  --before default_reset --after hard_reset \
-  write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m \
-  0x0      bootloader.bin \
-  0x8000   partition-table.bin \
-  0xd000   ota_data_initial.bin \
-  0x20000  stack-chan.bin \
-  0xa60000 generated_assets.bin \
-  0xe70000 human_face_detect.espdl
-```
-
-Flashing the bootloader (`0x0`) and partition table (`0x8000`) is
-**required** — skip them and the device keeps whatever partition layout
-the previous firmware left behind. That layout won't match these
-images, and the robot boot-loops on `No bootable app partitions`.
-
-Verify checksums against `SHA256SUMS.txt` in the release if desired.
+Flash the bootloader (`0x0`) and the partition table (`0x8000`) with the app.
+If you skip them, the device keeps the partition layout the previous
+firmware left behind, and the robot boot-loops on `No bootable app
+partitions`. `idf.py flash` writes all of them.
 
 ## 2. Clone the repo
 

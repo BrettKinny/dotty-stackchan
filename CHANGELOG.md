@@ -31,6 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`docs/multi-daemon-split.md`, `docs/advanced/multi-host.md`** — both documented ZeroClaw-host topologies that no longer exist.
 
 ### Fixed
+- **Quickstart builds the firmware from source**: step 1 told new users to download the `fw-v1.3.3` release binaries, which are compiled for the maintainer's own server and can't reach anyone else's. It now points to the build-from-source steps in SETUP.md.
 - **No runaway tool loops**: with the rules in its system prompt the 4B answered "Repeat these five words" by calling `think_hard` 19 times in 30 s until the context overflowed and Dotty said nothing. `PiClient` now steers pi to answer after 3 tool calls in one reply and aborts the turn after 6, and the routing rules say `think_hard` is for hard multi-step questions only, each tool at most once per reply.
 - **Kid Mode repeats ordinary words**: the jailbreak rule made the 4B refuse "Repeat these five words: purple, robot, seven, window, banana" as "part of a command to bypass my rules". Rule 7 now says repeating ordinary words is a game: say them back (mentioning spelling made it spell them out letter by letter); dangerous phrases are still stopped by rule 12 and the output filter.
 - **First word no longer clipped**: xiaozhi kept only ~0.6 s of audio from before the VAD fired, so a soft first word was lost ("Do you remember…" reached ASR as "remember…"). A build-time patch (`scripts/patch-asr-preroll.py`) keeps ~1.2 s.

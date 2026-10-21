@@ -56,9 +56,9 @@ perception changes.
 The StackChan's on-device Settings app has no **Advanced Options** or OTA URL
 editor. The similarly named **Advanced** tab documented by Xiaozhi belongs to
 its browser-based SoftAP captive portal and appears only when that provisioning
-mode is active. The current `fw-v1.3.3` prebuilt is compiled for the
-maintainer's LAN, so another self-hosted deployment must build from source with
-its own `CONFIG_OTA_URL` as shown below.
+mode is active. The server address is compiled into the firmware, and the
+`fw-v*` binaries on GitHub Releases point at the maintainer's deployment, so
+build from source with your own `CONFIG_OTA_URL` as shown below.
 
 The exact firmware source is the `firmware/` submodule of this repo. It pins
 `BrettKinny/StackChan@dotty`, whose `firmware/fetch_repos.py` pulls
