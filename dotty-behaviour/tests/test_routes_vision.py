@@ -10,7 +10,16 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+import config
 from main import app
+
+
+def _kid_policy(monkeypatch: pytest.MonkeyPatch, tmp_path, value: str | None) -> None:
+    """Point the shared guardian file at tmp_path; None = file missing."""
+    path = tmp_path / "kid-mode"
+    if value is not None:
+        path.write_text(value, encoding="utf-8")
+    monkeypatch.setattr(config, "KID_MODE_STATE_FILE", path)
 
 
 @pytest.fixture(autouse=True)
@@ -70,7 +79,8 @@ def _jpeg_file(payload: bytes = b"FAKEJPEG") -> tuple[str, io.BytesIO, str]:
     return ("photo.jpg", io.BytesIO(payload), "image/jpeg")
 
 
-def test_vision_explain_returns_vlm_description_and_caches_it() -> None:
+def test_vision_explain_returns_vlm_description_and_caches_it(monkeypatch, tmp_path) -> None:
+    _kid_policy(monkeypatch, tmp_path, "false")
     with TestClient(app) as client:
         fake = _FakeVLM(description="A red ball on the table.")
         _override_vlm(client, fake)
@@ -97,20 +107,29 @@ def test_vision_explain_returns_vlm_description_and_caches_it() -> None:
         assert "young child" not in fake.calls[0]["system_prompt"]
 
 
-def test_vision_explain_kid_mode_changes_system_prompt() -> None:
+@pytest.mark.parametrize("policy", ["true", None, "garbage"])
+def test_vision_explain_uses_the_kid_prompt_unless_adults_are_allowed(monkeypatch, tmp_path, policy) -> None:
+    # 2026-10-21 review: this read app.state.kid_mode, which nothing set, so
+    # every description used the adult prompt. A missing or unreadable
+    # policy file now means Kid Mode.
+    _kid_policy(monkeypatch, tmp_path, policy)
     with TestClient(app) as client:
         fake = _FakeVLM()
         _override_vlm(client, fake)
-        client.app.state.kid_mode = True
         r = client.post(
             "/api/vision/explain",
             files={"file": _jpeg_file()},
             headers={"device-id": "dev-1"},
         )
         assert r.status_code == 200
-        # Reset so other tests don't see the leak
-        client.app.state.kid_mode = False
         assert "young child" in fake.calls[0]["system_prompt"]
+
+
+def test_greeter_follows_the_shared_kid_policy(monkeypatch, tmp_path) -> None:
+    _kid_policy(monkeypatch, tmp_path, "false")
+    assert config.kid_mode_on() is False
+    _kid_policy(monkeypatch, tmp_path, "true")
+    assert config.kid_mode_on() is True
 
 
 def test_vision_explain_default_device_id_is_unknown() -> None:

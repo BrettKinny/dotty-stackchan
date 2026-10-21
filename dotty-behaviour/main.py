@@ -138,8 +138,8 @@ async def lifespan(app: FastAPI):
     calendar_cache = CalendarCache()
     app.state.calendar_cache = calendar_cache
     app.state.calendar_person_prefix_re = person_prefix_re
-    # kid-mode default — flipped by the dashboard's kid-mode toggle
-    # (deferred slice). vision_explain reads this via get_kid_mode().
+    # Unused by the live paths: vision_explain and the greeter read the shared
+    # guardian file via config.kid_mode_on(). Kept for older callers.
     app.state.kid_mode = False
 
     # Filesystem prep — best-effort; missing bind mounts are an
@@ -334,7 +334,7 @@ async def lifespan(app: FastAPI):
             household_bucket=config.CALENDAR_HOUSEHOLD_BUCKET,
         ),
         _greeter_tts,
-        lambda: bool(getattr(app.state, "kid_mode", False)),
+        config.kid_mode_on,
         household_registry=household,
         tz=config.LOCAL_TZ,
         state_path=config.GREETER_STATE_PATH,

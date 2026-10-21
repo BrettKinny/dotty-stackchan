@@ -130,6 +130,19 @@ STATE_DIR: Path = Path(
 KID_MODE_STATE_FILE: Path = Path(os.environ.get(
     "DOTTY_KID_MODE_STATE", "/var/lib/dotty-bridge/state/kid-mode"
 ))
+
+
+def kid_mode_on() -> bool:
+    """Live guardian toggle from the shared policy file, read on every call.
+
+    Fails closed: a missing or unreadable file means Kid Mode is on, so the
+    vision and greeter prompts never drop to adult wording by accident.
+    """
+    try:
+        value = KID_MODE_STATE_FILE.read_text(encoding="utf-8").strip().lower()
+    except (OSError, UnicodeError):
+        return True
+    return value not in ("false", "0", "no")
 LOG_DIR: Path = Path(
     os.environ.get("CONVO_LOG_DIR", "/var/lib/dotty-behaviour/logs")
 )

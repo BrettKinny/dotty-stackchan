@@ -69,10 +69,10 @@ def get_vlm_client(request: Request) -> VLMClient:
 
 
 def get_kid_mode(request: Request) -> bool:
-    """Live kid-mode reader. Set on app.state by the kid-mode toggle
-    handler (deferred slice). Defaults to False until the dashboard
-    plumbing lands."""
-    return bool(getattr(request.app.state, "kid_mode", False))
+    """Live kid-mode reader: the shared guardian policy file, failing closed.
+    It used to read app.state.kid_mode, which nothing ever set, so every
+    description used the adult prompt even in Kid Mode (2026-10-21 review)."""
+    return config.kid_mode_on()
 
 
 def get_household(request: Request) -> Optional[HouseholdRegistry]:
