@@ -29,7 +29,10 @@ def test_docs_identify_compiled_ota_url_and_missing_device_editor() -> None:
     quickstart = (ROOT / "docs" / "quickstart.md").read_text(encoding="utf-8")
     assert "CONFIG_OTA_URL" in quickstart
     assert "does **not** contain an Advanced" in quickstart
-    assert "fw-v1.3.3" in quickstart
+    # The release binaries are LAN-locked (#190): build from source instead.
+    assert "fw-v*" in quickstart and "don't flash them" in quickstart
+    assert "SETUP.md#2-build-and-flash-open-firmware" in quickstart
+    assert "write_flash" not in quickstart
 
 
 def test_source_build_uses_the_pinned_dotty_firmware_fork() -> None:
