@@ -185,3 +185,42 @@ class StateCardTests(_DashTest):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReviewFollowUps(unittest.TestCase):
+    """2026-10-21 slice-B review follow-ups."""
+
+    def test_probe_chat_activity_does_not_mark_the_robot_seen(self):
+        pstate = {
+            "automation-persistence-probe": {"last_chat_t": 2000.0},
+            "unknown": {"last_chat_t": 3000.0},
+            "1c:db:d4:ba:58:94": {"last_chat_t": 1000.0},
+        }
+        original = dash._state.get("perception_state_getter")
+        self.addCleanup(lambda: dash._state.__setitem__("perception_state_getter", original))
+        dash._state["perception_state_getter"] = lambda: pstate
+        self.assertEqual(dash._perception_last_chat_ts(), 1000.0)
+
+    def test_connected_devices_lookup_is_cached(self):
+        import asyncio
+        from unittest.mock import patch
+        calls = []
+
+        class _Resp:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self): return b'{"devices": ["robot"]}'
+
+        def _urlopen(req, timeout=0):
+            calls.append(req.full_url)
+            return _Resp()
+
+        self.addCleanup(lambda: setattr(dash, "_connected_cache", None))
+        dash._connected_cache = None
+        with patch.object(dash, "XIAOZHI_HOST", "xiaozhi.test"), \
+             patch("urllib.request.urlopen", _urlopen):
+            first = asyncio.run(dash._xiaozhi_connected_devices())
+            second = asyncio.run(dash._xiaozhi_connected_devices())
+        self.assertEqual((first, second), (["robot"], ["robot"]))
+        self.assertEqual(len(calls), 1)

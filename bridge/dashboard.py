@@ -418,8 +418,10 @@ def _perception_last_chat_ts() -> float | None:
         pstate = (getter() if getter else None) or {}
     except Exception:
         return None
+    # Real devices only, like every other device read: a probe or the
+    # "unknown" id must not mark the robot as recently active.
     stamps = [
-        d["last_chat_t"] for d in pstate.values()
+        d["last_chat_t"] for d in candidate_devices(pstate).values()
         if isinstance(d, dict) and isinstance(d.get("last_chat_t"), (int, float))
     ]
     return max(stamps) if stamps else None
@@ -466,11 +468,20 @@ _SONGS_BASE_PATH = "/opt/xiaozhi-esp32-server/config/assets/songs"
 _SONG_OK_EXT = {".opus", ".ogg", ".wav", ".mp3", ".mid", ".midi"}  # = xiaozhi play-asset
 
 
+_connected_cache: tuple[float, list[str] | None] | None = None
+
+
 async def _xiaozhi_connected_devices() -> list[str] | None:
     """Device ids holding a live StackChan WS, via the admin endpoint.
-    Returns None if xiaozhi is unreachable (unknown, not "none")."""
+    Returns None if xiaozhi is unreachable (unknown, not "none"). Cached for
+    _PROBE_TTL: the status strip re-renders on every perception event in
+    every open tab, and each render used to make this request."""
+    global _connected_cache
     if not XIAOZHI_HOST:
         return None
+    now = time.monotonic()
+    if _connected_cache and now - _connected_cache[0] < _PROBE_TTL:
+        return _connected_cache[1]
     url = f"http://{XIAOZHI_HOST}:{XIAOZHI_OTA_PORT}/xiaozhi/admin/devices"
     import urllib.request
     def _fetch() -> list[str] | None:
@@ -486,7 +497,9 @@ async def _xiaozhi_connected_devices() -> list[str] | None:
                 return [str(d) for d in devices]
         except Exception:
             return None
-    return await asyncio.to_thread(_fetch)
+    result = await asyncio.to_thread(_fetch)
+    _connected_cache = (time.monotonic(), result)
+    return result
 
 
 async def _xiaozhi_device_count() -> int | None:
