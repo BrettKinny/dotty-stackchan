@@ -63,6 +63,58 @@ def test_failed_camera_prevents_speaker_playback(tmp_path):
     assert not (tmp_path / "PLAYED").exists()
 
 
+def fake_run_harness(tmp_path, volume_output, mute_output="Mute: no"):
+    """Run `run` mode with fake devices; pactl only reports, and logs its argv."""
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    calls = tmp_path / "pactl.calls"
+    programs = {
+        "pactl": f'''echo "$*" >> "{calls}"
+case "$1" in
+  get-sink-volume) printf '%s\\n' "{volume_output}" ;;
+  get-sink-mute) echo "{mute_output}" ;;
+  get-default-sink) echo test-sink ;;
+esac''',
+        "espeak-ng": 'while [ "$1" != "-w" ]; do shift; done; shift; printf speech > "$1"',
+        "ffprobe": "echo 2",
+        # Stays alive past the 2 s pre-roll and leaves a non-empty output.
+        "ffmpeg": 'for last; do :; done; printf x > "$last"; sleep 3',
+        "pw-play": f'touch "{tmp_path / "PLAYED"}"',
+    }
+    for name, body in programs.items():
+        path = binaries / name
+        path.write_text("#!/bin/sh\n" + body + "\n")
+        path.chmod(0o755)
+    result = subprocess.run(["bash", ROOT / "scripts/dotty-av-test.sh", "run", "hello", "5", tmp_path / "capture.mp4"],
+        env={**os.environ, "PATH": str(binaries) + ":" + os.environ["PATH"],
+             "XDG_RUNTIME_DIR": str(tmp_path), "DOTTY_AV_VOLUME": "20", "DOTTY_AV_SINK": "test-sink"},
+        capture_output=True, text=True, timeout=20)
+    return result, calls.read_text().splitlines()
+
+
+@pytest.mark.parametrize("volume, mute", [
+    ("Volume: front-left: 19661 /  30% / -31.37 dB,   front-right: 19661 /  30% / -31.37 dB", "Mute: no"),
+    ("Volume: front-left: 13107 /  20% / -41.94 dB,   front-right: 19661 /  30% / -31.37 dB", "Mute: no"),
+    ("Volume: front-left: 13107 /  20% / -41.94 dB,   front-right: 13107 /  20% / -41.94 dB", "Mute: yes"),
+    ("", "Mute: no"),
+])
+def test_run_refuses_playback_when_speaker_changed_and_never_sets_it(tmp_path, volume, mute):
+    # 2026-10-21 review: run mode must not unmute or turn up a household speaker.
+    result, calls = fake_run_harness(tmp_path, volume, mute)
+    assert result.returncode == 3, result.stderr
+    assert "speaker volume/mute changed since check" in result.stderr
+    assert not (tmp_path / "PLAYED").exists()
+    assert not any(call.startswith("set-") for call in calls)
+
+
+def test_run_plays_at_the_checked_level_without_setting_it(tmp_path):
+    result, calls = fake_run_harness(
+        tmp_path, "Volume: front-left: 13107 /  20% / -41.94 dB,   front-right: 13107 /  20% / -41.94 dB")
+    assert (tmp_path / "PLAYED").exists(), result.stderr
+    assert "get-sink-volume test-sink" in calls and "get-sink-mute test-sink" in calls
+    assert not any(call.startswith("set-") for call in calls)
+
+
 def test_unbounded_recording_rejected(tmp_path):
     result = subprocess.run(["bash", ROOT / "scripts/dotty-av-test.sh", "record", "181", tmp_path / "capture.mp4"],
                             capture_output=True, text=True, timeout=5)

@@ -87,6 +87,19 @@ with urllib.request.urlopen(req, timeout=10) as r: print(r.read().decode())
                                 "python", "-", json.dumps([route, body])], input=code))
 
 
+# 2026-10-21 review: snapshots are written to before.json/after.json, so keep
+# only the perception fields the runner reads. Identity fields such as
+# last_face_id (a recognised family member) never reach the evidence.
+PERCEPTION_FIELDS = ("current_state", "listening", "sensor_stale", "sensor_age_s", "sensor_seen",
+                     "last_event_t", "last_event_name", "last_chat_status_t", "last_state_change_t",
+                     "face_present")
+
+
+def perception_evidence(state):
+    return {device: {key: fields[key] for key in PERCEPTION_FIELDS if key in fields}
+            for device, fields in (state or {}).items() if isinstance(fields, dict)}
+
+
 def snapshot(host):
     result = {"at": now(), "errors": {}}
     for name, url in {
@@ -96,6 +109,8 @@ def snapshot(host):
     }.items():
         try:
             result[name] = json.loads(ssh(host, ["curl", "-fsS", "--max-time", "5", url]))
+            if name == "perception":
+                result[name] = perception_evidence(result[name])
         except Exception as exc:
             result["errors"][name] = type(exc).__name__
     try:
@@ -274,12 +289,17 @@ def evaluate(case, transcript, log_text, playback_end, after, device, before=Non
         # Someone else spoke (or the robot answered room noise) inside the
         # capture; neither a pass nor a failure can be attributed to the prompt.
         failure = "extra_speech_in_capture"
+    if failure is None and service_tts and case.get("reply") and not service_ok:
+        # 2026-10-21 review: the server logged what it actually sent to TTS and
+        # it lacks the answer, so a matching reference-mic transcript (room
+        # speech, a Whisper guess) cannot carry the attempt to a pass.
+        failure = "service_tts_disagrees_with_expected"
     interaction = "FAIL" if failure else "PASS"
     verdict = "FAIL" if failure else "INCONCLUSIVE"
     if failure == "wake_precondition":
         interaction = verdict = "BLOCKED"
     elif failure in ("response_transcription_unavailable", "response_transcript_disagrees_with_tts",
-                     "extra_speech_in_capture"):
+                     "extra_speech_in_capture", "service_tts_disagrees_with_expected"):
         interaction = verdict = "INCONCLUSIVE"
     if failure is None and expected_tool and not tool_observed:
         # Absence of a marker may mean the deployed provider lacks this logger;
@@ -320,11 +340,14 @@ def playback_verdict(heard, asr_ok, groups):
 
 
 INCONCLUSIVE_FAILURES = {"response_transcription_unavailable", "response_transcript_disagrees_with_tts",
-                         "extra_speech_in_capture", "speech_in_silence_window"}
+                         "extra_speech_in_capture", "speech_in_silence_window",
+                         "service_tts_disagrees_with_expected"}
 # Failures that mean the prompt itself never reached the robot as intended;
 # downstream contract evidence cannot then be attributed to it.
 # BLOCKED outcomes that describe a moment, not a missing prerequisite.
-TRANSIENT_PRECONDITIONS = {"warm_listening_precondition", "device_disconnected"}
+# 2026-10-21 review: wake_precondition too; one conversation slow to go cold
+# must not block W01 for the rest of the night.
+TRANSIENT_PRECONDITIONS = {"warm_listening_precondition", "device_disconnected", "wake_precondition"}
 PROMPT_FAILURES = {"wake_precondition", "no_wake_event", "no_asr_or_no_wake", "asr_mismatch"}
 STATES = ("idle", "talk", "story_time", "security", "sleep", "dance")
 
@@ -413,13 +436,16 @@ def assess_contract(case, result, logs, rows):
 
 def apply_contract(result, case, contract, response_rms_dbfs=None):
     result.update(contract)
+    if contract["forbidden_reply"] == "FAIL":
+        # 2026-10-21 review (kid safety): forbidden words actually spoken fail
+        # the attempt even when the prompt was misheard or the room was noisy.
+        set_failure(result, "forbidden_content_spoken", case)
+        return
     base = result.get("failure")
     if base in PROMPT_FAILURES:
         return
     failure = None
-    if contract["forbidden_reply"] == "FAIL":
-        failure = "forbidden_content_spoken"
-    elif contract["server_evidence"] == "FAIL":
+    if contract["server_evidence"] == "FAIL":
         missing = next(i["label"] for i in contract["server_evidence_items"] if i["status"] == "FAIL")
         failure = "server_evidence_missing:" + missing
     for state in case.get("expect_states", []):
@@ -534,9 +560,13 @@ def space_ok(path):
     return usage.free >= max(10 * 1024**3, usage.total * .1)
 
 
+class DeadlineReached(TimeoutError):
+    """The session's own cutoff, not a hung subprocess."""
+
+
 def guarded_process(argv, logfile, session, timeout, env=None, deadline=None):
     if deadline is not None and time.time() >= deadline:
-        raise TimeoutError("session deadline reached before process launch")
+        raise DeadlineReached("session deadline reached before process launch")
     with logfile.open("w") as log:
         p = subprocess.Popen([str(a) for a in argv], stdout=log, stderr=subprocess.STDOUT,
                              env=env, start_new_session=True)
@@ -549,7 +579,7 @@ def guarded_process(argv, logfile, session, timeout, env=None, deadline=None):
                 if time.monotonic() - started > timeout:
                     raise TimeoutError(f"process exceeded {timeout}s")
                 if deadline is not None and time.time() >= deadline:
-                    raise TimeoutError("session deadline reached")
+                    raise DeadlineReached("session deadline reached")
                 if not space_ok(session):
                     raise RuntimeError("disk pressure")
                 if time.monotonic() - heartbeat >= 5:
@@ -600,25 +630,39 @@ def playback_window(directory, media_seconds):
     return start, end + .4
 
 
-def corrected_response_offset(prompt_start, offset, prompt_segments):
+MAX_CAPTURE_LAG = 1.5
+
+
+def prompt_words_heard(text, prompt_words):
+    """At least half of a segment's words are prompt words."""
+    words = normalize(str(text)).split()
+    return bool(words) and 2 * sum(word in prompt_words for word in words) >= len(words)
+
+
+def corrected_response_offset(prompt_start, offset, prompt_segments, prompt_text):
     """Move the reply crop earlier by the recording's measured startup lag.
 
     playback_window() times are relative to the recorder launch, which comes
     about a second before the first sample, so the crop starts that much
     after the prompt ends. With quick short replies ("My name is Dotty") that
-    cut the first word. The prompt's first heard segment gives the lag; keep
-    0.2 s of it as margin, and never start before the last heard prompt word
-    ends plus 0.3 s, so prompt words cannot count as the reply.
+    cut the first word. The first heard segment made of prompt words gives
+    the lag; keep 0.2 s of it as margin, and never start before the last such
+    segment ends plus 0.3 s, so prompt words cannot count as the reply.
+    2026-10-21 review: a stray pre-prompt utterance ("okay") must not set the
+    lag, and the applied lag is capped, so the crop cannot jump into the
+    prompt. No segment with prompt words leaves the crop uncorrected.
     Returns (offset, lag estimate or None).
     """
-    spoken = [s for s in prompt_segments if str(s.get("text", "")).strip()]
-    if not spoken:
+    prompt_words = set(normalize(prompt_text).split())
+    heard = [s for s in prompt_segments if prompt_words_heard(s.get("text", ""), prompt_words)]
+    if not heard:
         return offset, None
-    lag = prompt_start - float(spoken[0]["start"])
+    lag = prompt_start - float(heard[0]["start"])
     if not 0 < lag < prompt_start:
         return offset, round(lag, 2)
-    earliest = float(spoken[-1]["end"]) + .3
-    return round(min(offset, max(offset - (lag - .2), earliest)), 3), round(lag, 2)
+    earliest = float(heard[-1]["end"]) + .3
+    shift = min(lag, MAX_CAPTURE_LAG) - .2
+    return round(min(offset, max(offset - shift, earliest)), 3), round(lag, 2)
 
 
 def capture_window_metrics(media, media_seconds, prompt_end, response_start):
@@ -682,6 +726,10 @@ class PerceptionRecorder:
     def poll(self):
         try:
             for event in perception_recent(self.host, self.device):
+                if isinstance(event.get("data"), dict) and "identity" in event["data"]:
+                    # 2026-10-21 review: these events become perception-events.json;
+                    # a recognised person's identity stays on the host.
+                    event = {**event, "data": {k: v for k, v in event["data"].items() if k != "identity"}}
                 key = (event.get("ts"), event.get("name"), json.dumps(event.get("data"), sort_keys=True))
                 self.seen[key] = event
         except Exception:
@@ -791,7 +839,10 @@ def await_cold(config, seconds, poll=3):
 
 
 def evaluate_silence(case, transcript, log_text, events, window, after, device):
-    """Negative test: the robot is asleep, so a spoken prompt must do nothing."""
+    """Negative test: the robot is asleep, so a spoken prompt must do nothing.
+
+    `after` must be taken before case cleanup changes the held state.
+    """
     segments = transcript.get("segments", [])
     response = " ".join(s["text"].strip() for s in segments
                         if s.get("end", 0) > s.get("start", 0) and s.get("no_speech_prob", 1) < .8
@@ -982,6 +1033,12 @@ def run_case(session, config, case):
             write_json(directory / "perception-events.json", events)
             result["perception_poll_errors"] = recorder.errors
         result["observed_states"] = [state for _, state in state_changes(events, *window)]
+        held = None
+        if case.get("expect_silence"):
+            # 2026-10-21 review: judge the held state before cleanup sets the
+            # robot back to idle, or every S05 attempt reads as woken.
+            held = snapshot(config["host"])
+            write_json(directory / "held.json", held)
         # Clean up before transcription: evaluator runtime must not leave a
         # sleeping robot (microphone disabled) or a song running for minutes.
         cleanup_due = False
@@ -1047,7 +1104,8 @@ def run_case(session, config, case):
         if not case.get("expect_silence"):
             # A silence case keeps the late crop: prompt reverb must not count as speech.
             offset, result["capture_lag_estimate"] = corrected_response_offset(
-                prompt_offset, offset, load(directory / "prompt-heard.json").get("segments", []))
+                prompt_offset, offset, load(directory / "prompt-heard.json").get("segments", []),
+                case["prompt"])
         result["response_offset"] = offset
         result["native_audio_windows"] = capture_window_metrics(
             media, result["media"]["audio_seconds"], offset - .4, offset)
@@ -1083,7 +1141,7 @@ def run_case(session, config, case):
         log_text = (directory / "xiaozhi-esp32-server.log").read_text()
         if case.get("expect_silence"):
             result.update(evaluate_silence(case, load(directory / "response.json"), log_text,
-                                           events, window, after, config["device"]))
+                                           events, window, held, config["device"]))
             result["recovery"] = "PASS" if restored else "FAIL"
             if result["failure"] is None and not restored:
                 set_failure(result, "state_not_restored", case)
@@ -1106,6 +1164,13 @@ def run_case(session, config, case):
         result.update(verdict="BLOCKED", interaction="BLOCKED", failure=str(exc),
                       exception=type(exc).__name__)
         result[str(exc)] = "BLOCKED"
+    except (InterruptedError, TimeoutError) as exc:
+        # 2026-10-21 review: an operator stop, the session deadline or a hung
+        # harness subprocess (transcription, say) says nothing about the robot.
+        interrupted = isinstance(exc, (InterruptedError, DeadlineReached))
+        result.update(verdict="INCONCLUSIVE", interaction="INCONCLUSIVE",
+                      failure="interrupted" if interrupted else "harness_timeout",
+                      exception=type(exc).__name__, exception_detail=str(exc))
     except Exception as exc:
         result.update(verdict="FAIL", failure=str(exc), exception=type(exc).__name__)
     finally:
@@ -1240,8 +1305,21 @@ def record_attempt(checkpoint, case, result):
             return
         checkpoint.setdefault("blocked", {})[case["id"]] = result.get("failure", "prerequisite_missing")
         return
+    if result.get("failure") in ("interrupted", "harness_timeout"):
+        # 2026-10-21 review: not a product failure, so no quarantine and no
+        # progress toward the auto-pause. A stop or deadline is the operator's
+        # doing; a harness timeout that keeps recurring sets the case aside.
+        counts["streak"] = 0
+        if result["failure"] == "harness_timeout":
+            counts["inconclusive"] = counts.get("inconclusive", 0) + 1
+            if (counts["inconclusive"] >= case.get("max_inconclusive", 3)
+                    and case["id"] not in checkpoint.setdefault("unresolved", [])):
+                checkpoint["unresolved"].append(case["id"])
+        return
     fields = [result.get(k) for k in ("capture", "playback", "interaction", "recovery")]
-    acoustic_pass = all(value == "PASS" for value in fields)
+    # 2026-10-21 review: a FAIL verdict (say the catch-all exception after
+    # evaluation) is never an acoustic pass, whatever the fields say.
+    acoustic_pass = result.get("verdict") != "FAIL" and all(value == "PASS" for value in fields)
     # An attempt that proved nothing (reference-mic slip, extra speech in the
     # room) breaks the streak but is not evidence of a robot fault, so it must
     # not push a healthy case toward quarantine or pause the run.
@@ -1264,8 +1342,6 @@ def record_attempt(checkpoint, case, result):
     if counts["streak"] >= case.get("required_passes", 3) and case["id"] not in checkpoint["completed"]:
         checkpoint["completed"].append(case["id"])
     if counts["failures"] >= case.get("max_failures", 3) and case["id"] not in checkpoint["quarantined"]:
-        checkpoint["quarantined"].append(case["id"])
-    if result.get("exception") in {"InterruptedError", "TimeoutError"} and case["id"] not in checkpoint["quarantined"]:
         checkpoint["quarantined"].append(case["id"])
 
 

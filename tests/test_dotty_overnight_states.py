@@ -202,3 +202,43 @@ def test_interrupted_runner_restores_state_on_next_run(tmp_path, monkeypatch):
     runner.run(tmp_path, config, list(CATALOGUE.values()), once=True)
     assert robot.state == "idle"
     assert "needs_restore" not in json.loads((tmp_path / "checkpoint.json").read_text())
+
+
+@pytest.mark.parametrize("woke, failure", [(False, None), (True, "voice_left_sleep")])
+def test_sleep_hold_is_judged_before_cleanup_wakes_robot(tmp_path, monkeypatch, boundary, woke, failure):
+    # 2026-10-21 review: the after snapshot follows cleanup's set-state idle, so
+    # judging S05 from it failed every attempt. Judge the held state instead.
+    config, _ = boundary
+    config.update(python="fixture-python", model="fixture-model", finish_at="2099-01-01T01:00:00+00:00")
+    robot = FakeRobot(monkeypatch, state="idle")
+    monkeypatch.setattr(runner, "snapshot", snapshot_for(robot))
+    fixture_command = runner.command
+    monkeypatch.setattr(runner, "command", lambda argv, **kwargs:
+                        "" if argv[0] == "ffmpeg" else fixture_command(argv, **kwargs))
+    monkeypatch.setattr(runner, "verify", lambda *args, **kwargs: {"audio_seconds": 40, "video_seconds": 40})
+    monkeypatch.setattr(runner, "audio_metrics", lambda *args, **kwargs: {"fixture": True})
+    monkeypatch.setattr(runner, "read_log_window", lambda host, start, end, directory:
+                        (directory / "xiaozhi-esp32-server.log").write_text(""))
+
+    def process(argv, log, session, timeout, env=None, deadline=None):
+        directory = Path(log).parent
+        if "transcribe" not in argv:
+            for name, second in (("recording-start", 0), ("playback-start", 2), ("playback-end", 5)):
+                (directory / f"raw.{name}.txt").write_text(f"2026-09-12T12:00:0{second}+00:00")
+            if woke:
+                robot.state = "idle"  # woke without an echo the recorder saw
+            return
+        output = Path(argv[argv.index("--output") + 1])
+        heard = output.name == "prompt-heard.json"
+        runner.write_json(output, {"segments": [{"text": "Wake up. What is your name?", "start": 0, "end": 3,
+                                                 "no_speech_prob": .01, "avg_logprob": -.1}] if heard else []})
+    monkeypatch.setattr(runner, "guarded_process", process)
+    result = runner.run_case(tmp_path, config, CATALOGUE["S05-sleep-ignores-voice"])
+    assert result["setup"]["verified"] and result["cleanup"]["state"]["verified"]
+    assert robot.state == "idle"  # cleanup still woke the robot afterwards
+    directory = tmp_path / "cases" / result["id"]
+    assert runner.load(directory / "held.json")["perception"]["robot"]["current_state"] == (
+        "idle" if woke else "sleep")
+    assert result["failure"] == failure
+    assert result["interaction"] == ("FAIL" if woke else "PASS")
+    assert result["state_after_capture"] == ("idle" if woke else "sleep")

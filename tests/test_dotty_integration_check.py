@@ -154,3 +154,48 @@ def test_other_asr_skips_the_whisper_check(monkeypatch):
 def test_token_is_read_inside_container_only():
     assert "DOTTY_ADMIN_TOKEN" in check._ADMIN_CODE
     assert "print(token" not in check._ADMIN_CODE
+
+
+def flaky_restore(remote, failures):
+    """kid_mode restore (policy true -> enabled True) fails `failures` times."""
+    original = remote.admin
+    state = {"left": failures}
+
+    def admin(method, route, body=None, with_token=True):
+        if route == "set-toggle" and body.get("name") == "kid_mode" and body.get("enabled") is True:
+            remote.calls.append((route, body))
+            if state["left"]:
+                state["left"] -= 1
+                return {"status": 503, "body": {"error": "fixture"}, "token_configured": True}
+            return {"status": 200, "body": {"ok": True}, "token_configured": True}
+        return original(method, route, body, with_token)
+    remote.admin = admin
+
+
+def kid_row(result):
+    return next(row for row in result.rows if row["check"] == "set-toggle kid_mode (restored)")
+
+
+def kid_restores(remote):
+    return [b for r, b in remote.calls if r == "set-toggle" and b["name"] == "kid_mode" and b["enabled"]]
+
+
+def test_toggle_restore_is_retried_until_it_lands(monkeypatch, capsys):
+    # 2026-10-21 review: one dropped request must not leave kid_mode off.
+    remote = FakeRemote()
+    flaky_restore(remote, failures=2)
+    result = run(remote, monkeypatch)
+    assert kid_row(result)["status"] == "PASS", result.table()
+    assert len(kid_restores(remote)) == 3
+    assert "NOT restored" not in capsys.readouterr().err
+
+
+def test_toggle_that_never_restores_fails_loudly(monkeypatch, capsys):
+    remote = FakeRemote()
+    flaky_restore(remote, failures=99)
+    result = run(remote, monkeypatch)
+    row = kid_row(result)
+    assert row["status"] == "FAIL" and "NOT restored" in row["detail"]
+    assert result.failed
+    assert len(kid_restores(remote)) == 3
+    assert "!!! kid_mode NOT restored to True — set it on the dashboard now !!!" in capsys.readouterr().err

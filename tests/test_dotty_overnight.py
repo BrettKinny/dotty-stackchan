@@ -413,24 +413,42 @@ def test_response_vad_threshold_does_not_change_prompt_transcription(tmp_path, m
     assert result["transcription_analysis"]["prompt-heard"]["vad_parameters"] == {"threshold": .5}
 
 
-@pytest.mark.parametrize("segments, expected", [
+NAME = "What is your name? Please answer in one short sentence."
+REPEAT = "Repeat these five words: purple, robot, seven, window, banana."
+
+
+@pytest.mark.parametrize("prompt, segments, expected", [
     # 2026-10-21 V01: prompt played at 2.00-4.85 s after launch, heard at 1.04-3.94 s.
-    ([{"text": "What is your name?", "start": 1.04, "end": 3.94}], (4.49, .96)),
+    (NAME, [{"text": "What is your name?", "start": 1.04, "end": 3.94}], (4.49, .96)),
     # V02: a long prompt; the crop still moves by the lag less the margin.
-    ([{"text": "Repeat these", "start": 1.04, "end": 2.9}, {"text": "banana", "start": 3.6, "end": 6.08}],
+    (REPEAT, [{"text": "Repeat these", "start": 1.04, "end": 2.9}, {"text": "banana", "start": 3.6, "end": 6.08}],
      (6.56, .96)),
     # A late-heard prompt word bounds the crop: never before its end + 0.3 s.
-    ([{"text": "What is your name?", "start": 1.04, "end": 4.6}], (4.9, .96)),
-    # Nothing heard, or a lag that cannot be right: leave the crop alone.
-    ([], (None, None)),
-    ([{"text": " ", "start": 0.5, "end": 1}], (None, None)),
-    ([{"text": "late", "start": 2.5, "end": 4}], (None, -.5)),
+    (NAME, [{"text": "What is your name?", "start": 1.04, "end": 4.6}], (4.9, .96)),
+    # 2026-10-21 review: the applied lag is capped at 1.5 s (less the margin).
+    (NAME, [{"text": "What is your name?", "start": .3, "end": 3.2}], (3.95, 1.7)),
+    # Nothing heard, nothing from the prompt heard, or a lag that cannot be right.
+    (NAME, [], (None, None)),
+    (NAME, [{"text": " ", "start": 0.5, "end": 1}], (None, None)),
+    (NAME, [{"text": "Hello there, okay.", "start": 1.04, "end": 3.94}], (None, None)),
+    (NAME, [{"text": "What is your name?", "start": 2.5, "end": 4}], (None, -.5)),
 ])
-def test_response_crop_corrected_by_capture_lag(segments, expected):
+def test_response_crop_corrected_by_capture_lag(prompt, segments, expected):
     offset = 5.25 if not any(s["end"] > 5 for s in segments) else 7.32
-    got = runner.corrected_response_offset(2.0, offset, segments)
+    got = runner.corrected_response_offset(2.0, offset, segments, prompt)
     assert got == ((offset if expected[0] is None else expected[0]), expected[1])
     assert got[0] <= offset
+
+
+def test_stray_pre_prompt_utterance_does_not_set_capture_lag():
+    # 2026-10-21 review: someone saying "okay" before playback once set a 1.8 s
+    # lag and cut the crop into the prompt. Only prompt words measure the lag.
+    segments = [{"text": "Okay then.", "start": .2, "end": .7},
+                {"text": "What is your name?", "start": 1.04, "end": 3.94}]
+    assert runner.corrected_response_offset(2.0, 5.25, segments, NAME) == (4.49, .96)
+    # ...and a stray utterance after the prompt does not move the floor either.
+    segments.append({"text": "Hello there.", "start": 4.2, "end": 4.8})
+    assert runner.corrected_response_offset(2.0, 5.25, segments, NAME) == (4.49, .96)
 
 
 @pytest.mark.parametrize("vad_text, novad_text, used", [
@@ -559,12 +577,25 @@ def test_vad_cli_cannot_silently_override_existing_config(tmp_path, monkeypatch,
 
 def test_blocked_prerequisite_does_not_increment_failure_threshold(tmp_path):
     checkpoint = runner.restore_checkpoint(tmp_path)
-    runner.record_attempt(checkpoint, {"id": "wake"},
-                          {"verdict": "BLOCKED", "failure": "wake_precondition"})
-    assert checkpoint["blocked"] == {"wake": "wake_precondition"}
-    assert checkpoint["counts"]["wake"]["failures"] == 0
+    runner.record_attempt(checkpoint, {"id": "song"},
+                          {"verdict": "BLOCKED", "failure": "song_not_in_catalogue"})
+    assert checkpoint["blocked"] == {"song": "song_not_in_catalogue"}
+    assert checkpoint["counts"]["song"]["failures"] == 0
     assert checkpoint["consecutive_failures"] == 0
     assert checkpoint["completed"] == []
+
+
+def test_slow_cold_wake_precondition_is_retried_not_blocked_for_the_night(tmp_path):
+    # 2026-10-21 review: one conversation slow to time out must not block W01.
+    checkpoint = runner.restore_checkpoint(tmp_path)
+    blocked = {"verdict": "BLOCKED", "failure": "wake_precondition"}
+    runner.record_attempt(checkpoint, {"id": "wake"}, blocked)
+    assert checkpoint["blocked"] == {}
+    assert runner.eligible_cases([{"id": "wake"}], checkpoint) == [{"id": "wake"}]
+    assert checkpoint["counts"]["wake"]["failures"] == 0 and checkpoint["consecutive_failures"] == 0
+    runner.record_attempt(checkpoint, {"id": "wake"}, blocked)
+    runner.record_attempt(checkpoint, {"id": "wake"}, blocked)
+    assert checkpoint["unresolved"] == ["wake"] and checkpoint["quarantined"] == []
 
 
 def test_stale_listening_status_is_retried_not_blocked(tmp_path):
@@ -678,10 +709,127 @@ def test_failure_threshold_quarantines_and_pauses(tmp_path):
     assert checkpoint["completed"] == []
 
 
-def test_operator_interruption_is_not_automatically_retried(tmp_path):
+def test_fail_verdict_is_never_an_acoustic_pass(tmp_path):
+    # 2026-10-21 review: the catch-all except sets verdict FAIL after evaluation
+    # may already have marked every field PASS. That is a failure, not a pass.
     checkpoint = runner.restore_checkpoint(tmp_path)
-    runner.record_attempt(checkpoint, {"id": "memory-write"}, {"exception": "InterruptedError"})
-    assert checkpoint["quarantined"] == ["memory-write"]
+    crashed = {**dict.fromkeys(("capture", "playback", "interaction", "recovery"), "PASS"),
+               "verdict": "FAIL", "failure": "frame extraction failed", "exception": "CalledProcessError"}
+    for _ in range(3):
+        runner.record_attempt(checkpoint, {"id": "identity"}, crashed)
+    counts = checkpoint["counts"]["identity"]
+    assert (counts["streak"], counts["failures"]) == (0, 3)
+    assert checkpoint["quarantined"] == ["identity"]
+    assert checkpoint["completed"] == []
+
+
+@pytest.mark.parametrize("raised", [InterruptedError("operator stopped session"),
+                                    runner.DeadlineReached("session deadline reached")])
+def test_operator_stop_or_deadline_is_not_a_product_failure(tmp_path, prompt_capture_boundary, monkeypatch, raised):
+    # 2026-10-21 review: stopping the session mid-case must not quarantine it.
+    config, captured = prompt_capture_boundary
+    def capture(argv, log, session, timeout, env, deadline):
+        captured.append(argv)
+        raise raised
+    monkeypatch.setattr(runner, "guarded_process", capture)
+    result = runner.run_case(tmp_path, config, {"id": "identity", "prompt": "What is your name?"})
+    assert result["verdict"] == result["interaction"] == "INCONCLUSIVE"
+    assert result["failure"] == "interrupted"
+    checkpoint = runner.restore_checkpoint(tmp_path / "ledger")  # run_case leaves active.json
+    good = dict.fromkeys(("capture", "playback", "interaction", "recovery"), "PASS")
+    runner.record_attempt(checkpoint, {"id": "identity"}, good)
+    for _ in range(3):
+        runner.record_attempt(checkpoint, {"id": "identity"}, result)
+    counts = checkpoint["counts"]["identity"]
+    assert counts["streak"] == 0 and counts["failures"] == 0
+    assert checkpoint["consecutive_failures"] == 0
+    assert checkpoint["quarantined"] == [] and checkpoint["unresolved"] == []
+
+
+def test_transcription_timeout_is_inconclusive_not_quarantine(tmp_path, monkeypatch, prompt_capture_boundary):
+    config, _ = prompt_capture_boundary
+    config.update(python="fixture-python", model="fixture-model", finish_at="2099-01-01T01:00:00+00:00")
+    boundary_command = runner.command
+    monkeypatch.setattr(runner, "command", lambda argv, **kwargs:
+                        "" if argv[0] == "ffmpeg" else boundary_command(argv, **kwargs))
+    monkeypatch.setattr(runner, "verify", lambda *args, **kwargs: {"audio_seconds": 40, "video_seconds": 40})
+    monkeypatch.setattr(runner, "read_log_window", lambda host, start, end, directory:
+                        (directory / "xiaozhi-esp32-server.log").write_text(""))
+    def process(argv, log, session, timeout, env=None, deadline=None):
+        directory = Path(log).parent
+        if "transcribe" in argv:
+            raise TimeoutError(f"process exceeded {timeout}s")
+        for name, second in (("recording-start", 0), ("playback-start", 2), ("playback-end", 5)):
+            (directory / f"raw.{name}.txt").write_text(f"2026-09-12T12:00:0{second}+00:00")
+    monkeypatch.setattr(runner, "guarded_process", process)
+    result = runner.run_case(tmp_path, config, {"id": "arithmetic", "prompt": "Twelve plus seven?"})
+    assert result["capture"] == "PASS"
+    assert result["verdict"] == result["interaction"] == "INCONCLUSIVE"
+    assert result["failure"] == "harness_timeout"
+    checkpoint = runner.restore_checkpoint(tmp_path / "ledger")  # run_case leaves active.json
+    for _ in range(3):
+        runner.record_attempt(checkpoint, {"id": "arithmetic"}, result)
+    assert checkpoint["quarantined"] == [] and checkpoint["counts"]["arithmetic"]["failures"] == 0
+    assert checkpoint["consecutive_failures"] == 0
+    # A timeout that keeps recurring is set aside rather than retried for ever.
+    assert checkpoint["unresolved"] == ["arithmetic"]
+
+
+def test_speaker_check_failure_in_harness_is_not_a_pass(tmp_path, monkeypatch, prompt_capture_boundary):
+    # 2026-10-21 review: dotty-av-test.sh exits 3 when the sink volume or mute
+    # moved; guarded_process turns that into an error the runner records as FAIL.
+    config, _ = prompt_capture_boundary
+    def capture(argv, log, session, timeout, env, deadline):
+        raise RuntimeError("process exit 3; see capture.log")
+    monkeypatch.setattr(runner, "guarded_process", capture)
+    result = runner.run_case(tmp_path, config, {"id": "identity", "prompt": "What is your name?"})
+    assert result["verdict"] == "FAIL" and result["capture"] == "INCONCLUSIVE"
+    assert result["failure"] == "process exit 3; see capture.log"
+    checkpoint = runner.restore_checkpoint(tmp_path / "ledger")  # run_case leaves active.json
+    runner.record_attempt(checkpoint, {"id": "identity"}, result)
+    assert checkpoint["counts"]["identity"]["streak"] == 0
+    assert checkpoint["counts"]["identity"]["failures"] == 1
+
+
+def test_guarded_process_exit_status_is_an_error(tmp_path):
+    with pytest.raises(RuntimeError, match="process exit 3"):
+        runner.guarded_process([sys.executable, "-c", "raise SystemExit(3)"],
+                               tmp_path / "process.log", tmp_path, 60)
+
+
+def test_snapshot_evidence_drops_recognised_identity(monkeypatch):
+    # 2026-10-21 review: before.json/after.json must not name a family member.
+    perception = {"robot": {"current_state": "idle", "listening": False, "sensor_stale": False,
+                            "sensor_age_s": 1.5, "sensor_seen": True, "last_event_t": 1000,
+                            "last_event_name": "face_recognized", "last_chat_status_t": 990,
+                            "last_state_change_t": 900, "face_present": True,
+                            "last_face_id": "Brett", "last_face_recognized_t": 999,
+                            "last_sound_dir": "left"}}
+    def ssh(host, argv, timeout=30, **kwargs):
+        url = argv[-1]
+        if "perception/state" in url:
+            return json.dumps(perception)
+        if url.endswith("/health"):
+            return "{}"
+        return "/x true 0 sha\n" * 4
+    monkeypatch.setattr(runner, "ssh", ssh)
+    monkeypatch.setattr(runner, "admin", lambda host, route, body=None: {"devices": ["robot"]})
+    snap = runner.snapshot("unused")
+    state = snap["perception"]["robot"]
+    assert "last_face_id" not in state and "last_face_recognized_t" not in state
+    assert "Brett" not in json.dumps(snap)
+    assert state == {k: v for k, v in perception["robot"].items() if k in runner.PERCEPTION_FIELDS}
+    assert runner.wake_precondition(snap, "robot")
+
+
+def test_perception_events_evidence_drops_recognised_identity(monkeypatch):
+    monkeypatch.setattr(runner, "perception_recent", lambda host, device: [
+        {"ts": 1000, "name": "face_recognized", "data": {"identity": "Brett", "confidence": .9}},
+        {"ts": 1001, "name": "state_changed", "data": {"state": "talk"}}])
+    recorder = runner.PerceptionRecorder("unused", "robot")
+    recorder.poll()
+    assert "Brett" not in json.dumps(recorder.events())
+    assert runner.state_changes(recorder.events(), 0, 2000) == [(1001.0, "talk")]
 
 
 def test_device_lock_prevents_two_output_sessions():
@@ -715,6 +863,27 @@ def test_reference_mic_mishearing_is_inconclusive_when_service_tts_matches():
     assert result["failure"] == "response_transcript_disagrees_with_tts"
     assert result["interaction"] == result["verdict"] == "INCONCLUSIVE"
     assert result["service_tts_text"] == "My name is Dotty"
+
+
+def test_mic_match_cannot_pass_when_logged_tts_says_something_else():
+    # 2026-10-21 review: the server's own TTS text lacks the answer, so a
+    # reference-mic transcript that matches (room speech) is not a pass.
+    logs = "结果: name\n发送音频消息: SentenceType.FIRST, I am a little robot\nSentenceType.LAST"
+    result = runner.evaluate({"asr": [["name"]], "reply": [["Dotty"]]}, transcript("My name is Dotty"),
+                             logs, 2, after(), "robot")
+    assert result["response_match"] is True and result["service_tts_match"] is False
+    assert result["failure"] == "service_tts_disagrees_with_expected"
+    assert result["interaction"] == result["verdict"] == "INCONCLUSIVE"
+    runner.apply_contract(result, {"reply": [["Dotty"]]},
+                          runner.assess_contract({"reply": [["Dotty"]]}, result, {}, []))
+    assert result["interaction"] == "INCONCLUSIVE"
+
+
+def test_absent_service_tts_text_leaves_mic_match_unchanged():
+    result = runner.evaluate({"asr": [["name"]], "reply": [["Dotty"]]}, transcript("My name is Dotty"),
+                             "结果: name\nSentenceType.FIRST\nSentenceType.LAST", 2, after(), "robot")
+    assert result["service_tts_text"] == "" and result["failure"] is None
+    assert result["interaction"] == "PASS"
 
 
 def test_wrong_reply_still_fails_when_service_tts_also_lacks_the_answer():

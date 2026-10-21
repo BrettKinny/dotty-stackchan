@@ -63,6 +63,8 @@ Environment overrides:
 
 The run command needs espeak-ng for local/offline TTS. No recording is
 uploaded. Volume is capped at 60% unless DOTTY_AV_ALLOW_HIGH_VOLUME=1.
+The run command never changes volume or mute: set them with `volume` first;
+it exits 3 before playback if the sink is muted or not at DOTTY_AV_VOLUME.
 EOF
 }
 
@@ -90,6 +92,22 @@ set_volume() {
     pactl set-sink-mute "$SINK" 0
     pactl set-sink-volume "$SINK" "${percent}%"
     pactl get-sink-volume "$SINK"
+}
+
+require_volume() {
+    # 2026-10-21 review: run mode never changes the household speaker. It
+    # only confirms the level the operator calibrated is still in force.
+    local percent="$1" levels mute
+    [[ "$percent" =~ ^[0-9]+$ ]] || {
+        echo "ERROR: volume must be a whole-number percentage" >&2
+        exit 2
+    }
+    levels="$(pactl get-sink-volume "$SINK" | grep -oE '[0-9]+%' | tr -d '%')" || levels=''
+    mute="$(pactl get-sink-mute "$SINK")" || mute=''
+    if [[ -z "$levels" ]] || grep -qvx -- "$percent" <<<"$levels" || [[ "$mute" != 'Mute: no' ]]; then
+        echo "ERROR: speaker volume/mute changed since check (need ${percent}% unmuted on $SINK)" >&2
+        exit 3
+    fi
 }
 
 default_output() {
@@ -235,7 +253,6 @@ run)
     speech_seconds="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$speech")"
     total_seconds="$(awk -v speech="$speech_seconds" -v response="$response_seconds" 'BEGIN { printf "%d", speech + response + 3.999 }')"
     bounded "$total_seconds"
-    set_volume "$VOLUME"
     target_sink="$SINK"
     [[ "$target_sink" != '@DEFAULT_SINK@' ]] || target_sink="$(pactl get-default-sink)"
     cp -- "$speech" "${output%.mp4}.prompt.wav"
@@ -249,6 +266,7 @@ run)
     sleep 2
     kill -0 "$capture_pid" 2>/dev/null || { echo 'ERROR: capture failed before playback' >&2; exit 1; }
     [[ -s "$output" ]] || { echo 'ERROR: capture produced no file before playback' >&2; exit 1; }
+    require_volume "$VOLUME"
     date -u +%FT%T.%NZ > "${output%.mp4}.playback-start.txt"
     pw-play --target "$target_sink" "$speech"
     date -u +%FT%T.%NZ > "${output%.mp4}.playback-end.txt"

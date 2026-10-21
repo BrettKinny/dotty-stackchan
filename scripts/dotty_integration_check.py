@@ -152,6 +152,27 @@ def read_policy(remote, name):
     raise RuntimeError(f"unparseable {name} policy value")
 
 
+def restore_toggle(remote, device, toggle, policy, attempts=3, pause=2):
+    """Put a guardian toggle back to policy; shout if it will not go back.
+
+    2026-10-21 review: kid_mode left off in a family home is the worst outcome
+    of this check, so one dropped request must not leave it flipped silently.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            ok_response(remote.admin("POST", "set-toggle", {"device_id": device, "name": toggle,
+                                                           "enabled": policy}), "restore")
+            return attempt
+        except Exception as exc:
+            error = exc
+            if attempt < attempts:
+                time.sleep(pause)
+    print(f"\n!!! {toggle} NOT restored to {policy} — set it on the dashboard now !!!\n",
+          file=sys.stderr, flush=True)
+    raise RuntimeError(f"{toggle} NOT restored to policy {policy} after {attempts} attempts: "
+                       f"{str(error)[:120]}")
+
+
 def check(remote, device, skip_photo=False, skip_motion=False):
     checks = Checks()
     context = {}
@@ -262,8 +283,7 @@ def check(remote, device, skip_photo=False, skip_motion=False):
                                                                "enabled": not policy}), "flip")
                 time.sleep(2)
             finally:
-                ok_response(remote.admin("POST", "set-toggle", {"device_id": device, "name": toggle,
-                                                               "enabled": policy}), "restore")
+                restore_toggle(remote, device, toggle, policy)
             return "PASS", f"pip {not policy} then restored to policy {policy}; pip needs visual review"
         checks.run(f"set-toggle {toggle} (restored)", flip)
 
