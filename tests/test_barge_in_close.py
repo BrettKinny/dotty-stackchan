@@ -149,6 +149,25 @@ class TestBargeInStorm(unittest.TestCase):
                          ["one thing", "another", "and more"])
         self.assertEqual(len(calls), 1)
 
+    def test_injected_turns_while_speaking_do_not_count(self):
+        # The greeter and dashboard inject text while Dotty may be speaking;
+        # that is the server talking, not the child interrupting.
+        conn = _conn()
+        intent = AsyncMock(return_value=True)
+
+        async def go():
+            with patch.object(rah, "handleAbortMessage", new=AsyncMock()), \
+                 patch.object(rah, "_sync_toggles_once", new=AsyncMock()), \
+                 patch.object(rah, "handle_user_intent", new=intent):
+                for i in range(6):
+                    conn.client_is_speaking = True
+                    await rah.startToChat(conn, json.dumps({"content": f"hi {i}"}), injected=True)
+
+        _result, calls = self._run(go)
+        self.assertEqual(intent.await_count, 6)
+        self.assertEqual(calls, [])
+        self.assertEqual(getattr(conn, "_dotty_barge_ins", []), [])
+
     def test_turns_while_dotty_is_silent_do_not_count(self):
         conn = _conn()
         conn.client_is_speaking = False

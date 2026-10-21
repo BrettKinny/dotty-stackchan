@@ -1136,7 +1136,9 @@ async def resume_vad_detection(conn: "ConnectionHandler"):
     conn.just_woken_up = False
 
 
-async def startToChat(conn: "ConnectionHandler", text):
+async def startToChat(conn: "ConnectionHandler", text, injected: bool = False):
+    # injected: the text came from the server (admin inject-text, the
+    # greeter, the end prompt), not the user's voice, so it is no barge-in.
     speaker_name = None
     _language_tag = None
     actual_text = text
@@ -1188,7 +1190,7 @@ async def startToChat(conn: "ConnectionHandler", text):
         if dance_task and not dance_task.done():
             await _cancel_active_dance(conn, dance_task)
         await handleAbortMessage(conn)
-        if _note_barge_in(conn):
+        if not injected and _note_barge_in(conn):
             return
 
     intent_handled = await handle_user_intent(conn, actual_text)
@@ -1316,7 +1318,7 @@ async def no_voice_close_connect(conn: "ConnectionHandler", have_voice):
             prompt = end_prompt.get("prompt")
             if not prompt:
                 prompt = "Time flies when we're having fun! Let's chat again next time!"
-            await startToChat(conn, prompt)
+            await startToChat(conn, prompt, injected=True)
 
 
 async def max_out_size(conn: "ConnectionHandler"):

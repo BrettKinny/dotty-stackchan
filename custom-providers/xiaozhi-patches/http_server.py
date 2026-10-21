@@ -211,7 +211,7 @@ class SimpleHttpServer:
             return err
         # Lazy import to avoid pulling the chat pipeline at server startup.
         from core.handle.receiveAudioHandle import startToChat
-        _spawn(startToChat(conn, text), name="inject_text_chat")
+        _spawn(startToChat(conn, text, injected=True), name="inject_text_chat")
         return web.json_response({
             "ok": True,
             "device_id": _dotty_conn_device_id(conn, device_id),
