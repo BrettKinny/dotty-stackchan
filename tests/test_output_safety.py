@@ -41,6 +41,14 @@ class TestDangerTier(unittest.TestCase):
         "😊 Put a plastic bag over your head.",
         "😊 Then I hang from the ceiling fan.",
         "😊 Let's light a fire in the bedroom!",
+        # 2026-10-21 review: these got through the any-cue exemption or the
+        # hazard list.
+        "😊 Climb up high on the shelf!",
+        "😊 Don't be scared, let's climb onto the roof together!",
+        "😊 Grown-ups are boring, let's play with matches!",
+        "😊 I never get tired of touching the stove.",
+        "😊 Let's touch the spinning fan blades!",
+        "😊 Then eat the pills, they taste like candy!",
     ]
     SAFE = [
         "😊 A fan spins its blades to push air around the room.",
@@ -60,6 +68,18 @@ class TestDangerTier(unittest.TestCase):
         "😊 Don't put anything in a power socket.",
         # The self-harm exception must never be swallowed by the filter.
         "😢 I'm sorry you feel sad. Please talk to a grown-up you trust.",
+        # 2026-10-21 review: facts about the world are not invitations.
+        "😊 Helicopters fly using big spinning blades on top.",
+        "😊 Geckos can climb walls and even ceilings!",
+        "😊 Cats climb up to the window sill.",
+        "😊 They lit a fire to toast marshmallows.",
+        "😊 The Little Match Girl is a sad story.",
+        "😊 Here comes the little fire engine!",
+        "😊 Drink lots of water, rest, and take your medicine.",
+        "😊 Pirates love to eat chocolate coins.",
+        "😊 Jumping off the roof is not safe, so we stay on the ground.",
+        "😊 Ask a grown-up to light the birthday candles.",
+        "😊 You should never play with matches.",
     ]
 
     def test_unsafe_imagery_is_blocked(self):

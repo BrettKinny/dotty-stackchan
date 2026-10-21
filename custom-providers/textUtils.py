@@ -118,14 +118,19 @@ _CF_TIER_ALERT_RE = re.compile(
 # dancing around the blades". No blocked WORD is involved, so this tier
 # matches imitable-danger PHRASES: an action a child could copy, close to
 # the hazard, inside one sentence ([^.!?\n] keeps the gap in-sentence).
-# Kept deliberately narrow — "a fan spins its blades to push air" or
-# "blades of grass" must still pass. See _CF_DANGER_SAFETY_CUE_RE for the
-# one exemption (safety advice).
+# A phrase only counts when the sentence invites copying it (see
+# _danger_is_imitable): "Helicopters fly using spinning blades" is a fact,
+# "Let's touch the fan blades!" is an invitation. 2026-10-21 review: the
+# old any-verb-nearby rule blocked helicopters, geckos, "The Little Match
+# Girl" and "take your medicine", yet let "Climb up high on the shelf!" by.
 _GAP = r"[^.!?\n]{0,40}?"
+# A swallowing hazard must be the verb's object: "eat the pills", not
+# "drink lots of water, rest, and take your medicine" or "chocolate coins".
+_OBJ = r" (?:a |an |the |some |all the |those |these |my |your |his |her |our |their )?"
 _CF_TIER_DANGER_RE = re.compile(
     r"\b(?:"
     # spinning blades / ceiling fans
-    r"(?:zoom|fly|flew|flies|climb|swing|hang|hung|danc|ride|rode|jump|touch|grab|poke|reach|play)\w*"
+    r"(?:zoom|fly|flew|flies|flying|climb|swing|hang|hung|danc|ride|rode|jump|touch|grab|poke|reach|play)\w*"
     + _GAP + r"\b(?:ceiling fans?|fan blades?|blades?\b(?! of grass))"
     r"|(?:around|between|through|into|onto|near) (?:the |those |its |spinning |sharp )*(?:fan )?blades\b(?! of grass)"
     # electricity
@@ -133,27 +138,52 @@ _CF_TIER_DANGER_RE = re.compile(
     + r"\b(?:power ?points?|power sockets?|sockets?|outlets?|electrical wires?|live wires?|plug holes?)"
     # fire and sharp things
     r"|play\w* with (?:fire|flames?|matches|lighters?|knives|a knife|scissors|candles?|razors?)"
-    r"|(?:light|lit|strike|struck)\w* (?:a |the |some )?(?:matches|match|lighters?|fires?)\b"
+    r"|(?:light(?:s|ed|ing)?|lit|strik(?:e|es|ing)|struck) (?:a |the |some )?(?:matches|match|lighters?|fires?)\b"
     # hot things
     r"|touch\w*" + _GAP + r"\b(?:stoves?|ovens?|heaters?|irons?|hot ?plates?|burners?|kettles?|flames?|fire)\b"
     # swallowing hazards / poisons
-    r"|(?:swallow|eat|ate|lick|taste|tasting|drink|drank|sip)\w*" + _GAP
-    + r"\b(?:batter(?:y|ies)|magnets?|coins?|pills?|tablets?|medicines?|bleach|detergent|cleaning (?:stuff|liquid|spray))"
+    r"|(?:swallow|eat|ate|lick|taste|tasting|drink|drank|sip)\w*" + _OBJ
+    + r"(?:batter(?:y|ies)|magnets?|coins?|pills?|tablets?|medicines?|bleach|detergent|cleaning (?:stuff|liquid|spray))\b"
     # heights and windows
     r"|(?:jump|leap|fall|fell|lean)\w* (?:off|out of|out|from) (?:the |a |my |your |our )?"
     r"(?:roof|balcony|window|bridge|cliff|top bunk)"
-    r"|climb\w*" + _GAP + r"\b(?:roof|balcony|window|bookshel(?:f|ves)|ceiling|railing)"
+    r"|climb\w*" + _GAP + r"\b(?:roofs?|balcon(?:y|ies)|windows?|bookshel(?:f|ves)|shel(?:f|ves)|ceilings?"
+    r"|railings?|counters?|fridge|wardrobe|up high)\b"
     # suffocation
     r"|bags? over (?:your|my|his|her|their|its) heads?"
     r")",
     re.IGNORECASE,
 )
-# Safety advice ("never touch the stove", "ask a grown-up first") mentions
-# the same hazards. A danger match is exempt only when its own sentence
-# carries one of these cues; the other tiers have no exemption.
-_CF_DANGER_SAFETY_CUE_RE = re.compile(
-    r"\b(?:never|don'?t|do not|shouldn'?t|should not|mustn'?t|must not|"
-    r"not safe|isn'?t safe|unsafe|grown-?ups?|adults?)\b",
+# Invitation to copy: a first/second-person subject before the action
+# ("I love…", "let's…", "you can…"), or a bare command that opens the
+# sentence ("Touch the stove!", "Then jump off the roof!").
+_CF_DANGER_PERSON_RE = re.compile(
+    r"\b(?:i|i'?m|i'?ll|i'?d|i'?ve|me|we|we'?re|we'?ll|let'?s|let us|us|you|you'?re|you'?ll)\b",
+    re.IGNORECASE,
+)
+_CF_DANGER_COMMAND_RE = re.compile(
+    r"^\W*(?:(?:then|and|so|now|ok(?:ay)?|hey|just|go|come on)\W+)*"
+    r"(?:zoom|fly|climb|swing|hang|dance|ride|jump|leap|touch|grab|poke|reach|play|stick|put|lick"
+    r"|push|jam|light|strike|swallow|eat|taste|drink|sip|lean|try)\b",
+    re.IGNORECASE,
+)
+# Safety advice ("never touch the stove", "ask a grown-up first") names the
+# same hazards. A negation exempts only the action it governs (at most two
+# words before the verb, no comma between); a warning exempts the action
+# it follows ("jumping off the roof is not safe"); asking or being with a
+# grown-up exempts the sentence. A bare "grown-ups" or an unrelated "don't"
+# does not ("Grown-ups are boring, let's play with matches!").
+_CF_DANGER_NEGATION_RE = re.compile(
+    r"\b(?:never|don'?t|do not|shouldn'?t|should not|mustn'?t|must not|no)\s+(?:\w+\s+){0,2}$",
+    re.IGNORECASE,
+)
+_CF_DANGER_WARNING_RE = re.compile(
+    r"\b(?:not safe|isn'?t safe|unsafe|dangerous|can hurt|could hurt|can burn|could burn|job for (?:a )?grown-?ups?)\b",
+    re.IGNORECASE,
+)
+_CF_DANGER_GROWNUP_RE = re.compile(
+    r"\b(?:ask (?:a |an |your )?(?:grown-?ups?|adults?|parents?)|with (?:a |an |your )?(?:grown-?ups?|adults?)"
+    r"|only (?:grown-?ups|adults))\b",
     re.IGNORECASE,
 )
 
@@ -176,14 +206,26 @@ _cf_log = logging.getLogger(TAG)
 _CF_SENTENCE_END = re.compile(r"[.!?\n]")
 
 
-def _danger_is_safety_advice(match: "re.Match") -> bool:
+def _danger_sentence(match: "re.Match") -> "tuple[str, str, str]":
+    """(sentence text before the match, the match, sentence text after it)."""
     text = match.string
     start = 0
     for end in _CF_SENTENCE_END.finditer(text, 0, match.start()):
         start = end.end()
     stop = _CF_SENTENCE_END.search(text, match.end())
-    sentence = text[start:stop.start() if stop else len(text)]
-    return _CF_DANGER_SAFETY_CUE_RE.search(sentence) is not None
+    return text[start:match.start()], match.group(), text[match.end():stop.start() if stop else len(text)]
+
+
+def _danger_is_imitable(before: str, matched: str) -> bool:
+    return (_CF_DANGER_PERSON_RE.search(before) is not None
+            or _CF_DANGER_COMMAND_RE.match(before + matched) is not None)
+
+
+def _danger_is_safety_advice(before: str, matched: str, after: str) -> bool:
+    sentence = before + matched + after
+    return (_CF_DANGER_NEGATION_RE.search(before.split(",")[-1]) is not None
+            or _CF_DANGER_WARNING_RE.search(after) is not None
+            or _CF_DANGER_GROWNUP_RE.search(sentence) is not None)
 
 
 def content_filter_match(text: str) -> "tuple[str, re.Match] | None":
@@ -193,7 +235,8 @@ def content_filter_match(text: str) -> "tuple[str, re.Match] | None":
     for pattern, tier in _CF_TIERS:
         if tier == "danger":
             for match in pattern.finditer(text):
-                if not _danger_is_safety_advice(match):
+                parts = _danger_sentence(match)
+                if _danger_is_imitable(parts[0], parts[1]) and not _danger_is_safety_advice(*parts):
                     return tier, match
             continue
         match = pattern.search(text)
