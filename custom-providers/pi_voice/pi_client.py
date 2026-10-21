@@ -201,6 +201,20 @@ class PiClient:
             except PiClientError:
                 logger.warning("PiClient: could not disable auto-compaction")
 
+    def _stop_process(self) -> None:
+        """Terminate pi without closing the client; the next call respawns
+        it (same flags and system prompt) with a fresh event queue."""
+        with self._lock:
+            if self._proc and self._proc.poll() is None:
+                try:
+                    self._proc.terminate()
+                    self._proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self._proc.kill()
+                except Exception:
+                    logger.exception("PiClient: error stopping pi")
+            self._proc = None
+
     def close(self) -> None:
         with self._lock:
             self._closed = True
@@ -273,6 +287,11 @@ class PiClient:
         aborted_at = None
         while time.time() < deadline:
             if aborted_at is not None and time.time() > aborted_at + _ABORT_GRACE_SEC:
+                # The aborted run is still going (think_hard ignores the abort
+                # signal and can wait 90 s on a cold 27B). Its leftover frames
+                # would end the next turn early, so start pi afresh instead.
+                logger.warning("PiClient: aborted turn did not end; restarting pi")
+                self._stop_process()
                 return
             try:
                 frame = self._event_queue.get(timeout=1.0)
@@ -399,6 +418,9 @@ class PiClient:
 
     def _read_stdout(self) -> None:
         proc = self._proc
+        # Bound at start: after a restart, a late frame from the old process
+        # must not land in the new process's queue.
+        queue = self._event_queue
         assert proc is not None and proc.stdout is not None
         try:
             for raw in iter(proc.stdout.readline, b""):
@@ -410,16 +432,16 @@ class PiClient:
                 except json.JSONDecodeError:
                     logger.debug("PiClient: dropped non-JSON stdout: %r", line[:120])
                     continue
-                self._route_frame(frame)
+                self._route_frame(frame, queue)
         except Exception:
             if not self._closed:
                 logger.exception("PiClient: stdout reader crashed")
 
-    def _route_frame(self, frame: object) -> None:
+    def _route_frame(self, frame: object, queue: Optional[Queue] = None) -> None:
         if isinstance(frame, dict) and frame.get("type") == "extension_ui_request":
             self._handle_ui_request(frame)
             return
-        self._event_queue.put(frame)
+        (queue if queue is not None else self._event_queue).put(frame)
 
     def _handle_ui_request(self, req: dict) -> None:
         """Invariant 2: auto-cancel dialog methods, drop fire-and-forget."""

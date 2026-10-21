@@ -384,6 +384,50 @@ class TestToolCallCap(unittest.TestCase):
         self.assertEqual((text, sent), ("", ["steer", "abort"]))
         self.assertLess(took, 2.5)
 
+    def test_unfinished_abort_restarts_pi_so_its_frames_cannot_reach_the_next_turn(self):
+        spawned = []
+
+        def factory():
+            spawned.append(FakePopen())
+            return spawned[-1]
+
+        client = PiClient(factory, turn_timeout_sec=3.0)
+        try:
+            first = None
+
+            def feed_first():
+                fake = spawned[0]
+                fake.emit({"id": "turn-1", "type": "response", "command": "prompt", "success": True})
+                for n in range(6):
+                    fake.emit({"type": "message_update", "assistantMessageEvent": {
+                        "type": "toolcall_end", "toolCall": {"id": f"t{n}", "name": "think_hard"}}})
+
+            with patch.object(pi_client, "_ABORT_GRACE_SEC", 0.2):
+                gen = client.iter_turn_text("loop")
+                threading.Timer(0.05, feed_first).start()
+                first = "".join(gen)
+            self.assertEqual(first, "")
+            old = spawned[0]
+            self.assertEqual(old.poll(), 0)  # the stuck pi was stopped
+            # The old run finishes late: its agent_end must not end turn 2.
+            old.emit({"type": "message_update",
+                      "assistantMessageEvent": {"type": "text_delta", "delta": "stale"}})
+            old.emit({"type": "agent_end"})
+
+            def feed_second():
+                fake = spawned[-1]
+                fake.emit({"id": "turn-2", "type": "response", "command": "prompt", "success": True})
+                fake.emit({"type": "message_update",
+                           "assistantMessageEvent": {"type": "text_delta", "delta": "fresh"}})
+                fake.emit({"type": "agent_end"})
+
+            gen = client.iter_turn_text("next")
+            threading.Timer(0.1, feed_second).start()
+            self.assertEqual("".join(gen), "fresh")
+            self.assertEqual(len(spawned), 2)
+        finally:
+            client.close()
+
 
 class TestToolCallTelemetry(unittest.TestCase):
     def test_completed_tool_call_is_logged_at_info_without_arguments(self):
