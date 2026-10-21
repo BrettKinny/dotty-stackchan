@@ -56,7 +56,9 @@ services:
       - GREETER_STATE_PATH=/var/lib/dotty-behaviour/state/greeter_state.json
     volumes:
       # Read-only directory mount follows atomic replacement of the state file.
-      - /mnt/user/appdata/dotty-bridge/state:/var/lib/dotty-bridge/state:ro
+      # Must be the directory the bridge actually writes: if it is wrong, the
+      # policy file is missing and the camera stays denied (fail closed).
+      - ${DOTTY_BRIDGE_STATE_DIR:-/mnt/user/appdata/dotty-bridge/state}:/var/lib/dotty-bridge/state:ro
       - /mnt/user/appdata/dotty-behaviour/state:/var/lib/dotty-behaviour/state
       - /mnt/user/appdata/dotty-behaviour/logs:/var/lib/dotty-behaviour/logs
       - /mnt/user/appdata/dotty-behaviour/secrets:/var/lib/dotty-behaviour/secrets:ro
