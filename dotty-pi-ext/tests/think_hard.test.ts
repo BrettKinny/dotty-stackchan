@@ -156,7 +156,7 @@ async function testLiveSmoke(): Promise<void> {
   const url = process.env.DOTTY_LLAMA_SWAP_URL;
   if (!url) {
     process.stdout.write(
-      "\nLive smoke: SKIPPED (set DOTTY_LLAMA_SWAP_URL=http://192.168.1.67:8080/v1/chat/completions to run).\n",
+      "\nLive smoke: SKIPPED (set DOTTY_LLAMA_SWAP_URL=http://<XIAOZHI_HOST>:8080/v1/chat/completions to run).\n",
     );
     return;
   }

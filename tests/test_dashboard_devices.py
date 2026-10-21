@@ -194,7 +194,7 @@ class TestReviewFollowUps(unittest.TestCase):
         pstate = {
             "automation-persistence-probe": {"last_chat_t": 2000.0},
             "unknown": {"last_chat_t": 3000.0},
-            "1c:db:d4:ba:58:94": {"last_chat_t": 1000.0},
+            "aa:bb:cc:dd:ee:01": {"last_chat_t": 1000.0},
         }
         original = dash._state.get("perception_state_getter")
         self.addCleanup(lambda: dash._state.__setitem__("perception_state_getter", original))

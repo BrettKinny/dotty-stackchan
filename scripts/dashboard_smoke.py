@@ -35,7 +35,9 @@ from urllib.parse import urlsplit
 from dataclasses import dataclass
 from typing import Callable
 
-DEFAULT_BASE_URL = "http://192.168.1.67:8081"
+# No built-in host: pass the URL or set DOTTY_DASHBOARD_URL (e.g.
+# http://<XIAOZHI_HOST>:8081).
+DEFAULT_BASE_URL = os.environ.get("DOTTY_DASHBOARD_URL", "")
 
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 
@@ -518,7 +520,8 @@ def exit_code(results: list[Result], *, strict: bool = False) -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("base_url", nargs="?", default=DEFAULT_BASE_URL,
-                    help=f"dashboard base URL (default {DEFAULT_BASE_URL})")
+                    help="dashboard base URL, e.g. http://<XIAOZHI_HOST>:8081 "
+                         "(default: $DOTTY_DASHBOARD_URL)")
     ap.add_argument("--timeout", type=float, default=5.0,
                     help="per-request timeout in seconds")
     ap.add_argument("--stream-window", type=float, default=2.0,
@@ -526,6 +529,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--strict", action="store_true",
                     help="exit 1 on WARN rows too")
     args = ap.parse_args(argv)
+    if not args.base_url:
+        ap.error("pass the dashboard base URL or set DOTTY_DASHBOARD_URL")
     user = os.environ.get("DOTTY_DASHBOARD_USER", "")
     password = os.environ.get("DOTTY_DASHBOARD_PASS", "")
     fetch = make_fetcher(args.base_url, timeout=args.timeout,
