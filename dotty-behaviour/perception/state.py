@@ -134,24 +134,34 @@ class PerceptionState:
         self._audio_waiters: dict[str, list[asyncio.Event]] = {}
 
     def _load_state(self) -> dict[str, dict[str, Any]]:
+        """Restore each device's mutex state. A device whose entry is not a
+        durable state (a probe that posted "testing", say) is dropped on its
+        own, so it cannot discard the robot's saved state; an unreadable file
+        (bad bytes, wrong shape) starts empty instead of failing startup."""
         if self._state_path is None:
             return {}
         try:
             payload = json.loads(self._state_path.read_text(encoding="utf-8"))
-            if isinstance(payload, dict) and all(
-                isinstance(device_id, str)
-                and isinstance(device_state, dict)
-                and device_state.get("current_state") in _DURABLE_DEVICE_STATES
-                and isinstance(
-                    device_state.get("last_state_change_t", 0.0),
-                    (int, float),
-                )
-                for device_id, device_state in payload.items()
-            ):
-                return payload
-        except (OSError, json.JSONDecodeError):
-            pass
-        return {}
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError) as exc:  # ValueError covers bad UTF-8 and JSON
+            log.warning("perception state %s unreadable (%s); starting fresh", self._state_path, exc)
+            return {}
+        if not isinstance(payload, dict):
+            log.warning("perception state %s is not an object; starting fresh", self._state_path)
+            return {}
+        restored: dict[str, dict[str, Any]] = {}
+        for device_id, device_state in payload.items():
+            if not (isinstance(device_id, str) and isinstance(device_state, dict)):
+                continue
+            current = device_state.get("current_state")
+            changed = device_state.get("last_state_change_t", 0.0)
+            if (isinstance(current, str) and current in _DURABLE_DEVICE_STATES
+                    and isinstance(changed, (int, float)) and not isinstance(changed, bool)):
+                restored[device_id] = device_state
+            else:
+                log.warning("perception state: dropping invalid saved entry for %s", device_id)
+        return restored
 
     def _persist_state(self) -> None:
         if self._state_path is None:

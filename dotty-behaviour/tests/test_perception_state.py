@@ -45,6 +45,28 @@ def test_invalid_persisted_mutex_value_fails_safe_to_idle(tmp_path: Path) -> Non
     assert restarted.current_device_state("dev-1") == "idle"
 
 
+def test_one_bad_device_entry_does_not_discard_the_robots_state(tmp_path: Path) -> None:
+    # 2026-10-21 review: a probe posting state "testing" used to throw away
+    # every device's saved state, the real robot's included.
+    state_file = tmp_path / "perception-state.json"
+    before_restart = PerceptionState(state_path=state_file)
+    before_restart.update_state("robot", "state_changed", {"state": "sleep"}, 100.0)
+    before_restart.update_state("probe", "state_changed", {"state": "testing"}, 101.0)
+
+    after_restart = PerceptionState(state_path=state_file)
+
+    assert after_restart.current_device_state("robot") == "sleep"
+    assert after_restart.current_device_state("probe") == "idle"
+
+
+def test_corrupt_state_file_starts_fresh_instead_of_failing(tmp_path: Path) -> None:
+    state_file = tmp_path / "perception-state.json"
+    for raw in (b"\xff\xfe not utf-8", b'{"dev-1": {"current_state": ["sleep"]}}', b"[1, 2]"):
+        state_file.write_bytes(raw)
+        restarted = PerceptionState(state_path=state_file)
+        assert restarted.current_device_state("dev-1") == "idle"
+
+
 def test_restart_does_not_revive_transient_sensor_state(tmp_path: Path) -> None:
     state_file = tmp_path / "perception-state.json"
     before_restart = PerceptionState(state_path=state_file)
