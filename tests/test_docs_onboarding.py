@@ -29,8 +29,9 @@ def test_docs_identify_compiled_ota_url_and_missing_device_editor() -> None:
     quickstart = (ROOT / "docs" / "quickstart.md").read_text(encoding="utf-8")
     assert "CONFIG_OTA_URL" in quickstart
     assert "does **not** contain an Advanced" in quickstart
-    # The release binaries are LAN-locked (#190): build from source instead.
-    assert "fw-v*" in quickstart and "don't flash them" in quickstart
+    # The old release binaries were LAN-locked and removed (#190): build from source.
+    assert "fw-v*" in quickstart and "binaries have been removed" in quickstart
+    assert "don't flash them" not in quickstart
     assert "SETUP.md#2-build-and-flash-open-firmware" in quickstart
     assert "write_flash" not in quickstart
 

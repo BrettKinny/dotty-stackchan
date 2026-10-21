@@ -10,7 +10,7 @@
 
 Dotty is a fully self-hosted voice stack for the M5Stack StackChan desktop robot. Open-source firmware runs on the robot, [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) handles voice I/O, and a local **pi** coding agent is the brain. ASR, TTS and session state all run on your own hardware. The LLM is pluggable. The shipped default runs a small, fast model for plain conversation and hands hard questions to a more capable one, with [llama-swap](./docs/cookbook/llama-swap-concurrent-models.md) as the recommended local backend. [Ollama](./docs/cookbook/run-fully-local.md) is the simpler single-binary option, or you can point it at OpenRouter or any OpenAI-compatible API if you'd rather use the cloud.
 
-Out of the box, Dotty runs in **Kid Mode**. The persona and a per-turn prompt steer replies toward age-appropriate topics, and a blocked-words filter replaces a matching reply before it is spoken. The filter is a backstop that can be bypassed, not a safety guarantee or a substitute for supervision. Turn Kid Mode off for a general-purpose assistant.
+Out of the box, Dotty runs in **Kid Mode**. The persona and the Kid Mode rules in pi's system prompt steer replies toward age-appropriate topics, and a blocked-words filter replaces a matching LLM reply before it is spoken. The filter is a backstop that can be bypassed, not a safety guarantee or a substitute for supervision. Turn Kid Mode off for a general-purpose assistant.
 
 ## Why I built this
 
@@ -26,7 +26,7 @@ Full policy: [`AI_TRANSPARENCY.md`](./AI_TRANSPARENCY.md).
 
 ## Features
 
-- **Kid Mode (on by default):** age-appropriate replies through the persona and per-turn prompt, backed by a blocked-words filter on everything that is about to be spoken ([#157](https://github.com/BrettKinny/dotty-stackchan/issues/157)). If the filter itself fails, the reply is replaced rather than spoken. It can still be bypassed and is not a substitute for supervision. See [`docs/kid-mode.md`](./docs/kid-mode.md).
+- **Kid Mode (on by default):** age-appropriate replies through the persona and the Kid Mode rules in pi's system prompt, backed by a blocked-words filter on every LLM voice reply ([#157](https://github.com/BrettKinny/dotty-stackchan/issues/157)). If the filter itself fails, the reply is replaced rather than spoken. Speech the server pushes directly (the proactive greeter, admin `say`) does not pass through the filter. It can still be bypassed and is not a substitute for supervision. See [`docs/kid-mode.md`](./docs/kid-mode.md).
 - **Local ASR:** FunASR SenseVoiceSmall by default, with no cloud transcription. WhisperLocal is picked automatically on GPU hosts and handles kids' voices better; SenseVoiceOnnx is a lighter option for low-RAM hosts.
 - **Local or cloud TTS:** Piper (offline) or EdgeTTS (cloud), switched with a config change.
 - **Streaming replies:** the voice provider streams the model's reply into TTS sentence by sentence, so Dotty starts talking before the whole answer is written.
@@ -34,7 +34,7 @@ Full policy: [`AI_TRANSPARENCY.md`](./AI_TRANSPARENCY.md).
 - **Voice tools:** mid-conversation, the pi agent can remember things and people and look them up later, pass a hard question to a bigger model, take a photo and describe it, and play a song.
 - **States, toggles and LEDs:** six states (`idle / talk / story_time / security / sleep / dance`) plus two independent toggles (`kid_mode`, `smart_mode`), all owned by the firmware StateManager and shown on the 12-pixel LED ring. See [`docs/modes.md`](./docs/modes.md).
 - **Privacy sleep:** in `sleep`, the firmware turns off face detection, voice processing and wake-word detection. Only a head touch or an explicit dashboard state change wakes it, not a face or a voice. This stops the normal camera and microphone paths; it is not a hardware power cut.
-- **Vision:** the robot's camera can take a photo for a local vision model to describe.
+- **Vision:** the robot's camera can take a photo for a vision model to describe. The default is a cloud API (OpenRouter); to keep frames on your LAN, see [Keeping vision and audio on the LAN](./docs/brain.md#keeping-vision-and-audio-on-the-lan).
 - **Calendar context:** optional calendar integration adds upcoming events to the conversation.
 - **Hackable:** every seam can be swapped: LLM, TTS, ASR, agent framework. Fork it, rip out what you don't want, wire in your own.
 

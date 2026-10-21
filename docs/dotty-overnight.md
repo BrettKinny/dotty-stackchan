@@ -44,14 +44,14 @@ here has yet been run against the robot.*
 
 ```bash
 S=uat-sessions/$(date +%F)/overnight
-python scripts/dotty_overnight.py init --session $S --host root@tower \
-  --device 1c:db:d4:ba:58:94 --mic-opener admin_say
+python scripts/dotty_overnight.py init --session $S --host <XIAOZHI_USER>@<XIAOZHI_HOST> \
+  --device <DEVICE_MAC> --mic-opener admin_say
 # init expects $S/evaluator-venv and $S/models/whisper-small.en-ct2; reuse a
 # previous session's by symlink. That venv also has piper-tts 1.8.0. Otherwise:
 #   python -m venv ~/.cache/dotty-piper && ~/.cache/dotty-piper/bin/pip install piper-tts==1.8.0
 $S/evaluator-venv/bin/python scripts/dotty_render_prompts.py --session $S \
   --voice PATH/en_US-ryan-high.onnx           # binds text+sha256 into config.json
-python scripts/dotty_integration_check.py --host root@tower --json $S/integration.json
+python scripts/dotty_integration_check.py --host <XIAOZHI_USER>@<XIAOZHI_HOST> --json $S/integration.json
 python scripts/dotty_overnight.py preflight --session $S   # pi_tool_call_logger, songs
 python scripts/dotty_overnight.py run --session $S
 ```
@@ -93,7 +93,7 @@ defaults to this route; `DOTTY_AV_AUDIO_BACKEND=alsa` remains an explicit fallba
 
 Verification asserts decoded sample coverage and maximum timestamp gaps, not
 just container duration. ALSA xruns must not be dismissed on duration alone.
-The volume in this particular calibrated session is 100% software with Brett's
+The volume in this particular calibrated session is 100% software with the maintainer's
 previously confirmed physical knob position; it is not a recommendation for
 another bench. Never raise volume automatically when a wake phrase fails.
 

@@ -2,9 +2,11 @@
 #
 # Manual only (2026-10-21): the firmware's server address is compiled in
 # (CONFIG_OTA_URL), so these binaries only work on the network they were
-# built for, and LAN-locked binaries are not published. Restore the fw-v*
-# tag trigger once a prebuilt can be pointed at any server (#190). A manual
-# run names the release after the ref it runs on, so run it from a tag.
+# built for. Nothing here stops that: a manual run publishes whatever
+# CONFIG_OTA_URL the pinned source has, so don't run it until #190 makes a
+# prebuilt that can be pointed at any server, then restore the fw-v* tag
+# trigger. A manual run names the release after the ref it runs on, so run
+# it from a tag.
 # Uses the Espressif IDF Docker container to build the ESP32-S3 firmware,
 # then attaches the binaries + SHA256 checksums to a GitHub Release.
 #

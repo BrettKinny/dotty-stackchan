@@ -1,6 +1,6 @@
 # Overnight behaviour coverage catalogue
 
-AI-assisted: OpenAI Codex (GPT-6), under Brett's direction. Inventory date:
+AI-assisted: OpenAI Codex (GPT-6), under the maintainer's direction. Inventory date:
 2026-09-12. This is a test specification, **not a report of passing tests**.
 Attach actual attempt IDs, deployed versions, verdicts and artifacts in the
 session's coverage/results files. All rows begin `PENDING` unless their stated

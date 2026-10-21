@@ -40,6 +40,7 @@ The runtime contract:
 3. **pi** runs the prompt against llama-swap (`qwen3.5:4b` by default) with the `dotty-pi-ext` extension loaded.
 4. Thinking deltas and extension UI requests are filtered by PiClient; only TTS-bound text chunks reach xiaozhi-server.
 5. `PiVoiceLLM` holds one long-lived `PiClient`; between turns it issues `new_session` to reset pi's working state without re-spawning the process.
+6. `PiClient` caps tool calls per reply: after 3 it steers pi to answer with what it has, and after 6 it aborts the turn (restarting pi if the aborted run never ends).
 
 Appdata layout on the Docker host:
 

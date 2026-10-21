@@ -52,8 +52,9 @@ pinned `BrettKinny/StackChan@dotty` submodule, and set `CONFIG_OTA_URL` to
 
 > There is no ready-made binary for another server: the firmware's server
 > address is compiled in, and the StackChan's on-device Settings app has no
-> OTA/server editor. The `fw-v*` binaries on GitHub Releases point at the
-> maintainer's own deployment, so don't flash them for yours. Don't build the
+> OTA/server editor. Earlier `fw-v*` GitHub releases carried binaries locked
+> to the maintainer's LAN server; those binaries have been removed and the
+> releases are now source-only, so build your own. Don't build the
 > official `m5stack/StackChan` upstream either: it doesn't include Dotty's
 > firmware changes.
 

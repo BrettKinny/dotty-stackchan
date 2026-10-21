@@ -102,7 +102,11 @@ Server and firmware are versioned independently:
 The docs live as plain markdown under `docs/` and render on GitHub directly —
 there is no separate docs-site build to deploy.
 
-GitHub Actions handles image builds and artifact publishing from the tag.
+Pushing a tag does not trigger any build or publish. The firmware release
+workflow (`firmware-release.yml`) is manual-only, and no firmware binaries are
+published at the moment, because the server address is compiled in; a
+portable prebuilt is tracked in
+[#190](https://github.com/BrettKinny/dotty-stackchan/issues/190).
 
 ### Compatibility matrix updates
 

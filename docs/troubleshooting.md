@@ -16,8 +16,8 @@ Symptom-first lookup table covering common and obscure failure modes. Pair with 
 **Cause:** Language mismatch between the TTS voice and the response text. EdgeTTS `en-*` voices return empty audio when given non-English text (Chinese, Japanese, etc.). This is not a throttle or rate limit — it's a silent failure in the EdgeTTS service.
 
 **Fix:**
-1. Check the xiaozhi-server logs for the LLM response text. On PiVoiceLLM, non-English text means the model ignored the per-turn `build_turn_suffix()` policy.
-2. Confirm `custom-providers/pi_voice/pi_voice.py` appends `build_turn_suffix()` to the prompt. PiVoiceLLM uses `--no-context-files` and does not forward xiaozhi's system dialogue, so persona and `.config.yaml` prompt edits do not diagnose this provider.
+1. Check the xiaozhi-server logs for the LLM response text. On PiVoiceLLM, non-English text means the model ignored the `build_turn_suffix()` rules in pi's system prompt.
+2. Confirm `custom-providers/pi_voice/pi_voice.py` puts `build_turn_suffix()` into pi's system prompt (`_turn_rules`). PiVoiceLLM uses `--no-context-files` and does not forward xiaozhi's system dialogue, so persona and `.config.yaml` prompt edits do not diagnose this provider.
 3. Check `data/.config.yaml` to confirm the TTS voice matches the expected response language (e.g., `en-AU-WilliamNeural` for English).
 4. If using Piper TTS instead of EdgeTTS, confirm the selected voice model matches the response language.
 
@@ -27,10 +27,10 @@ Symptom-first lookup table covering common and obscure failure modes. Pair with 
 
 **Symptom:** The robot speaks, but in the wrong language. Logs show Chinese or Japanese text in the LLM response.
 
-**Cause:** The LLM (Qwen3) is ignoring the per-turn language constraint. Qwen3 can leak Chinese despite the English-only suffix; English has no deterministic output validator.
+**Cause:** The LLM (Qwen3) is ignoring the English-only rule. Qwen3 can leak Chinese despite it; English has no deterministic output validator.
 
 **Fix:**
-1. Confirm the per-turn sandwich enforcement is active on the live `PiVoiceLLM` path. Static system prompts alone are not enough — every turn is wrapped with an explicit English+emoji suffix. This is `build_turn_suffix()` in `custom-providers/textUtils.py`, applied by `custom-providers/pi_voice/pi_voice.py` (`_wrap_with_sandwich`). (The old `bridge.py::_build_sandwich_prompt` was part of the retired ZeroClaw bridge and no longer exists — the bridge is not in the voice path.)
+1. Confirm the voice rules are in place on the live `PiVoiceLLM` path. The English-only and emoji rules come from `build_turn_suffix()` in `custom-providers/textUtils.py`, which `custom-providers/pi_voice/pi_voice.py` (`_turn_rules`) puts in pi's system prompt when pi spawns; pi respawns when Kid Mode changes. (The old `bridge.py::_build_sandwich_prompt` was part of the retired ZeroClaw bridge and no longer exists — the bridge is not in the voice path.)
 2. Inspect the prompt captured by PiVoiceLLM or its unit tests; do not use persona files or the top-level `.config.yaml` prompt as evidence for this path.
 3. Watch the actual voice path in xiaozhi-server logs. `docker logs dotty-pi` is normally empty because Pi runs as a `docker exec` child; PiClient owns that child's stdio.
 4. As a last resort, the ASR may be mis-transcribing English as another language. Check the configured ASR language is `en` rather than `auto`.
@@ -56,7 +56,7 @@ Symptom-first lookup table covering common and obscure failure modes. Pair with 
 
 **Cause:** The device was flashed without a partition table, so it kept the layout left by whatever firmware was on it before (the M5Burner StackChan demo, Home Assistant Voice, etc.). That layout doesn't match Dotty's images.
 
-**Fix:** Re-flash with the **full six-file command** in [Quickstart step 1](quickstart.md#1-flash-the-firmware). It writes `bootloader.bin` at `0x0` and `partition-table.bin` at `0x8000` — with those in place the partition offsets line up. If your downloaded release is missing either file, grab the latest `fw-v` release, which ships all six binaries.
+**Fix:** Build from source and re-flash with `idf.py flash`, as in [SETUP.md §2](../SETUP.md#2-build-and-flash-open-firmware). It writes the bootloader at `0x0` and the partition table at `0x8000` along with the app, so the partition offsets line up.
 
 ---
 
@@ -110,7 +110,7 @@ Symptom-first lookup table covering common and obscure failure modes. Pair with 
 | `😴` | Sleepy |
 
 **Fix:**
-1. Check the xiaozhi-server logs for the raw LLM response. PiVoiceLLM's per-turn suffix requests an allowed emoji and `_enforce_leading_emoji()` prepends neutral `😐` when it is absent. A prefix-free response therefore indicates the deployed provider is stale or bypassed.
+1. Check the xiaozhi-server logs for the raw LLM response. The rules in PiVoiceLLM's system prompt request an allowed emoji and `_enforce_leading_emoji()` prepends neutral `😐` when it is absent. A prefix-free response therefore indicates the deployed provider is stale or bypassed.
 2. If the response has an emoji but the face doesn't change, it may be an unsupported emoji. Only the nine listed above are mapped to animations.
 3. Confirm the selected provider is PiVoiceLLM and the deployed `pi_voice.py` contains `_enforce_leading_emoji()`. The retired bridge fallback is unrelated.
 

@@ -72,7 +72,7 @@ On exit, firmware restores torque **before** issuing the wake tilt (yaw 0, pitch
 
 | Toggle | Toggle pip (right ring) | What it does | Persistence |
 |---|---|---|---|
-| `kid_mode` | salmon pink `(220, 80, 80)` at index **8** (G == B so PY32 RGB565 quantization stays warm) | Guardrails only — content sandwich, camera tools denied, kid-safe persona. Does not pick the model. Bridge-side hot-reload via `_apply_kid_mode()` (no daemon restart). | `bridge` container state file |
+| `kid_mode` | salmon pink `(220, 80, 80)` at index **8** (G == B so PY32 RGB565 quantization stays warm) | Guardrails only — Kid Mode rules in pi's system prompt, the output filter, voice camera requests denied, kid-safe persona. Does not pick the model. Bridge-side hot-reload via `_apply_kid_mode()` (no daemon restart). | `bridge` container state file |
 | `smart_mode` | orange `(168, 80, 0)` at index **9** | Toggle-only today — flips the pip and behaviour gate. The model-swap it was designed to drive (ON → `SMART_MODEL` via OpenRouter; OFF → local default) is v2 scope and not wired on the `PiVoiceLLM` path. | `bridge` container state file |
 
 The two toggles are orthogonal — they compose freely. `kid_mode = on` AND `smart_mode = on` runs the smart model behind the kid-safe sandwich. Both toggles are sticky across turns, daemon restarts, and reboots.

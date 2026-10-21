@@ -20,8 +20,11 @@ manifest, and should be retried under a new name.
 Each export contains a fitted portrait 1080×1920 `clean.mp4`, a thumbnail, a
 provenance manifest and, when local transcription and its capture offset are
 available, a provisional `captions.srt`. Captions describe the response only;
-the spoken prompt remains in the original audio. All source pixels are retained
-within the portrait frame. The export normalizes original sound; it does not
+the spoken prompt remains in the original audio. By default the whole source
+frame is fitted into the portrait frame with padding, so no source pixels are
+lost. `--crop W:H:X:Y` instead takes a 9:16 portrait region of the source (in
+source pixels) and scales it to fill 1080×1920; everything outside that region
+is trimmed, and the manifest's `layout` records the region. The export normalizes original sound; it does not
 replace the soundtrack. Captions are a sidecar, not burned into the clean video.
 
 `manifest.json` records the source recording hash, exact source interval, full case
