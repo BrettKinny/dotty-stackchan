@@ -52,6 +52,8 @@ htmlcov/
 /AUDIT-REPORT.md
 /audit-draft-issues.md
 /pi-session-*.html
+# Session-id file a test writes when a DB path is ":memory:".
+*.ses
 
 # Frontend build deps for the dashboard's vendored Tailwind bundle.
 # package.json + tailwind.config.js are committed; build artifacts and
