@@ -7,7 +7,7 @@
 // Each marker is matched only at the start of a line after a blank/new line,
 // exactly as the provider emits it, so a person saying the words is untouched.
 const SCAFFOLD_START =
-  /\n+(?:MEMORY SEARCH RESULTS \(|CAMERA VIEW \(|ROOM VIEW \(|VOICE TOOL ROUTING:|---\nHARD CONSTRAINTS for THIS reply)/;
+  /\n+(?:MEMORY SEARCH RESULTS \(|CAMERA VIEW \(|ROOM VIEW \(|REASONING RESULT \(|VOICE TOOL ROUTING:|---\nHARD CONSTRAINTS for THIS reply)/;
 
 // xiaozhi-server prefixes a turn with "[ROOM_VIEW]\n<description>\n<person id
 // or blank>\n" while a face is cached. PiVoiceLLM now moves it out of the way,

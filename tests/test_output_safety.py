@@ -327,11 +327,13 @@ class TestPiVoiceOutputHook(unittest.TestCase):
         def __init__(self, chunks=(), tool_result=None):
             self.chunks = list(chunks)
             self.tool_result = tool_result
+            self.prompts = []
 
         def new_session(self):
             pass
 
         def iter_turn_text(self, prompt):
+            self.prompts.append(prompt)
             yield from self.chunks
 
         def invoke_voice_tool(self, name, arguments):
@@ -361,16 +363,31 @@ class TestPiVoiceOutputHook(unittest.TestCase):
 
     def test_think_hard_result_is_filtered_in_kid_mode(self):
         # Direct tool results used to reach TTS without the kid filter.
-        client = self._Client(tool_result="Cocaine is a stimulant.")
+        client = self._Client(chunks=["😊 Cocaine is a stimulant."],
+                              tool_result="Cocaine is a stimulant.")
         out = self._turn(client, "Think hard about: what is cocaine?", True)
         self.assertEqual(out[0], "🤔 Let me think hard about that. ")
         self.assertNotIn("Cocaine", "".join(out))
-        self.assertTrue(out[-1].startswith("Let's talk about something fun"))
+        self.assertTrue(out[-1].lstrip().startswith("Let's talk about something fun"))
 
-    def test_think_hard_preamble_still_streams_first_in_kid_mode(self):
-        client = self._Client(tool_result="Forty-two.")
+    def test_kid_mode_think_hard_answer_is_retold_under_the_rules(self):
+        # The reasoner has none of Dotty's rules (2026-10-21 review), so in
+        # kid mode its answer goes to the 4B as context, not straight to TTS.
+        client = self._Client(chunks=["😊 It is forty-two!"], tool_result="The answer is 42.")
         out = self._turn(client, "Think hard about: six times seven", True)
+        self.assertEqual(out[0], "🤔 Let me think hard about that. ")
+        self.assertIn("forty-two", "".join(out[1:]))
+        self.assertNotIn("The answer is 42.", "".join(out))
+        self.assertEqual(len(client.prompts), 1)
+        self.assertIn("REASONING RESULT (from your think_hard tool):\nThe answer is 42.", client.prompts[0])
+        emojis = [ch for ch in "".join(out) if ch in tu.ALLOWED_EMOJIS]
+        self.assertEqual(emojis, ["🤔"])
+
+    def test_adult_think_hard_answer_is_spoken_directly(self):
+        client = self._Client(tool_result="Forty-two.")
+        out = self._turn(client, "Think hard about: six times seven", False)
         self.assertEqual(out, ["🤔 Let me think hard about that. ", "Forty-two."])
+        self.assertEqual(client.prompts, [])
 
     def test_think_hard_follows_the_live_kid_toggle(self):
         # The dashboard toggle (state file) wins over the startup env, on the
@@ -399,7 +416,8 @@ class TestPiVoiceOutputHook(unittest.TestCase):
 
     def test_think_hard_filter_hit_is_reported(self):
         from unittest.mock import patch
-        client = self._Client(tool_result="Cocaine is a stimulant.")
+        client = self._Client(chunks=["😊 Cocaine is a stimulant."],
+                              tool_result="Cocaine is a stimulant.")
         with patch.object(self.LLMProvider, "_on_filter_hit") as on_hit:
             self._turn(client, "Think hard about: what is cocaine?", True)
         on_hit.assert_called_once()

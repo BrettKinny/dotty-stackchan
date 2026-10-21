@@ -369,7 +369,9 @@ class TestDeterministicVoiceToolRouting(unittest.TestCase):
     def test_explicit_think_hard_speaks_first_then_answers_with_one_emoji(self):
         # The reasoner can take 30-60 s to load from cold. Dotty says so before
         # starting instead of sitting silent, and the reply still carries
-        # exactly one (leading) emoji.
+        # exactly one (leading) emoji. Adult mode: the answer is spoken as-is
+        # (kid mode retells it through the 4B; see test_output_safety).
+        os.environ["DOTTY_KID_MODE"] = "false"
         client = FakeClient()
         client.tool_results["think_hard"] = "The precise answer is forty-two."
         provider = LLMProvider({}, client=client)  # type: ignore[arg-type]

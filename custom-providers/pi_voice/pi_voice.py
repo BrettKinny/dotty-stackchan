@@ -266,6 +266,11 @@ _CAMERA_CONTEXT = (
     "\n\nCAMERA VIEW (what your camera saw in the last few seconds):\n{view}\n"
     "Answer from this view only. Do not add anything it does not say."
 )
+_REASONING_CONTEXT = (
+    "\n\nREASONING RESULT (from your think_hard tool):\n{answer}\n"
+    "Tell them this answer in your own words, following all your rules. "
+    "You already used think_hard for this; do not call it again."
+)
 _ROOM_VIEW_CONTEXT = (
     "\n\nROOM VIEW (who your camera saw in front of you recently; mention it "
     "only if it helps):\n{view}"
@@ -422,9 +427,14 @@ class LLMProvider(LLMProviderBase):
             )
             if result is None or result.startswith("("):
                 yield "I couldn't finish the deeper reasoning."
-            else:
+                return
+            if not self._kid_mode:
                 yield result
-            return
+                return
+            # Kid Mode: the reasoner runs without Dotty's rules (they live in
+            # the 4B's system prompt), so hand its answer to the 4B to retell
+            # under them instead of speaking it as-is.
+            context = _REASONING_CONTEXT.format(answer=result)
         if intent is not None and intent.tool == "take_photo":
             # Reached only when xiaozhi's own vision shortcut produced nothing;
             # the 4B would otherwise describe a room it has not seen.
@@ -450,12 +460,12 @@ class LLMProvider(LLMProviderBase):
         self._first_turn = False
 
         try:
-            # #157: kid-mode blocked-content filter on TTS-bound output.
-            # Full-turn buffered — the filter drains the pi RPC stream through
-            # agent_end before making an atomic allow/replace decision.
-            # Emoji enforcement precedes filtering, matching OpenAICompat: in
-            # kid mode the filter still makes one atomic whole-turn decision;
-            # outside it, chunks stream after the first meaningful one.
+            # The outer guard_tts_stream in _response_serialized already
+            # applies the face contract and the kid filter to the whole turn.
+            # This inner pass is kept for its buffering: in kid mode it holds
+            # the model's text until agent_end, so a turn that fails part-way
+            # drops its partial reply instead of speaking it before the
+            # "brain offline" line.
             for chunk in filter_tts_stream(
                 _enforce_leading_emoji(self._client.iter_turn_text(prompt)),
                 self._kid_mode,

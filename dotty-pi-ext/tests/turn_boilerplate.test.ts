@@ -34,6 +34,9 @@ assertEq("ordinary braces are not treated as a wrapper", stripTurnBoilerplate("{
 assertEq("camera view block removed",
   stripTurnBoilerplate("What do you see?\n\nCAMERA VIEW (what your camera saw):\na cat" + ROUTING + RULES),
   "What do you see?");
+assertEq("reasoning result block removed",
+  stripTurnBoilerplate("Think hard about: six times seven\n\nREASONING RESULT (from your think_hard tool):\nThe answer is 42.\nTell them this answer in your own words."),
+  "Think hard about: six times seven");
 assertEq("room view block removed",
   stripTurnBoilerplate("Hello!\n\nROOM VIEW (who your camera saw):\na child" + ROUTING + RULES), "Hello!");
 assertEq("legacy room-view prefix removed",
