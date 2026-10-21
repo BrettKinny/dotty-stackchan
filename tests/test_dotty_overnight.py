@@ -579,6 +579,18 @@ def test_stale_listening_status_is_retried_not_blocked(tmp_path):
     assert checkpoint["unresolved"] == ["song"]
 
 
+def test_disconnected_robot_is_retried_not_failed(tmp_path):
+    checkpoint = runner.restore_checkpoint(tmp_path)
+    blocked = {"verdict": "BLOCKED", "failure": "device_disconnected"}
+    for _ in range(3):
+        runner.record_attempt(checkpoint, {"id": "identity"}, blocked)
+    counts = checkpoint["counts"]["identity"]
+    assert counts["failures"] == 0 and counts.get("inconclusive", 0) == 0
+    assert checkpoint["quarantined"] == [] and checkpoint["unresolved"] == []
+    # ...but a robot that stays gone pauses the run like any repeated failure.
+    assert checkpoint["consecutive_failures"] == 3
+
+
 def test_cannot_pool_unrelated_asr_requests():
     result = runner.evaluate({"asr": [["purple"], ["robot"]]}, transcript("yes"),
                              "结果: purple\n结果: robot\nSentenceType.FIRST", 10, after(), "robot")

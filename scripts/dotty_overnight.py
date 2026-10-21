@@ -324,7 +324,7 @@ INCONCLUSIVE_FAILURES = {"response_transcription_unavailable", "response_transcr
 # Failures that mean the prompt itself never reached the robot as intended;
 # downstream contract evidence cannot then be attributed to it.
 # BLOCKED outcomes that describe a moment, not a missing prerequisite.
-TRANSIENT_PRECONDITIONS = {"warm_listening_precondition"}
+TRANSIENT_PRECONDITIONS = {"warm_listening_precondition", "device_disconnected"}
 PROMPT_FAILURES = {"wake_precondition", "no_wake_event", "no_asr_or_no_wake", "asr_mismatch"}
 STATES = ("idle", "talk", "story_time", "security", "sleep", "dance")
 
@@ -901,8 +901,13 @@ def run_case(session, config, case):
         result["warm_listening_precondition"] = "NOT_REQUIRED"
         before = snapshot(config["host"])
         write_json(directory / "before.json", before)
-        if before["errors"] or not before.get("services_running") or config["device"] not in before.get("devices", []):
+        if before["errors"] or not before.get("services_running"):
             raise RuntimeError("infrastructure_down_or_device_disconnected")
+        if config["device"] not in before.get("devices", []):
+            # Services up, robot not connected: usually xiaozhi's 180 s idle
+            # close or a power loss. Retry it like a stale listening state
+            # instead of failing (and quarantining) the case under test.
+            raise CaseBlocked("device_disconnected")
         if case.get("requires_tool_logger") and not tool_logger_deployed(config["host"]):
             # Without the marker a model tool call is unobservable: block, do not fail.
             raise CaseBlocked("pi_tool_call_logger_not_deployed")
@@ -1216,6 +1221,13 @@ def record_attempt(checkpoint, case, result):
     counts = checkpoint["counts"].setdefault(case["id"], {"attempts": 0, "streak": 0, "failures": 0})
     counts["attempts"] += 1
     if result.get("verdict") == "BLOCKED":
+        if result.get("failure") == "device_disconnected":
+            # Not the case's fault, so it neither fails nor sets the case
+            # aside; but the robot being gone stops the whole run (three in a
+            # row auto-pause) instead of burning every case in a second each.
+            counts["streak"] = 0
+            checkpoint["consecutive_failures"] += 1
+            return
         if result.get("failure") in TRANSIENT_PRECONDITIONS:
             # A stale listening status (a song still playing after the last
             # attempt, say) clears on its own. Retry, and set the case aside
