@@ -1,6 +1,10 @@
 # Build StackChan firmware and publish a GitHub Release.
 #
-# Triggered by tags matching fw-v* (e.g. fw-v1.0.0).
+# Manual only (2026-10-21): the firmware's server address is compiled in
+# (CONFIG_OTA_URL), so these binaries only work on the network they were
+# built for, and LAN-locked binaries are not published. Restore the fw-v*
+# tag trigger once a prebuilt can be pointed at any server (#190). A manual
+# run names the release after the ref it runs on, so run it from a tag.
 # Uses the Espressif IDF Docker container to build the ESP32-S3 firmware,
 # then attaches the binaries + SHA256 checksums to a GitHub Release.
 #
@@ -11,9 +15,7 @@
 name: Firmware Release
 
 on:
-  push:
-    tags:
-      - 'fw-v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
