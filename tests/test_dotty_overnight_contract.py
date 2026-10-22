@@ -153,10 +153,10 @@ def test_direct_camera_route_counts_as_take_photo():
 
 def test_pending_person_fact_must_not_be_spoken():
     case = case_by_id("T03-recall-person")
-    logs = ("结果: What do you know about my friend Zorbo Quill\nSentenceType.FIRST\n"
-            "PiClient: tool call name=recall_person id=c1\n" + tts("Zorbo loves moon crackers.")
+    logs = ("结果: What do you know about my friend Sam Baker\nSentenceType.FIRST\n"
+            "PiClient: tool call name=recall_person id=c1\n" + tts("Sam loves blueberry pancakes.")
             + "\nSentenceType.LAST")
-    result = contract(case, passing(case, "I don't know much about Zorbo yet.", logs),
+    result = contract(case, passing(case, "I don't know much about Sam yet.", logs),
                       {"xiaozhi-esp32-server": logs})
     assert result["failure"] == "forbidden_content_spoken"
 
@@ -192,12 +192,12 @@ def test_forbidden_content_in_service_tts_alone_fails():
 
 def test_person_fact_must_land_in_pending_not_approved_namespace():
     case = case_by_id("T04-remember-person")
-    logs = ("结果: My friend Zorbo Quill loves moon crackers.\nSentenceType.FIRST\n"
+    logs = ("结果: My friend Sam Baker loves blueberry pancakes.\nSentenceType.FIRST\n"
             "PiClient: tool call name=remember_person id=c2\nSentenceType.LAST")
-    behaviour = '"GET /api/voice/person_review_status?person_id=Zorbo%20Quill HTTP/1.1" 200 OK'
+    behaviour = '"GET /api/voice/person_review_status?person_id=Sam%20Baker HTTP/1.1" 200 OK'
     services = {"xiaozhi-esp32-server": logs, "dotty-behaviour": behaviour}
-    pending = {"namespace": "person_pending:zorbo quill", "content": "Zorbo loves moon crackers"}
-    approved = {**pending, "namespace": "person:zorbo quill"}
+    pending = {"namespace": "person_pending:sam baker", "content": "Sam loves blueberry pancakes"}
+    approved = {**pending, "namespace": "person:sam baker"}
     assert contract(case, passing(case, "Saved.", logs), services, [pending])["interaction"] == "PASS"
     leaked = contract(case, passing(case, "Saved.", logs), services, [pending, approved])
     assert leaked["failure"] == "server_evidence_missing:fact_not_auto_approved"
