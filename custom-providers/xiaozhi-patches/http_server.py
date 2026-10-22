@@ -696,6 +696,14 @@ class SimpleHttpServer:
                 # which is the actual flush. Skipping LAST is the bug
                 # that left "this should play once." stuck in the buffer
                 # behind a mid-string comma.
+                #
+                # Clear a stale abort first: upstream's TTS thread drops
+                # every message while client_abort is set, and nothing
+                # resets it until the next chat turn, so a greeting after
+                # an abort (face_lost_aborter, a dashboard stop) was lost.
+                # play-asset does the same; the aborted turn's leftover
+                # text is still discarded by the sentence_id swap.
+                conn.client_abort = False
                 conn.sentence_id = sentence_id
                 for st, body in (
                     (_SentenceType.FIRST, ""),

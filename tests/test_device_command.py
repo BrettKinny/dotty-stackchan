@@ -232,13 +232,13 @@ class TestHttpServerWiring(unittest.TestCase):
         self.assertIsNone(got)
         self.assertEqual(err.status, 503)
 
-    def test_server_say_survives_chat_sentence_id_change(self):
-        """#104: a chat turn must not invalidate queued server speech."""
-        class SentenceType:
-            FIRST = "first"
-            MIDDLE = "middle"
-            LAST = "last"
+    class _SentenceType:
+        FIRST = "first"
+        MIDDLE = "middle"
+        LAST = "last"
 
+    def _say(self, conn, text):
+        """Run /xiaozhi/admin/say against `conn` with xiaozhi's TTS DTOs stubbed."""
         class ContentType:
             TEXT = "text"
 
@@ -248,7 +248,7 @@ class TestHttpServerWiring(unittest.TestCase):
 
         dto_module = types.SimpleNamespace(
             ContentType=ContentType,
-            SentenceType=SentenceType,
+            SentenceType=self._SentenceType,
             TTSMessageDTO=DTO,
         )
         saved = {
@@ -264,35 +264,15 @@ class TestHttpServerWiring(unittest.TestCase):
             sys.modules["core.providers.tts.dto.dto"] = dto_module
 
             async def go():
-                conn = _FakeConn()
                 conn.headers = {"device-id": "dev-say"}
                 conn.tts = types.SimpleNamespace(tts_text_queue=queue.Queue())
                 type(self).active["dev-say"] = conn
+
                 async def run_inline(func):
                     return func()
 
                 with patch.object(self.mod.asyncio, "to_thread", side_effect=run_inline):
-                    await self._server()._dotty_say(
-                        self._request({"text": "Hello from the server."})
-                    )
-
-                conn.sentence_id = "new-chat-turn"
-                accepted = []
-                while not conn.tts.tts_text_queue.empty():
-                    message = conn.tts.tts_text_queue.get_nowait()
-                    if (
-                        message.sentence_id != conn.sentence_id
-                        and message.sentence_id not in getattr(
-                            conn, "_dotty_server_push_sentence_ids", set()
-                        )
-                    ):
-                        continue
-                    accepted.append(message)
-
-                self.assertEqual(
-                    [m.sentence_type for m in accepted],
-                    [SentenceType.FIRST, SentenceType.MIDDLE, SentenceType.LAST],
-                )
+                    await self._server()._dotty_say(self._request({"text": text}))
 
             asyncio.run(go())
         finally:
@@ -301,6 +281,38 @@ class TestHttpServerWiring(unittest.TestCase):
                     sys.modules.pop(name, None)
                 else:
                     sys.modules[name] = module
+
+    def test_server_say_survives_chat_sentence_id_change(self):
+        """#104: a chat turn must not invalidate queued server speech."""
+        conn = _FakeConn()
+        self._say(conn, "Hello from the server.")
+
+        conn.sentence_id = "new-chat-turn"
+        accepted = []
+        while not conn.tts.tts_text_queue.empty():
+            message = conn.tts.tts_text_queue.get_nowait()
+            if (
+                message.sentence_id != conn.sentence_id
+                and message.sentence_id not in getattr(
+                    conn, "_dotty_server_push_sentence_ids", set()
+                )
+            ):
+                continue
+            accepted.append(message)
+
+        self.assertEqual(
+            [m.sentence_type for m in accepted],
+            [self._SentenceType.FIRST, self._SentenceType.MIDDLE, self._SentenceType.LAST],
+        )
+
+    def test_server_say_after_abort_is_not_dropped(self):
+        """2026-10-22 A/V run: after an abort, the TTS thread drops every
+        message while client_abort is set, so a greeting was silently lost."""
+        conn = _FakeConn()
+        conn.client_abort = True
+        self._say(conn, "Hi!")
+        self.assertFalse(conn.client_abort)
+        self.assertEqual(conn.tts.tts_text_queue.qsize(), 3)
 
     def test_server_push_exemption_does_not_keep_stale_chat_ids(self):
         conn = types.SimpleNamespace(
