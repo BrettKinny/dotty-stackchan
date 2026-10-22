@@ -81,11 +81,29 @@ def test_every_catalogue_case_is_valid(case):
 
 @pytest.mark.parametrize("ident", ["T01-memory-lookup", "T02-remember", "T03-recall-person",
                                    "T04-remember-person", "T05-think-hard", "T06-take-photo",
-                                   "T07-play-song", "V07-hard-thinking"])
+                                   "T07-play-song"])
 def test_tool_cases_are_enabled_and_require_server_evidence(ident):
     case = case_by_id(ident)
     assert case.get("enabled", True)
     assert case["server_evidence"]
+
+
+@pytest.mark.parametrize("called", [False, True])
+def test_puzzle_passes_on_the_answer_with_or_without_think_hard(called):
+    # Brett 2026-10-22: the small model may solve V07 itself; the answer is
+    # what counts, and the tool choice is only recorded.
+    case = case_by_id("V07-hard-thinking")
+    marker = "PiClient: tool call name=think_hard id=c4\n" if called else ""
+    logs = ("结果: If all wugs are blue and some blue things are round, must some wugs be round\n"
+            + marker + tts("Not necessarily. The wugs could all be square.") + "\nSentenceType.LAST")
+    result = contract(case, passing(case, "Not necessarily. The wugs could all be square.", logs),
+                      {"xiaozhi-esp32-server": logs})
+    assert result["interaction"] == "PASS"
+    assert result["observed_tool_calls"] == (["think_hard"] if called else [])
+    wrong = ("结果: If all wugs are blue and some blue things are round, must some wugs be round\n"
+             + tts("Yes, some wugs are round.") + "\nSentenceType.LAST")
+    assert contract(case, passing(case, "Yes, some wugs are round.", wrong),
+                    {"xiaozhi-esp32-server": wrong})["verdict"] == "FAIL"
 
 
 def test_remember_needs_success_reply_and_a_new_row():

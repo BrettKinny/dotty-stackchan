@@ -66,7 +66,7 @@ Case contracts (all also need the existing ASR, reply, TTS and recovery checks):
 | T02-remember | TTS "I'll remember that", no failure string, a new `voice`/`core` brain.db row containing pineapple+lantern |
 | T01-memory-lookup (after T02) | TTS and reply contain "pineapple"; no "couldn't check"/"don't remember" |
 | T05-think-hard | direct route: TTS "think hard about that", no reasoner failure, answer five cents |
-| V07-hard-thinking | the pi agent itself calls `think_hard` (`PiClient: tool call` marker); answer "no" |
+| V07-hard-thinking | answer "no" (not necessarily); a `think_hard` call is recorded but not required, since T05 covers the tool |
 | T04-remember-person | marker, behaviour `person_review_status` 200, row in `person_pending:` and none in `person:` |
 | T03-recall-person (after T04) | marker `recall_person`; reply/TTS never says "cracker" |
 | T06-take-photo | marker, behaviour `GET /api/voice/take_photo` 200 (Kid Mode answers "camera disabled": still a pass) |
