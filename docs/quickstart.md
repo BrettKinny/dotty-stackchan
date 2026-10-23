@@ -45,34 +45,23 @@ auto-detects the NVIDIA Docker runtime: if it's present, setup selects
 
 ## 1. Flash the firmware
 
-Download the latest release from
-[GitHub Releases](https://github.com/BrettKinny/dotty-stackchan/releases)
-(look for a tag starting with `fw-v`). Grab all six binaries:
-`bootloader.bin`, `partition-table.bin`, `ota_data_initial.bin`,
-`stack-chan.bin`, `generated_assets.bin`, and `human_face_detect.espdl`.
+Build the firmware from source and flash it over USB-C. The steps are in
+[SETUP.md](../SETUP.md#2-build-and-flash-open-firmware). They use this repo's
+pinned `BrettKinny/StackChan@dotty` submodule, and set `CONFIG_OTA_URL` to
+`http://<XIAOZHI_HOST>:8003/xiaozhi/ota/` for your own server.
 
-Install esptool and flash over USB-C:
+> There is no ready-made binary for another server: the firmware's server
+> address is compiled in, and the StackChan's on-device Settings app has no
+> OTA/server editor. Earlier `fw-v*` GitHub releases carried binaries locked
+> to the maintainer's LAN server; those binaries have been removed and the
+> releases are now source-only, so build your own. Don't build the
+> official `m5stack/StackChan` upstream either: it doesn't include Dotty's
+> firmware changes.
 
-```bash
-pip install esptool
-
-python -m esptool --chip esp32s3 -b 460800 \
-  --before default_reset --after hard_reset \
-  write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m \
-  0x0      bootloader.bin \
-  0x8000   partition-table.bin \
-  0xd000   ota_data_initial.bin \
-  0x20000  stack-chan.bin \
-  0xa60000 generated_assets.bin \
-  0xe70000 human_face_detect.espdl
-```
-
-Flashing the bootloader (`0x0`) and partition table (`0x8000`) is
-**required** — skip them and the device keeps whatever partition layout
-the previous firmware left behind. That layout won't match these
-images, and the robot boot-loops on `No bootable app partitions`.
-
-Verify checksums against `SHA256SUMS.txt` in the release if desired.
+Flash the bootloader (`0x0`) and the partition table (`0x8000`) with the app.
+If you skip them, the device keeps the partition layout the previous
+firmware left behind, and the robot boot-loops on `No bootable app
+partitions`. `idf.py flash` writes all of them.
 
 ## 2. Clone the repo
 
@@ -141,10 +130,24 @@ No separate host, no systemd bridge unit, no SSH to a second machine.
 
 ## 6. Connect the robot
 
-1. Power on the robot (USB-C or battery).
-2. On the device screen, navigate to **Settings > Advanced Options**.
-3. Enter the OTA URL: `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/`
-4. The robot connects via WebSocket and shows a face.
+1. Confirm the firmware was built with
+   `CONFIG_OTA_URL="http://<XIAOZHI_HOST>:8003/xiaozhi/ota/"` as described in
+   [SETUP.md](../SETUP.md#2-build-and-flash-open-firmware).
+2. Power on the robot (USB-C or battery).
+3. On a fresh flash, **“Welcome! Let's get started.” is expected**. Tap
+   **Skip** to bypass the M5Stack account wizard. If the launcher remains,
+   open **SETUP** and use its home control to exit into Xiaozhi.
+4. Join the temporary `Xiaozhi-*` hotspot, open the browser URL shown on the
+   robot (normally `http://192.168.4.1`), and select your 2.4 GHz Wi-Fi.
+   The portal's **Advanced** tab can confirm or override `ota_url`.
+5. Watch `docker logs -f xiaozhi-esp32-server`. The robot should POST to the
+   configured OTA URL, receive the WebSocket endpoint, connect, and show a
+   face.
+
+The StackChan's on-device Settings app does **not** contain an Advanced
+Options or OTA URL field. Wi-Fi credentials are provisioned into NVS through
+the browser hotspot portal; `CONFIG_WIFI_SSID` and `CONFIG_WIFI_PASSWORD` are
+not firmware options in the pinned source.
 
 ## 7. First voice turn
 
@@ -184,7 +187,7 @@ This repo uses placeholders in place of real IPs, usernames, and filesystem path
 | `<XIAOZHI_HOSTNAME>` | Hostname or Tailscale name of the server (optional, IP works for everything). |
 | `<XIAOZHI_PATH>` | Path on the server where you clone/install this repo (e.g. `/opt/xiaozhi-server/` or `/srv/xiaozhi-server/`). |
 | `<YOUR_NAME>` | Your name / org, used by the `.config.yaml` prompt for providers that forward xiaozhi's system dialogue. |
-| `<ROBOT_NAME>` | Robot name used by that configured prompt. PiVoiceLLM's live per-turn policy is versioned separately. |
+| `<ROBOT_NAME>` | Robot name used by that configured prompt. PiVoiceLLM's live policy is versioned separately. |
 
 Port numbers (`8000`, `8003`, `8081`, `8090`) are product-generic and should not be changed unless you also reconfigure the respective services.
 
@@ -228,7 +231,7 @@ The full file inventory lives in [architecture.md](./architecture.md#deployment-
 
 | What | URL | Who calls it |
 |---|---|---|
-| OTA (enter into StackChan settings) | `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/` | The robot on boot |
+| OTA (compile into firmware or set in the hotspot portal) | `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/` | The robot on boot |
 | WebSocket | `ws://<XIAOZHI_HOST>:8000/xiaozhi/v1/` | The robot after OTA handshake |
 | Perception / ambient events | `http://<XIAOZHI_HOST>:8090` | xiaozhi-server → dotty-behaviour |
 | Admin dashboard | `http://<XIAOZHI_HOST>:8081/ui` | Humans (LAN-only HTMX UI) |
@@ -272,7 +275,7 @@ curl http://<XIAOZHI_HOST>:8081/health
 The default TTS is `LocalPiper` (offline, runs inside the container). To change the Piper voice, edit `TTS.LocalPiper.voice` and the corresponding `model_path` / `config_path` in `data/.config.yaml`. To switch to cloud EdgeTTS instead, set `selected_module.TTS: EdgeTTS` and edit `TTS.EdgeTTS.voice` (any Microsoft Edge Neural voice ID works, e.g. `en-US-AvaNeural`). Restart the container after changes.
 
 ### Changing persona (the robot's personality)
-`OpenAICompat` supports `persona_file` and the xiaozhi system prompt. The default PiVoiceLLM currently uses neither; its live voice policy is the versioned per-turn prompt in `custom-providers/pi_voice/pi_voice.py` and `custom-providers/textUtils.py`. Full instructions and limitations: [cookbook/change-persona.md](cookbook/change-persona.md).
+`OpenAICompat` supports `persona_file` and the xiaozhi system prompt. The default PiVoiceLLM uses neither; pi's system prompt is `personas/pi_voice.md` plus the versioned rules in `custom-providers/pi_voice/pi_voice.py` and `custom-providers/textUtils.py`. Full instructions and limitations: [cookbook/change-persona.md](cookbook/change-persona.md).
 
 ### Changing VAD sensitivity
 `VAD.SileroVAD.min_silence_duration_ms` in `data/.config.yaml`. Default: 700 ms. Lower = cuts off quicker. Higher = waits longer for slow speakers.

@@ -17,12 +17,15 @@ import sys
 import threading
 import time
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 # Make the package importable as `pi_voice.*` regardless of cwd.
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
-from pi_client import PiClient, PiClientError  # noqa: E402
+from pi_client import PiClient, PiClientError, _run_container_voice_tool  # noqa: E402
+import pi_client  # noqa: E402
 
 
 class FakePopen:
@@ -156,6 +159,7 @@ class TestSpawnOnce(unittest.TestCase):
                     for cmd in fake.stdin_lines:
                         if cmd.get("type") == "new_session":
                             fake.emit({
+                                "id": cmd["id"],
                                 "type": "response", "command": "new_session",
                                 "success": True,
                             })
@@ -169,6 +173,82 @@ class TestSpawnOnce(unittest.TestCase):
             self.assertEqual(chunks, ["bye"])
 
             self.assertEqual(client._spawn_count[0], 1, "must only spawn once")
+        finally:
+            client.close()
+
+    def test_new_session_ignores_stale_response_until_matching_ack(self):
+        fake = FakePopen()
+        client = make_client(fake)
+        stale_emitted = threading.Event()
+        release_matching = threading.Event()
+        errors: list[BaseException] = []
+
+        def responder():
+            while True:
+                time.sleep(0.01)
+                for cmd in fake.stdin_lines:
+                    if cmd.get("type") == "new_session":
+                        fake.emit({
+                            "id": "nsess-stale",
+                            "type": "response",
+                            "command": "new_session",
+                            "success": False,
+                            "error": "stale failure",
+                        })
+                        stale_emitted.set()
+                        release_matching.wait(timeout=2)
+                        fake.emit({
+                            "id": cmd["id"],
+                            "type": "response",
+                            "command": "new_session",
+                            "success": True,
+                        })
+                        return
+
+        def reset_session():
+            try:
+                client.new_session()
+            except BaseException as exc:  # captured for the main test thread
+                errors.append(exc)
+
+        threading.Thread(target=responder, daemon=True).start()
+        reset = threading.Thread(target=reset_session)
+        reset.start()
+        try:
+            self.assertTrue(stale_emitted.wait(timeout=1))
+            time.sleep(0.05)
+            self.assertTrue(reset.is_alive(), "stale response must not complete reset")
+            release_matching.set()
+            reset.join(timeout=2)
+            self.assertFalse(reset.is_alive())
+            self.assertEqual(errors, [])
+        finally:
+            release_matching.set()
+            reset.join(timeout=2)
+            client.close()
+
+    def test_new_session_raises_on_matching_failure(self):
+        fake = FakePopen()
+        client = make_client(fake)
+
+        def responder():
+            while True:
+                time.sleep(0.01)
+                for cmd in fake.stdin_lines:
+                    if cmd.get("type") == "new_session":
+                        fake.emit({
+                            "id": cmd["id"],
+                            "type": "response",
+                            "command": "new_session",
+                            "success": False,
+                            "error": "reset refused",
+                        })
+                        return
+
+        threading.Thread(target=responder, daemon=True).start()
+        try:
+            with self.assertRaisesRegex(PiClientError, "reset refused"):
+                client.new_session()
         finally:
             client.close()
 
@@ -208,6 +288,143 @@ class TestThinkingFilter(unittest.TestCase):
             threading.Thread(target=feed, daemon=True).start()
             chunks = list(client.iter_turn_text("hi"))
             self.assertEqual(chunks, ["Hello", " world."])
+        finally:
+            client.close()
+
+
+class TestRepeatedTurnText(unittest.TestCase):
+    def _run(self, turns):
+        fake = FakePopen()
+        client = make_client(fake)
+        try:
+            def feed():
+                fake.emit({
+                    "id": "turn-1", "type": "response",
+                    "command": "prompt", "success": True,
+                })
+                for deltas in turns:
+                    fake.emit({"type": "turn_start"})
+                    for delta in deltas:
+                        fake.emit({
+                            "type": "message_update",
+                            "assistantMessageEvent": {"type": "text_delta", "delta": delta},
+                        })
+                    fake.emit({"type": "turn_end"})
+                fake.emit({"type": "agent_end"})
+
+            threading.Thread(target=feed, daemon=True).start()
+            return "".join(client.iter_turn_text("play tetris"))
+        finally:
+            client.close()
+
+    def test_post_tool_turn_repeating_the_pre_tool_line_is_dropped(self):
+        self.assertEqual(
+            self._run([["😊 Let me play ", "that song for you."],
+                       ["Let me play that ", "song for you!"]]),
+            "😊 Let me play that song for you.",
+        )
+
+    def test_new_words_after_a_repeat_are_spoken(self):
+        self.assertEqual(
+            self._run([["Let me play that song for you."],
+                       ["Let me play that song for you.", " Here is Tetris!"]]),
+            "Let me play that song for you. Here is Tetris!",
+        )
+
+    def test_a_different_post_tool_reply_is_spoken_whole(self):
+        self.assertEqual(
+            self._run([["Let me check."], ["Let me", " see, it is nineteen."]]),
+            "Let me check.Let me see, it is nineteen.",
+        )
+
+    def test_silent_tool_turn_does_not_hold_back_the_reply(self):
+        self.assertEqual(self._run([[], ["Here is Tetris!"]]), "Here is Tetris!")
+
+
+class TestToolCallCap(unittest.TestCase):
+    def _run(self, calls, end=True, reply="Purple robot seven window banana."):
+        fake = FakePopen()
+        client = make_client(fake)
+        try:
+            def feed():
+                fake.emit({"id": "turn-1", "type": "response", "command": "prompt", "success": True})
+                for n in range(calls):
+                    fake.emit({"type": "message_update", "assistantMessageEvent": {
+                        "type": "toolcall_end",
+                        "toolCall": {"type": "toolCall", "id": f"t{n}", "name": "think_hard"}}})
+                if end:
+                    fake.emit({"type": "message_update",
+                               "assistantMessageEvent": {"type": "text_delta", "delta": reply}})
+                    fake.emit({"type": "agent_end"})
+
+            threading.Thread(target=feed, daemon=True).start()
+            started = time.monotonic()
+            text = "".join(client.iter_turn_text("Repeat these five words"))
+            return text, [c["type"] for c in fake.stdin_lines if c["type"] in ("steer", "abort")], time.monotonic() - started
+        finally:
+            client.close()
+
+    def test_few_tool_calls_are_left_alone(self):
+        text, sent, _ = self._run(2)
+        self.assertEqual(sent, [])
+        self.assertEqual(text, "Purple robot seven window banana.")
+
+    def test_third_tool_call_steers_toward_an_answer(self):
+        text, sent, _ = self._run(3)
+        self.assertEqual(sent, ["steer"])
+        self.assertEqual(text, "Purple robot seven window banana.")
+
+    def test_runaway_tool_loop_is_aborted(self):
+        _, sent, _ = self._run(19)
+        self.assertEqual(sent, ["steer", "abort"])
+
+    def test_abort_without_agent_end_does_not_hang_the_turn(self):
+        with patch.object(pi_client, "_ABORT_GRACE_SEC", 0.2):
+            text, sent, took = self._run(6, end=False)
+        self.assertEqual((text, sent), ("", ["steer", "abort"]))
+        self.assertLess(took, 2.5)
+
+    def test_unfinished_abort_restarts_pi_so_its_frames_cannot_reach_the_next_turn(self):
+        spawned = []
+
+        def factory():
+            spawned.append(FakePopen())
+            return spawned[-1]
+
+        client = PiClient(factory, turn_timeout_sec=3.0)
+        try:
+            first = None
+
+            def feed_first():
+                fake = spawned[0]
+                fake.emit({"id": "turn-1", "type": "response", "command": "prompt", "success": True})
+                for n in range(6):
+                    fake.emit({"type": "message_update", "assistantMessageEvent": {
+                        "type": "toolcall_end", "toolCall": {"id": f"t{n}", "name": "think_hard"}}})
+
+            with patch.object(pi_client, "_ABORT_GRACE_SEC", 0.2):
+                gen = client.iter_turn_text("loop")
+                threading.Timer(0.05, feed_first).start()
+                first = "".join(gen)
+            self.assertEqual(first, "")
+            old = spawned[0]
+            self.assertEqual(old.poll(), 0)  # the stuck pi was stopped
+            # The old run finishes late: its agent_end must not end turn 2.
+            old.emit({"type": "message_update",
+                      "assistantMessageEvent": {"type": "text_delta", "delta": "stale"}})
+            old.emit({"type": "agent_end"})
+
+            def feed_second():
+                fake = spawned[-1]
+                fake.emit({"id": "turn-2", "type": "response", "command": "prompt", "success": True})
+                fake.emit({"type": "message_update",
+                           "assistantMessageEvent": {"type": "text_delta", "delta": "fresh"}})
+                fake.emit({"type": "agent_end"})
+
+            gen = client.iter_turn_text("next")
+            threading.Timer(0.1, feed_second).start()
+            self.assertEqual("".join(gen), "fresh")
+            self.assertEqual(len(spawned), 2)
         finally:
             client.close()
 
@@ -358,6 +575,125 @@ class TestTurnTimeout(unittest.TestCase):
         finally:
             client.close()
 
+
+class TestContainerVoiceToolRunner(unittest.TestCase):
+    def test_rejects_tools_outside_allowlist_without_spawning(self):
+        with patch("pi_client.subprocess.run") as run:
+            with self.assertRaisesRegex(PiClientError, "unsupported"):
+                _run_container_voice_tool("dotty-pi", "remember_person", {"name": "x"})
+        run.assert_not_called()
+
+    def test_rejects_malformed_json_output(self):
+        completed = SimpleNamespace(returncode=0, stdout="not-json", stderr="")
+        with patch("pi_client.subprocess.run", return_value=completed):
+            with self.assertRaisesRegex(PiClientError, "invalid JSON"):
+                _run_container_voice_tool("dotty-pi", "remember", {"fact": "x"})
+
+    def test_rejects_non_string_result(self):
+        completed = SimpleNamespace(
+            returncode=0, stdout='{"result":42}', stderr="",
+        )
+        with patch("pi_client.subprocess.run", return_value=completed):
+            with self.assertRaisesRegex(PiClientError, "non-string"):
+                _run_container_voice_tool("dotty-pi", "remember", {"fact": "x"})
+
+
+
+class TestVoiceSessionSetup(unittest.TestCase):
+    """#165: the voice agent sees only its voice tools and never compacts."""
+
+    def test_pi_coding_tools_are_disabled_by_default(self):
+        from pi_client import _DEFAULT_PI_FLAGS
+        self.assertIn("--no-builtin-tools", _DEFAULT_PI_FLAGS)
+        self.assertNotIn("--no-tools", _DEFAULT_PI_FLAGS)  # would drop the voice tools too
+
+    def test_auto_compaction_is_disabled_once_per_spawn(self):
+        fake = FakePopen()
+        client = make_client(fake)
+        try:
+            _auto_respond(fake, turn_text="hi")
+            list(client.iter_turn_text("hello"))
+            _auto_respond(fake, turn_text="again")
+            list(client.iter_turn_text("hello again"))
+            toggles = [c for c in fake.stdin_lines if c.get("type") == "set_auto_compaction"]
+            self.assertEqual(toggles, [{"type": "set_auto_compaction", "enabled": False}])
+            self.assertEqual(fake.stdin_lines[0]["type"], "set_auto_compaction")
+        finally:
+            client.close()
+
+
+class TestTakePhotoDirectRunner(unittest.TestCase):
+    def test_take_photo_runs_without_an_argument(self):
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen["script"] = argv[-1]
+            return SimpleNamespace(
+                returncode=0, stdout=json.dumps({"result": "a cat"}), stderr="",
+            )
+
+        with patch("pi_client.subprocess.run", fake_run):
+            result = _run_container_voice_tool("dotty-pi", "take_photo", {})
+        self.assertEqual(result, "a cat")
+        self.assertIn("take_photo.ts", seen["script"])
+        self.assertIn("await runTakePhoto()", seen["script"])
+
+
+class TestRecallPersonDirectRunner(unittest.TestCase):
+    def test_recall_person_passes_the_name(self):
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen["script"], seen["input"] = argv[-1], kwargs["input"]
+            return SimpleNamespace(
+                returncode=0, stdout=json.dumps({"result": "(nothing remembered about Sam)"}),
+                stderr="",
+            )
+
+        with patch("pi_client.subprocess.run", fake_run):
+            result = _run_container_voice_tool("dotty-pi", "recall_person", {"name": "Sam"})
+        self.assertEqual(result, "(nothing remembered about Sam)")
+        self.assertIn("recall_person.ts", seen["script"])
+        self.assertIn('await runRecallPerson(input["name"])', seen["script"])
+        self.assertEqual(json.loads(seen["input"]), {"name": "Sam"})
+
+
+class TestPlaySongDirectRunner(unittest.TestCase):
+    def test_play_song_passes_the_name(self):
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen["script"] = argv[-1]
+            return SimpleNamespace(
+                returncode=0, stdout=json.dumps({"result": "playing tetris"}), stderr="",
+            )
+
+        with patch("pi_client.subprocess.run", fake_run):
+            result = _run_container_voice_tool("dotty-pi", "play_song", {"name": "tetris"})
+        self.assertEqual(result, "playing tetris")
+        self.assertIn('await runPlaySong(input["name"])', seen["script"])
+
+
+class TestDirectToolTimeouts(unittest.TestCase):
+    """think_hard may wait for a cold 27B load; quick tools must stay quick."""
+
+    def _timeout_for(self, name: str, argument: str) -> float:
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen["timeout"] = kwargs["timeout"]
+            return SimpleNamespace(returncode=0, stdout=json.dumps({"result": "ok"}), stderr="")
+
+        with patch("pi_client.subprocess.run", fake_run):
+            _run_container_voice_tool("dotty-pi", name, {argument: "x"})
+        return seen["timeout"]
+
+    def test_think_hard_outlasts_the_reasoner_cold_start(self):
+        self.assertGreaterEqual(self._timeout_for("think_hard", "question"), 100)
+
+    def test_memory_tools_keep_a_short_timeout(self):
+        self.assertEqual(self._timeout_for("memory_lookup", "query"), 60)
+        self.assertEqual(self._timeout_for("remember", "fact"), 60)
 
 if __name__ == "__main__":
     unittest.main()

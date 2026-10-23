@@ -10,7 +10,7 @@ description: Single-host architecture and message flow for the self-hosted voice
 - Two hosts: **robot** (StackChan on your desk) and a **single Docker host** (`<XIAOZHI_HOST>`) that runs all four server-side services.
 - Audio goes robot → xiaozhi-server → (text) → dotty-pi → (response text) → xiaozhi-server → (audio) → robot. The Docker host never sends audio to the robot — xiaozhi-server handles that.
 - The default voice provider is **`PiVoiceLLM`**, selected via `selected_module.LLM` in `.config.yaml`. One documented alternate exists (`OpenAICompat`) — see [llm-backends.md](./llm-backends.md).
-- Everything is LAN-local **except** cloud-routed LLM calls (smart-mode, VLM, audio caption). EdgeTTS is cloud when selected; Piper is fully local.
+- Everything is LAN-local **except** cloud-routed LLM calls (smart-mode, VLM, audio caption). EdgeTTS is cloud when selected; Piper is fully local. Setting `DOTTY_LOCAL_ONLY=1` on dotty-behaviour makes that fail closed: any VLM, audio-caption or narrative URL that is not on the LAN is disabled at startup, and weather and calendar fetches are switched off.
 - The robot speaks the **Xiaozhi WebSocket protocol** (see [protocols.md](./protocols.md)). It has no knowledge of the services running on the Docker host.
 
 > **Cutover note (2026-05-19, issue #36):** The stack previously ran on three hosts — a separate ZeroClaw host (Raspberry Pi) ran the ZeroClaw Rust agent + a FastAPI bridge under systemd. That host has been retired. The brain is now the `dotty-pi` container; the voice provider is `PiVoiceLLM`. See [cutover-behaviour.md](./cutover-behaviour.md) for the historical runbook.
@@ -61,7 +61,7 @@ Solid arrows are per-turn data flow; dotted arrows are cloud / conditional. All 
 
 | Actor | Host | Role | Process |
 |---|---|---|---|
-| **StackChan** | Desk | Captures audio, plays audio, renders face, runs MCP tools for head/LED/camera | ESP32-S3 firmware built from `m5stack/StackChan` |
+| **StackChan** | Desk | Captures audio, plays audio, renders face, runs MCP tools for head/LED/camera | ESP32-S3 firmware built from the pinned `BrettKinny/StackChan@dotty` fork |
 | **xiaozhi-esp32-server** | Docker host | VAD → ASR → LLM (proxy) → TTS pipeline, emotion dispatch, OTA, admin surface | Docker container |
 | **PiVoiceLLM custom provider** | Docker host (inside xiaozhi container) | Default LLM provider — translates each voice turn into a pi RPC request, streams TTS-bound text back | Python, mounted via volume |
 | **dotty-pi** | Docker host | The voice-tool brain — pi coding agent with the `dotty-pi-ext` extension; owns the agent loop and tool dispatch | Docker container (`dotty-pi`) |
@@ -190,7 +190,7 @@ Operations that need to touch a live device session — head servos, MCP dispatc
 | `POST /xiaozhi/admin/set-face-identified` | Light the face-identified pixel for ~4 s. |
 | `POST /xiaozhi/admin/take-photo` | Trigger a camera capture. |
 | `GET /xiaozhi/admin/songs` | List audio assets available to `play_song`. |
-| `POST /xiaozhi/admin/play-asset` | Play a named audio asset through the speaker. |
+| `POST /xiaozhi/admin/play-asset` | Play a named audio asset through the speaker. Refused (409) mid-turn, unless `after_turn: true` asks it to wait for the turn's reply to finish. |
 | `POST /xiaozhi/admin/say` | Synthesise + play arbitrary text. |
 
 ### Perception event bus
@@ -208,7 +208,7 @@ The xiaozhi-server's `EventTextMessageHandler` (`custom-providers/xiaozhi-patche
 | Consumer | What it does |
 |---|---|
 | `FaceGreeter` | "Hi!" greeting (via `/xiaozhi/admin/inject-text`) on first face detection after a cooldown window. |
-| `SoundTurner` | Head-turn (via `/xiaozhi/admin/set-head-angles`) toward sound direction. |
+| `SoundTurner` | Head-turn (via `/xiaozhi/admin/set-head-angles`) toward sound direction. **Off by default** (`SOUND_TURN_ENABLED=0`) — the firmware localizer is stuck-left (#27), so it only ever turned left. |
 | `FaceLostAborter` | Aborts an in-flight TTS turn (via `/xiaozhi/admin/abort`) when the audience walks away. |
 | `WakeWordTurner` | Head-turn toward the speaker on wake-word event. |
 | `FaceIdentifiedRefresher` | Re-asserts the face-identified pixel every ~3 s so the firmware's 4 s timeout doesn't drop it. |

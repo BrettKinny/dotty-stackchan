@@ -37,14 +37,42 @@ from core.utils.modules_initialize import initialize_modules
 from core.utils.util import check_vad_update, check_asr_update
 # DOTTY-PATCH: shared registry consumed by the admin /inject-text route.
 from core.portal_bridge import active_connections as _dotty_active_connections
+# DOTTY-PATCH: last firmware-reported state per device, restored onto each
+# new connection so sticky-state wake phrases survive a reconnect (#170).
+from core.portal_bridge import restore_device_state as _dotty_restore_device_state
 
 TAG = __name__
+
+
+def _dotty_preimport_tts(config, *, import_module=None, exists=None) -> None:
+    """Import the configured TTS provider module once, on the main thread.
+
+    Each connection builds its own TTS on a worker thread through upstream's
+    create_instance, which treats any ``sys.modules`` entry as loaded. Two
+    connections in the same second (a robot reconnecting after a restart)
+    raced the first import: one saw the half-initialised module, failed with
+    "has no attribute 'TTSProvider'", and was left with no TTS, so Dotty could
+    not speak until it reconnected (2026-10-23 A/V run). Best effort: any
+    problem here is left for the per-connection path to report.
+    """
+    import importlib
+    import os
+    import_module = import_module or importlib.import_module
+    exists = exists or os.path.exists
+    try:
+        selected = config["selected_module"]["TTS"]
+        tts_type = config["TTS"][selected].get("type", selected)
+        if exists(os.path.join("core", "providers", "tts", f"{tts_type}.py")):
+            import_module(f"core.providers.tts.{tts_type}")
+    except Exception:
+        pass
 
 
 class WebSocketServer:
     def __init__(self, config: dict):
         self.config = config
         self.logger = setup_logging()
+        _dotty_preimport_tts(self.config)
         self.config_lock = asyncio.Lock()
         modules = initialize_modules(
             self.logger,
@@ -130,6 +158,11 @@ class WebSocketServer:
         _dotty_dev_id = websocket.request.headers.get("device-id", "") or ""
         if _dotty_dev_id:
             _dotty_active_connections[_dotty_dev_id] = handler
+            _restored = _dotty_restore_device_state(handler, _dotty_dev_id)
+            if _restored:
+                self.logger.bind(tag=TAG).info(
+                    f"restored device state {_restored!r} for {_dotty_dev_id}"
+                )
         try:
             await handler.handle_connection(websocket)
         except Exception as e:

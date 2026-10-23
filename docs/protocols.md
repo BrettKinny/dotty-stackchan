@@ -244,7 +244,7 @@ xiaozhi-server
                                         │ (stdout, streamed)
 ```
 
-Each turn is a single JSONL object written to stdin; the agent streams JSONL response chunks back on stdout. Only TTS-bound text chunks are forwarded to xiaozhi-server — tool call details stay internal to the agent loop. The agent exits cleanly after each turn; `PiClient` re-invokes `docker exec` for the next turn.
+Each turn is a single JSONL object written to stdin; the agent streams JSONL response chunks back on stdout. Only TTS-bound text chunks are forwarded to xiaozhi-server — tool call details stay internal to the agent loop. The `pi --mode rpc` process is long-lived: `PiClient` keeps the same `docker exec` child across turns and sends `new_session` before each one, so every turn starts from a fresh session. The voice rules sit in pi's system prompt, which is fixed at spawn, so a Kid Mode change closes pi and spawns a new one before the next turn. If an aborted turn never ends, `PiClient` restarts pi. `PiClient` also caps tool calls per reply: after 3 it steers pi to answer, and after 6 it aborts the turn.
 
 The dotty-pi agent loads the **dotty-pi-ext extension** at startup, which registers seven voice tools (`memory_lookup`, `recall_person`, `remember`, `remember_person`, `think_hard`, `take_photo`, `play_song`). Tool results never appear in the TTS stream.
 

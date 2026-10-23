@@ -241,5 +241,247 @@ class TestPlayAssetRoute(unittest.TestCase):
         self.assertEqual(resp.status, 503)
 
 
+class TestMidiSongs(unittest.TestCase):
+    """The songs dir holds .mid tunes; they must be listed and playable.
+
+    AI-assisted (Claude). The catalogue used to filter to opus/ogg/wav/mp3,
+    so the dashboard and play_song saw only purr.opus.
+    """
+
+    def setUp(self):
+        _mock_active.clear()
+        self.srv = _make_server()
+        self.root = os.path.realpath(tempfile.mkdtemp())
+        self._prev_roots = os.environ.get("DOTTY_PLAY_ASSET_ROOTS")
+        os.environ["DOTTY_PLAY_ASSET_ROOTS"] = self.root
+
+    def tearDown(self):
+        _mock_active.clear()
+        if self._prev_roots is None:
+            os.environ.pop("DOTTY_PLAY_ASSET_ROOTS", None)
+        else:
+            os.environ["DOTTY_PLAY_ASSET_ROOTS"] = self._prev_roots
+        import shutil
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_catalogue_lists_midi_alongside_opus(self):
+        names = ["README.md", "macarena.mid", "macarena_lyrics.txt", "purr.opus", "tetris.mid"]
+        with patch("os.listdir", return_value=names):
+            resp = _run(self.srv._dotty_list_songs(MagicMock()))
+        self.assertEqual(_body(resp)["files"], ["macarena.mid", "purr.opus", "tetris.mid"])
+
+    def test_midi_asset_is_rendered_with_fluidsynth_and_streamed(self):
+        path = os.path.join(self.root, "tetris.mid")
+        with open(path, "wb") as f:
+            f.write(b"MThd")
+        conn = MagicMock()
+        conn.headers = {"device-id": "dev1"}
+        conn.sample_rate = 24000
+        conn.session_id = "sess"
+        conn.client_abort = False
+        conn.is_exiting = False
+        conn.client_is_speaking = False
+        conn.websocket.send = AsyncMock()
+        _mock_active["dev1"] = conn
+
+        rendered = []
+
+        async def fake_render(midi_path, target_rate, **_kw):
+            rendered.append((midi_path, target_rate))
+            return [b"pkt1", b"pkt2"]
+
+        handle_mod = MagicMock()
+        handle_mod._encode_midi_to_opus = fake_render
+        fake_modules = {
+            "core.handle": MagicMock(receiveAudioHandle=handle_mod),
+            "core.handle.receiveAudioHandle": handle_mod,
+            "scipy": MagicMock(),
+            "pydub": MagicMock(),
+        }
+        spawned = []
+
+        async def go():
+            with patch("asyncio.create_task", side_effect=lambda coro, **_kw: spawned.append(coro) or MagicMock()):
+                resp = await self.srv._dotty_play_asset(
+                    _FakeRequest(data={"asset": path, "device_id": "dev1"}))
+            self.assertEqual(resp.status, 200)
+            await spawned[0]
+
+        with patch.dict(sys.modules, fake_modules), patch("asyncio.sleep", AsyncMock()):
+            _run(go())
+
+        self.assertEqual(rendered, [(path, 24000)])
+        sent = [c.args[0] for c in conn.websocket.send.await_args_list]
+        self.assertEqual([s for s in sent if isinstance(s, bytes)], [b"pkt1", b"pkt2"])
+        self.assertEqual(json.loads(sent[0])["state"], "sentence_start")
+        self.assertEqual(json.loads(sent[-1])["state"], "stop")
+
+
+class TestAfterTurn(unittest.TestCase):
+    """play_song is a pi tool call inside a voice turn. With after_turn the
+    song waits for that turn's reply to finish instead of being refused, or
+    cut off by the reply's closing `tts stop`.
+
+    AI-assisted (Claude Opus 5.5).
+    """
+
+    def setUp(self):
+        _mock_active.clear()
+        self.srv = _make_server()
+        self.root = os.path.realpath(tempfile.mkdtemp())
+        self._prev_roots = os.environ.get("DOTTY_PLAY_ASSET_ROOTS")
+        os.environ["DOTTY_PLAY_ASSET_ROOTS"] = self.root
+        self.path = os.path.join(self.root, "tetris.mid")
+        with open(self.path, "wb") as f:
+            f.write(b"MThd")
+
+    def tearDown(self):
+        _mock_active.clear()
+        if self._prev_roots is None:
+            os.environ.pop("DOTTY_PLAY_ASSET_ROOTS", None)
+        else:
+            os.environ["DOTTY_PLAY_ASSET_ROOTS"] = self._prev_roots
+        import shutil
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _conn(self, speaking):
+        conn = MagicMock()
+        conn.headers = {"device-id": "dev1"}
+        conn.sample_rate = 24000
+        conn.session_id = "sess"
+        conn.client_abort = False
+        conn.is_exiting = False
+        conn.client_is_speaking = speaking
+        conn.websocket.send = AsyncMock()
+        _mock_active["dev1"] = conn
+        return conn
+
+    def _play(self, conn, body, on_sleep=None):
+        """Run the route and its dispatch task. `on_sleep(n)` runs on the
+        n-th asyncio.sleep call, standing in for the turn progressing."""
+        async def fake_render(midi_path, target_rate, **_kw):
+            return [b"pkt1", b"pkt2"]
+
+        handle_mod = MagicMock()
+        handle_mod._encode_midi_to_opus = fake_render
+        fake_modules = {
+            "core.handle": MagicMock(receiveAudioHandle=handle_mod),
+            "core.handle.receiveAudioHandle": handle_mod,
+            "scipy": MagicMock(),
+            "pydub": MagicMock(),
+            # _dispatch imports numpy; a real one cannot be re-imported once
+            # patch.dict has dropped it again after an earlier test.
+            "numpy": MagicMock(),
+        }
+        sleeps = {"n": 0, "sent_before": []}
+
+        async def fake_sleep(_s):
+            sleeps["n"] += 1
+            sleeps["sent_before"].append(conn.websocket.send.await_count)
+            if on_sleep is not None:
+                on_sleep(sleeps["n"])
+
+        spawned = []
+        result = {}
+
+        async def go():
+            with patch("asyncio.create_task",
+                       side_effect=lambda coro, **_kw: spawned.append(coro) or MagicMock()):
+                resp = await self.srv._dotty_play_asset(_FakeRequest(data=body))
+            result["resp"] = resp
+            if spawned:
+                await spawned[0]
+
+        with patch.dict(sys.modules, fake_modules), patch("asyncio.sleep", fake_sleep):
+            _run(go())
+        sent = [c.args[0] for c in conn.websocket.send.await_args_list]
+        return result["resp"], sent, sleeps
+
+    def _body_for(self, after_turn=True):
+        body = {"asset": self.path, "device_id": "dev1"}
+        if after_turn:
+            body["after_turn"] = True
+        return body
+
+    def test_mid_turn_after_turn_is_accepted(self):
+        conn = self._conn(speaking=True)
+
+        def turn_ends(n):
+            if n == 3:
+                conn.client_is_speaking = False
+
+        resp, _sent, _ = self._play(conn, self._body_for(), on_sleep=turn_ends)
+        self.assertEqual(resp.status, 200)
+        self.assertTrue(_body(resp)["after_turn"])
+
+    def test_song_starts_only_after_the_turn_finishes_speaking(self):
+        conn = self._conn(speaking=True)
+
+        def turn_ends(n):
+            if n == 3:
+                conn.client_is_speaking = False
+
+        _resp, sent, sleeps = self._play(conn, self._body_for(), on_sleep=turn_ends)
+        # Three polls while the reply was speaking, then the grace sleep:
+        # not a single frame went out during any of them.
+        self.assertEqual(sleeps["sent_before"][:4], [0, 0, 0, 0])
+        self.assertEqual([s for s in sent if isinstance(s, bytes)], [b"pkt1", b"pkt2"])
+        self.assertEqual(json.loads(sent[0])["state"], "sentence_start")
+        self.assertEqual(json.loads(sent[-1])["state"], "stop")
+
+    def test_barge_in_while_waiting_drops_the_song(self):
+        conn = self._conn(speaking=True)
+
+        def barge_in(n):
+            if n == 2:
+                conn.client_abort = True
+                conn.client_is_speaking = False
+
+        _resp, sent, _ = self._play(conn, self._body_for(), on_sleep=barge_in)
+        self.assertEqual(sent, [])
+        # The barge-in stays in force for the turn that follows it.
+        self.assertTrue(conn.client_abort)
+
+    def test_new_turn_starting_in_the_grace_window_drops_the_song(self):
+        conn = self._conn(speaking=True)
+
+        def next_turn(n):
+            if n == 1:
+                conn.client_is_speaking = False   # reply finished
+            elif n == 2:
+                conn.client_is_speaking = True    # grace sleep: user spoke again
+
+        _resp, sent, _ = self._play(conn, self._body_for(), on_sleep=next_turn)
+        self.assertEqual(sent, [])
+
+    def test_turn_that_never_ends_drops_the_song(self):
+        conn = self._conn(speaking=True)
+        with patch.object(_mod, "_AFTER_TURN_MAX_WAIT_S", 0.5):
+            _resp, sent, sleeps = self._play(conn, self._body_for())
+        self.assertEqual(sent, [])
+        self.assertEqual(sleeps["n"], 5)
+
+    def test_after_turn_when_idle_plays_without_waiting(self):
+        conn = self._conn(speaking=False)
+        resp, sent, sleeps = self._play(conn, self._body_for())
+        self.assertNotIn("after_turn", _body(resp))
+        # Only the 60 ms packet pacing sleeps; no turn wait, no grace.
+        self.assertEqual(sleeps["n"], 2)
+        self.assertEqual([s for s in sent if isinstance(s, bytes)], [b"pkt1", b"pkt2"])
+
+    def test_mid_turn_without_after_turn_is_still_refused(self):
+        conn = self._conn(speaking=True)
+        resp, sent, _ = self._play(conn, self._body_for(after_turn=False))
+        self.assertEqual(resp.status, 409)
+        self.assertEqual(sent, [])
+
+    def test_after_turn_must_be_a_real_boolean(self):
+        conn = self._conn(speaking=True)
+        body = self._body_for(after_turn=False)
+        body["after_turn"] = "yes"
+        resp, _sent, _ = self._play(conn, body)
+        self.assertEqual(resp.status, 409)
+
+
 if __name__ == "__main__":
     unittest.main()

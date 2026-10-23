@@ -1,11 +1,14 @@
 """Regression tests for wake-name corrections on the live ASR text path."""
 
 import importlib.util
+import asyncio
+import json
 import pathlib
 import sys
 import types
 import unittest
 from contextlib import contextmanager
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 _ROOT = pathlib.Path(__file__).parent.parent
@@ -95,6 +98,117 @@ class TestAsrNameCorrections(unittest.TestCase):
     def test_alias_matching_is_word_bounded(self):
         text = "Duddybrook is a place."
         self.assertEqual(_module._apply_asr_corrections(text), text)
+
+
+class TestWakeNamePositionAliases(unittest.TestCase):
+    """#164 (AI-assisted, Claude Opus 5.5): real-name mishearings from the
+    2026-07-11 UAT are corrected only where Dotty is being addressed."""
+
+    def test_observed_vocative_mishearings_are_corrected(self):
+        for heard, expected in (
+            ("Jody, what's the hardest question?", "Dotty, what's the hardest question?"),
+            ("Donny, what do you see right now?", "Dotty, what do you see right now?"),
+            ("Jodi, tell me a joke.", "Dotty, tell me a joke."),
+            ("Claudia, are you awake?", "Dotty, are you awake?"),
+            ("Hey Jody, how are you?", "Hey Dotty, how are you?"),
+            ("Okay. Donny, look at this.", "Okay. Dotty, look at this."),
+        ):
+            with self.subTest(heard=heard):
+                self.assertEqual(_module._apply_asr_corrections(heard), expected)
+
+    def test_vision_request_still_routes_after_correction(self):
+        corrected = _module._apply_asr_corrections("Donny, what do you see right now?")
+        self.assertTrue(_module._is_vision_request(corrected))
+
+    def test_real_names_and_words_elsewhere_are_left_alone(self):
+        for text in (
+            "Jody is coming over later.",
+            "Can you say hi to Jody, please?",
+            "My friend Donny, he likes robots.",
+            "Don't be naughty, it's bedtime.",
+            "Naughty dogs chew shoes.",
+            "Finding Dory is my favourite movie.",
+            "Hello Dolly.",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(_module._apply_asr_corrections(text), text)
+
+    def test_goodnight_to_someone_else_is_not_a_sleep_command(self):
+        for text in ("Good night, Jody.", "Goodnight Dolly.", "Good night, naughty.",
+                     "Good night, Donny.", "Good night, Claudia."):
+            with self.subTest(text=text):
+                corrected = _module._apply_phrase_corrections(
+                    _module._apply_asr_corrections(text))
+                self.assertIsNone(_module._detect_state_phrase(corrected))
+
+    def test_vocative_correction_cannot_manufacture_a_state_command(self):
+        for text in ("Jody, good night.", "Dolly, what is a story?", "Donny, I keep watching TV."):
+            with self.subTest(text=text):
+                corrected = _module._apply_phrase_corrections(
+                    _module._apply_asr_corrections(text))
+                self.assertIsNone(_module._detect_state_phrase(corrected))
+
+
+class TestAsrEnvelope(unittest.TestCase):
+    """AI-assisted GPT-6: exercise the actual post-ASR call boundary."""
+
+    def test_content_only_json_reaches_intent_as_text(self):
+        for envelope in (
+            {"content": "Purple robot seven window Brisbane."},
+            {"content": "Purple robot seven window Brisbane.", "speaker": "Fixture"},
+            {"content": "Purple robot seven window Brisbane.", "speaker": "Fixture", "language": "en"},
+        ):
+            with self.subTest(envelope=envelope):
+                conn = types.SimpleNamespace(logger=MagicMock(), need_bind=False,
+                    max_output_size=0, client_is_speaking=False)
+                intent = AsyncMock(return_value=True)
+                with patch.object(_module, "_sync_toggles_once", new=AsyncMock()), \
+                     patch.object(_module, "handle_user_intent", new=intent):
+                    asyncio.run(_module.startToChat(conn, json.dumps(envelope)))
+                intent.assert_awaited_once_with(conn, envelope["content"])
+                self.assertEqual(conn.current_speaker, envelope.get("speaker"))
+
+    def test_empty_or_nontext_content_is_not_a_spoken_request(self):
+        for content in ("", "...", None, [], {"nested": "say hello"}):
+            with self.subTest(content=content):
+                conn = types.SimpleNamespace(logger=MagicMock(), need_bind=False,
+                    max_output_size=0, client_is_speaking=False)
+                sync = AsyncMock()
+                with patch.object(_module, "_sync_toggles_once", new=sync), \
+                     patch.object(_module, "handle_user_intent", new=AsyncMock(return_value=True)):
+                    asyncio.run(_module.startToChat(conn, json.dumps({"content": content})))
+                sync.assert_not_awaited()
+
+
+class TestPhraseIntentPreservation(unittest.TestCase):
+    def test_correct_ordinary_requests_are_not_rewritten_as_commands(self):
+        for text in (
+            "Tell me one short joke about being a very small robot.",
+            "Tell me a short joke.",
+            "What is your game?",
+            "Can you sing a long note?",
+            "Please take a phota of the toy.",
+            "Tell me. A story is something I dislike.",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(_module._apply_phrase_corrections(text), text)
+
+    def test_known_phrase_punctuation_still_normalizes(self):
+        self.assertEqual(_module._apply_phrase_corrections("Good night, Dotty."),
+                         "good night Dotty.")
+        self.assertEqual(_module._apply_phrase_corrections("Please take a photo, now."),
+                         "Please take a photo now.")
+
+    def test_actual_json_joke_turn_reaches_routing_unchanged(self):
+        text = "Tell me one short joke about being a very small robot."
+        conn = types.SimpleNamespace(logger=MagicMock(), need_bind=False,
+            max_output_size=0, client_is_speaking=False)
+        intent = AsyncMock(return_value=True)
+        with patch.object(_module, "_sync_toggles_once", new=AsyncMock()), \
+             patch.object(_module, "handle_user_intent", new=intent):
+            asyncio.run(_module.startToChat(conn, json.dumps({"content": text})))
+        intent.assert_awaited_once_with(conn, text)
+        self.assertIsNone(_module._detect_state_phrase(intent.await_args.args[1]))
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 {
   "name": "dotty-pi-ext",
-  "version": "0.1.0",
+  "version": "0.2.0-rc.1",
   "description": "Pi extension exposing Dotty's seven voice tools (memory_lookup, remember, recall_person, remember_person, think_hard, take_photo, play_song). Ports bridge.py's _voice_tool_* handlers per #36; recall_person/remember_person added per #53.",
   "type": "module",
   "private": true,
@@ -15,7 +15,7 @@
     "@earendil-works/pi-coding-agent": "^0.74.0"
   },
   "scripts": {
-    "test": "npm run test:memory && npm run test:memgate && npm run test:recall && npm run test:remember && npm run test:rememberperson && npm run test:turnlog && npm run test:think && npm run test:play && npm run test:adminauth",
+    "test": "node tests/run_isolated.mjs",
     "test:memory": "node --experimental-strip-types tests/memory_lookup.test.ts",
     "test:memgate": "node --experimental-strip-types tests/memory_gate.test.ts",
     "test:recall": "node --experimental-strip-types tests/recall_person.test.ts",
@@ -24,6 +24,7 @@
     "test:turnlog": "node --experimental-strip-types tests/turn_log.test.ts",
     "test:think": "node --experimental-strip-types tests/think_hard.test.ts",
     "test:play": "node --experimental-strip-types tests/play_song.test.ts",
+    "test:photo": "node --experimental-strip-types tests/take_photo.test.ts",
     "test:adminauth": "node --experimental-strip-types tests/admin_auth.test.ts"
   }
 }

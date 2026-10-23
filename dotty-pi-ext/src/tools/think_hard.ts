@@ -2,8 +2,8 @@
 // bridge.py:_voice_tool_think_hard (lines ~3998-4038).
 //
 // Bypasses the agent loop entirely: a direct POST to llama-swap at
-// qwen3.6:27b-think (the small-context 27B in the `voice` matrix set,
-// stays resident alongside qwen3.5:4b so most escalations are warm).
+// qwen3.6:27b-think (the small-context 27B in the `voice` matrix set; it
+// is not kept resident, so a cold load takes 30-50 s, see llama_swap.ts).
 // `enable_thinking=false` is critical — qwen3 defaults to reasoning
 // mode and would otherwise eat the entire 200-token budget on `<think>`
 // tokens, leaving content empty.
@@ -89,8 +89,8 @@ export const thinkHardTool = {
   label: "Think Hard",
   description:
     "Send a single question to a larger reasoning model for a precise " +
-    "1-2 sentence answer. Use only when the quick chat path can't " +
-    "handle the question (math, lookups, technical specifics).",
+    "1-2 sentence answer. Call it when the user asks you to think hard, " +
+    "and for arithmetic beyond simple sums, lookups or technical specifics.",
   promptSnippet:
     "Escalate a single question to the qwen3.6:27b-think reasoning model.",
   promptGuidelines: [

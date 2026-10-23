@@ -1,6 +1,7 @@
 import os
 import time
 import asyncio
+import inspect
 
 import numpy as np
 from faster_whisper import WhisperModel
@@ -15,6 +16,50 @@ logger = setup_logging()
 
 MAX_RETRIES = 2
 RETRY_DELAY = 1  # seconds
+DEFAULT_NO_SPEECH_THRESHOLD = 0.6  # Whisper's own default
+# The hotword bias turns servo whirr and other non-speech into a lone "Dotty"
+# (no_speech 0.43 on the robot, 2026-10-20), so a transcript that is nothing
+# but the hotword has to be clearer speech than that before it becomes a turn.
+HOTWORD_ONLY_NO_SPEECH_THRESHOLD = 0.3
+
+
+def _no_speech_threshold(config: dict) -> float:
+    """Mean no_speech_prob above which a transcript is dropped. 1.0 disables."""
+    try:
+        value = float(config.get("no_speech_threshold", DEFAULT_NO_SPEECH_THRESHOLD))
+    except (TypeError, ValueError):
+        return DEFAULT_NO_SPEECH_THRESHOLD
+    return value if 0.0 <= value <= 1.0 else DEFAULT_NO_SPEECH_THRESHOLD
+
+
+def _hotwords(config: dict) -> Optional[str]:
+    """Decoder bias for rare words such as the wake-name (#164). None = off."""
+    value = config.get("hotwords")
+    if isinstance(value, (list, tuple)):
+        value = " ".join(str(v) for v in value if v)
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    # An unrendered template placeholder ("<ROBOT_NAME>") is not a hotword.
+    if not value or (value.startswith("<") and value.endswith(">")):
+        return None
+    return value
+
+
+def _is_hotword_only(content: str, hotwords: Optional[str]) -> bool:
+    if not hotwords:
+        return False
+    vocab = {w.strip(".,!?;:'\"").lower() for w in hotwords.split()}
+    words = [w.strip(".,!?;:'\"").lower() for w in content.split()]
+    words = [w for w in words if w]
+    return bool(words) and all(w in vocab for w in words)
+
+
+def _supports_kwarg(func, name: str) -> bool:
+    try:
+        return name in inspect.signature(func).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 class ASRProvider(ASRProviderBase):
@@ -43,6 +88,8 @@ class ASRProvider(ASRProviderBase):
         self.beam_size = int(config.get("beam_size", 1))
         self.cpu_threads = int(config.get("cpu_threads", 0))
         self.initial_prompt = config.get("initial_prompt", None)
+        self.hotwords = _hotwords(config)
+        self.no_speech_threshold = _no_speech_threshold(config)
         self.delete_audio_file = delete_audio_file
 
         if self.output_dir:
@@ -65,6 +112,19 @@ class ASRProvider(ASRProviderBase):
             cpu_threads=self.cpu_threads,
         )
 
+        # `hotwords` arrived in faster-whisper 1.0. Passing it to an older
+        # build would raise on every utterance, so drop it there instead.
+        self._decode_options = {}
+        if self.hotwords:
+            if _supports_kwarg(self.model.transcribe, "hotwords"):
+                self._decode_options["hotwords"] = self.hotwords
+                logger.bind(tag=TAG).info(f"faster-whisper hotwords: {self.hotwords!r}")
+            else:
+                logger.bind(tag=TAG).warning(
+                    "faster-whisper build has no hotwords support; ignoring "
+                    f"hotwords={self.hotwords!r}"
+                )
+
         # Warm-up: transcribe 1 s of silence so the lazy model load + first
         # CTranslate2 init cost is paid here, not on the first real utterance.
         # Wrapped in try/except — a warm-up failure shouldn't kill init; the
@@ -79,6 +139,7 @@ class ASRProvider(ASRProviderBase):
                 condition_on_previous_text=False,
                 vad_filter=False,
                 initial_prompt=self.initial_prompt,
+                **self._decode_options,
             )
             for _ in warm_segments:
                 pass
@@ -110,6 +171,20 @@ class ASRProvider(ASRProviderBase):
                 segments = list(segments)
 
                 content = "".join(seg.text for seg in segments).strip()
+                # Near-silence after Dotty stops speaking comes back as a
+                # confident stock phrase ("Thank you."). vad_filter is off, so
+                # Whisper's own no-speech score is the only signal here.
+                if segments and content:
+                    mean_no_speech = sum(s.no_speech_prob for s in segments) / len(segments)
+                    threshold = self.no_speech_threshold
+                    if _is_hotword_only(content, getattr(self, "hotwords", None)):
+                        threshold = min(threshold, HOTWORD_ONLY_NO_SPEECH_THRESHOLD)
+                    if mean_no_speech > threshold:
+                        logger.bind(tag=TAG).info(
+                            f"ASR-REJECT no_speech={mean_no_speech:.3f} > "
+                            f"{threshold:.2f} | dropped {content!r}"
+                        )
+                        content = ""
                 text = {"content": content}
 
                 logger.bind(tag=TAG).info(
@@ -169,5 +244,6 @@ class ASRProvider(ASRProviderBase):
             condition_on_previous_text=False,
             vad_filter=False,
             initial_prompt=self.initial_prompt,
+            **self._decode_options,
         )
         return list(segments_iter), info

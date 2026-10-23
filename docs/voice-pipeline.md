@@ -81,7 +81,7 @@ Pick one via `selected_module.LLM` in `.config.yaml`. The default is `PiVoiceLLM
 
 #### `PiVoiceLLM` (default)
 
-Custom provider at `custom-providers/pi_voice/` (mounted into `/opt/xiaozhi-esp32-server/core/providers/llm/pi_voice/`). It doesn't run a model itself — it hands each voice turn to the **`dotty-pi` container** by running `docker exec -i dotty-pi pi --mode rpc` and exchanging JSONL messages over stdio. The pi agent owns the conversation loop (`qwen3.5:4b` on local llama-swap) and the five `dotty-pi-ext` voice tools (`memory_lookup`, `remember`, `think_hard`, `take_photo`, `play_song`); only TTS-bound text streams back. See [brain.md](./brain.md).
+Custom provider at `custom-providers/pi_voice/` (mounted into `/opt/xiaozhi-esp32-server/core/providers/llm/pi_voice/`). It doesn't run a model itself — it hands each voice turn to the **`dotty-pi` container** by running `docker exec -i dotty-pi pi --mode rpc` and exchanging JSONL messages over stdio. The pi agent owns the conversation loop (`qwen3.5:4b` on local llama-swap) and the seven `dotty-pi-ext` voice tools (`memory_lookup`, `remember`, `recall_person`, `remember_person`, `think_hard`, `take_photo`, `play_song`); only TTS-bound text streams back. See [brain.md](./brain.md).
 
 #### `OpenAICompat` (alternate)
 
@@ -129,7 +129,7 @@ xiaozhi-server doesn't run an emotion classifier. It **strips the leading emoji*
 
 The TTS provider receives text **with the emoji already stripped**. The device receives the emotion and sets the face animation; the speaker plays the clean text.
 
-**Wire consequence**: the text reaching emotion dispatch must begin with an allowed emoji. On PiVoiceLLM, the per-turn suffix requests one and `_enforce_leading_emoji()` guarantees an allowed prefix, using neutral `😐` when the model omits it. Persona files and `.config.yaml`'s system prompt are not forwarded on this path. See [protocols.md](./protocols.md#emotion-protocol).
+**Wire consequence**: the text reaching emotion dispatch must begin with an allowed emoji. On PiVoiceLLM, the system-prompt rules request one and `_enforce_leading_emoji()` guarantees an allowed prefix, using neutral `😐` when the model omits it. Only `personas/pi_voice.md` and those rules form pi's system prompt; `.config.yaml`'s system prompt is not forwarded on this path. See [protocols.md](./protocols.md#emotion-protocol).
 
 **Note — we don't use SenseVoice's built-in SER.** The model card advertises speech emotion recognition and audio-event detection (bgm / applause / laughter / crying / coughing / sneezing). xiaozhi-server's FunASR provider returns only the transcription text; the SER/AED fields aren't piped through. That's a genuine latent capability — see [latent-capabilities.md](./latent-capabilities.md#voice-pipeline-unused).
 

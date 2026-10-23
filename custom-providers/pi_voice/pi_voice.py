@@ -34,12 +34,17 @@ LLM:
 from __future__ import annotations
 
 import json
+import logging
 import os
-import unicodedata
+import threading
+import time
+import urllib.request
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
+from urllib.parse import urlparse
 
 from .pi_client import PiClient, PiClientError, make_default_pi_client
+from .voice_intents import match_voice_intent, split_room_view
 
 
 try:
@@ -66,8 +71,11 @@ try:
     from core.utils.textUtils import (  # type: ignore
         ALLOWED_EMOJIS,
         FALLBACK_EMOJI,
+        ProviderText,
         build_turn_suffix,
+        enforce_face_stream,
         filter_tts_stream,
+        guard_tts_stream,
     )
 except ImportError:  # pragma: no cover — dev workstation fallback
     import importlib.util as _ilu
@@ -82,10 +90,52 @@ except ImportError:  # pragma: no cover — dev workstation fallback
     FALLBACK_EMOJI = _tu.FALLBACK_EMOJI  # type: ignore[attr-defined]
     build_turn_suffix = _tu.build_turn_suffix  # type: ignore[attr-defined]
     filter_tts_stream = _tu.filter_tts_stream  # type: ignore[attr-defined]
+    ProviderText = _tu.ProviderText  # type: ignore[attr-defined]
+    enforce_face_stream = _tu.enforce_face_stream  # type: ignore[attr-defined]
+    guard_tts_stream = _tu.guard_tts_stream  # type: ignore[attr-defined]
 
 
 TAG = __name__
 logger = setup_logging()
+
+
+class _ForwardToProviderLog(logging.Handler):
+    """Hands stdlib log records to the provider's loguru logger."""
+
+    def __init__(self, target) -> None:
+        super().__init__(logging.INFO)
+        self._target = target
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = record.getMessage()
+            if record.exc_info:
+                message += "\n" + logging.Formatter().formatException(record.exc_info)
+            method = getattr(self._target, record.levelname.lower(), None) or self._target.info
+            method(message)
+        except Exception:  # logging must never break a voice turn
+            pass
+
+
+def _forward_pi_client_logs(target) -> None:
+    """PiClient logs through stdlib ``logging``, but xiaozhi-server prints only
+    its loguru logger and leaves the stdlib root at WARNING, so INFO lines such
+    as ``PiClient: tool call name=...`` (the A/V runner's tool evidence) never
+    reached the container log (2026-10-20). Forward them there. On the dev
+    workstation ``setup_logging`` is stdlib already, so nothing is added."""
+    from . import pi_client as _pi_client
+
+    client_logger = _pi_client.logger
+    if isinstance(target, logging.Logger) or any(
+        isinstance(h, _ForwardToProviderLog) for h in client_logger.handlers
+    ):
+        return
+    client_logger.addHandler(_ForwardToProviderLog(target))
+    client_logger.setLevel(logging.INFO)
+    client_logger.propagate = False
+
+
+_forward_pi_client_logs(logger.bind(tag=TAG) if hasattr(logger, "bind") else logger)
 
 
 def _read_kid_mode() -> bool:
@@ -102,6 +152,53 @@ def _read_kid_mode() -> bool:
     except OSError:
         pass
     return os.environ.get("DOTTY_KID_MODE", "true").lower() in ("1", "true", "yes")
+
+
+_DASHBOARD_PORT = 8081
+
+
+def _dashboard_url() -> str:
+    """Base URL of the bridge dashboard, or "" when it can't be worked out.
+
+    `DOTTY_DASHBOARD_URL` wins. Otherwise assume the dashboard sits on the
+    same host as dotty-behaviour (which this container already reaches via
+    `BRIDGE_URL` / `VISION_BRIDGE_URL`) on its default port."""
+    explicit = os.environ.get("DOTTY_DASHBOARD_URL", "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    sibling = os.environ.get("BRIDGE_URL") or os.environ.get("VISION_BRIDGE_URL", "")
+    parsed = urlparse(sibling)
+    if not parsed.hostname:
+        return ""
+    return f"{parsed.scheme or 'http'}://{parsed.hostname}:{_DASHBOARD_PORT}"
+
+
+def _report_to_dashboard(path: str, payload: dict) -> None:
+    """Fire-and-forget POST to the bridge dashboard.
+
+    Runs on a daemon thread with a short timeout and swallows every error:
+    a missing or slow dashboard must never delay or break a voice turn."""
+    base = _dashboard_url()
+    if not base:
+        return
+    headers = {"Content-Type": "application/json"}
+    token = os.environ.get("DOTTY_ADMIN_TOKEN", "").strip()
+    if token:
+        headers["X-Admin-Token"] = token
+    body = json.dumps(payload).encode("utf-8")
+
+    def _post() -> None:
+        try:
+            req = urllib.request.Request(
+                base + path, data=body, headers=headers, method="POST",
+            )
+            urllib.request.urlopen(req, timeout=2).close()
+        except Exception as exc:
+            logger.debug("PiVoiceLLM dashboard report to %s failed: %s", path, exc)
+
+    threading.Thread(
+        target=_post, name="dotty-dashboard-report", daemon=True,
+    ).start()
 
 
 def _last_user_text(dialogue: list[dict]) -> str:
@@ -143,77 +240,107 @@ _VOICE_TOOL_ROUTING = (
     "composing the spoken reply. Use the matching tool when the user asks you "
     "to remember or recall, play a song, look or take a photo, or solve a "
     "question that needs careful reasoning. Call it first and use its result. "
+    # 2026-10-21: "Repeat these five words" got think_hard 19 times in a row.
+    "think_hard is only for hard questions that need several steps of "
+    "reasoning, never for repeating words, simple sums, jokes or chat. Call "
+    "each tool at most once per reply. "
     "Never claim an action succeeded unless its tool succeeded. The reply "
     "constraints below apply only to final spoken text, not to tool calls."
 )
 
 
-def _wrap_with_sandwich(user_text: str, kid_mode: bool) -> str:
-    """Append the HARD CONSTRAINTS suffix to the user's text via the shared
-    textUtils.build_turn_suffix contract — emoji-prefix
-    rule, English-only, length caps, kid-mode topic filtering. Without
-    this Dotty drifts into Chinese, multi-paragraph replies, and (in
-    kid_mode) unsafe topics, since qwen3.5:4b's base behaviour doesn't
-    encode any of those constraints."""
-    return user_text + _VOICE_TOOL_ROUTING + build_turn_suffix(kid_mode)
+# Appended to the user's words for an explicit recall. dotty-pi-ext's
+# turn_text.ts strips from this exact marker when logging the turn, so search
+# results are never written back into memory as if the person had said them.
+_MEMORY_CONTEXT = (
+    "\n\nMEMORY SEARCH RESULTS (from earlier conversations; \"user\" is the "
+    "person, \"assistant\" was you):\n{results}\n"
+    "Answer their question from these results in your own words. If the "
+    "results do not answer it, say you don't remember that yet. Never read "
+    "the results out as they are written."
+)
+
+
+# Same contract as _MEMORY_CONTEXT: turn_text.ts strips from these markers.
+# Same marker as _MEMORY_CONTEXT, so turn_text.ts strips it from the logged turn.
+_PERSON_CONTEXT = (
+    "\n\nMEMORY SEARCH RESULTS (what you know about {name}):\n{facts}\n"
+    "Answer from these facts in your own words. Do not add anything they do "
+    "not say."
+)
+_CAMERA_CONTEXT = (
+    "\n\nCAMERA VIEW (what your camera saw in the last few seconds):\n{view}\n"
+    "Answer from this view only. Do not add anything it does not say."
+)
+_REASONING_CONTEXT = (
+    "\n\nREASONING RESULT (from your think_hard tool):\n{answer}\n"
+    "Tell them this answer in your own words, following all your rules. "
+    "You already used think_hard for this; do not call it again."
+)
+_ROOM_VIEW_CONTEXT = (
+    "\n\nROOM VIEW (who your camera saw in front of you recently; mention it "
+    "only if it helps):\n{view}"
+)
+_CAMERA_DENIED = "(Camera access is disabled in Kid Mode)"
+
+
+# ProviderText: a fixed phrase, so kid mode may speak it before the wait.
+_THINKING_PREAMBLE = ProviderText("\U0001F914 Let me think hard about that. ")
+
+
+def _turn_rules(kid_mode: bool) -> str:
+    """Voice tool routing plus the shared textUtils.build_turn_suffix HARD
+    CONSTRAINTS — emoji-prefix rule, English-only, length caps, kid-mode
+    topic filtering. Without them Dotty drifts into Chinese, multi-paragraph
+    replies, and (in kid_mode) unsafe topics, since qwen3.5:4b's base
+    behaviour doesn't encode any of those constraints.
+
+    They go in pi's system prompt, not after the user's words: appended to
+    each turn (~2.8K characters ending on reply-format rules) they stopped
+    the 4B calling tools at all — 0/6 play_song calls against 2/2 with the
+    same rules in the system prompt (2026-10-20 A/V run). The system prompt
+    is fixed when pi spawns, so a Kid Mode change respawns pi."""
+    return (_VOICE_TOOL_ROUTING + build_turn_suffix(kid_mode)).strip()
 
 
 def _enforce_leading_emoji(chunks: Iterator[str]) -> Iterator[str]:
-    """Guarantee the firmware's leading-glyph face contract.
+    """Guarantee the firmware's leading-glyph face contract (#168).
 
-    Pi is prompted to start with an allowed emoji, but model compliance is not
-    an output guarantee. Buffer only leading whitespace, then either pass an
-    allowed emoji through or replace a missing/disallowed leading glyph with
-    the neutral fallback before the model text.
+    Delegates to the shared textUtils.enforce_face_stream: exactly one
+    supported face at the head of the first chunk, near-miss emoji mapped
+    onto the supported set, no added streaming latency.
     """
-    leading: list[str] = []
-    saw_content = False
-    for chunk in chunks:
-        if not chunk:
-            continue
-        if not saw_content:
-            leading.append(chunk)
-            so_far = "".join(leading).lstrip()
-            if not so_far:
-                continue
-            saw_content = True
-            if not any(so_far.startswith(emoji) for emoji in ALLOWED_EMOJIS):
-                yield f"{FALLBACK_EMOJI} "
-                # Do not leave a disallowed model emoji after the fallback:
-                # `😐 ❤️ hello` still violates the exactly-one-face contract.
-                # Consume the leading symbol plus emoji presentation/joiner
-                # codepoints, while leaving ordinary punctuation and text.
-                if so_far and unicodedata.category(so_far[0]) == "So":
-                    end = 1
-                    while end < len(so_far) and (
-                        so_far[end] in ("\ufe0f", "\u200d")
-                        or 0x1F3FB <= ord(so_far[end]) <= 0x1F3FF
-                        or unicodedata.category(so_far[end]) == "So"
-                    ):
-                        end += 1
-                    so_far = so_far[end:].lstrip()
-            if so_far:
-                yield so_far
-            continue
-        yield chunk
-
-    if not saw_content:
-        yield f"{FALLBACK_EMOJI} (no response)"
+    yield from enforce_face_stream(chunks)
 
 
 class LLMProvider(LLMProviderBase):
     """xiaozhi-server LLM provider backed by the dotty-pi container."""
 
-    def __init__(self, config: dict, *, client: PiClient | None = None):
+    def __init__(
+        self, config: dict, *, client: PiClient | None = None,
+        client_factory: Callable[[str], PiClient] | None = None,
+    ):
         self._container = config.get("container_name") or os.environ.get(
             "DOTTY_PI_CONTAINER", "dotty-pi",
         )
         # Initial value is logged for diagnostics. response() refreshes this
         # from the bridge/xiaozhi shared state file on every turn.
         self._kid_mode = _read_kid_mode()
-        # `client` is injected by tests; production passes None to get
-        # the env-configured default.
-        self._client: PiClient = client if client is not None else make_default_pi_client()
+        # `client` (fixed) or `client_factory` is injected by tests;
+        # production passes neither to get the env-configured default. The
+        # factory takes the turn rules for pi's system prompt.
+        if client is not None:
+            self._client_factory = None
+            self._client: PiClient = client
+        else:
+            self._client_factory = client_factory or make_default_pi_client
+            self._client = self._client_factory(_turn_rules(self._kid_mode))
+        self._client_kid_mode = self._kid_mode
+        # A connection can submit multiple chat jobs to its thread pool. Pi RPC
+        # is one ordered stream, so keep the complete new_session -> prompt ->
+        # agent_end transaction exclusive; per-write locking cannot prevent one
+        # caller from consuming another caller's response frames.
+        self._turn_lock = threading.Lock()
         self._first_turn = True
         msg = f"PiVoiceLLM ready (container={self._container} kid_mode={self._kid_mode})"
         try:
@@ -224,12 +351,130 @@ class LLMProvider(LLMProviderBase):
     # xiaozhi-server's voice loop calls this as a sync generator.
     # Each yielded string becomes a TTS chunk.
     def response(self, session_id, dialogue, **kwargs) -> Iterator[str]:
+        with self._turn_lock:
+            yield from self._response_serialized(session_id, dialogue, **kwargs)
+
+    def _response_serialized(self, session_id, dialogue, **kwargs) -> Iterator[str]:
+        """Run one complete Pi RPC transaction while ``_turn_lock`` is held."""
         self._kid_mode = _read_kid_mode()
-        user_text = _last_user_text(dialogue)
-        if not user_text:
+        room_view, user_text = split_room_view(_last_user_text(dialogue))
+        if not user_text.strip():
             yield f"{FALLBACK_EMOJI} (empty turn)"
             return
-        prompt = _wrap_with_sandwich(user_text, self._kid_mode)
+        if self._kid_mode != self._client_kid_mode and self._client_factory is not None:
+            # pi's rules live in its system prompt; respawn so this turn runs
+            # under the Kid Mode it was asked in.
+            logger.info(f"PiVoiceLLM kid_mode -> {self._kid_mode}; respawning pi with its rules")
+            self._client.close()
+            self._client = self._client_factory(_turn_rules(self._kid_mode))
+            self._client_kid_mode = self._kid_mode
+            self._first_turn = True
+        # Everything spoken this turn is reported to the dashboard when the
+        # generator finishes — including when xiaozhi closes it early.
+        spoken: list[str] = []
+        errors: list[str] = []
+        started = time.monotonic()
+        try:
+            # Output safety for every path below (model text, direct tool
+            # results, fixed phrases): one leading face, and in kid mode the
+            # fail-closed blocked-content filter. See textUtils.guard_tts_stream.
+            for chunk in guard_tts_stream(
+                self._respond(user_text, errors, room_view), self._kid_mode,
+                on_hit=self._on_filter_hit,
+            ):
+                spoken.append(chunk)
+                yield chunk
+        finally:
+            _report_to_dashboard("/api/voice/turn", {
+                "request_text": user_text,
+                "response_text": "".join(spoken),
+                "latency_ms": int((time.monotonic() - started) * 1000),
+                "error": "; ".join(errors) or None,
+            })
+
+    def _respond(
+        self, user_text: str, errors: list[str], room_view: str = "",
+    ) -> Iterator[str]:
+        """One turn's TTS chunks. Failures are appended to `errors` so
+        response() can report them alongside the spoken fallback.
+
+        Explicit tool requests (voice_intents.py) run their tool directly
+        instead of trusting the 4B to call it (#165)."""
+        context = ""
+        intent = match_voice_intent(user_text)
+        if intent is not None and intent.tool == "remember":
+            result = self._invoke_voice_tool("remember", {"fact": intent.argument}, errors)
+            if result == "(remembered)":
+                yield f"{FALLBACK_EMOJI} I'll remember that."
+            else:
+                yield f"{FALLBACK_EMOJI} I couldn't save that memory."
+            return
+        if intent is not None and intent.tool == "memory_lookup":
+            result = self._invoke_voice_tool(
+                "memory_lookup", {"query": intent.argument}, errors,
+            )
+            if result is None:
+                yield f"{FALLBACK_EMOJI} I couldn't check my memory right now."
+                return
+            if result in ("(no memories found)", "(empty query)"):
+                yield f"{FALLBACK_EMOJI} I don't remember anything about that yet."
+                return
+            # The lookup is deterministic; the wording is not. Search output is
+            # raw stored rows ("user: … | assistant: …"), never fit to be
+            # spoken as-is, so hand it to the model as context for this turn.
+            context = _MEMORY_CONTEXT.format(results=result)
+        if intent is not None and intent.tool == "play_song":
+            name = intent.argument
+            result = self._invoke_voice_tool("play_song", {"name": name}, errors)
+            if result is not None and result.startswith("playing "):
+                yield f"{FALLBACK_EMOJI} Here's {result[len('playing '):]}!"
+            elif result is not None and result.startswith("(no match"):
+                yield f"{FALLBACK_EMOJI} I don't have a song called {name}."
+            else:
+                yield f"{FALLBACK_EMOJI} I couldn't play that song right now."
+            return
+        if intent is not None and intent.tool == "recall_person":
+            name = intent.argument
+            result = self._invoke_voice_tool("recall_person", {"name": name}, errors)
+            if result is None:
+                yield f"{FALLBACK_EMOJI} I couldn't check my memory right now."
+                return
+            if result.startswith("("):
+                yield f"{FALLBACK_EMOJI} I don't know anything about {name} yet."
+                return
+            context = _PERSON_CONTEXT.format(name=name, facts=result)
+        if intent is not None and intent.tool == "think_hard":
+            # The reasoner unloads when idle and takes 30-60 s to come back.
+            # Say so first: this chunk carries the turn's one emoji (the
+            # thinking face) and reaches TTS before the wait starts.
+            yield _THINKING_PREAMBLE
+            result = self._invoke_voice_tool(
+                "think_hard", {"question": intent.argument}, errors,
+            )
+            if result is None or result.startswith("("):
+                yield "I couldn't finish the deeper reasoning."
+                return
+            if not self._kid_mode:
+                yield result
+                return
+            # Kid Mode: the reasoner runs without Dotty's rules (they live in
+            # the 4B's system prompt), so hand its answer to the 4B to retell
+            # under them instead of speaking it as-is.
+            context = _REASONING_CONTEXT.format(answer=result)
+        if intent is not None and intent.tool == "take_photo":
+            # Reached only when xiaozhi's own vision shortcut produced nothing;
+            # the 4B would otherwise describe a room it has not seen.
+            result = self._invoke_voice_tool("take_photo", {}, errors)
+            if result == _CAMERA_DENIED:
+                yield f"{FALLBACK_EMOJI} My camera is switched off in Kid Mode."
+                return
+            if result is None or result.startswith("("):
+                yield f"{FALLBACK_EMOJI} I can't see anything clearly right now."
+                return
+            context = _CAMERA_CONTEXT.format(view=result)
+        if room_view and intent is None:
+            context = _ROOM_VIEW_CONTEXT.format(view=room_view)
+        prompt = user_text + context
 
         # Reset pi state between voice turns. First turn skips this —
         # the freshly-spawned process is already clean.
@@ -241,12 +486,12 @@ class LLMProvider(LLMProviderBase):
         self._first_turn = False
 
         try:
-            # #157: kid-mode blocked-content filter on TTS-bound output.
-            # Full-turn buffered — the filter drains the pi RPC stream through
-            # agent_end before making an atomic allow/replace decision.
-            # Emoji enforcement precedes filtering, matching OpenAICompat: in
-            # kid mode the filter still makes one atomic whole-turn decision;
-            # outside it, chunks stream after the first meaningful one.
+            # The outer guard_tts_stream in _response_serialized already
+            # applies the face contract and the kid filter to the whole turn.
+            # This inner pass is kept for its buffering: in kid mode it holds
+            # the model's text until agent_end, so a turn that fails part-way
+            # drops its partial reply instead of speaking it before the
+            # "brain offline" line.
             for chunk in filter_tts_stream(
                 _enforce_leading_emoji(self._client.iter_turn_text(prompt)),
                 self._kid_mode,
@@ -254,18 +499,39 @@ class LLMProvider(LLMProviderBase):
             ):
                 yield chunk
         except PiClientError as exc:
-            logger.error("PiVoiceLLM turn failed: %s", exc)
+            errors.append(str(exc) or exc.__class__.__name__)
+            logger.error(f"PiVoiceLLM turn failed: {exc}")
             for line in self._client.recent_stderr()[-5:]:
-                logger.error("  pi.stderr: %s", line)
+                logger.error(f"  pi.stderr: {line}")
             yield f"{FALLBACK_EMOJI} (brain offline — try again in a moment)"
 
+    def _invoke_voice_tool(
+        self, name: str, arguments: dict[str, str],
+        errors: list[str] | None = None,
+    ) -> str | None:
+        # f-strings, not %-args: xiaozhi's loguru logger does not apply them,
+        # and the A/V cases grep these lines.
+        try:
+            result = self._client.invoke_voice_tool(name, arguments)
+        except PiClientError as exc:
+            logger.error(f"PiVoiceLLM direct tool {name} failed: {exc}")
+            if errors is not None:
+                errors.append(f"{name}: {exc}" if str(exc) else name)
+            return None
+        logger.info(f"PiVoiceLLM direct tool {name} ok")
+        return result
+
     def _on_filter_hit(self, tier: str, match) -> None:
-        # Local logging only — the Prometheus counter / safety ring live in
-        # the bridge container, which this provider can't reach.
         logger.warning(
-            "PiVoiceLLM content-filter hit tier=%s pattern=%r — turn replaced",
-            tier, match.group(),
+            f"PiVoiceLLM content-filter hit tier={tier} pattern={match.group()!r} — turn replaced"
         )
+        # The Prometheus counter and /ui/safety/recent ring live in the
+        # bridge container; hand the hit over so the dashboard card shows it.
+        _report_to_dashboard("/api/voice/filter-hit", {
+            "tier": tier,
+            "rule": match.group(),
+            "prefix": match.string[:8],
+        })
 
     def close(self) -> None:
         """xiaozhi may call this on shutdown — make sure pi cleans up."""

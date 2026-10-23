@@ -293,7 +293,8 @@ class TestOpenAICompatWiring(unittest.TestCase):
                 else:
                     sys.modules[k] = v
 
-    def _respond(self, contents, kid_mode=True):
+    @staticmethod
+    def _post_returning(contents):
         import json as _json
         lines = [
             "data: " + _json.dumps({"choices": [{"delta": {"content": c}}]})
@@ -302,10 +303,18 @@ class TestOpenAICompatWiring(unittest.TestCase):
         resp = MagicMock()
         resp.raise_for_status = MagicMock()
         resp.iter_lines = lambda decode_unicode=True: iter(lines)
-        provider = self.mod.LLMProvider({"url": "http://x/v1", "model": "m"})
-        with patch.object(self.mod, "KID_MODE", kid_mode), \
-             patch.object(self.mod.requests, "post", return_value=resp):
-            return list(provider.response("s", [{"role": "user", "content": "hi"}]))
+        return resp
+
+    def _turn(self, provider, contents):
+        resp = self._post_returning(contents)
+        with patch.object(self.mod.requests, "post", return_value=resp) as post:
+            out = list(provider.response("s", [{"role": "user", "content": "hi"}]))
+        return out, post.call_args.kwargs["json"]["messages"]
+
+    def _respond(self, contents, kid_mode=True):
+        with patch.object(self.mod, "_read_kid_mode", return_value=kid_mode):
+            provider = self.mod.LLMProvider({"url": "http://x/v1", "model": "m"})
+            return self._turn(provider, contents)[0]
 
     def test_kid_on_blocked_turn_replaced(self):
         out = self._respond(["😊 I love coc", "aine. It is great."])
@@ -324,6 +333,50 @@ class TestOpenAICompatWiring(unittest.TestCase):
         # the filter must keep it as the leading glyph.
         out = self._respond(["Hello there. "])
         self.assertTrue("".join(out).startswith(FALLBACK))
+
+    def _live_toggle_env(self, tmp, startup_env):
+        state = Path(tmp) / "kid-mode"
+        env = {"DOTTY_KID_MODE": startup_env, "DOTTY_KID_MODE_STATE": str(state)}
+        return state, patch.dict(os.environ, env)
+
+    def test_live_toggle_on_overrides_startup_env_off(self):
+        # The fallback provider must fail closed with the dashboard toggle,
+        # not with whatever DOTTY_KID_MODE said when the container started.
+        with tempfile.TemporaryDirectory() as tmp:
+            state, env = self._live_toggle_env(tmp, "false")
+            with env:
+                provider = self.mod.LLMProvider({"url": "http://x/v1", "model": "m"})
+                state.write_text("true\n")
+                out, messages = self._turn(provider, ["😊 cocaine. ", "More."])
+        self.assertEqual(out, [REPLACEMENT])
+        self.assertEqual(
+            messages[-1]["content"], "hi" + tu.build_turn_suffix(True),
+        )
+
+    def test_toggle_flip_applies_to_the_next_turn(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state, env = self._live_toggle_env(tmp, "true")
+            with env:
+                state.write_text("false")
+                provider = self.mod.LLMProvider({"url": "http://x/v1", "model": "m"})
+                off, off_msgs = self._turn(provider, ["😊 cocaine. ", "More."])
+                state.write_text("true")
+                on, on_msgs = self._turn(provider, ["😊 cocaine. ", "More."])
+        self.assertEqual("".join(off), "😊 cocaine. More.")
+        self.assertEqual(off_msgs[-1]["content"], "hi" + tu.build_turn_suffix(False))
+        self.assertEqual(on, [REPLACEMENT])
+        self.assertEqual(on_msgs[-1]["content"], "hi" + tu.build_turn_suffix(True))
+
+    def test_missing_or_garbled_state_falls_back_to_env(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state, env = self._live_toggle_env(tmp, "true")
+            with env:
+                provider = self.mod.LLMProvider({"url": "http://x/v1", "model": "m"})
+                missing, _ = self._turn(provider, ["😊 cocaine."])
+                state.write_text("maybe")
+                garbled, _ = self._turn(provider, ["😊 cocaine."])
+        self.assertEqual(missing, [REPLACEMENT])
+        self.assertEqual(garbled, [REPLACEMENT])
 
 
 if __name__ == "__main__":

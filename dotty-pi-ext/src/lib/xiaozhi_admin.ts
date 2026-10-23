@@ -73,23 +73,34 @@ export async function fetchSongCatalog(
 /**
  * POST /xiaozhi/admin/play-asset {asset: <abs_path>}. Returns
  * {ok: true} on 2xx, otherwise {ok: false, error: <short>}.
+ *
+ * `afterTurn` asks xiaozhi to hold the asset until the device has finished
+ * speaking the current turn, instead of refusing it mid-turn (409). A tool
+ * called inside a voice turn needs it: the turn's own reply would otherwise
+ * end with a `tts stop` that cuts the song off.
  */
 export interface PlayAssetResult {
   ok: boolean;
   error?: string;
 }
 
+export interface PlayAssetOptions extends AdminOptions {
+  afterTurn?: boolean;
+}
+
 export async function playAsset(
   assetPath: string,
-  opts: AdminOptions = {},
+  opts: PlayAssetOptions = {},
 ): Promise<PlayAssetResult> {
+  const payload: { asset: string; after_turn?: boolean } = { asset: assetPath };
+  if (opts.afterTurn) payload.after_turn = true;
   try {
     const resp = await adminFetch(
       "/xiaozhi/admin/play-asset",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ asset: assetPath }),
+        body: JSON.stringify(payload),
       },
       opts,
     );

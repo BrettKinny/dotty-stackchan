@@ -151,3 +151,12 @@ def test_chat_returns_none_on_malformed_response() -> None:
     client = NarrativeLLMClient("http://127.0.0.1:8080/v1", "qwen3.6:27b-think")
     out = asyncio.run(client.chat("hi", system_prompt="x"))
     assert out is None
+
+
+def test_chat_returns_none_when_url_empty() -> None:
+    rec = _Recorder()
+    _install(rec)
+    client = NarrativeLLMClient("", "qwen")  # url blanked, model set
+    out = asyncio.run(client.chat("hi", system_prompt="x"))
+    assert out is None
+    assert rec.calls == []

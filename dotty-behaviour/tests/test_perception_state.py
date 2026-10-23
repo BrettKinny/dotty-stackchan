@@ -10,8 +10,75 @@ from __future__ import annotations
 
 import asyncio
 import time
+from pathlib import Path
 
 from perception import PerceptionEvent, PerceptionState
+
+
+def test_current_device_state_survives_daemon_reconstruction(tmp_path: Path) -> None:
+    state_file = tmp_path / "perception-state.json"
+    before_restart = PerceptionState(state_path=state_file)
+    before_restart.update_state(
+        "dev-1", "state_changed", {"state": "security"}, 100.0
+    )
+
+    after_restart = PerceptionState(state_path=state_file)
+
+    assert after_restart.current_device_state("dev-1") == "security"
+
+
+def test_invalid_persisted_state_fails_safe_to_idle(tmp_path: Path) -> None:
+    state_file = tmp_path / "perception-state.json"
+    state_file.write_text('{"dev-1":"security"}', encoding="utf-8")
+
+    restarted = PerceptionState(state_path=state_file)
+
+    assert restarted.current_device_state("dev-1") == "idle"
+
+
+def test_invalid_persisted_mutex_value_fails_safe_to_idle(tmp_path: Path) -> None:
+    state_file = tmp_path / "perception-state.json"
+    state_file.write_text('{"dev-1":{"current_state":7}}', encoding="utf-8")
+
+    restarted = PerceptionState(state_path=state_file)
+
+    assert restarted.current_device_state("dev-1") == "idle"
+
+
+def test_one_bad_device_entry_does_not_discard_the_robots_state(tmp_path: Path) -> None:
+    # 2026-10-21 review: a probe posting state "testing" used to throw away
+    # every device's saved state, the real robot's included.
+    state_file = tmp_path / "perception-state.json"
+    before_restart = PerceptionState(state_path=state_file)
+    before_restart.update_state("robot", "state_changed", {"state": "sleep"}, 100.0)
+    before_restart.update_state("probe", "state_changed", {"state": "testing"}, 101.0)
+
+    after_restart = PerceptionState(state_path=state_file)
+
+    assert after_restart.current_device_state("robot") == "sleep"
+    assert after_restart.current_device_state("probe") == "idle"
+
+
+def test_corrupt_state_file_starts_fresh_instead_of_failing(tmp_path: Path) -> None:
+    state_file = tmp_path / "perception-state.json"
+    for raw in (b"\xff\xfe not utf-8", b'{"dev-1": {"current_state": ["sleep"]}}', b"[1, 2]"):
+        state_file.write_bytes(raw)
+        restarted = PerceptionState(state_path=state_file)
+        assert restarted.current_device_state("dev-1") == "idle"
+
+
+def test_restart_does_not_revive_transient_sensor_state(tmp_path: Path) -> None:
+    state_file = tmp_path / "perception-state.json"
+    before_restart = PerceptionState(state_path=state_file)
+    before_restart.update_state("dev-1", "face_detected", {}, 90.0)
+    before_restart.update_state(
+        "dev-1", "state_changed", {"state": "security"}, 100.0
+    )
+
+    after_restart = PerceptionState(state_path=state_file)
+
+    assert after_restart.current_device_state("dev-1") == "security"
+    assert "face_present" not in after_restart.state["dev-1"]
 
 
 def test_subscribe_broadcast_unsubscribe_roundtrip() -> None:
@@ -93,6 +160,21 @@ def test_update_state_chat_status_toggles_listening() -> None:
     assert ps.state["dev-1"]["listening"] is False
 
 
+def test_chat_edges_refresh_quiet_timestamp_without_shortening_purr() -> None:
+    """AI-assisted regression: OpenAI Codex (GPT-6)."""
+    ps = PerceptionState()
+    ps.update_state("dev-1", "chat_status", {"listening": True}, 100.0)
+    assert ps.state["dev-1"]["last_chat_t"] == 100.0
+    ps.update_state("dev-1", "chat_status", {"listening": False}, 110.0)
+    assert ps.state["dev-1"]["last_chat_t"] == 110.0
+    # PurrPlayer intentionally reserves a future quiet window for its audio.
+    ps.state["dev-1"]["last_chat_t"] = 120.0
+    ps.update_state("dev-1", "chat_status", {"listening": True}, 115.0)
+    assert ps.state["dev-1"]["last_chat_t"] == 120.0
+    ps.update_state("dev-1", "chat_status", {"listening": False}, 125.0)
+    assert ps.state["dev-1"]["last_chat_t"] == 125.0
+
+
 def test_full_queue_drops_event_without_raising() -> None:
     async def go() -> None:
         ps = PerceptionState()
@@ -121,6 +203,64 @@ def test_annotate_for_introspection_marks_stale() -> None:
     out = ps.annotate_for_introspection(now=10_000.0)
     assert out["dev-1"]["sensor_stale"] is True
     assert out["dev-1"]["sensor_age_s"] == 10_000.0
+
+
+def test_annotate_reports_sensor_seen() -> None:
+    """A device restored from disk with no event since startup is marked
+    unseen, so the dashboard does not call its sensors hung."""
+    ps = PerceptionState()
+    ps.state["restored"] = {"current_state": "sleep", "last_state_change_t": 5.0}
+    ps.update_state("live", "face_detected", {}, 9_000.0)
+    out = ps.annotate_for_introspection(now=10_000.0)
+    assert out["restored"]["sensor_seen"] is False
+    assert out["live"]["sensor_seen"] is True
+
+
+def test_ephemeral_device_ids() -> None:
+    from perception.state import is_ephemeral_device
+
+    for device_id in (
+        "automation-persistence-probe", "test-dev", "probe_1",
+        "smoke-run", "ci-42", "uat-session", "unknown", "",
+    ):
+        assert is_ephemeral_device(device_id), device_id
+    for device_id in ("aa:bb:cc:dd:ee:ff", "dev-1", "robot", "latest-probe"):
+        assert not is_ephemeral_device(device_id), device_id
+
+
+def test_idle_probe_device_expires_but_real_device_stays(tmp_path: Path) -> None:
+    state_file = tmp_path / "perception-state.json"
+    ps = PerceptionState(state_path=state_file)
+    ps.update_state(
+        "automation-persistence-probe", "state_changed", {"state": "security"}, 1_000.0,
+    )
+    ps.update_state("aa:bb:cc:dd:ee:ff", "state_changed", {"state": "sleep"}, 1_000.0)
+
+    # Within the TTL the probe is still visible (so a restart probe works).
+    assert "automation-persistence-probe" in ps.annotate_for_introspection(now=1_100.0)
+
+    out = ps.annotate_for_introspection(now=1_000.0 + 7_200.0)
+    assert "automation-persistence-probe" not in out
+    assert out["aa:bb:cc:dd:ee:ff"]["current_state"] == "sleep"
+    assert ps.get_recent("automation-persistence-probe") == []
+
+    # The durable copy drops the probe too, so a restart does not revive it.
+    restarted = PerceptionState(state_path=state_file)
+    assert "automation-persistence-probe" not in restarted.state
+    assert restarted.current_device_state("aa:bb:cc:dd:ee:ff") == "sleep"
+
+
+def test_leftover_probe_is_dropped_on_load(tmp_path: Path) -> None:
+    state_file = tmp_path / "perception-state.json"
+    state_file.write_text(
+        '{"automation-persistence-probe":{"current_state":"idle",'
+        '"last_state_change_t":100.0},'
+        '"aa:bb:cc:dd:ee:ff":{"current_state":"security","last_state_change_t":100.0}}',
+        encoding="utf-8",
+    )
+    restarted = PerceptionState(state_path=state_file)
+    assert list(restarted.state) == ["aa:bb:cc:dd:ee:ff"]
+    assert restarted.current_device_state("aa:bb:cc:dd:ee:ff") == "security"
 
 
 def test_get_recent_newest_first_with_limit() -> None:

@@ -223,7 +223,7 @@ The default in the shipped `.config.yaml`. The `PiVoiceLLM` provider routes each
 | `play_song` | Play a song through the speaker |
 
 Only TTS-bound text streams back to xiaozhi-server — tool results stay internal to the agent loop.
-PiVoiceLLM does not use `persona_file` or forward xiaozhi's configured system dialogue; its live policy is appended to every user turn by the provider.
+PiVoiceLLM does not use `persona_file` or forward xiaozhi's configured system dialogue; its live policy (`build_turn_suffix()` plus the voice tool-routing rules) goes into pi's system prompt when the provider spawns pi, and pi is respawned when Kid Mode changes. (`OpenAICompat`, by contrast, still appends `build_turn_suffix()` to the last user message.)
 
 ### Prerequisites
 

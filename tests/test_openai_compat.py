@@ -75,6 +75,16 @@ def _passthrough_filter(chunks, kid_mode, on_hit=None):
 
 
 _tu.filter_tts_stream = _passthrough_filter  # type: ignore[attr-defined]
+
+# The face guard is exercised for real: _response_stream owns the
+# leading-emoji contract, which is what TestStreamEmojiOrdering pins.
+_real_tu_spec = _ilu.spec_from_file_location(
+    "dotty_textUtils_oc_test",
+    pathlib.Path(__file__).parent.parent / "custom-providers" / "textUtils.py",
+)
+_real_tu = _ilu.module_from_spec(_real_tu_spec)  # type: ignore[arg-type]
+_real_tu_spec.loader.exec_module(_real_tu)  # type: ignore[union-attr]
+_tu.enforce_face_stream = _real_tu.enforce_face_stream  # type: ignore[attr-defined]
 sys.modules["core.utils.textUtils"] = _tu
 
 # ── Load the module under test by path ───────────────────────────────────────
@@ -170,9 +180,16 @@ class TestStreamEmojiOrdering(unittest.TestCase):
         self.assertNotIn(_FALLBACK, "".join(out))
 
     def test_emoji_prepended_when_first_chunk_has_no_emoji(self):
+        # The face rides on the first chunk: xiaozhi reads it from there.
         out = _patched_stream(_provider(), _sse("Hello"))
-        self.assertEqual(out[0], f"{_FALLBACK} ")
+        self.assertEqual(out[0], f"{_FALLBACK} Hello")
         self.assertEqual("".join(out), f"{_FALLBACK} Hello")
+
+    def test_near_miss_emoji_maps_onto_supported_face(self):
+        # #168: 😲 is surprise, not "no face".
+        out = _patched_stream(_provider(), _sse("😲", " Wow, a comet!"))
+        self.assertEqual("".join(out), "😮 Wow, a comet!")
+        self.assertEqual(out[0], "😮 ")
 
     def test_all_whitespace_stream_emits_fallback(self):
         out = _patched_stream(_provider(), _sse("  ", "\n"))

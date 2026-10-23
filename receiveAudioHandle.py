@@ -3,7 +3,6 @@ import re
 import time
 import json
 import asyncio
-from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -76,6 +75,25 @@ def _read_smart_mode_state() -> bool:
     return False
 
 
+def _camera_access_denied() -> bool:
+    """Voice-camera access requires explicit adult policy in the shared file.
+
+    This camera-only reader intentionally fails closed on missing/invalid
+    state, even when a startup environment flag says adult mode. Re-read on
+    every access; keep in sync with dotty-behaviour/routes/voice.py.
+    """
+    try:
+        with open(_KID_MODE_STATE_FILE, "r", encoding="utf-8") as file:
+            value = file.read().strip().lower()
+    except (OSError, UnicodeError):
+        return True
+    return value not in ("false", "0", "no")
+
+
+class _VoiceCameraDenied(PermissionError):
+    """Distinct from a stale/missing image; never treat denial as a photo."""
+
+
 def _write_smart_mode_state(enabled: bool) -> None:
     try:
         os.makedirs(os.path.dirname(_SMART_MODE_STATE_FILE), exist_ok=True)
@@ -88,23 +106,17 @@ def _write_smart_mode_state(enabled: bool) -> None:
 _LETTERS_RE = re.compile(r'[a-zA-Z一-鿿぀-ゟ゠-ヿ]')
 
 _ASR_CORRECTIONS: dict[str, str] = {
+    # Spellings of the wake-name that are not ordinary words, so rewriting
+    # them anywhere cannot change what was meant. "Duddy" is from the
+    # 2026-07-11 filmed UAT ("Good night, Duddy.").
     "doty": "Dotty",
     "dottie": "Dotty",
-    # Close phonetic substitutions observed in the 2026-07-11 filmed UAT.
-    # Keep this list conservative: broader variants such as Donny, Jody/Jodi,
-    # and Claudia are real names and must not be rewritten globally.
     "duddy": "Dotty",
     "dotie": "Dotty",
     "dotti": "Dotty",
     "dody": "Dotty",
     "daughty": "Dotty",
-    "haughty": "Dotty",
-    "naughty": "Dotty",
-    "hardy": "Dotty",
     "darty": "Dotty",
-    "dolly": "Dotty",
-    "dougie": "Dotty",
-    "dory": "Dotty",
     "foto": "photo",
     "pitcher": "picture",
     "pikture": "picture",
@@ -120,88 +132,67 @@ _ASR_CORRECTION_RE = re.compile(
 )
 
 
-# ---------- Fuzzy phrase corrections ----------
-# Each entry: (canonical_phrase, minimum_similarity_ratio)
-# The canonical phrase is what we want. If the ASR text (or a window of it)
-# fuzzy-matches above the threshold, we substitute the canonical form.
-# Threshold 0.7 is conservative — avoids false positives on short utterances.
-_PHRASE_CORRECTIONS: list[tuple[str, float]] = [
+# ---------- Known-phrase punctuation normalization ----------
+# Never infer intent from edit-distance similarity: correct "one short joke"
+# was rewritten into "a story", causing an unintended state transition.
+_CANONICAL_PHRASES: tuple[str, ...] = (
     # Vision triggers
-    ("take a photo", 0.7),
-    ("take a picture", 0.7),
-    ("take a photo of me", 0.7),
-    ("take a picture of me", 0.7),
+    "take a photo",
+    "take a picture",
+    "take a photo of me",
+    "take a picture of me",
     # Common kid requests
-    ("tell me a story", 0.7),
-    ("sing a song", 0.7),
-    ("sing the macarena", 0.7),
-    ("dance", 0.8),
-    ("do the macarena", 0.7),
-    # Song-name fuzzy hits
-    ("play tetris", 0.7),
-    ("hall of the mountain king", 0.7),
-    ("star wars", 0.75),
-    ("pirates of the caribbean", 0.7),
-    ("super mario", 0.7),
-    ("play music", 0.75),
+    "tell me a story",
+    "sing a song",
+    "sing the macarena",
+    "dance",
+    "do the macarena",
+    # Song names
+    "play tetris",
+    "hall of the mountain king",
+    "star wars",
+    "pirates of the caribbean",
+    "super mario",
+    "play music",
     # Identity questions
-    ("what's your name", 0.7),
-    ("what is your name", 0.7),
-    ("who are you", 0.75),
+    "what's your name",
+    "what is your name",
+    "who are you",
     # Greetings
-    ("good morning", 0.7),
-    ("good night", 0.7),
-]
+    "good morning",
+    "good night",
+)
+
+# Paired quotation marks only. Apostrophes inside words (don't / Dotty's)
+# are not quote delimiters. Quoted spans remain verbatim for the LLM.
+_QUOTED_SPAN_RE = re.compile(
+    r'"[^"]*"|“[^”]*”|(?<!\w)\'[^\n]*?\'(?!\w)|‘[^\n]*?’(?!\w)'
+)
 
 
 def _apply_phrase_corrections(text: str) -> str:
-    """Fuzzy-match ASR text against known phrases and substitute if close enough.
+    """Normalize one known phrase's punctuation without changing its words.
 
-    Uses a sliding window: for each canonical phrase of N words, we check every
-    contiguous N-word window in the ASR text. If the best window exceeds the
-    similarity threshold, we replace that window with the canonical phrase.
-
-    Only the single best match (highest ratio) is applied per call to avoid
-    cascading replacements on short utterances.
+    Explicit observed name aliases remain in _apply_asr_corrections. Unknown
+    near-matches stay intact for ordinary conversation instead of manufacturing
+    camera, music, or state commands. Prefer the longest exact word sequence.
     """
-    lower = text.lower().strip()
-    words = lower.split()
-    if len(words) < 2:
-        return text  # too short to fuzzy-match phrases
-
-    best_ratio = 0.0
-    best_phrase = ""
-    best_start = 0
-    best_length = 0
-
-    for canonical, threshold in _PHRASE_CORRECTIONS:
+    # Do not erase the distinction between a command and a quoted mention.
+    if _QUOTED_SPAN_RE.search(text):
+        return text
+    original_words = text.split()
+    words = [word.lower().strip(".,!?;:\"'()[]{}‘’“”") for word in original_words]
+    for canonical in sorted(_CANONICAL_PHRASES, key=lambda p: len(p.split()), reverse=True):
         canon_words = canonical.split()
         window_size = len(canon_words)
-        if window_size > len(words):
-            continue
-
         for i in range(len(words) - window_size + 1):
-            window = " ".join(words[i : i + window_size])
-            ratio = SequenceMatcher(None, window, canonical).ratio()
-            if ratio >= threshold and ratio > best_ratio:
-                best_ratio = ratio
-                best_phrase = canonical
-                best_start = i
-                best_length = window_size
-
-    if best_ratio > 0:
-        # Rebuild using original-case words outside the match window,
-        # substituting the canonical phrase for the matched span.
-        original_words = text.split()
-        # Map word indices from lower-cased split back to original split.
-        # They should align since we only called .lower() without changing
-        # word boundaries, but guard against edge cases.
-        if len(original_words) >= best_start + best_length:
-            before = " ".join(original_words[:best_start])
-            after = " ".join(original_words[best_start + best_length :])
-            parts = [p for p in (before, best_phrase, after) if p]
-            return " ".join(parts)
-
+            # Punctuation cleanup must not concatenate separate sentences into
+            # a command, e.g. "Tell me. A story is something I dislike."
+            if any(word.rstrip("\"'‘’“”)]}").endswith((".", "!", "?"))
+                   for word in original_words[i:i + window_size - 1]):
+                continue
+            if words[i:i + window_size] == canon_words:
+                return " ".join(original_words[:i] + [canonical] + original_words[i + window_size:])
     return text
 
 
@@ -212,10 +203,33 @@ def _is_noise(text: str) -> bool:
     return len(_LETTERS_RE.findall(stripped)) < MIN_UTTERANCE_CHARS
 
 
+# Mishearings of the wake-name that are real words or names (#164: Jody,
+# Jodi, Donny and Claudia were observed in the 2026-07-11 UAT; the others
+# are older children's-speech garbles). They are rewritten only in the
+# wake-name position — addressing Dotty at the start of a sentence, with
+# the comma Whisper writes after a vocative ("Jody, what's the hardest
+# question?") — never mid-sentence ("say hello to Jody") or after "good
+# night", where "goodnight Dolly" to a doll must not put Dotty to sleep.
+_ADDRESS_ONLY_ALIASES: tuple[str, ...] = (
+    "jody", "jodi", "donny", "claudia",
+    "naughty", "haughty", "hardy", "dolly", "dougie", "dory",
+)
+_ADDRESS_ALIAS_RE = re.compile(
+    r'(^|[.!?]\s+)'                                  # utterance/sentence start
+    r'((?:(?:hey|hi|hello|okay|ok|oh)\b[\s,]*)?)'     # optional interjection
+    r'(' + '|'.join(_ADDRESS_ONLY_ALIASES) + r')'
+    r'(?=\s*,)',                                     # vocative comma
+    re.IGNORECASE,
+)
+
+
 def _apply_asr_corrections(text: str) -> str:
     def _repl(m):
         return _ASR_CORRECTIONS.get(m.group(0).lower(), m.group(0))
-    return _ASR_CORRECTION_RE.sub(_repl, text)
+    text = _ASR_CORRECTION_RE.sub(_repl, text)
+    return _ADDRESS_ALIAS_RE.sub(lambda m: m.group(1) + m.group(2) + "Dotty", text)
+
+
 VISION_PHRASES = (
     "look at", "what do you see", "what is this", "what's this",
     "take a photo", "take a picture", "can you see", "what's in front",
@@ -246,17 +260,35 @@ _WAKE_PHRASES = ("wake up", "come back", "are you there")
 _NON_CONVERSATIONAL_STATES = ("sleep", "security", "story_time")
 
 
+def _has_state_command(text: str, phrase: str) -> bool:
+    """Recognize a literal state phrase, excluding explicit mentions/negation.
+
+    This is deliberately not NLU: paired quotes and immediately preceding
+    do-not/don't/never (with common politeness/adverb fillers) are protected.
+    Indirect negation, hypothetical/reporting language, and unmatched quotes
+    remain outside this guard. Wake and entry shortcuts share the same rule.
+    """
+    lower = _QUOTED_SPAN_RE.sub(" [quoted] ", text.lower()).strip()
+    for match in re.finditer(r"\b" + re.escape(phrase) + r"\b", lower):
+        prefix = lower[:match.start()]
+        negated = re.search(
+            r"\b(?:do\s+not|don['’]t|never)\b"
+            r"(?:[\s,]+(?:please|ever|just|you))*[\s,]*$", prefix,
+        )
+        if not negated:
+            return True
+    return False
+
+
 def _detect_state_phrase(text: str) -> tuple[str, str] | None:
-    lower = text.lower().strip()
     for phrase, state, ack in _STATE_TRIGGER_PHRASES:
-        if phrase in lower:
+        if _has_state_command(text, phrase):
             return (state, ack)
     return None
 
 
 def _is_wake_phrase(text: str) -> bool:
-    lower = text.lower().strip()
-    return any(phrase in lower for phrase in _WAKE_PHRASES)
+    return any(_has_state_command(text, phrase) for phrase in _WAKE_PHRASES)
 
 
 _HELP_PHRASES = (
@@ -395,6 +427,8 @@ def _is_vision_request(text: str) -> bool:
 
 
 async def _handle_vision(conn: "ConnectionHandler", text: str) -> str | None:
+    if _camera_access_denied():
+        raise _VoiceCameraDenied("Camera access is disabled in Kid Mode")
     if not VISION_BRIDGE_URL:
         conn.logger.bind(tag=TAG).warning("VISION_BRIDGE_URL not set, skipping vision")
         return None
@@ -1021,6 +1055,64 @@ async def _stream_singing(conn: "ConnectionHandler", opus_packets: list) -> None
         conn.logger.bind(tag=TAG).info(f"Singing stream complete ({sent} packets sent)")
 
 
+# ---------- Barge-in storm → end the session (#105) ----------
+# Room audio (TV, podcast) keeps an open session busy: every snippet is
+# transcribed and starts a reply, and the next snippet interrupts it. On
+# 2026-10-06 that was 18 recognitions and 19 aborts in three minutes, at
+# levels overlapping a quiet child's real speech, so no energy gate can
+# separate them. The maintainer's direction is to close the session rather
+# than keep listening (touch / wake word reopens it). A person rarely cuts
+# Dotty off this often, so N interrupted replies within a window ends the
+# session the way the no-voice timeout does. Admin aborts (face-lost,
+# dashboard) do not count. Config: `dotty_barge_in_close: {aborts, window_s}`
+# in .config.yaml; aborts: 0 disables.
+_BARGE_IN_CLOSE_ABORTS = 4
+_BARGE_IN_CLOSE_WINDOW_S = 60.0
+_BACKGROUND_TASKS: set = set()
+
+
+def _barge_in_close_limits(conn: "ConnectionHandler") -> tuple[int, float]:
+    config = getattr(conn, "config", None)
+    cfg = config.get("dotty_barge_in_close") if isinstance(config, dict) else None
+    cfg = cfg if isinstance(cfg, dict) else {}
+    try:
+        aborts = int(cfg.get("aborts", _BARGE_IN_CLOSE_ABORTS))
+        window_s = float(cfg.get("window_s", _BARGE_IN_CLOSE_WINDOW_S))
+    except (TypeError, ValueError):
+        return _BARGE_IN_CLOSE_ABORTS, _BARGE_IN_CLOSE_WINDOW_S
+    return aborts, window_s
+
+
+def _note_barge_in(conn: "ConnectionHandler", now: float | None = None) -> bool:
+    """Record that the user's audio cut off a reply in flight.
+
+    Returns True when this interruption completes a storm; the caller should
+    then drop the turn, because the session is being closed.
+    """
+    aborts, window_s = _barge_in_close_limits(conn)
+    if aborts <= 0 or window_s <= 0:
+        return False
+    now = time.monotonic() if now is None else now
+    recent = [t for t in getattr(conn, "_dotty_barge_ins", []) if now - t < window_s]
+    recent.append(now)
+    conn._dotty_barge_ins = recent
+    if len(recent) < aborts:
+        return False
+    conn._dotty_barge_ins = []
+    try:
+        conn.logger.bind(tag=TAG).info(
+            f"barge-in storm: {len(recent)} interrupted replies in "
+            f"{window_s:.0f}s - ending session (#105)"
+        )
+    except Exception:
+        pass
+    from core.utils.device_command import end_session
+    task = asyncio.create_task(end_session(conn, reason="barge-in storm"))
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    return True
+
+
 async def handleAudioMessage(conn: "ConnectionHandler", audio):
     if getattr(conn, "is_exiting", False):
         return
@@ -1033,6 +1125,8 @@ async def handleAudioMessage(conn: "ConnectionHandler", audio):
     if have_voice:
         if conn.client_is_speaking and conn.client_listen_mode != "manual":
             await handleAbortMessage(conn)
+            if _note_barge_in(conn):
+                return
     await no_voice_close_connect(conn, have_voice)
     await conn.asr.receive_audio(conn, audio, have_voice)
 
@@ -1042,7 +1136,9 @@ async def resume_vad_detection(conn: "ConnectionHandler"):
     conn.just_woken_up = False
 
 
-async def startToChat(conn: "ConnectionHandler", text):
+async def startToChat(conn: "ConnectionHandler", text, injected: bool = False):
+    # injected: the text came from the server (admin inject-text, the
+    # greeter, the end prompt), not the user's voice, so it is no barge-in.
     speaker_name = None
     _language_tag = None
     actual_text = text
@@ -1050,11 +1146,15 @@ async def startToChat(conn: "ConnectionHandler", text):
     try:
         if text.strip().startswith("{") and text.strip().endswith("}"):
             data = json.loads(text)
-            if "speaker" in data and "content" in data:
-                speaker_name = data["speaker"]
-                _language_tag = data["language"]
-                actual_text = data["content"]
-                conn.logger.bind(tag=TAG).info(f"解析到说话人信息: {speaker_name}")
+            if isinstance(data, dict) and "content" in data:
+                # ASR may omit speaker/language metadata. Decode content before
+                # corrections, noise filtering, or intent routing; otherwise a
+                # fuzzy replacement can corrupt the JSON envelope itself.
+                actual_text = data["content"] if isinstance(data["content"], str) else ""
+                speaker_name = data.get("speaker")
+                _language_tag = data.get("language")
+                if speaker_name:
+                    conn.logger.bind(tag=TAG).info(f"解析到说话人信息: {speaker_name}")
     except (json.JSONDecodeError, KeyError):
         pass
 
@@ -1090,6 +1190,8 @@ async def startToChat(conn: "ConnectionHandler", text):
         if dance_task and not dance_task.done():
             await _cancel_active_dance(conn, dance_task)
         await handleAbortMessage(conn)
+        if not injected and _note_barge_in(conn):
+            return
 
     intent_handled = await handle_user_intent(conn, actual_text)
 
@@ -1097,6 +1199,10 @@ async def startToChat(conn: "ConnectionHandler", text):
         return
 
     await send_stt_message(conn, actual_text)
+    # DOTTY-PATCH: an abort cancels the turn in flight, not the ones after it.
+    # Nothing else on the `nointent` path clears this, so a single abort frame
+    # left conn.chat() breaking out of every later reply until reconnect.
+    conn.client_abort = False
 
     thinking_frame = json.dumps({
         "type": "llm",
@@ -1162,7 +1268,15 @@ async def startToChat(conn: "ConnectionHandler", text):
 
     if _is_vision_request(user_text):
         conn.logger.bind(tag=TAG).info(f"Vision intent detected: {user_text[:60]}")
-        description = await _handle_vision(conn, user_text)
+        try:
+            description = await _handle_vision(conn, user_text)
+        except _VoiceCameraDenied:
+            conn.logger.bind(tag=TAG).info("Voice camera denied by Kid Mode policy")
+            _submit_chat(conn,
+                "[CAMERA_DISABLED] Camera access is disabled in Kid Mode. "
+                "This request did not take a photo or access a camera view. "
+                "Briefly tell the user that camera access is disabled; do not use tools.")
+            return
         if description:
             vision_prompt = (
                 f"[You just used your camera and took a photo. "
@@ -1204,7 +1318,7 @@ async def no_voice_close_connect(conn: "ConnectionHandler", have_voice):
             prompt = end_prompt.get("prompt")
             if not prompt:
                 prompt = "Time flies when we're having fun! Let's chat again next time!"
-            await startToChat(conn, prompt)
+            await startToChat(conn, prompt, injected=True)
 
 
 async def max_out_size(conn: "ConnectionHandler"):

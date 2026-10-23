@@ -36,6 +36,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import threading
 import time
@@ -56,6 +57,11 @@ _DEFAULT_PI_FLAGS = (
     "--no-skills",
     "--no-prompt-templates",
     "--no-themes",
+    # Keep the seven voice tools, drop pi's coding tools (read, bash, edit,
+    # write). A voice-driven agent has no use for them, and their schemas
+    # cost a 4K-context 4B model room and pull it towards being a coding
+    # assistant (#165). It also means a spoken prompt cannot reach a shell.
+    "--no-builtin-tools",
     "--thinking", "off",
 )
 
@@ -98,6 +104,22 @@ def local_exec_subprocess_factory(
 
 
 SubprocessFactory = Callable[[], subprocess.Popen]
+VoiceToolRunner = Callable[[str, dict[str, str]], str]
+
+
+TOOL_CALLS_BEFORE_STEER = 3
+TOOL_CALLS_BEFORE_ABORT = 6
+_ABORT_GRACE_SEC = 5.0
+_STOP_TOOLS_STEER = (
+    "Stop calling tools now. Using what you already have, give your short "
+    "spoken reply to the person's last message."
+)
+
+
+def _normalise_reply(text: str) -> str:
+    """Words only, lowercased: compares replies regardless of face emoji,
+    punctuation and spacing."""
+    return " ".join(re.findall(r"\w+", text.lower()))
 
 
 class PiClientError(Exception):
@@ -129,6 +151,7 @@ class PiClient:
         *,
         turn_timeout_sec: float = 120.0,
         stderr_ring_size: int = 200,
+        voice_tool_runner: VoiceToolRunner | None = None,
     ):
         self._spawn = subprocess_factory
         self._proc: Optional[subprocess.Popen] = None
@@ -141,6 +164,7 @@ class PiClient:
         self._turn_timeout_sec = turn_timeout_sec
         self._next_req_id = 0
         self._closed = False
+        self._voice_tool_runner = voice_tool_runner
 
     # ------------------------------------------------------------------
     # lifecycle
@@ -167,6 +191,29 @@ class PiClient:
                 daemon=True,
             )
             self._stderr_reader.start()
+            # Every voice turn starts a fresh session, so compaction has
+            # nothing to save. With a 4096-token model and pi's default
+            # 16384-token reserve it fired after every turn (#165), spending
+            # a model call while the next turn waited. The `response` frame
+            # is dropped like any other unmatched frame.
+            try:
+                self._send({"type": "set_auto_compaction", "enabled": False})
+            except PiClientError:
+                logger.warning("PiClient: could not disable auto-compaction")
+
+    def _stop_process(self) -> None:
+        """Terminate pi without closing the client; the next call respawns
+        it (same flags and system prompt) with a fresh event queue."""
+        with self._lock:
+            if self._proc and self._proc.poll() is None:
+                try:
+                    self._proc.terminate()
+                    self._proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self._proc.kill()
+                except Exception:
+                    logger.exception("PiClient: error stopping pi")
+            self._proc = None
 
     def close(self) -> None:
         with self._lock:
@@ -204,7 +251,12 @@ class PiClient:
             if (
                 frame.get("type") == "response"
                 and frame.get("command") == "new_session"
+                and frame.get("id") == req_id
             ):
+                if not frame.get("success", False):
+                    raise PiClientError(
+                        f"pi rejected new_session: {frame.get('error', 'unknown')}"
+                    )
                 return
         raise PiClientError("new_session timed out waiting for response")
 
@@ -219,7 +271,28 @@ class PiClient:
 
         deadline = time.time() + self._turn_timeout_sec
         saw_accept = False
+        # After a tool call the 4B model often says its pre-tool line again
+        # ("Let me play that song for you" twice). Hold each later agent
+        # turn's text while it only repeats the previous turn's, and drop
+        # the repeat; speak whatever it adds beyond that.
+        previous = ""  # previous agent turn's text, normalised
+        current = ""   # this agent turn's raw text
+        held = None    # raw text held back while it still repeats `previous`
+        repeat_end = None  # length of `held` at which it repeated all of `previous`
+        # 2026-10-21: "Repeat these five words" made the 4B call think_hard 19
+        # times in 30 s until the context overflowed and nothing was said.
+        # Steer it to answer after TOOL_CALLS_BEFORE_STEER calls; abort the
+        # turn after TOOL_CALLS_BEFORE_ABORT.
+        tool_calls = 0
+        aborted_at = None
         while time.time() < deadline:
+            if aborted_at is not None and time.time() > aborted_at + _ABORT_GRACE_SEC:
+                # The aborted run is still going (think_hard ignores the abort
+                # signal and can wait 90 s on a cold 27B). Its leftover frames
+                # would end the next turn early, so start pi afresh instead.
+                logger.warning("PiClient: aborted turn did not end; restarting pi")
+                self._stop_process()
+                return
             try:
                 frame = self._event_queue.get(timeout=1.0)
             except Empty:
@@ -251,7 +324,19 @@ class PiClient:
                     if ame.get("type") == "text_delta":
                         delta = ame.get("delta")
                         if isinstance(delta, str) and delta:
-                            yield delta
+                            current += delta
+                            if held is None:
+                                yield delta
+                                continue
+                            held += delta
+                            norm = _normalise_reply(held)
+                            if norm == previous:
+                                repeat_end = len(held)
+                            if not previous.startswith(norm):
+                                out = held[repeat_end:] if repeat_end else held
+                                held = None
+                                if out:
+                                    yield out
                     elif ame.get("type") == "toolcall_end":
                         tool_call = ame.get("toolCall")
                         if isinstance(tool_call, dict):
@@ -260,13 +345,32 @@ class PiClient:
                                 tool_call.get("name", "unknown"),
                                 tool_call.get("id", "unknown"),
                             )
+                        tool_calls += 1
+                        if tool_calls == TOOL_CALLS_BEFORE_STEER:
+                            logger.warning("PiClient: %d tool calls this turn; steering to answer", tool_calls)
+                            self._send({"type": "steer", "message": _STOP_TOOLS_STEER})
+                        elif tool_calls >= TOOL_CALLS_BEFORE_ABORT and aborted_at is None:
+                            logger.warning("PiClient: %d tool calls this turn; aborting it", tool_calls)
+                            self._send({"type": "abort"})
+                            aborted_at = time.time()
                 # thinking_delta, thinking_start, thinking_end and any
                 # other message_update sub-types are filtered out here.
+                continue
+
+            if ftype == "turn_start":
+                if held:
+                    logger.info("PiClient: dropped a reply repeating the previous turn")
+                if _normalise_reply(current):
+                    previous = _normalise_reply(current)
+                current = ""
+                held, repeat_end = ("" if previous else None), None
                 continue
 
             if ftype == "agent_end":
                 if not saw_accept:
                     raise PiClientError("agent_end before prompt-accept")
+                if held:
+                    logger.info("PiClient: dropped a reply repeating the previous turn")
                 return
 
             # Unknown frame — drop silently. Logging at debug level keeps
@@ -276,6 +380,15 @@ class PiClient:
         raise PiClientError(
             f"turn timed out after {self._turn_timeout_sec}s"
         )
+
+    def invoke_voice_tool(self, name: str, arguments: dict[str, str]) -> str:
+        """Run one deterministic voice tool outside the fallible 4B router."""
+        if self._voice_tool_runner is None:
+            raise PiClientError("direct voice-tool runner is not configured")
+        try:
+            return self._voice_tool_runner(name, arguments)
+        except Exception as exc:
+            raise PiClientError(f"voice tool {name} failed: {exc}") from exc
 
     # ------------------------------------------------------------------
     # diagnostics
@@ -305,6 +418,9 @@ class PiClient:
 
     def _read_stdout(self) -> None:
         proc = self._proc
+        # Bound at start: after a restart, a late frame from the old process
+        # must not land in the new process's queue.
+        queue = self._event_queue
         assert proc is not None and proc.stdout is not None
         try:
             for raw in iter(proc.stdout.readline, b""):
@@ -316,16 +432,16 @@ class PiClient:
                 except json.JSONDecodeError:
                     logger.debug("PiClient: dropped non-JSON stdout: %r", line[:120])
                     continue
-                self._route_frame(frame)
+                self._route_frame(frame, queue)
         except Exception:
             if not self._closed:
                 logger.exception("PiClient: stdout reader crashed")
 
-    def _route_frame(self, frame: object) -> None:
+    def _route_frame(self, frame: object, queue: Optional[Queue] = None) -> None:
         if isinstance(frame, dict) and frame.get("type") == "extension_ui_request":
             self._handle_ui_request(frame)
             return
-        self._event_queue.put(frame)
+        (queue if queue is not None else self._event_queue).put(frame)
 
     def _handle_ui_request(self, req: dict) -> None:
         """Invariant 2: auto-cancel dialog methods, drop fire-and-forget."""
@@ -365,9 +481,36 @@ class PiClient:
 
 # Convenience factory that wires the env-var-defaults into a
 # PiClient ready to be used by xiaozhi-server.
-def make_default_pi_client() -> PiClient:
+DEFAULT_SYSTEM_PROMPT_FILE = "/opt/xiaozhi-esp32-server/personas/pi_voice.md"
+
+
+def _system_prompt_args(turn_rules: str = "") -> list[str]:
+    """`--system-prompt <persona>` from DOTTY_PI_SYSTEM_PROMPT_FILE, followed
+    by `turn_rules` (the voice tool routing and HARD CONSTRAINTS).
+
+    Without a persona pi uses its built-in coding-assistant prompt, and that
+    identity leaks into spoken replies (#177). A missing or empty file keeps
+    the old behaviour rather than breaking the voice path; the rules are still
+    passed.
+    """
+    path = os.environ.get("DOTTY_PI_SYSTEM_PROMPT_FILE", DEFAULT_SYSTEM_PROMPT_FILE)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read().strip()
+    except OSError:
+        logger.warning("PiClient: no voice persona at %s; pi default prompt in use", path)
+        text = ""
+    else:
+        if not text:
+            logger.warning("PiClient: voice persona %s is empty; pi default prompt in use", path)
+    text = "\n\n".join(part for part in (text, turn_rules.strip()) if part)
+    return ["--system-prompt", text] if text else []
+
+
+def make_default_pi_client(turn_rules: str = "") -> PiClient:
     container = os.environ.get("DOTTY_PI_CONTAINER", "dotty-pi")
     pi_args: list[str] = list(_DEFAULT_PI_FLAGS)
+    pi_args.extend(_system_prompt_args(turn_rules))
     extra = os.environ.get("DOTTY_PI_EXTRA_FLAGS", "").split()
     if extra:
         pi_args.extend(extra)
@@ -375,4 +518,61 @@ def make_default_pi_client() -> PiClient:
         subprocess_factory=lambda: local_exec_subprocess_factory(
             container=container, pi_args=pi_args,
         ),
+        voice_tool_runner=lambda name, arguments: _run_container_voice_tool(
+            container, name, arguments,
+        ),
     )
+
+
+# think_hard waits on the 27B reasoner, which is not kept resident: a cold
+# load is 30-50 s before generation starts. Its own request timeout is
+# VOICE_THINKER_TIMEOUT (90 s) inside the container; allow a little more here.
+_DIRECT_TOOL_TIMEOUT_SEC = {"think_hard": 105}
+
+
+def _run_container_voice_tool(
+    container: str, name: str, arguments: dict[str, str],
+) -> str:
+    modules = {
+        "remember": ("remember.ts", "runRemember", "fact"),
+        "memory_lookup": ("memory_lookup.ts", "runMemoryLookup", "query"),
+        # Reads approved person facts only; pending (unreviewed) ones never.
+        "recall_person": ("recall_person.ts", "runRecallPerson", "name"),
+        # Queues the song for after this turn's reply (after_turn).
+        "play_song": ("play_song.ts", "runPlaySong", "name"),
+        "think_hard": ("think_hard.ts", "runThinkHard", "question"),
+        # No argument: reads the latest cached camera description, and
+        # dotty-behaviour applies the Kid Mode camera policy.
+        "take_photo": ("take_photo.ts", "runTakePhoto", None),
+    }
+    if name not in modules:
+        raise PiClientError(f"unsupported direct voice tool: {name}")
+    module, function, argument = modules[name]
+    call_args = f"input[{json.dumps(argument)}]" if argument else ""
+    script = (
+        'import fs from "node:fs";'
+        f'import {{ {function} }} from "/root/.pi/extensions/dotty-pi-ext/src/tools/{module}";'
+        'const input=JSON.parse(fs.readFileSync(0,"utf8"));'
+        f'const result=await {function}({call_args});'
+        'process.stdout.write(JSON.stringify({result}));'
+    )
+    proc = subprocess.run(
+        [
+            "docker", "exec", "-i", container, "node",
+            "--experimental-strip-types", "--input-type=module", "-e", script,
+        ],
+        input=json.dumps(arguments), text=True, capture_output=True,
+        timeout=_DIRECT_TOOL_TIMEOUT_SEC.get(name, 60), check=False,
+    )
+    if proc.returncode != 0:
+        raise PiClientError(proc.stderr.strip() or f"tool exited {proc.returncode}")
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise PiClientError("voice tool returned invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise PiClientError("voice tool returned invalid JSON shape")
+    result = payload.get("result")
+    if not isinstance(result, str):
+        raise PiClientError("voice tool returned a non-string result")
+    return result
