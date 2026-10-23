@@ -249,6 +249,23 @@ def test_song_case_accepts_untranscribed_music_only_with_evidence_and_signal(cal
     assert run(-30, logs.replace("sent=40", "sent=0"))["verdict"] == "FAIL"
 
 
+def test_dance_without_any_speech_passes_on_state_and_music():
+    # 2026-10-23 A/V run: the firmware danced (talk -> dance -> idle) with no
+    # spoken reply, and "speech optional" S06 failed as no_tts.
+    case = case_by_id("S06-dance")
+    logs = "结果: Can you do a little dance for me?\n识别文本: Can you do a little dance for me?"
+
+    def run(rms, states):
+        result = runner.evaluate(case, {"segments": []}, logs, 10, after(), "robot",
+                                 recovered_override=True)
+        assert result["failure"] == "no_tts"
+        result["observed_states"] = states
+        return contract(case, result, {"xiaozhi-esp32-server": logs}, rms=rms)
+    assert run(-30, ["dance", "idle"])["interaction"] == "PASS"
+    assert run(-70, ["dance", "idle"])["interaction"] == "FAIL"   # no music either
+    assert run(-30, ["talk"])["verdict"] == "FAIL"                # never danced
+
+
 def test_prompt_failures_are_not_overridden_by_contract():
     case = case_by_id("T06-take-photo")
     result = contract(case, passing(case, "hello", "结果: something else\nSentenceType.FIRST"), {})

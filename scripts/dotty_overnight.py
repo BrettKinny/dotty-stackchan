@@ -454,7 +454,9 @@ def apply_contract(result, case, contract, response_rms_dbfs=None):
     if failure and (result.get("asr_match") or case.get("expect_silence")):
         set_failure(result, failure, case)
         return
-    if base == "response_transcription_unavailable" and case.get("speech_reply_optional"):
+    # A speech-optional case (a dance, a song) may answer with music alone and
+    # no TTS turn at all (2026-10-23: the firmware danced without a word).
+    if base in ("response_transcription_unavailable", "no_tts") and case.get("speech_reply_optional"):
         floor = case.get("response_audio_min_rms_dbfs")
         result["response_audio_rms_dbfs"] = response_rms_dbfs
         if floor is None or (response_rms_dbfs is not None and response_rms_dbfs >= floor):
