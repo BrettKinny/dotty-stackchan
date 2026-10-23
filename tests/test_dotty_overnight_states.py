@@ -229,11 +229,16 @@ def test_sleep_hold_is_judged_before_cleanup_wakes_robot(tmp_path, monkeypatch, 
                 robot.state = "idle"  # woke without an echo the recorder saw
             return
         output = Path(argv[argv.index("--output") + 1])
+        calls.append(argv)
         heard = output.name == "prompt-heard.json"
         runner.write_json(output, {"segments": [{"text": "Wake up. What is your name?", "start": 0, "end": 3,
                                                  "no_speech_prob": .01, "avg_logprob": -.1}] if heard else []})
+    calls = []
     monkeypatch.setattr(runner, "guarded_process", process)
     result = runner.run_case(tmp_path, config, CATALOGUE["S05-sleep-ignores-voice"])
+    # 2026-10-23: biased toward "Dotty", Whisper heard a lone "Dotty" in the
+    # silence and S05 came out inconclusive. Silence gets no name bias.
+    assert all("--hotwords" not in argv for argv in calls)
     assert result["setup"]["verified"] and result["cleanup"]["state"]["verified"]
     assert robot.state == "idle"  # cleanup still woke the robot afterwards
     directory = tmp_path / "cases" / result["id"]

@@ -1101,8 +1101,11 @@ def run_case(session, config, case):
                      "-vn", "-ar", "16000", "-ac", "1", wav])
             guarded_process([config["python"], ROOT / "scripts/dotty_av_media.py", "transcribe", wav,
                             "--model", config["model"], "--output", directory / f"{label}.json",
-                            *(["--normalize", "--vad-threshold", str(result["response_vad_threshold"]),
-                               "--hotwords", RESPONSE_HOTWORDS] if label == "response" else [])],
+                            *(["--normalize", "--vad-threshold", str(result["response_vad_threshold"])]
+                              if label == "response" else []),
+                            # The name bias invents a lone "Dotty" in a silent crop.
+                            *(["--hotwords", RESPONSE_HOTWORDS]
+                              if label == "response" and not case.get("expect_silence") else [])],
                             directory / f"{label}-transcribe.log", session, 120,
                             deadline=datetime.fromisoformat(config["finish_at"]).timestamp())
             analysis = load(directory / f"{label}.json")
