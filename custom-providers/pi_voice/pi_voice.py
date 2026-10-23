@@ -423,6 +423,16 @@ class LLMProvider(LLMProviderBase):
             # raw stored rows ("user: … | assistant: …"), never fit to be
             # spoken as-is, so hand it to the model as context for this turn.
             context = _MEMORY_CONTEXT.format(results=result)
+        if intent is not None and intent.tool == "play_song":
+            name = intent.argument
+            result = self._invoke_voice_tool("play_song", {"name": name}, errors)
+            if result is not None and result.startswith("playing "):
+                yield f"{FALLBACK_EMOJI} Here's {result[len('playing '):]}!"
+            elif result is not None and result.startswith("(no match"):
+                yield f"{FALLBACK_EMOJI} I don't have a song called {name}."
+            else:
+                yield f"{FALLBACK_EMOJI} I couldn't play that song right now."
+            return
         if intent is not None and intent.tool == "recall_person":
             name = intent.argument
             result = self._invoke_voice_tool("recall_person", {"name": name}, errors)

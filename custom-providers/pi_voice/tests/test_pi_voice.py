@@ -386,6 +386,31 @@ class TestDeterministicVoiceToolRouting(unittest.TestCase):
         )
         self.assertEqual(client.prompts, [])
 
+    def test_named_song_is_played_without_asking_the_model(self):
+        client = FakeClient()
+        client.tool_results["play_song"] = "playing tetris"
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "Please put on the song called tetris."}],
+        ))
+
+        self.assertEqual(client.tool_calls, [("play_song", {"name": "tetris"})])
+        self.assertEqual(out, f"{textUtils.FALLBACK_EMOJI} Here's tetris!")
+        self.assertEqual(client.prompts, [])
+
+    def test_missing_song_is_said_plainly(self):
+        client = FakeClient()
+        client.tool_results["play_song"] = "(no match for 'zelda'; have: mario, tetris)"
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "Play the song called zelda"}],
+        ))
+
+        self.assertEqual(out, f"{textUtils.FALLBACK_EMOJI} I don't have a song called zelda.")
+        self.assertEqual(client.prompts, [])
+
     def test_recall_client_error_returns_honest_tts_failure(self):
         client = FakeClient()
         client.tool_errors["memory_lookup"] = PiClientError("lookup failed")

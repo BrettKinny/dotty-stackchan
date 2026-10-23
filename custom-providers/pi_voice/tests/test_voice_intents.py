@@ -67,6 +67,12 @@ ROUTED = [
      VoiceIntent("recall_person", "Mia")),
     ("What can you tell me about my neighbour Mrs Lee?",
      VoiceIntent("recall_person", "Mrs Lee")),
+    # play_song: a named song (2026-10-23 A/V run, T07: the 4B said Tetris
+    # was "a puzzle game, not a song" without asking the catalogue)
+    ("Please put on the song called tetris.", VoiceIntent("play_song", "tetris")),
+    ("Can you play the song called Star Wars?", VoiceIntent("play_song", "Star Wars")),
+    ("Dotty, play me the song named mario", VoiceIntent("play_song", "mario")),
+    ("Put on the tune called pirates", VoiceIntent("play_song", "pirates")),
     # take_photo (fallback behind xiaozhi's vision shortcut)
     ("Take a photo", VoiceIntent("take_photo", "Take a photo")),
     ("What do you see?", VoiceIntent("take_photo", "What do you see?")),
@@ -90,6 +96,9 @@ LEFT_TO_THE_MODEL = [
     "Remember?",
     "What do you know about dinosaurs?",       # general knowledge, not memory
     "What do you know about my friend?",      # no name to look up
+    "Play a game with me",
+    "Can you play a song?",                   # no name: the model picks
+    "I like the song called tetris",
     "What do you know about friendship?",
     "What do you know about my friend's dog Rex and his cat and his house?",
     "What's my favourite colour?",

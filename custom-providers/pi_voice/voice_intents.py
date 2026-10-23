@@ -114,6 +114,14 @@ _PERSON_RE = re.compile(
     re.IGNORECASE,
 )
 
+# "Please put on the song called tetris." Needs "song/tune called|named <x>";
+# the catalogue match (and a missing song) is play_song's job, not the 4B's.
+_SONG_RE = re.compile(
+    r"^" + _ASK + r"(?:play|put on)\s+(?:me\s+)?(?:the\s+|a\s+)?(?:song|tune)\s+"
+    r"(?:called|named)\s+(?P<name>.+?)[\s?!.]*$",
+    re.IGNORECASE,
+)
+
 _REMEMBER_LEAD_RE = re.compile(
     rf"^{_ASK}{_REMEMBER_VERB}\b[\s,:;-]*(?P<that>(?:that|this)\b[\s,:;-]*)?(?P<fact>.+?)[\s.!?]*$",
     re.IGNORECASE,
@@ -215,6 +223,10 @@ def match_voice_intent(text: str) -> VoiceIntent | None:
     cleaned = _clean(text or "")
     if not cleaned or cleaned.startswith("["):
         return None
+
+    song = _SONG_RE.match(cleaned)
+    if song and _has_words(song.group("name")):
+        return VoiceIntent("play_song", song.group("name"))
 
     person = _PERSON_RE.match(cleaned)
     if person:

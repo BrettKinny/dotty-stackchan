@@ -231,10 +231,12 @@ def test_person_fact_must_land_in_pending_not_approved_namespace():
     assert leaked["failure"] == "server_evidence_missing:fact_not_auto_approved"
 
 
-def test_song_case_accepts_untranscribed_music_only_with_evidence_and_signal():
+@pytest.mark.parametrize("call", ["PiClient: tool call name=play_song id=c3",
+                                  "PiVoiceLLM direct tool play_song ok"])
+def test_song_case_accepts_untranscribed_music_only_with_evidence_and_signal(call):
     case = case_by_id("T07-play-song")
     logs = ("结果: Please put on the song called Tetris.\nSentenceType.FIRST\n"
-            "PiClient: tool call name=play_song id=c3\nSentenceType.LAST\n"
+            f"{call}\nSentenceType.LAST\n"
             "play-asset complete device=robot asset=tetris.wav sent=40/900")
 
     def run(rms, text):

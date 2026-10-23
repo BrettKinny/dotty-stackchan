@@ -580,7 +580,7 @@ class TestContainerVoiceToolRunner(unittest.TestCase):
     def test_rejects_tools_outside_allowlist_without_spawning(self):
         with patch("pi_client.subprocess.run") as run:
             with self.assertRaisesRegex(PiClientError, "unsupported"):
-                _run_container_voice_tool("dotty-pi", "play_song", {"name": "x"})
+                _run_container_voice_tool("dotty-pi", "remember_person", {"name": "x"})
         run.assert_not_called()
 
     def test_rejects_malformed_json_output(self):
@@ -656,6 +656,22 @@ class TestRecallPersonDirectRunner(unittest.TestCase):
         self.assertIn("recall_person.ts", seen["script"])
         self.assertIn('await runRecallPerson(input["name"])', seen["script"])
         self.assertEqual(json.loads(seen["input"]), {"name": "Sam"})
+
+
+class TestPlaySongDirectRunner(unittest.TestCase):
+    def test_play_song_passes_the_name(self):
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen["script"] = argv[-1]
+            return SimpleNamespace(
+                returncode=0, stdout=json.dumps({"result": "playing tetris"}), stderr="",
+            )
+
+        with patch("pi_client.subprocess.run", fake_run):
+            result = _run_container_voice_tool("dotty-pi", "play_song", {"name": "tetris"})
+        self.assertEqual(result, "playing tetris")
+        self.assertIn('await runPlaySong(input["name"])', seen["script"])
 
 
 class TestDirectToolTimeouts(unittest.TestCase):

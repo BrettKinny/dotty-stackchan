@@ -538,6 +538,8 @@ def _run_container_voice_tool(
         "memory_lookup": ("memory_lookup.ts", "runMemoryLookup", "query"),
         # Reads approved person facts only; pending (unreviewed) ones never.
         "recall_person": ("recall_person.ts", "runRecallPerson", "name"),
+        # Queues the song for after this turn's reply (after_turn).
+        "play_song": ("play_song.ts", "runPlaySong", "name"),
         "think_hard": ("think_hard.ts", "runThinkHard", "question"),
         # No argument: reads the latest cached camera description, and
         # dotty-behaviour applies the Kid Mode camera policy.
