@@ -829,13 +829,24 @@ def case_cleanup(session, config, case, clock=None):
     return out
 
 
+# Just after its conversation times out the robot reconnects its WebSocket,
+# and a wake word in that window is missed (2026-10-23 A/V run, W01).
+COLD_SETTLE_SECONDS = 15
+
+
 def await_cold(config, seconds, poll=3):
     """Passively wait for the open conversation to time out. Changes nothing."""
     end = time.monotonic() + seconds
+    waited = False
     while time.monotonic() < end:
         snap = snapshot(config["host"])
         if wake_precondition(snap, config["device"]):
-            return snap
+            if not waited:
+                return snap
+            time.sleep(COLD_SETTLE_SECONDS)
+            snap = snapshot(config["host"])
+            return snap if wake_precondition(snap, config["device"]) else None
+        waited = True
         time.sleep(poll)
     return None
 

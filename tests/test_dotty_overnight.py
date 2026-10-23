@@ -1010,3 +1010,25 @@ def test_a_pass_clears_the_inconclusive_count(tmp_path):
     for attempt in (murky, murky, good, murky, murky):
         runner.record_attempt(checkpoint, {"id": "repeat"}, attempt)
     assert checkpoint["unresolved"] == []
+
+
+def test_cold_wake_settles_after_the_robot_just_went_idle(monkeypatch):
+    # 2026-10-23: a wake word played 4 s after the conversation timed out (the
+    # robot was still reconnecting) was missed; the next one, 80 s later, woke.
+    states = iter([False, False, True, True])
+    sleeps = []
+    monkeypatch.setattr(runner, "snapshot", lambda host: {"cold": next(states)})
+    monkeypatch.setattr(runner, "wake_precondition", lambda snap, device: snap["cold"])
+    monkeypatch.setattr(runner.time, "sleep", sleeps.append)
+    snap = runner.await_cold({"host": "h", "device": "robot"}, 60)
+    assert snap == {"cold": True}
+    assert runner.COLD_SETTLE_SECONDS in sleeps
+
+
+def test_already_cold_robot_is_not_made_to_wait(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(runner, "snapshot", lambda host: {"cold": True})
+    monkeypatch.setattr(runner, "wake_precondition", lambda snap, device: snap["cold"])
+    monkeypatch.setattr(runner.time, "sleep", sleeps.append)
+    assert runner.await_cold({"host": "h", "device": "robot"}, 60) == {"cold": True}
+    assert sleeps == []
