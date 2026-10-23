@@ -44,10 +44,35 @@ from core.portal_bridge import restore_device_state as _dotty_restore_device_sta
 TAG = __name__
 
 
+def _dotty_preimport_tts(config, *, import_module=None, exists=None) -> None:
+    """Import the configured TTS provider module once, on the main thread.
+
+    Each connection builds its own TTS on a worker thread through upstream's
+    create_instance, which treats any ``sys.modules`` entry as loaded. Two
+    connections in the same second (a robot reconnecting after a restart)
+    raced the first import: one saw the half-initialised module, failed with
+    "has no attribute 'TTSProvider'", and was left with no TTS, so Dotty could
+    not speak until it reconnected (2026-10-23 A/V run). Best effort: any
+    problem here is left for the per-connection path to report.
+    """
+    import importlib
+    import os
+    import_module = import_module or importlib.import_module
+    exists = exists or os.path.exists
+    try:
+        selected = config["selected_module"]["TTS"]
+        tts_type = config["TTS"][selected].get("type", selected)
+        if exists(os.path.join("core", "providers", "tts", f"{tts_type}.py")):
+            import_module(f"core.providers.tts.{tts_type}")
+    except Exception:
+        pass
+
+
 class WebSocketServer:
     def __init__(self, config: dict):
         self.config = config
         self.logger = setup_logging()
+        _dotty_preimport_tts(self.config)
         self.config_lock = asyncio.Lock()
         modules = initialize_modules(
             self.logger,
