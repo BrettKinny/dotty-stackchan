@@ -77,6 +77,48 @@ def synthesize(voice, text, destination, length_scale):
     temporary.replace(destination)
 
 
+def case_renderer(case, renderer):
+    """The renderer label, including any pause, so changing it re-renders."""
+    if case.get("prompt_pause_after"):
+        return (f"{renderer} pause={case.get('prompt_pause_seconds', 4):g}s "
+                f"after {case['prompt_pause_after']!r}")
+    return renderer
+
+
+def synthesize_case(synth, voice, case, destination, length_scale):
+    """One WAV for the case prompt. A case with ``prompt_pause_after`` renders
+    the text up to and after that marker separately, with silence between:
+    Dotty answers a wake word at once, so a follow-up question spoken in the
+    same breath lands on top of its greeting (2026-10-23 A/V run, W01)."""
+    marker = case.get("prompt_pause_after")
+    if not marker:
+        synth(voice, case["prompt"], destination, length_scale)
+        return
+    head, found, tail = case["prompt"].partition(marker)
+    if head or not found or not tail.strip():
+        raise ValueError(f"{case['id']}: prompt_pause_after must be the start of the prompt")
+    parts = [destination.with_name(destination.name + f".part{i}.wav") for i in (1, 2)]
+    try:
+        synth(voice, marker, parts[0], length_scale)
+        synth(voice, tail.strip(), parts[1], length_scale)
+        with wave.open(str(parts[0])) as first, wave.open(str(parts[1])) as second:
+            params = first.getparams()
+            if second.getparams()[:3] != params[:3]:
+                raise RuntimeError("prompt parts differ in format")
+            gap = round(case.get("prompt_pause_seconds", 4) * params.framerate)
+            audio = (first.readframes(first.getnframes())
+                     + b"\x00" * (gap * params.sampwidth * params.nchannels)
+                     + second.readframes(second.getnframes()))
+        temporary = destination.with_name(destination.name + ".tmp")
+        with wave.open(str(temporary), "wb") as out:
+            out.setparams(params)
+            out.writeframes(audio)
+        temporary.replace(destination)
+    finally:
+        for part in parts:
+            part.unlink(missing_ok=True)
+
+
 @contextlib.contextmanager
 def runner_lock(session):
     # Same lock as dotty_overnight.py run: never rewrite config under a live run.
@@ -115,16 +157,17 @@ def render(session, voice_path, length_scale=DEFAULT_LENGTH_SCALE, ids=None,
         voice = None
         rendered, kept = [], []
         for case in cases:
-            if not force and is_current(session, entries.get(case["id"]), case, renderer):
+            label = case_renderer(case, renderer)
+            if not force and is_current(session, entries.get(case["id"]), case, label):
                 kept.append(case["id"])
                 continue
             if synth is None and voice is None:
                 from piper import PiperVoice
                 voice = PiperVoice.load(str(voice_path))
             destination = prompts / f"{case['id']}.wav"
-            (synth or synthesize)(voice, case["prompt"], destination, length_scale)
+            synthesize_case(synth or synthesize, voice, case, destination, length_scale)
             entries[case["id"]] = {"path": f"prompts/{case['id']}.wav", "text": case["prompt"],
-                                   "sha256": sha256(destination), "renderer": renderer}
+                                   "sha256": sha256(destination), "renderer": label}
             rendered.append(case["id"])
         config["prompt_wavs"] = entries
         write_json(config_path, config)

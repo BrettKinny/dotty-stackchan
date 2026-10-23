@@ -36,3 +36,37 @@ def test_render_binds_text_and_hash_and_keeps_current(tmp_path):
     render.render(tmp_path, voice, synth=fake_synth(calls), catalogue=changed)
     assert calls[-1] == "Hello again."
     assert json.loads((tmp_path / "config.json").read_text())["host"] == "h"
+
+
+def wav_synth(calls, seconds=0.1, rate=16000):
+    import wave
+
+    def synth(voice, text, destination, length_scale):
+        calls.append(text)
+        with wave.open(str(destination), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(rate)
+            w.writeframes(b"\x01\x00" * int(seconds * rate))
+    return synth
+
+
+def test_prompt_pause_renders_two_parts_with_silence_between(tmp_path):
+    # 2026-10-23: Dotty greets the wake word at once, so "Hi E S P. What is
+    # your name?" in one breath had the question spoken over the greeting.
+    import wave
+    (tmp_path / "config.json").write_text(json.dumps({"host": "h"}))
+    case = {"id": "W", "prompt": "Hi E S P. What is your name?",
+            "prompt_pause_after": "Hi E S P.", "prompt_pause_seconds": 4}
+    calls = []
+    out = render.render(tmp_path, "voices/en_US-ryan-high.onnx", synth=wav_synth(calls),
+                        catalogue={"cases": [case]})
+    assert out["rendered"] == ["W"]
+    assert calls == ["Hi E S P.", "What is your name?"]
+    with wave.open(str(tmp_path / "prompts/W.wav")) as w:
+        frames = w.readframes(w.getnframes())
+        assert abs(w.getnframes() / w.getframerate() - 4.2) < 0.01
+    assert frames[1600 * 2:(1600 + 64000) * 2] == b"\x00" * 128000
+    entry = json.loads((tmp_path / "config.json").read_text())["prompt_wavs"]["W"]
+    assert entry["text"] == case["prompt"]
+    assert entry["renderer"].endswith("pause=4s after 'Hi E S P.'")
