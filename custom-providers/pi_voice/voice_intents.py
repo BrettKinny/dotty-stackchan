@@ -103,6 +103,17 @@ _RECALL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# "What do you know about my friend Sam Baker?" names a person to look up.
+# Needs the relationship word, so "what do you know about dinosaurs" stays
+# general knowledge, and a short name (one to three words).
+_PERSON_RE = re.compile(
+    r"^(?:please\s+)?(?:what do you know|what can you tell me|tell me what you know)"
+    r" about my (?:best |good |old )?"
+    r"(?:friend|mate|buddy|pal|neighbou?r|teacher|cousin|classmate|aunt|aunty|auntie|uncle)"
+    r"[\s,]+(?P<name>[a-z][\w'.-]*(?:\s+[a-z][\w'.-]*){0,2})[\s?!.]*$",
+    re.IGNORECASE,
+)
+
 _REMEMBER_LEAD_RE = re.compile(
     rf"^{_ASK}{_REMEMBER_VERB}\b[\s,:;-]*(?P<that>(?:that|this)\b[\s,:;-]*)?(?P<fact>.+?)[\s.!?]*$",
     re.IGNORECASE,
@@ -204,6 +215,10 @@ def match_voice_intent(text: str) -> VoiceIntent | None:
     cleaned = _clean(text or "")
     if not cleaned or cleaned.startswith("["):
         return None
+
+    person = _PERSON_RE.match(cleaned)
+    if person:
+        return VoiceIntent("recall_person", person.group("name"))
 
     recall = _RECALL_RE.match(cleaned)
     if recall and _has_words(recall.group("query")):

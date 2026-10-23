@@ -244,11 +244,6 @@ _VOICE_TOOL_ROUTING = (
     "think_hard is only for hard questions that need several steps of "
     "reasoning, never for repeating words, simple sums, jokes or chat. Call "
     "each tool at most once per reply. "
-    # 2026-10-23: asked about Sam Baker twice, the 4B reused its first lookup
-    # instead of checking memory again.
-    "Memory can change between replies, so every question about a person or "
-    "something remembered needs a fresh lookup, even if you looked it up "
-    "earlier. "
     "Never claim an action succeeded unless its tool succeeded. The reply "
     "constraints below apply only to final spoken text, not to tool calls."
 )
@@ -267,6 +262,12 @@ _MEMORY_CONTEXT = (
 
 
 # Same contract as _MEMORY_CONTEXT: turn_text.ts strips from these markers.
+# Same marker as _MEMORY_CONTEXT, so turn_text.ts strips it from the logged turn.
+_PERSON_CONTEXT = (
+    "\n\nMEMORY SEARCH RESULTS (what you know about {name}):\n{facts}\n"
+    "Answer from these facts in your own words. Do not add anything they do "
+    "not say."
+)
 _CAMERA_CONTEXT = (
     "\n\nCAMERA VIEW (what your camera saw in the last few seconds):\n{view}\n"
     "Answer from this view only. Do not add anything it does not say."
@@ -422,6 +423,16 @@ class LLMProvider(LLMProviderBase):
             # raw stored rows ("user: … | assistant: …"), never fit to be
             # spoken as-is, so hand it to the model as context for this turn.
             context = _MEMORY_CONTEXT.format(results=result)
+        if intent is not None and intent.tool == "recall_person":
+            name = intent.argument
+            result = self._invoke_voice_tool("recall_person", {"name": name}, errors)
+            if result is None:
+                yield f"{FALLBACK_EMOJI} I couldn't check my memory right now."
+                return
+            if result.startswith("("):
+                yield f"{FALLBACK_EMOJI} I don't know anything about {name} yet."
+                return
+            context = _PERSON_CONTEXT.format(name=name, facts=result)
         if intent is not None and intent.tool == "think_hard":
             # The reasoner unloads when idle and takes 30-60 s to come back.
             # Say so first: this chunk carries the turn's one emoji (the

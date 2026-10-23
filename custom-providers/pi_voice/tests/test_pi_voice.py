@@ -125,7 +125,6 @@ class TestTurnRules(unittest.TestCase):
         self.assertIn("not to tool calls", rules)
         self.assertIn("never for repeating words", rules)
         self.assertIn("at most once per reply", rules)
-        self.assertIn("needs a fresh lookup", rules)
         self.assertEqual(rules, rules.strip())
 
     def test_json_wrapped_user_content_is_unwrapped(self):
@@ -351,6 +350,39 @@ class TestDeterministicVoiceToolRouting(unittest.TestCase):
 
         self.assertEqual(
             out, f"{textUtils.FALLBACK_EMOJI} I don't remember anything about that yet.",
+        )
+        self.assertEqual(client.prompts, [])
+
+    def test_person_question_looks_the_person_up_first(self):
+        client = FakeClient()
+        client.tool_results["recall_person"] = "Sam loves blueberry pancakes"
+        client.script_turn(["😊 Sam loves blueberry pancakes!"])
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "What do you know about my friend Sam Baker?"}],
+        ))
+
+        self.assertEqual(client.tool_calls, [("recall_person", {"name": "Sam Baker"})])
+        self.assertEqual(out, "😊 Sam loves blueberry pancakes!")
+        prompt = client.prompts[0]
+        # The extension strips from this marker when logging the turn.
+        self.assertIn("\n\nMEMORY SEARCH RESULTS (", prompt)
+        self.assertIn("Sam loves blueberry pancakes", prompt)
+
+    def test_unknown_person_gets_a_fixed_reply_without_a_model_turn(self):
+        # recall_person never reads pending (unreviewed) facts, so this is
+        # also what a child hears about a fact still waiting for review.
+        client = FakeClient()
+        client.tool_results["recall_person"] = "(nothing remembered about Sam Baker)"
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+
+        out = "".join(provider.response(
+            "s", [{"role": "user", "content": "What do you know about my friend Sam Baker?"}],
+        ))
+
+        self.assertEqual(
+            out, f"{textUtils.FALLBACK_EMOJI} I don't know anything about Sam Baker yet.",
         )
         self.assertEqual(client.prompts, [])
 

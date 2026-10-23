@@ -57,6 +57,16 @@ ROUTED = [
      VoiceIntent("think_hard", "why the sky is blue")),
     ("Can you think hard about how many legs a spider has?",
      VoiceIntent("think_hard", "how many legs a spider has")),
+    # recall_person: a named friend (2026-10-23 A/V run, T03: the 4B said
+    # "I don't have any information" without looking)
+    ("What do you know about my friend, Sam Baker?",
+     VoiceIntent("recall_person", "Sam Baker")),
+    ("What do you know about my friend Sam Baker?",
+     VoiceIntent("recall_person", "Sam Baker")),
+    ("Dotty, what do you know about my best friend Mia?",
+     VoiceIntent("recall_person", "Mia")),
+    ("What can you tell me about my neighbour Mrs Lee?",
+     VoiceIntent("recall_person", "Mrs Lee")),
     # take_photo (fallback behind xiaozhi's vision shortcut)
     ("Take a photo", VoiceIntent("take_photo", "Take a photo")),
     ("What do you see?", VoiceIntent("take_photo", "What do you see?")),
@@ -79,6 +89,9 @@ LEFT_TO_THE_MODEL = [
     "remember me?",
     "Remember?",
     "What do you know about dinosaurs?",       # general knowledge, not memory
+    "What do you know about my friend?",      # no name to look up
+    "What do you know about friendship?",
+    "What do you know about my friend's dog Rex and his cat and his house?",
     "What's my favourite colour?",
     "Think hard about it",                     # nothing to think about
     "Don't think hard about it",

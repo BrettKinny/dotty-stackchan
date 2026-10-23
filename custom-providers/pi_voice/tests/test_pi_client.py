@@ -639,6 +639,25 @@ class TestTakePhotoDirectRunner(unittest.TestCase):
         self.assertIn("await runTakePhoto()", seen["script"])
 
 
+class TestRecallPersonDirectRunner(unittest.TestCase):
+    def test_recall_person_passes_the_name(self):
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen["script"], seen["input"] = argv[-1], kwargs["input"]
+            return SimpleNamespace(
+                returncode=0, stdout=json.dumps({"result": "(nothing remembered about Sam)"}),
+                stderr="",
+            )
+
+        with patch("pi_client.subprocess.run", fake_run):
+            result = _run_container_voice_tool("dotty-pi", "recall_person", {"name": "Sam"})
+        self.assertEqual(result, "(nothing remembered about Sam)")
+        self.assertIn("recall_person.ts", seen["script"])
+        self.assertIn('await runRecallPerson(input["name"])', seen["script"])
+        self.assertEqual(json.loads(seen["input"]), {"name": "Sam"})
+
+
 class TestDirectToolTimeouts(unittest.TestCase):
     """think_hard may wait for a cold 27B load; quick tools must stay quick."""
 

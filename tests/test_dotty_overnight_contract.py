@@ -179,6 +179,16 @@ def test_pending_person_fact_must_not_be_spoken():
     assert result["failure"] == "forbidden_content_spoken"
 
 
+def test_person_recall_accepts_the_direct_route():
+    case = case_by_id("T03-recall-person")
+    logs = ("结果: What do you know about my friend Sam Baker\nSentenceType.FIRST\n"
+            "PiVoiceLLM direct tool recall_person ok\n"
+            + tts("I don't know anything about Sam Baker yet.") + "\nSentenceType.LAST")
+    result = contract(case, passing(case, "I don't know anything about Sam Baker yet.", logs),
+                      {"xiaozhi-esp32-server": logs})
+    assert result["server_evidence"] == "PASS" and result["interaction"] == "PASS"
+
+
 @pytest.mark.parametrize("extra_speech", [False, True])
 def test_forbidden_content_spoken_fails_even_when_prompt_misheard(extra_speech):
     # 2026-10-21 review (kid safety): K04's "fan" heard as "van" made this an
