@@ -284,6 +284,8 @@ class TestKidModePrompt(unittest.TestCase):
 
     def test_asks_again_when_the_words_make_no_sense(self):
         self.assertIn("say it again", self.kid)
+        # A stray word means a mishearing, not a question to half-answer.
+        self.assertIn("instead of answering the part that made sense", self.kid)
 
     def test_names_imitable_physical_danger(self):
         for hazard in ("ceiling fans", "plugs", "climbing", "fire"):
