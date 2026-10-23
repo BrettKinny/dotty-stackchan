@@ -41,6 +41,7 @@ check and set, so initialisation cannot race.
 
 import asyncio
 import json
+import time
 
 _ID_ATTR = "_dotty_mcp_next_id"
 _LOCK_ATTR = "_dotty_send_lock"
@@ -140,6 +141,36 @@ async def end_session(conn, *, reason: str = "", grace_s: float = 0.0) -> bool:
     _log(logger, "info", f"ending listening session ({reason or 'requested'})")
     await conn.close(getattr(conn, "websocket", None))
     return True
+
+
+# A sleeping robot sends no audio, so xiaozhi's inactivity check (no-voice
+# time + 60 s) would close its WebSocket; asleep, it never reconnects, and the
+# dashboard could no longer wake it as docs/modes.md promises (2026-10-23 A/V
+# run, S05). The firmware's privacy gate keeps the mic and wake word off, so
+# holding the connection open hears nothing.
+SLEEP_KEEPALIVE_INTERVAL_S = 30.0
+_KEEPALIVE_ATTR = "_dotty_sleep_keepalive"
+
+
+def keep_alive_while_asleep(conn, *, interval_s: float = SLEEP_KEEPALIVE_INTERVAL_S):
+    """Refresh ``conn.last_activity_time`` while the device reports sleep.
+
+    One task per connection; it ends when the state leaves sleep or the
+    connection stops. Must be called from the event loop.
+    """
+    existing = getattr(conn, _KEEPALIVE_ATTR, None)
+    if existing is not None and not existing.done():
+        return existing
+
+    async def _run():
+        stop = getattr(conn, "stop_event", None)
+        while getattr(conn, "current_state", "") == "sleep" and not (stop and stop.is_set()):
+            conn.last_activity_time = time.time() * 1000
+            await asyncio.sleep(interval_s)
+
+    task = asyncio.get_running_loop().create_task(_run())
+    setattr(conn, _KEEPALIVE_ATTR, task)
+    return task
 
 
 def _log(logger, level: str, message: str) -> None:

@@ -164,8 +164,8 @@ class TestSetStateEndsSession(unittest.TestCase):
 
         return asyncio.run(go())
 
-    def test_idle_and_sleep_send_state_then_close(self):
-        for state in ("idle", "sleep"):
+    def test_idle_sends_state_then_closes(self):
+        for state in ("idle",):
             with self.subTest(state=state):
                 conn = _Conn()
                 resp = self._post("_dotty_set_state", {"state": state}, conn)
@@ -183,7 +183,10 @@ class TestSetStateEndsSession(unittest.TestCase):
         self.assertEqual(conn.kinds(), ["send", "abort", "close"])
 
     def test_conversational_and_sticky_states_keep_the_session(self):
-        for state in ("talk", "story_time", "security", "dance"):
+        # sleep keeps it too (2026-10-23 A/V run): a sleeping robot never
+        # reconnects, so closing it left nothing for the dashboard to wake.
+        # The firmware's privacy gate already stops voice and wake word.
+        for state in ("talk", "story_time", "security", "dance", "sleep"):
             with self.subTest(state=state):
                 conn = _Conn()
                 resp = self._post("_dotty_set_state", {"state": state}, conn)
@@ -216,3 +219,34 @@ class TestSetStateEndsSession(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SleepKeepAlive(unittest.TestCase):
+    """A sleeping device sends no audio, so xiaozhi's 180 s inactivity check
+    would drop it and the dashboard could no longer wake it (modes.md)."""
+
+    def _conn(self, state):
+        conn = types.SimpleNamespace(current_state=state, last_activity_time=1.0,
+                                     stop_event=asyncio.Event())
+        return conn
+
+    def test_activity_is_refreshed_while_asleep_and_stops_on_wake(self):
+        async def go():
+            conn = self._conn("sleep")
+            task = dc.keep_alive_while_asleep(conn, interval_s=0.01)
+            await asyncio.sleep(0.03)
+            self.assertGreater(conn.last_activity_time, 1.0)
+            self.assertIs(dc.keep_alive_while_asleep(conn, interval_s=0.01), task)  # one per conn
+            conn.current_state = "idle"
+            await asyncio.sleep(0.03)
+            self.assertTrue(task.done())
+        asyncio.run(go())
+
+    def test_stops_when_the_connection_closes(self):
+        async def go():
+            conn = self._conn("sleep")
+            task = dc.keep_alive_while_asleep(conn, interval_s=0.01)
+            conn.stop_event.set()
+            await asyncio.sleep(0.03)
+            self.assertTrue(task.done())
+        asyncio.run(go())

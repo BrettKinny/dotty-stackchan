@@ -157,7 +157,9 @@ def _dotty_conn_device_id(conn, fallback: str = "") -> str:
 
 
 # States whose admin transition also ends the listening session by default.
-_END_SESSION_STATES = ("idle", "sleep")
+# Not sleep: a sleeping robot never reconnects, so the dashboard could not wake
+# it; the firmware privacy gate already stops voice (2026-10-23 A/V run).
+_END_SESSION_STATES = ("idle",)
 
 
 async def _dotty_set_state_then_maybe_end(conn, state: str, end_session: bool) -> None:

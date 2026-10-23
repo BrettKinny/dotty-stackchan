@@ -112,6 +112,10 @@ class EventTextMessageHandler(TextMessageHandler):
                     # receiveAudioHandle hook below.
                     from core.portal_bridge import record_device_state
                     record_device_state(device_id, new_state)
+                if new_state == "sleep":
+                    # Hold the connection open so the dashboard can wake it.
+                    from core.utils.device_command import keep_alive_while_asleep
+                    keep_alive_while_asleep(conn)
             except Exception:
                 pass
         # Listen on `face_detected`. Prior firmware also emitted
