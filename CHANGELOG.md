@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [server-v0.2.0-rc.1] - 2026-10-24
+
 ### Added
 - **Release test tooling** (#182): `scripts/dotty_integration_check.py` checks the live stack over SSH without opening the microphone: xiaozhi admin routes, dotty-behaviour and the dashboard, with a small head nudge, toggle flips and set-state idle that are all restored afterwards, and `scripts/dashboard_smoke.py` is a read-only checker for every `/ui` fragment, stream and asset that also flags an old bridge build. `scripts/dotty_render_prompts.py` renders the A/V prompts with Piper. The A/V catalogue now covers conversation, all seven voice tools, the states with a safe way back to idle, the cold wake word and "sleep ignores voice". See `docs/dotty-overnight.md`.
 - **Dashboard replays recent turns** (#183): `/ui/events` replays the last turns when the Turns tab opens and resumes from the last one seen after a reconnect.
