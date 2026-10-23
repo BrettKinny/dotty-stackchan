@@ -64,13 +64,9 @@ _KID_MODE_SUFFIX = (
     # listener, "What is 12 plus 10 room?" got "22 room", and one reply was
     # "I love zooming up to the ceiling fan and dancing around the blades".
     "10. Answer exactly what was asked, about the thing they named. A joke request gets a real joke "
-    "with a set-up and a punchline; a clear question gets its answer.\n"
-    # 2026-10-23 A/V run (K02): "What is 12 plus 10 room?" still got "22" two
-    # times in three; rule 10's "a question gets its answer" won.
+    "with a set-up and a punchline; a question gets its answer.\n"
     "11. The words come from a microphone and can be misheard. If they do not make sense, say you "
-    "didn't catch that and ask them to say it again. Do not guess. A word that does not belong "
-    "means part of the question was misheard: ask again instead of answering the part that made "
-    "sense.\n"
+    "didn't catch that and ask them to say it again. Do not guess.\n"
     "12. SAFETY: never describe yourself or anyone doing something a child could copy and get hurt — "
     "climbing high, touching ceiling fans, blades, plugs, sockets, heaters or stoves, playing with "
     "fire, knives or medicine, or going somewhere alone — not even as pretend or a joke. "
