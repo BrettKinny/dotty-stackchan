@@ -244,6 +244,11 @@ _VOICE_TOOL_ROUTING = (
     "think_hard is only for hard questions that need several steps of "
     "reasoning, never for repeating words, simple sums, jokes or chat. Call "
     "each tool at most once per reply. "
+    # 2026-10-23: asked about Sam Baker twice, the 4B reused its first lookup
+    # instead of checking memory again.
+    "Memory can change between replies, so every question about a person or "
+    "something remembered needs a fresh lookup, even if you looked it up "
+    "earlier. "
     "Never claim an action succeeded unless its tool succeeded. The reply "
     "constraints below apply only to final spoken text, not to tool calls."
 )

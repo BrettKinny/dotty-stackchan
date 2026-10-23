@@ -125,6 +125,7 @@ class TestTurnRules(unittest.TestCase):
         self.assertIn("not to tool calls", rules)
         self.assertIn("never for repeating words", rules)
         self.assertIn("at most once per reply", rules)
+        self.assertIn("needs a fresh lookup", rules)
         self.assertEqual(rules, rules.strip())
 
     def test_json_wrapped_user_content_is_unwrapped(self):
