@@ -169,16 +169,26 @@ def test_opt_in_pulse_requests_float_before_reading_input():
 def test_existing_sidecar_is_never_overwritten_or_played(tmp_path, kind):
     sidecar = tmp_path / "capture.capture.wav"
     sidecar.write_bytes(b"existing evidence")
+    # Stub the device tools so the guard is reached on hosts without FFmpeg
+    # (CI); each stub leaves a marker if the script ever runs it.
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    for name in ("pactl", "espeak-ng", "ffprobe", "ffmpeg", "pw-play"):
+        path = binaries / name
+        path.write_text(f'#!/bin/sh\ntouch "{tmp_path / ("RAN-" + name)}"\n')
+        path.chmod(0o755)
     argv = ["bash", ROOT / "scripts/dotty-av-test.sh", kind]
     if kind == "run":
         argv.append("fixture no playback")
     argv.extend(["5", tmp_path / "capture.mp4"])
     result = subprocess.run(argv, capture_output=True, text=True, timeout=5,
-                            env={**os.environ, "DOTTY_AV_LOSSLESS_AUDIO": "1"})
+                            env={**os.environ, "PATH": str(binaries) + ":" + os.environ["PATH"],
+                                 "XDG_RUNTIME_DIR": str(tmp_path), "DOTTY_AV_LOSSLESS_AUDIO": "1"})
     assert result.returncode != 0
     assert "output already exists" in result.stderr
     assert sidecar.read_bytes() == b"existing evidence"
     assert not (tmp_path / "capture.mp4").exists()
+    assert not (tmp_path / "RAN-ffmpeg").exists() and not (tmp_path / "RAN-pw-play").exists()
 
 
 def test_same_process_synthetic_float_sidecar_preserves_overshoots(tmp_path):
