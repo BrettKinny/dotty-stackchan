@@ -14,7 +14,11 @@ and how to verify a published release.
 Two engineers, starting from the same git commit, running `make verify-firmware`
 on different machines, should get the same `stack-chan.bin` SHA256 checksum.
 The GitHub Actions release workflow records that checksum in `SHA256SUMS.txt`
-and attaches it to every `fw-v*` release.
+when it is run. It is manual-only and no firmware binaries are published at the
+moment: the server address is compiled in, so a binary only works on the
+network it was built for. A portable prebuilt is tracked in
+[#190](https://github.com/BrettKinny/dotty-stackchan/issues/190). Until then,
+`make verify-firmware` is mainly useful for comparing two of your own builds.
 
 ## Toolchain pinning
 
@@ -40,7 +44,9 @@ git submodule update --init --recursive
 make verify-firmware
 
 # 3. Download the published SHA256SUMS.txt for the release you're verifying
-RELEASE=fw-v0.1.0   # or whichever tag
+#    (only once binaries are published again, #190; current fw-v* releases
+#    are source-only, with no binaries to verify)
+RELEASE=fw-vX.Y.Z   # the release tag
 curl -L "https://github.com/BrettKinny/dotty-stackchan/releases/download/${RELEASE}/SHA256SUMS.txt" \
      -o firmware/firmware/build/SHA256SUMS.published
 
@@ -68,7 +74,8 @@ release could silently change the binary.
 
 ## CI workflow
 
-The `firmware-release.yml` workflow fires on `fw-v*` tags and:
+The `firmware-release.yml` workflow is manual-only (`workflow_dispatch`); it
+does not run on `fw-v*` tags. When run, it:
 
 1. Checks out with `submodules: recursive`
 2. Fetches upstream dependencies via `fetch_repos.py`

@@ -10,10 +10,11 @@ import asyncio
 import importlib.util as _ilu
 import json
 import pathlib
+import queue
 import sys
 import types
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 _PATCHES = pathlib.Path(__file__).parent.parent / "custom-providers" / "xiaozhi-patches"
 
@@ -230,6 +231,163 @@ class TestHttpServerWiring(unittest.TestCase):
         got, err = self.mod._dotty_resolve_conn("")
         self.assertIsNone(got)
         self.assertEqual(err.status, 503)
+
+    class _SentenceType:
+        FIRST = "first"
+        MIDDLE = "middle"
+        LAST = "last"
+
+    def _say(self, conn, text):
+        """Run /xiaozhi/admin/say against `conn` with xiaozhi's TTS DTOs stubbed."""
+        class ContentType:
+            TEXT = "text"
+
+        class DTO:
+            def __init__(self, **kwargs):
+                self.__dict__.update(kwargs)
+
+        dto_module = types.SimpleNamespace(
+            ContentType=ContentType,
+            SentenceType=self._SentenceType,
+            TTSMessageDTO=DTO,
+        )
+        saved = {
+            name: sys.modules.get(name)
+            for name in (
+                "core.providers", "core.providers.tts",
+                "core.providers.tts.dto", "core.providers.tts.dto.dto",
+            )
+        }
+        try:
+            for name in ("core.providers", "core.providers.tts", "core.providers.tts.dto"):
+                sys.modules[name] = types.ModuleType(name)
+            sys.modules["core.providers.tts.dto.dto"] = dto_module
+
+            async def go():
+                conn.headers = {"device-id": "dev-say"}
+                conn.tts = types.SimpleNamespace(tts_text_queue=queue.Queue())
+                type(self).active["dev-say"] = conn
+
+                async def run_inline(func):
+                    return func()
+
+                with patch.object(self.mod.asyncio, "to_thread", side_effect=run_inline):
+                    await self._server()._dotty_say(self._request({"text": text}))
+
+            asyncio.run(go())
+        finally:
+            for name, module in saved.items():
+                if module is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = module
+
+    def test_server_say_survives_chat_sentence_id_change(self):
+        """#104: a chat turn must not invalidate queued server speech."""
+        conn = _FakeConn()
+        self._say(conn, "Hello from the server.")
+
+        conn.sentence_id = "new-chat-turn"
+        accepted = []
+        while not conn.tts.tts_text_queue.empty():
+            message = conn.tts.tts_text_queue.get_nowait()
+            if (
+                message.sentence_id != conn.sentence_id
+                and message.sentence_id not in getattr(
+                    conn, "_dotty_server_push_sentence_ids", set()
+                )
+            ):
+                continue
+            accepted.append(message)
+
+        self.assertEqual(
+            [m.sentence_type for m in accepted],
+            [self._SentenceType.FIRST, self._SentenceType.MIDDLE, self._SentenceType.LAST],
+        )
+
+    def test_server_say_after_abort_is_not_dropped(self):
+        """2026-10-22 A/V run: after an abort, the TTS thread drops every
+        message while client_abort is set, so a greeting was silently lost."""
+        conn = _FakeConn()
+        conn.client_abort = True
+        self._say(conn, "Hi!")
+        self.assertFalse(conn.client_abort)
+        self.assertEqual(conn.tts.tts_text_queue.qsize(), 3)
+
+    def test_server_push_exemption_does_not_keep_stale_chat_ids(self):
+        conn = types.SimpleNamespace(
+            sentence_id="current-chat",
+            _dotty_server_push_sentence_ids={"server-push"},
+        )
+
+        def accepted(sentence_id):
+            return not (
+                sentence_id != conn.sentence_id
+                and sentence_id not in conn._dotty_server_push_sentence_ids
+            )
+
+        self.assertFalse(accepted("stale-chat"))
+        self.assertTrue(accepted("server-push"))
+
+    def test_client_abort_still_drops_server_push(self):
+        conn = types.SimpleNamespace(
+            sentence_id="current-chat",
+            client_abort=True,
+            _dotty_server_push_sentence_ids={"server-push"},
+        )
+
+        def accepted(sentence_id):
+            if conn.client_abort:
+                return False
+            return not (
+                sentence_id != conn.sentence_id
+                and sentence_id not in conn._dotty_server_push_sentence_ids
+            )
+
+        self.assertFalse(accepted("server-push"))
+
+    def test_build_patch_rewrites_consumer_predicate_explicitly(self):
+        script = pathlib.Path(__file__).parent.parent / "scripts" / "patch-tts-server-push.py"
+        spec = _ilu.spec_from_file_location("tts_push_patch_under_test", script)
+        module = _ilu.module_from_spec(spec)  # type: ignore[arg-type]
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+        source = (
+            "if message.sentence_id != self.conn.sentence_id:\n"
+            "                    continue\n"
+        )
+        updated = module.patch_source(source)
+        self.assertIn("_dotty_server_push_sentence_ids", updated)
+        self.assertIn("continue", updated)
+
+    def test_build_patch_keeps_server_push_audio_past_the_send_filter(self):
+        """#104: sendAudioMessage re-checks sentence_id after synthesis, so a
+        chat turn starting mid-say used to drop the say's audio frames."""
+        script = pathlib.Path(__file__).parent.parent / "scripts" / "patch-tts-server-push.py"
+        spec = _ilu.spec_from_file_location("tts_push_patch_send_under_test", script)
+        module = _ilu.module_from_spec(spec)  # type: ignore[arg-type]
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+        # Head of upstream v0.9.3 core/handle/sendAudioHandle.sendAudioMessage.
+        upstream = (
+            "async def sendAudioMessage(conn, sentenceType, audios, text, sentence_id=None):\n"
+            "    # skip stale sentence audio\n"
+            "    if sentence_id is not None and sentence_id != conn.sentence_id:\n"
+            "        return\n"
+            "    conn.sent.append(sentence_id)\n"
+        )
+        patched = module.patch_send_audio_source(upstream)
+        self.assertEqual(module.patch_send_audio_source(patched), patched, "idempotent")
+        with self.assertRaises(ValueError):
+            module.patch_send_audio_source("async def sendAudioMessage(): pass\n")
+        ns: dict = {}
+        exec(compile(patched, "sendAudioHandle_patched", "exec"), ns)
+        conn = types.SimpleNamespace(
+            sentence_id="chat-2", sent=[],
+            _dotty_server_push_sentence_ids={"say-1"},
+        )
+        for sid in ("say-1", "chat-1", "chat-2", None):
+            asyncio.run(ns["sendAudioMessage"](conn, "middle", b"", None, sid))
+        self.assertEqual(conn.sent, ["say-1", "chat-2", None],
+                         "server push and current chat pass; stale chat drops")
 
     def test_no_ms_truncated_ids_left_anywhere(self):
         # The collision-prone id pattern must not reappear in either

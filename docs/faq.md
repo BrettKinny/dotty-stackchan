@@ -55,8 +55,8 @@ With Piper TTS and the default local model, nothing leaves your LAN. The trade-o
 **Kid Mode is ON by default** (`DOTTY_KID_MODE=true`). It applies age-appropriate prompt steering plus a thin blocked-words filter on spoken output (see the honest caveat below). You can disable it with `DOTTY_KID_MODE=false` for general-purpose use.
 
 What Kid Mode enforces:
-- The per-turn sandwich instructs the LLM to respond in English and Kid Mode style; code guarantees the emoji prefix, while English and topic adherence remain model-enforced.
-- PiVoiceLLM's versioned per-turn suffix defines the live child-safety and response-style policy.
+- The HARD CONSTRAINTS rules instruct the LLM to respond in English and Kid Mode style; code guarantees the emoji prefix, while English and topic adherence remain model-enforced.
+- PiVoiceLLM's versioned rules (`build_turn_suffix`, in pi's system prompt) define the live child-safety and response-style policy.
 - Content and tone are constrained to be age-appropriate.
 - A blocked-words filter runs on TTS-bound LLM output ([#157](https://github.com/BrettKinny/dotty-stackchan/issues/157)): if a reply matches the blocklist (profanity, explicit content, hard drugs), the turn is replaced with a cheerful redirect before it's spoken. The same blocklist guards the dashboard say/story ingresses.
 

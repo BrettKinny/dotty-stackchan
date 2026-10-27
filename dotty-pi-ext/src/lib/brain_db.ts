@@ -63,6 +63,53 @@ export interface SearchOptions {
  * or any SQLite error (logged to stderr). Never throws into the caller —
  * the voice path must degrade gracefully.
  */
+// Words that carry no recall signal on their own. The keyword fallback below
+// ignores them so "the test word for tonight" searches test/word/tonight.
+const FALLBACK_STOPWORDS = new Set([
+  "a", "an", "and", "any", "are", "about", "at", "be", "did", "do", "does", "for",
+  "from", "i", "in", "is", "it", "me", "my", "of", "on", "or", "that", "the",
+  "this", "to", "was", "were", "what", "who", "with", "you", "your",
+]);
+
+function keywords(text: string): string[] {
+  const words = (text.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter(
+    (w) => !FALLBACK_STOPWORDS.has(w),
+  );
+  return [...new Set(words)];
+}
+
+/**
+ * Keyword fallback for a phrase search that found nothing. One misheard word
+ * ("test work" for "test word", 2026-10-20 on the robot) must not hide a
+ * memory, but a single shared word must not surface an unrelated one either:
+ * a row has to contain at least two of the query's keywords and 60% of them.
+ */
+function keywordFallback(
+  db: Database.Database,
+  query: string,
+  limit: number,
+): MemoryRow[] {
+  const words = keywords(query);
+  if (words.length < 2) return [];
+  const needed = Math.max(2, Math.ceil(words.length * 0.6));
+  const stmt = db.prepare(`
+    SELECT m.key, m.content, m.category, m.namespace, m.created_at
+    FROM memories_fts
+    JOIN memories m ON m.rowid = memories_fts.rowid
+    WHERE memories_fts MATCH ?
+      AND m.namespace NOT LIKE 'person_pending:%'
+    ORDER BY rank
+    LIMIT 50
+  `);
+  const rows = stmt.all(words.map((w) => `"${w}"`).join(" OR ")) as MemoryRow[];
+  return rows
+    .filter((row) => {
+      const have = new Set(keywords(`${row.key ?? ""} ${row.content ?? ""}`));
+      return words.filter((w) => have.has(w)).length >= needed;
+    })
+    .slice(0, limit);
+}
+
 export function searchMemories(
   query: string,
   opts: SearchOptions = {},
@@ -93,7 +140,8 @@ export function searchMemories(
       ORDER BY rank
       LIMIT ?
     `);
-    return stmt.all(fts, limit) as MemoryRow[];
+    const rows = stmt.all(fts, limit) as MemoryRow[];
+    return rows.length > 0 ? rows : keywordFallback(db, safe, limit);
   } catch (err) {
     process.stderr.write(
       `[brain_db] search failed for query=${JSON.stringify(safe.slice(0, 60))}: ${err}\n`,

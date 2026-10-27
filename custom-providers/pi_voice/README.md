@@ -18,9 +18,13 @@ What works:
   subprocess for the 3 Step-5 invariants + prompt-rejection +
   timeout. Run with `python3 -m unittest custom-providers.pi_voice.tests.test_pi_client`.
 
-The HARD-CONSTRAINTS sandwich ships: every turn is wrapped server-side
-via `_wrap_with_sandwich` / `build_turn_suffix(KID_MODE)` (from
-`core.utils.textUtils`) before the prompt reaches pi.
+The HARD CONSTRAINTS ship in pi's system prompt: `_turn_rules(kid_mode)`
+(voice tool routing plus `build_turn_suffix(KID_MODE)` from
+`core.utils.textUtils`) is appended to the persona when pi spawns, and a
+Kid Mode change respawns pi before the next turn. The user's words reach pi
+bare. They used to be appended to every turn, which stopped the 4B calling
+tools (2026-10-20 A/V run). The fail-closed kid-mode output filter (#157)
+still checks every reply.
 
 Still open:
 - Memory write-back from xiaozhi-server (PiVoiceLLM does not yet post
@@ -168,3 +172,20 @@ Conversation logging and explicit memory writes are implemented by the
 - [`../../dotty-pi-ext/README.md`](../../dotty-pi-ext/README.md) — voice-tool extension.
 - [`../textUtils.py`](../textUtils.py) — the shared `build_turn_suffix` sandwich + emoji map.
 - [#36](https://github.com/BrettKinny/dotty-stackchan/issues/36) — cutover plan + soak rule.
+
+## Dashboard reporting
+
+The bridge dashboard never sees a voice turn on its own (turns go straight
+from this provider to `dotty-pi`), so `PiVoiceLLM` reports each completed
+turn to the bridge at `POST /api/voice/turn`, and each kid-mode filter hit at
+`POST /api/voice/filter-hit`. That feeds the dashboard's Turns tab, error
+toast, Errors count/report and Content filter card.
+
+- Fire-and-forget on a daemon thread with a 2 s timeout; failures are
+  swallowed, so a missing dashboard never delays or breaks a turn.
+- Target: `DOTTY_DASHBOARD_URL` if set, otherwise the host from `BRIDGE_URL`
+  / `VISION_BRIDGE_URL` on port 8081. With none set, reporting is off.
+- Sends `X-Admin-Token` when `DOTTY_ADMIN_TOKEN` is set (the bridge enforces
+  it when its own copy is set).
+- The bridge keeps turns in memory only (last 200); nothing is written to
+  disk and the list empties on a bridge restart.

@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildThinkRequest, runThinkHard } from "../src/tools/think_hard.ts";
-import { TimeoutError } from "../src/lib/llama_swap.ts";
+import { DEFAULT_TIMEOUT_SEC, TimeoutError } from "../src/lib/llama_swap.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ORACLE = join(__dirname, "think_hard_oracle.py");
@@ -156,7 +156,7 @@ async function testLiveSmoke(): Promise<void> {
   const url = process.env.DOTTY_LLAMA_SWAP_URL;
   if (!url) {
     process.stdout.write(
-      "\nLive smoke: SKIPPED (set DOTTY_LLAMA_SWAP_URL=http://192.168.1.67:8080/v1/chat/completions to run).\n",
+      "\nLive smoke: SKIPPED (set DOTTY_LLAMA_SWAP_URL=http://<XIAOZHI_HOST>:8080/v1/chat/completions to run).\n",
     );
     return;
   }
@@ -177,6 +177,10 @@ async function testLiveSmoke(): Promise<void> {
 async function main(): Promise<void> {
   testRequestBodies();
   await testEmptyInput();
+  if (!process.env.VOICE_THINKER_TIMEOUT) {
+    // Must outlast a cold reasoner load (30-50 s) plus generation.
+    assertEq("default timeout outlasts a cold load", String(DEFAULT_TIMEOUT_SEC >= 75), "true");
+  }
   await testSuccess();
   await testLongResponseCap();
   await testTimeout();

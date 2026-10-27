@@ -63,7 +63,7 @@ Features xiaozhi-esp32-server supports upstream that aren't turned on or surface
 | **Streaming first-token to TTS** | First-token TTS instead of waiting for the full response (perceived-latency win) | **High** | `ROADMAP.md` → "Reduce first-audio latency" |
 | **Long-lived pi agent sessions** | Carry context across turns within a conversation without re-loading the persona each time | Medium | `ROADMAP.md` → "Reduce first-audio latency" |
 | **Tool pre-approval gate** | Bridge confirms tool calls before they execute — useful for child-safety. | Medium | `ROADMAP.md` → "Lock down for child-safe operation" |
-| ~~**Tool-use**~~ | **Wired up.** The `dotty-pi-ext` extension exposes 5 voice tools (`memory_lookup`, `remember`, `think_hard`, `take_photo`, `play_song`). | Done | — |
+| ~~**Tool-use**~~ | **Wired up.** The `dotty-pi-ext` extension exposes 7 voice tools (`memory_lookup`, `remember`, `recall_person`, `remember_person`, `think_hard`, `take_photo`, `play_song`). | Done | — |
 | **pi agent MCP-server mode** | Expose the agent's tools/memory to other MCP clients | Low | **New-task candidate** |
 | **Qwen3 `role: "system"` injection** | Move the English+emoji constraints into a proper system message instead of a prompt prefix/suffix; better MoE adherence | Medium | Rework of persona prompt structure |
 | **Qwen3 extended context (96K native)** | Keep long conversation history / memory verbatim instead of summarising | Low | Costs more tokens per turn — probably not worth it yet |

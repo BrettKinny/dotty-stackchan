@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from consumers import FaceGreeter
 from household import HouseholdRegistry
 from perception import PerceptionEvent, PerceptionState
@@ -364,6 +366,101 @@ people:
                 )
                 await let_consumer_settle()
                 assert xiaozhi.say_calls == []
+
+            await _drive(consumer, body)
+
+    asyncio.run(go())
+
+
+# The device states from docs/modes.md, and whether a proactive greet is
+# allowed in each. None is a device that never reported a state.
+_STATE_GREETS = [
+    (None, True),
+    ("idle", True),
+    ("talk", True),
+    ("story_time", False),
+    ("security", False),
+    ("sleep", False),
+    ("dance", False),
+]
+
+
+def _set_device_state(state: PerceptionState, device_state: str | None) -> None:
+    if device_state is not None:
+        state.update_state(
+            "dev-1", "state_changed", {"state": device_state}, 100.0
+        )
+
+
+@pytest.mark.parametrize("device_state,greets", _STATE_GREETS)
+def test_bare_greet_follows_device_state(device_state, greets) -> None:
+    """docs/modes.md allows a proactive greet only in idle and talk.
+
+    A suppressed greet also leaves last_face_greet_t unset, so
+    FaceLostAborter does not treat it as a recent greet.
+
+    AI-assisted (Claude Opus 5.5).
+    """
+    async def go() -> None:
+        with tempfile.TemporaryDirectory() as td:
+            household = _household_with(Path(td), "people: {}\n")
+            state = PerceptionState()
+            _set_device_state(state, device_state)
+            xiaozhi = FakeXiaozhi()
+            consumer = _consumer(state, xiaozhi, household)
+
+            async def body() -> None:
+                state.broadcast(
+                    PerceptionEvent(
+                        device_id="dev-1",
+                        name="face_detected",
+                        data={},
+                        ts=time.time(),
+                    )
+                )
+                await let_consumer_settle()
+                assert bool(xiaozhi.inject_text_calls) is greets
+                stamped = state.state.get("dev-1", {}).get("last_face_greet_t")
+                assert bool(stamped) is greets
+
+            await _drive(consumer, body)
+
+    asyncio.run(go())
+
+
+@pytest.mark.parametrize("device_state,greets", _STATE_GREETS)
+def test_named_greet_follows_device_state(device_state, greets) -> None:
+    """The named greet obeys the same idle/talk gate as the bare one.
+
+    AI-assisted (Claude Opus 5.5).
+    """
+    async def go() -> None:
+        with tempfile.TemporaryDirectory() as td:
+            household = _household_with(
+                Path(td),
+                """
+people:
+  brett:
+    display_name: Brett
+""",
+            )
+            state = PerceptionState()
+            _set_device_state(state, device_state)
+            xiaozhi = FakeXiaozhi()
+            consumer = _consumer(state, xiaozhi, household)
+
+            async def body() -> None:
+                state.broadcast(
+                    PerceptionEvent(
+                        device_id="dev-1",
+                        name="face_recognized",
+                        data={"identity": "brett"},
+                        ts=time.time(),
+                    )
+                )
+                await let_consumer_settle()
+                assert bool(xiaozhi.say_calls) is greets
+                assert bool(xiaozhi.set_face_identified_calls) is greets
 
             await _drive(consumer, body)
 

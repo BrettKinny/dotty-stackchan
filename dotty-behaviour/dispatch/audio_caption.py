@@ -78,6 +78,13 @@ class AudioCaptionClient:
         if not self._api_key:
             log.warning("audio caption: api key not set; returning fallback")
             return AUDIO_FALLBACK_DESCRIPTION
+        if not self._url:
+            log.warning(
+                "audio caption: no endpoint configured "
+                "(AUDIO_CAPTION_API_URL empty, or blanked by "
+                "DOTTY_LOCAL_ONLY); returning fallback"
+            )
+            return AUDIO_FALLBACK_DESCRIPTION
         payload = {
             "model": model or self._model,
             "messages": [

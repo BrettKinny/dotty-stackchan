@@ -40,6 +40,7 @@ The runtime contract:
 3. **pi** runs the prompt against llama-swap (`qwen3.5:4b` by default) with the `dotty-pi-ext` extension loaded.
 4. Thinking deltas and extension UI requests are filtered by PiClient; only TTS-bound text chunks reach xiaozhi-server.
 5. `PiVoiceLLM` holds one long-lived `PiClient`; between turns it issues `new_session` to reset pi's working state without re-spawning the process.
+6. `PiClient` caps tool calls per reply: after 3 it steers pi to answer with what it has, and after 6 it aborts the turn (restarting pi if the aborted run never ends).
 
 Appdata layout on the Docker host:
 
@@ -67,7 +68,7 @@ Appdata layout on the Docker host:
 | `remember_person(name, fact)` | Stores a durable fact in a named household member's memory namespace. |
 | `think_hard(question)` | Direct POST to llama-swap `qwen3.6:27b-think` (`enable_thinking=false`, 200-token cap, terse answer). |
 | `take_photo()` | GET to `dotty-behaviour /api/voice/take_photo` — returns latest cached vision description if ≤30 s old. |
-| `play_song(name)` | Resolves free-form name against `/xiaozhi/admin/songs` catalogue (60 s cache), then POSTs `/xiaozhi/admin/play-asset`. |
+| `play_song(name)` | Resolves free-form name against `/xiaozhi/admin/songs` catalogue (60 s cache), then POSTs `/xiaozhi/admin/play-asset` with `after_turn`, so the song starts once the turn's spoken reply has finished. |
 
 In addition, an `agent_end` handler in the extension automatically writes a `category=conversation` row to `brain.db` after every completed user prompt — the agent does not decide to log; every successful turn is recorded.
 
@@ -117,6 +118,21 @@ Local on the same llama-swap, separate alias. ~18 tok/s generation, ~30–50 s c
 - **Smart-mode inner loop:** `anthropic/claude-sonnet-4-6` (`SMART_MODEL` env var). **Not wired on the live `PiVoiceLLM` path** — the inner-loop model-swap is v2 scope; smart-mode currently flips ambient/behaviour only. The env var is still read for dashboard-adjacent calls.
 - **VLM (`take_photo`, security camera frames):** `google/gemini-3.1-flash-lite` (`VLM_MODEL`). Served by dotty-behaviour.
 - **Audio captioning (security mode):** `google/gemini-2.5-flash` (`AUDIO_CAPTION_MODEL`). Served by dotty-behaviour.
+
+## Keeping vision and audio on the LAN
+
+The cloud routes above are defaults, not requirements. Set `DOTTY_LOCAL_ONLY=1` in dotty-behaviour's `.env` and any `VLM_API_URL`, `VISION_API_URL`, `AUDIO_CAPTION_API_URL` or `NARRATIVE_LLM_URL` that is not loopback or a private address is disabled at startup; weather (wttr.in) and Google Calendar are switched off too. A disabled route fails closed: the camera reports itself offline and audio captioning returns its fallback string, with nothing sent.
+
+To keep the camera working, point the VLM at a local OpenAI-compatible vision model:
+
+```
+DOTTY_LOCAL_ONLY=1
+VLM_API_URL=http://127.0.0.1:8080/v1/chat/completions
+VLM_MODEL=<your-local-vision-model>
+VLM_API_KEY=local
+```
+
+Notes for the local model: the VLM request carries `max_tokens: 200` and no reasoning parameter, so serve the model with thinking off (a thinking model spends the budget reasoning and returns empty content), and keep it resident, because a cold load will exceed the 15 s `VISION_TIMEOUT`. There is no local audio-caption route; under `DOTTY_LOCAL_ONLY` it stays off unless you supply a LAN endpoint that accepts `input_audio`.
 
 ## OpenRouter
 

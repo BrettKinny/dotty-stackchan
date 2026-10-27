@@ -20,7 +20,9 @@ function assertEq(label: string, got: unknown, want: unknown): void {
 const original = globalThis.fetch;
 let token: string | null = null;
 let contentType: string | null = null;
-globalThis.fetch = (async (_url: unknown, init: { headers?: HeadersInit }) => {
+let posted: string | null = null;
+globalThis.fetch = (async (_url: unknown, init: { headers?: HeadersInit; body?: string }) => {
+  posted = init?.body ?? null;
   const h = new Headers(init?.headers);
   token = h.get("X-Admin-Token");
   contentType = h.get("content-type");
@@ -31,6 +33,12 @@ try {
   await playAsset("/opt/xiaozhi-esp32-server/config/assets/songs/x.opus");
   assertEq("X-Admin-Token sent when DOTTY_ADMIN_TOKEN set", token, "test-token");
   assertEq("caller content-type header preserved", contentType, "application/json");
+  // Plain callers keep the old body: no after_turn unless they ask for it.
+  assertEq(
+    "plain play-asset body has no after_turn",
+    posted,
+    JSON.stringify({ asset: "/opt/xiaozhi-esp32-server/config/assets/songs/x.opus" }),
+  );
 } finally {
   globalThis.fetch = original;
 }

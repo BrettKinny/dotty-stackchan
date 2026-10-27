@@ -198,7 +198,7 @@ async function testDispatchOk(): Promise<void> {
     assertEq(
       "posted body",
       captured.body,
-      { asset: "/opt/songs/twinkle.opus" },
+      { asset: "/opt/songs/twinkle.opus", after_turn: true },
     );
   } finally {
     restore();

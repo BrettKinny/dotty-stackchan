@@ -7,6 +7,7 @@ from core.api.vision_handler import VisionHandler
 # and consumed by the /xiaozhi/admin/inject-text route below. Lets the
 # Dotty admin dashboard fire `startToChat` against an active device WS.
 from core.portal_bridge import active_connections as _dotty_active_connections
+from core.portal_bridge import record_device_state as _dotty_record_device_state
 # DOTTY-PATCH: DeviceCommand seam — monotonic MCP request ids + the
 # envelope + per-conn serialized sends live in one module shared with
 # receiveAudioHandle.py (mounted at core/utils/device_command.py).
@@ -36,7 +37,10 @@ def _spawn(coro, *, name: str | None = None):
 # Override with DOTTY_PLAY_ASSET_ROOTS (os.pathsep-separated absolute paths).
 import os as _os_mod
 
-_ASSET_OK_EXT = {".opus", ".ogg", ".wav", ".mp3"}
+# MIDI is rendered server-side (fluidsynth, as dance mode does); the firmware
+# only ever receives Opus frames, so it needs no MIDI support of its own.
+_MIDI_EXT = {".mid", ".midi"}
+_ASSET_OK_EXT = {".opus", ".ogg", ".wav", ".mp3"} | _MIDI_EXT
 _DEFAULT_ASSET_ROOTS = (
     "/opt/xiaozhi-esp32-server/config/assets",
     "/var/lib/dotty-behaviour/assets",
@@ -61,6 +65,45 @@ def _resolve_play_asset(asset: str) -> "str | None":
         if real == root or real.startswith(root + _os_mod.sep):
             return real
     return None
+
+
+# DOTTY-PATCH: play-asset `after_turn`. play_song runs as a pi tool call in
+# the middle of a voice turn, while that turn's reply is still to be spoken.
+# Streaming the song straight away loses it: the turn's own TTS ends with a
+# `tts stop`, the firmware leaves its speaking state and drops every song
+# frame after that. With after_turn the route accepts the request and the
+# song waits for the turn to finish speaking. A barge-in, a dropped
+# connection or a turn that never ends drops the song instead.
+_AFTER_TURN_POLL_S = 0.1
+_AFTER_TURN_MAX_WAIT_S = 120.0
+# The speaking flag clears just before the `tts stop` frame goes out; start
+# after it, or the stop would land on the song's first frames.
+_AFTER_TURN_GRACE_S = 0.5
+
+
+def _conn_interrupted(conn) -> bool:
+    return bool(getattr(conn, "client_abort", False)) or bool(
+        getattr(conn, "is_exiting", False)
+    )
+
+
+async def _wait_for_turn_end(conn) -> bool:
+    """Wait until `conn` has finished speaking its turn. True means play now;
+    False means drop the asset (barge-in, connection closing, a new turn
+    already speaking, or the wait timed out)."""
+    polls = int(_AFTER_TURN_MAX_WAIT_S / _AFTER_TURN_POLL_S)
+    for _ in range(polls):
+        if _conn_interrupted(conn):
+            return False
+        if not getattr(conn, "client_is_speaking", False):
+            break
+        await asyncio.sleep(_AFTER_TURN_POLL_S)
+    else:
+        return False
+    await asyncio.sleep(_AFTER_TURN_GRACE_S)
+    return not (
+        _conn_interrupted(conn) or getattr(conn, "client_is_speaking", False)
+    )
 
 
 # DOTTY-PATCH: admin-route authentication. The /xiaozhi/admin/* surface is
@@ -113,6 +156,32 @@ def _dotty_conn_device_id(conn, fallback: str = "") -> str:
     return (getattr(conn, "headers", {}) or {}).get("device-id", "") or fallback
 
 
+# States whose admin transition also ends the listening session by default.
+# Not sleep: a sleeping robot never reconnects, so the dashboard could not wake
+# it; the firmware privacy gate already stops voice (2026-10-23 A/V run).
+_END_SESSION_STATES = ("idle",)
+
+
+async def _dotty_set_state_then_maybe_end(conn, state: str, end_session: bool) -> None:
+    """Send set_state, then (optionally) close the listening session.
+
+    One task, so the WebSocket close can never overtake the MCP frame; the
+    grace period lets the firmware apply it and echo state_changed first.
+    """
+    await _dotty_device_command.call_tool(
+        conn, "self.robot.set_state", {"state": state},
+    )
+    if end_session:
+        # The firmware's state_changed echo may not arrive before the socket
+        # closes; remember the requested state for the next connection (#170).
+        _dotty_record_device_state(_dotty_conn_device_id(conn), state)
+        await _dotty_device_command.end_session(
+            conn,
+            reason=f"admin set-state {state}",
+            grace_s=_dotty_device_command.DEFAULT_END_SESSION_GRACE_S,
+        )
+
+
 class SimpleHttpServer:
     def __init__(self, config: dict):
         self.config = config
@@ -144,7 +213,7 @@ class SimpleHttpServer:
             return err
         # Lazy import to avoid pulling the chat pipeline at server startup.
         from core.handle.receiveAudioHandle import startToChat
-        _spawn(startToChat(conn, text), name="inject_text_chat")
+        _spawn(startToChat(conn, text, injected=True), name="inject_text_chat")
         return web.json_response({
             "ok": True,
             "device_id": _dotty_conn_device_id(conn, device_id),
@@ -218,6 +287,12 @@ class SimpleHttpServer:
         Direct MCP self.robot.set_state call. Phase 4 — voice phrases and the
         dashboard route through here (and through the bridge) so the state pip
         and idle profile flip without a daemon restart.
+
+        `idle` and `sleep` also end the listening session (optional
+        `"end_session": false` opts out). StateManager changes the state arc,
+        but xiaozhi's own device state stays LISTENING with the mic open until
+        the WebSocket closes — previously that meant until the 120 s no-voice
+        timeout, answering room audio in the meantime.
         """
         try:
             data = await request.json()
@@ -227,6 +302,9 @@ class SimpleHttpServer:
         state = (data.get("state") or "").strip()
         if state not in ("idle", "talk", "story_time", "security", "sleep", "dance"):
             return web.json_response({"error": f"unknown state: {state!r}"}, status=400)
+        end_session = data.get("end_session", state in _END_SESSION_STATES)
+        if not isinstance(end_session, bool):
+            return web.json_response({"error": "end_session must be a bool"}, status=400)
         conn, err = _dotty_resolve_conn(device_id)
         if err is not None:
             return err
@@ -235,15 +313,39 @@ class SimpleHttpServer:
         # change while the firmware state_changed echo is still in flight.
         conn._dotty_desired_state = state
         _spawn(
-            _dotty_device_command.call_tool(
-                conn, "self.robot.set_state", {"state": state},
-            ),
+            _dotty_set_state_then_maybe_end(conn, state, end_session),
             name="set_state_send",
         )
         return web.json_response({
             "ok": True,
             "device_id": _dotty_conn_device_id(conn, device_id),
             "state": state,
+            "end_session": end_session,
+        })
+
+    async def _dotty_end_session(self, request: "web.Request") -> "web.Response":
+        """POST /xiaozhi/admin/end-session  Body: {"device_id": "<optional>"}
+
+        Ends the device's listening session without changing its State: stops
+        any reply in flight and closes the WebSocket exactly as the no-voice
+        timeout does, so the firmware drops to idle with the mic closed.
+        Fire-and-forget.
+        """
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        device_id = (data.get("device_id") or "").strip() if isinstance(data, dict) else ""
+        conn, err = _dotty_resolve_conn(device_id)
+        if err is not None:
+            return err
+        _spawn(
+            _dotty_device_command.end_session(conn, reason="admin end-session"),
+            name="end_session",
+        )
+        return web.json_response({
+            "ok": True,
+            "device_id": _dotty_conn_device_id(conn, device_id),
         })
 
     async def _dotty_set_toggle(self, request: "web.Request") -> "web.Response":
@@ -353,18 +455,25 @@ class SimpleHttpServer:
             names = sorted(_os.listdir(base))
         except OSError as exc:
             return web.json_response({"error": str(exc), "base": base}, status=500)
-        ok_ext = {".opus", ".ogg", ".wav", ".mp3"}
-        files = [n for n in names if _os.path.splitext(n)[1].lower() in ok_ext]
+        # Same set play-asset accepts. MIDI used to be filtered out here, so
+        # the dashboard and play_song listed only purr.opus while the songs
+        # dir held six .mid tunes.
+        files = [n for n in names if _os.path.splitext(n)[1].lower() in _ASSET_OK_EXT]
         return web.json_response({"base": base, "files": files})
 
     async def _dotty_play_asset(self, request: "web.Request") -> "web.Response":
         """POST /xiaozhi/admin/play-asset
-        Body: {"device_id": "<optional>", "asset": "/abs/path/to/file"}
+        Body: {"device_id": "<optional>", "asset": "/abs/path/to/file",
+               "after_turn": <optional bool>}
 
         Decodes the named audio asset (WAV, Opus, MP3, etc.) and streams
         it to the device as Opus 60 ms frames using the same push path as
         dance/singing mode.  Returns 200 immediately; playback is
         fire-and-forget.  Respects conn.client_abort for barge-in.
+
+        Mid-turn, a plain request is refused (409). With after_turn (the
+        play_song voice tool) it is accepted and plays once the turn has
+        finished speaking; the response then carries "after_turn": true.
         """
         try:
             data = await request.json()
@@ -398,9 +507,11 @@ class SimpleHttpServer:
         # idle in its finally block while chat TTS is still streaming — cancelling
         # the user's barge-in and corrupting the turn. Refuse instead; a dropped
         # ambient asset is the correct outcome here.
-        if getattr(conn, "client_is_speaking", False) and not getattr(
+        mid_turn = getattr(conn, "client_is_speaking", False) and not getattr(
             conn, "client_abort", False
-        ):
+        )
+        wait_for_turn = mid_turn and data.get("after_turn") is True
+        if mid_turn and not wait_for_turn:
             return web.json_response(
                 {"error": "device busy (mid-turn)", "device_id": resolved_id},
                 status=409,
@@ -454,10 +565,23 @@ class SimpleHttpServer:
                 return pkts
 
             try:
-                pkts = await asyncio.get_running_loop().run_in_executor(None, _decode)
+                if _os.path.splitext(asset_path)[1].lower() in _MIDI_EXT:
+                    # ffmpeg cannot decode MIDI; reuse dance mode's
+                    # fluidsynth renderer (cached by path + mtime + rate).
+                    from core.handle.receiveAudioHandle import _encode_midi_to_opus
+                    pkts = await _encode_midi_to_opus(asset_path, conn.sample_rate)
+                else:
+                    pkts = await asyncio.get_running_loop().run_in_executor(None, _decode)
             except Exception as exc:
                 self.logger.bind(tag=TAG).warning(
                     f"play-asset decode failed {asset_path!r}: {exc}"
+                )
+                return
+
+            if wait_for_turn and not await _wait_for_turn_end(conn):
+                self.logger.bind(tag=TAG).info(
+                    f"play-asset dropped: turn did not end cleanly "
+                    f"device={resolved_id} asset={_os.path.basename(asset_path)}"
                 )
                 return
 
@@ -503,7 +627,10 @@ class SimpleHttpServer:
                 )
 
         _spawn(_dispatch(), name="play_asset_dispatch")
-        return web.json_response({"ok": True, "device_id": resolved_id, "asset": asset_path})
+        body = {"ok": True, "device_id": resolved_id, "asset": asset_path}
+        if wait_for_turn:
+            body["after_turn"] = True
+        return web.json_response(body)
 
     async def _dotty_say(self, request: "web.Request") -> "web.Response":
         """POST /xiaozhi/admin/say
@@ -552,16 +679,18 @@ class SimpleHttpServer:
         )
 
         sentence_id = _uuid.uuid4().hex
+        server_push_ids = getattr(conn, "_dotty_server_push_sentence_ids", None)
+        if server_push_ids is None:
+            server_push_ids = set()
+            conn._dotty_server_push_sentence_ids = server_push_ids
 
         def _enqueue() -> None:
             try:
-                # The consumer thread filters with
-                # `message.sentence_id != self.conn.sentence_id` and
-                # drops anything that doesn't match — so we stamp the
-                # conn with our new id BEFORE putting messages on the
-                # queue. This will pre-empt any in-flight TTS for this
-                # conn, which is acceptable for server-pushed greetings
-                # (they shouldn't race a chat turn in normal operation).
+                # Stamp the connection so an idle device treats this as its
+                # active utterance. Explicitly register this ID as a server
+                # push so the patched TTS consumer accepts it independently
+                # if a concurrent chat replaces conn.sentence_id (#104).
+                server_push_ids.add(sentence_id)
                 #
                 # Frame the utterance with FIRST/MIDDLE/LAST: FIRST inits
                 # consumer state, MIDDLE carries the text into the
@@ -569,6 +698,14 @@ class SimpleHttpServer:
                 # which is the actual flush. Skipping LAST is the bug
                 # that left "this should play once." stuck in the buffer
                 # behind a mid-string comma.
+                #
+                # Clear a stale abort first: upstream's TTS thread drops
+                # every message while client_abort is set, and nothing
+                # resets it until the next chat turn, so a greeting after
+                # an abort (face_lost_aborter, a dashboard stop) was lost.
+                # play-asset does the same; the aborted turn's leftover
+                # text is still discarded by the sentence_id swap.
+                conn.client_abort = False
                 conn.sentence_id = sentence_id
                 for st, body in (
                     (_SentenceType.FIRST, ""),
@@ -589,6 +726,13 @@ class SimpleHttpServer:
         # The puts are sync on a thread-safe queue, but we hop a thread
         # so the aiohttp loop never blocks on producer-side contention.
         await asyncio.to_thread(_enqueue)
+        # Consumers need the marker through text synthesis, audio queuing and
+        # sendAudioMessage's stale-sentence check (both patched at image build
+        # by scripts/patch-tts-server-push.py), but not forever. Expiry bounds per-connection state without risking
+        # eviction of an active push during a short burst.
+        asyncio.get_running_loop().call_later(
+            120.0, server_push_ids.discard, sentence_id,
+        )
         self.logger.bind(tag=TAG).info(
             f"say queued device={resolved_id} sid={sentence_id[:8]} "
             f"text={text[:60]!r}"
@@ -656,6 +800,10 @@ class SimpleHttpServer:
                         web.post(
                             "/xiaozhi/admin/set-state",
                             self._dotty_set_state,
+                        ),
+                        web.post(
+                            "/xiaozhi/admin/end-session",
+                            self._dotty_end_session,
                         ),
                         web.post(
                             "/xiaozhi/admin/set-toggle",

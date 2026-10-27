@@ -62,6 +62,14 @@ log = logging.getLogger("dotty-behaviour")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("dotty-behaviour starting (version=%s)", config.VERSION)
+    if config.LOCAL_ONLY:
+        log.info(
+            "DOTTY_LOCAL_ONLY=1 — outbound routes are LAN-only "
+            "(vlm=%s audio_caption=%s narrative=%s; weather + calendar off)",
+            config.VLM_API_URL or "disabled",
+            config.AUDIO_CAPTION_API_URL or "disabled",
+            config.NARRATIVE_LLM_URL or "disabled",
+        )
     log.info(
         "config: port=%d xiaozhi=%s narrative_model=%s state_dir=%s log_dir=%s",
         config.PORT,
@@ -74,7 +82,13 @@ async def lifespan(app: FastAPI):
     # Singleton perception state — bus + caches + per-device dicts.
     # Stored on app.state so routes/consumers can retrieve it via
     # FastAPI's Request.app.state.
-    state = PerceptionState()
+    # Persist only the last state_changed mutex per device. This survives a
+    # daemon/container restart through the existing mounted STATE_DIR, but is
+    # not an authoritative sync for firmware changes made while this service
+    # was offline; the next relayed state_changed event remains authoritative.
+    state = PerceptionState(
+        state_path=config.STATE_DIR / "perception-state.json"
+    )
     app.state.perception = state
 
     # Singleton dispatch clients — outbound HTTP to xiaozhi-server's
@@ -124,8 +138,8 @@ async def lifespan(app: FastAPI):
     calendar_cache = CalendarCache()
     app.state.calendar_cache = calendar_cache
     app.state.calendar_person_prefix_re = person_prefix_re
-    # kid-mode default — flipped by the dashboard's kid-mode toggle
-    # (deferred slice). vision_explain reads this via get_kid_mode().
+    # Unused by the live paths: vision_explain and the greeter read the shared
+    # guardian file via config.kid_mode_on(). Kept for older callers.
     app.state.kid_mode = False
 
     # Filesystem prep — best-effort; missing bind mounts are an
@@ -146,14 +160,6 @@ async def lifespan(app: FastAPI):
             window_sec=config.FACE_LOST_ABORT_WINDOW_SEC,
             grace_sec=config.FACE_LOST_ABORT_GRACE_SEC,
         ),
-        SoundTurner(
-            state,
-            xiaozhi,
-            cooldown_sec=config.SOUND_TURN_COOLDOWN_SEC,
-            yaw_deg=config.SOUND_TURN_YAW_DEG,
-            speed=config.SOUND_TURN_SPEED,
-            quiet_after_chat_sec=config.SOUND_TURN_QUIET_AFTER_CHAT_SEC,
-        ),
         FaceIdentifiedRefresher(
             state,
             xiaozhi,
@@ -169,6 +175,20 @@ async def lifespan(app: FastAPI):
             duration_sec=config.PURR_DURATION_SEC,
         ),
     ]
+    if config.SOUND_TURN_ENABLED:
+        consumers.append(
+            SoundTurner(
+                state,
+                xiaozhi,
+                cooldown_sec=config.SOUND_TURN_COOLDOWN_SEC,
+                yaw_deg=config.SOUND_TURN_YAW_DEG,
+                speed=config.SOUND_TURN_SPEED,
+                quiet_after_chat_sec=config.SOUND_TURN_QUIET_AFTER_CHAT_SEC,
+            )
+        )
+    else:
+        log.info("sound turner disabled by SOUND_TURN_ENABLED=0 (see #27)")
+
     if config.WAKE_TURN_ENABLED:
         consumers.append(
             WakeWordTurner(
@@ -314,7 +334,7 @@ async def lifespan(app: FastAPI):
             household_bucket=config.CALENDAR_HOUSEHOLD_BUCKET,
         ),
         _greeter_tts,
-        lambda: bool(getattr(app.state, "kid_mode", False)),
+        config.kid_mode_on,
         household_registry=household,
         tz=config.LOCAL_TZ,
         state_path=config.GREETER_STATE_PATH,

@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import time
 
+import pytest
+
 from consumers import PurrPlayer
 from perception import PerceptionEvent, PerceptionState
 
@@ -96,5 +98,46 @@ def test_purr_extends_last_chat_t_to_suppress_localiser() -> None:
             assert state.state["dev-1"]["last_chat_t"] == now + 2.0
 
         await _spin(state, xiaozhi, body, cooldown=5.0, duration=2.0)
+
+    asyncio.run(go())
+
+
+@pytest.mark.parametrize("name,data,purrs", [
+    (None, None, True),
+    ("state_changed", {"state": "idle"}, True),
+    ("state_changed", {"state": "talk"}, True),
+    ("state_changed", {"state": "story_time"}, False),
+    ("state_changed", {"state": "security"}, False),
+    ("state_changed", {"state": "sleep"}, False),
+    ("state_changed", {"state": "dance"}, False),
+    ("dance_started", {}, False),
+])
+def test_purr_only_in_idle_and_talk(name, data, purrs) -> None:
+    """A head pet purrs in idle and talk only. In sleep the touch is the
+    wake gesture; the other states own the speaker. A suppressed pet
+    must not push last_chat_t either.
+
+    AI-assisted (Claude Opus 5.5).
+    """
+    async def go() -> None:
+        state = PerceptionState()
+        if name is not None:
+            state.update_state("dev-1", name, data, 100.0)
+        xiaozhi = FakeXiaozhi()
+
+        async def body() -> None:
+            state.broadcast(
+                PerceptionEvent(
+                    device_id="dev-1",
+                    name="head_pet_started",
+                    data={},
+                    ts=time.time(),
+                )
+            )
+            await let_consumer_settle()
+            assert bool(xiaozhi.play_asset_calls) is purrs
+            assert ("last_chat_t" in state.state.get("dev-1", {})) is purrs
+
+        await _spin(state, xiaozhi, body)
 
     asyncio.run(go())

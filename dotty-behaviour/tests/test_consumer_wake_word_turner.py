@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import time
 
+import pytest
+
 from consumers import WakeWordTurner
 from perception import PerceptionEvent, PerceptionState
 
@@ -39,6 +41,42 @@ def test_left_direction_turns_negative_yaw() -> None:
             await let_consumer_settle()
             assert xiaozhi.set_head_angles_calls[0]["yaw"] == -45
             assert xiaozhi.set_head_angles_calls[0]["speed"] == 200
+
+        await _spin(state, xiaozhi, body)
+
+    asyncio.run(go())
+
+
+@pytest.mark.parametrize("name,data,turns", [
+    ("state_changed", {"state": "dance"}, False),
+    ("dance_started", {}, False),
+    ("state_changed", {"state": "security"}, False),
+    ("state_changed", {"state": "talk"}, True),
+    ("state_changed", {"state": "story_time"}, True),
+])
+def test_dance_and_security_own_the_head(name, data, turns) -> None:
+    """A wake word must not yank the head out of a dance or the security
+    scan; in conversational states it still turns.
+
+    AI-assisted (Claude Opus 5.5).
+    """
+    async def go() -> None:
+        state = PerceptionState()
+        xiaozhi = FakeXiaozhi()
+
+        async def body() -> None:
+            state.update_state("dev-1", name, data, 100.0)
+            state.broadcast(PerceptionEvent(device_id="dev-1", name=name, data=data, ts=100.0))
+            state.broadcast(
+                PerceptionEvent(
+                    device_id="dev-1",
+                    name="wake_word_detected",
+                    data={"direction": "right", "phrase": "hey dotty"},
+                    ts=101.0,
+                )
+            )
+            await let_consumer_settle()
+            assert bool(xiaozhi.set_head_angles_calls) is turns
 
         await _spin(state, xiaozhi, body)
 

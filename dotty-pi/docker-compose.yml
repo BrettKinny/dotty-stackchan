@@ -25,6 +25,12 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      # play_song refuses to run without XIAOZHI_HOST (#165 side find: it
+      # was unset here, so the tool always answered "can't reach
+      # xiaozhi-server"). Host networking puts xiaozhi's :8003 on loopback;
+      # set XIAOZHI_HOST in .env to point elsewhere.
+      - XIAOZHI_HOST=${XIAOZHI_HOST:-127.0.0.1}
     volumes:
       - /mnt/user/appdata/dotty-pi:/root/.pi
     command: ["sleep", "infinity"]

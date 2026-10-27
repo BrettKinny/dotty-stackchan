@@ -6,7 +6,9 @@
 //   1. Fetch the catalogue from xiaozhi-server (60 s TTL cache).
 //   2. Resolve the free-form name against the catalogue —
 //      case-insensitive exact-stem match first, then substring containment.
-//   3. POST /xiaozhi/admin/play-asset with the absolute asset path.
+//   3. POST /xiaozhi/admin/play-asset with the absolute asset path and
+//      after_turn, so the song starts once this turn's reply has been spoken
+//      instead of being cut off by it.
 //
 // Failure-mode strings match bridge.py exactly so the LLM's prompt
 // behaviour holds.
@@ -120,7 +122,8 @@ export async function runPlaySong(
 
   const base = (opts.assetBaseOverride ?? ASSET_BASE).replace(/\/+$/, "");
   const assetPath = `${base}/${match}`;
-  const result = await playAsset(assetPath, opts);
+  // Called mid-turn: the song waits for this turn's reply to finish.
+  const result = await playAsset(assetPath, { ...opts, afterTurn: true });
   if (result.ok) {
     return `playing ${match.replace(/\.[^.]+$/, "")}`;
   }

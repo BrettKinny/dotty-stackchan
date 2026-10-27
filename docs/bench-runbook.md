@@ -130,14 +130,17 @@ directly in this file on a branch). Every check gets `PASS` / `FAIL` /
 
 | ID | Brett does | Eyes / video | Logs (Claude) |
 |---|---|---|---|
-| I1 | Voice: *"goodnight Dotty"* | Smooth face-down travel (~3–4 s), pixel 0 very dim blue, sleepy emoji + `Zzz…` bubble, audible torque-release click ~1 s after settle | `state_changed` → `sleep` |
-| I2 | Observe asleep, lights on | Gentle physical droop forward of commanded pose (expected — torque off) | — |
-| I3 | While asleep, idle ~30 s | Idle motion does **NOT** fire | no idle-motion servo commands |
-| I4 | Voice: *"wake up"* | Torque audibly re-engages **first**, wake-tilt up to ~70 pitch, neutral face, pixel 0 off (IDLE) | `state_changed` → `idle` |
-| I5 | *"goodnight Dotty"* again; then **touch the head** | Same wake sequence, lands in IDLE (not TALK) | `head_pet_started` event |
-| I6 | Sleep again; then **walk into camera** | Wakes straight to TALK (pixel 0 cyan); lookAt overrides wake-pose — reads as "looks up, then at you" | `face_detected` → TALK |
+| I1 | Voice: *"goodnight Dotty"* | Neutral home pose; left arc very dim blue, sleepy emoji + `Zzz…`; torque released after settling or the 3 s fallback | `state_changed` → `sleep`; privacy gate engaged, face detector and voice/wake-word processing disabled |
+| I2 | Observe asleep, lights on | Parked and quiet; torque off may allow physical drift, not a commanded face-down pose | — |
+| I3 | While asleep, idle ~30 s | Idle motion does **NOT** fire; listening indicator stays off | no idle-motion servo commands or new face/listening producer activity after sleep settles |
+| I4 | While asleep, say the configured wake word and *"wake up"* | Remains asleep: no listening or wake tilt | no wake detection or sleep-exit transition attributable to speech |
+| I5 | While asleep, briefly **touch the head** | Torque re-engages before wake tilt, neutral face; initial transition to IDLE. A continued ≥2 s hold separately requests listening | `head_pet_started`, then `state_changed` → `idle`; later face/listening transitions are separate |
+| I6 | Sleep again; then **walk into camera view** | Remains asleep; face detection cannot wake privacy sleep | no new face-driven sleep-exit transition |
 | I7 | With Dotty awake: pet the head | NO state change; existing pet behaviours (hearts + happy) still fire | no `state_changed` |
 | I8 | Awake: provoke a "sleepy" emotion reply (😴) | Legacy hard-sleep path still works (face detector off, modifiers removed) | — |
+| I9 | While asleep, explicitly select **idle** in the dashboard | Torque re-engages before wake tilt; `Zzz…` clears, normal perception resumes | admin `set-state` acknowledgement plus `state_changed` → `idle`; not an acoustic test |
+
+Sleep expectations above follow active firmware `3140f03` (source audit 2026-09-12), not the historical face/voice-wake descriptions. See [modes.md](./modes.md#wake-from-sleep-edges) for the privacy gate and release-pin caveat. This correction is AI-assisted (OpenAI Codex, GPT-6); these rows are test instructions, not recorded passes.
 
 ## Phase J — dance + combined indicators — #44
 

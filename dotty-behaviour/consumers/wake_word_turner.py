@@ -6,7 +6,9 @@ Distinct from SoundTurner:
 
 Skips when a face is already being tracked (face tracker owns gaze
 in that case — likely the speaker IS the tracked face). Skips
-direction=centre because there's no spatial info to act on.
+direction=centre because there's no spatial info to act on. Skips
+while the device is dancing or in security: the choreography and the
+surveillance scan own the head there, as they do for SoundTurner.
 
 Writes ``state[device_id]["last_sound_turn_t"]`` so the ambient
 sound turner doesn't immediately re-fire on the user's continued
@@ -22,6 +24,9 @@ from dispatch import XiaozhiAdminClient
 from perception import PerceptionEvent, PerceptionState
 
 log = logging.getLogger("dotty-behaviour.consumers.wake_word_turner")
+
+# States whose own motion a wake-word head turn would fight.
+_HEAD_OWNED_STATES = frozenset({"dance", "security"})
 
 
 class WakeWordTurner:
@@ -66,6 +71,9 @@ class WakeWordTurner:
 
                 dev_state = self._state.state.setdefault(device_id, {})
                 if dev_state.get("face_present"):
+                    continue
+                if (self._state.current_device_state(device_id) in _HEAD_OWNED_STATES
+                        or self._state.is_dance_active(device_id)):
                     continue
 
                 yaw = (

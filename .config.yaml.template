@@ -82,6 +82,10 @@ ASR:
     # Optional decoder bias — short list of canonical phrases improves
     # recall on rare names. Keep under ~200 chars to avoid prompt bleed.
     initial_prompt: null
+    # Bias the decoder toward the wake-name so it stops coming back as
+    # Jody / Donny / Duddy (#164). null disables. Needs faster-whisper >= 1.0
+    # (ignored with a warning on older builds).
+    hotwords: <ROBOT_NAME>
   SenseVoiceOnnx:
     # int8 sherpa-onnx SenseVoiceSmall — no PyTorch, lighter for Pi-class hosts
     # (#135). Opt-in: set selected_module.ASR: SenseVoiceOnnx to use it.

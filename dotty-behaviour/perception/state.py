@@ -14,18 +14,60 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import json
 import logging
+import os
+import re
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterable
 
 from config import (
+    PERCEPTION_EPHEMERAL_DEVICE_RE,
+    PERCEPTION_EPHEMERAL_TTL_SEC,
     PERCEPTION_QUEUE_MAX,
     PERCEPTION_RECENT_MAX,
     PERCEPTION_STALE_THRESHOLD_SEC,
 )
 
 log = logging.getLogger("dotty-behaviour.perception")
+
+_DURABLE_DEVICE_STATES = frozenset(
+    {"idle", "talk", "story_time", "security", "sleep", "dance"}
+)
+
+try:
+    _EPHEMERAL_DEVICE_RE: re.Pattern[str] | None = re.compile(
+        PERCEPTION_EPHEMERAL_DEVICE_RE
+    )
+except re.error:
+    log.warning(
+        "invalid PERCEPTION_EPHEMERAL_DEVICE_RE %r; no device ids expire",
+        PERCEPTION_EPHEMERAL_DEVICE_RE,
+    )
+    _EPHEMERAL_DEVICE_RE = None
+
+
+def is_ephemeral_device(device_id: str) -> bool:
+    """True for test / automation / fallback device ids that should expire
+    instead of living in production per-device state forever."""
+    if not device_id:
+        return True
+    if _EPHEMERAL_DEVICE_RE is None:
+        return False
+    return _EPHEMERAL_DEVICE_RE.fullmatch(device_id) is not None
+
+
+def _last_activity_t(device_state: dict[str, Any]) -> float:
+    stamps = [
+        device_state.get(key)
+        for key in ("last_event_t", "last_state_change_t")
+    ]
+    return max(
+        (float(t) for t in stamps if isinstance(t, (int, float))),
+        default=0.0,
+    )
 
 
 @dataclass(frozen=True)
@@ -59,16 +101,18 @@ class PerceptionState:
     construct instances directly.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, state_path: str | Path | None = None) -> None:
+        self._state_path = Path(state_path) if state_path is not None else None
         # Event bus
         self._listeners: list[asyncio.Queue[PerceptionEvent]] = []
         # Per-device state (face_present, listening, current_state,
         # last_*_t timestamps, dance_active, etc.)
-        self.state: dict[str, dict[str, Any]] = {}
+        self.state: dict[str, dict[str, Any]] = self._load_state()
         # Bounded per-device ring buffer of recent events (dashboard).
         self._recent: dict[
             str, collections.deque[dict[str, Any]]
         ] = {}
+        self.prune_ephemeral()
         # Caches consumed by snapshot() + the dashboard's perception card.
         self.vision_cache: dict[str, dict[str, Any]] = {}
         self.audio_cache: dict[str, dict[str, Any]] = {}
@@ -88,6 +132,83 @@ class PerceptionState:
         # slice — included now so the audio explain route can share
         # the pattern).
         self._audio_waiters: dict[str, list[asyncio.Event]] = {}
+
+    def _load_state(self) -> dict[str, dict[str, Any]]:
+        """Restore each device's mutex state. A device whose entry is not a
+        durable state (a probe that posted "testing", say) is dropped on its
+        own, so it cannot discard the robot's saved state; an unreadable file
+        (bad bytes, wrong shape) starts empty instead of failing startup."""
+        if self._state_path is None:
+            return {}
+        try:
+            payload = json.loads(self._state_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError) as exc:  # ValueError covers bad UTF-8 and JSON
+            log.warning("perception state %s unreadable (%s); starting fresh", self._state_path, exc)
+            return {}
+        if not isinstance(payload, dict):
+            log.warning("perception state %s is not an object; starting fresh", self._state_path)
+            return {}
+        restored: dict[str, dict[str, Any]] = {}
+        for device_id, device_state in payload.items():
+            if not (isinstance(device_id, str) and isinstance(device_state, dict)):
+                continue
+            current = device_state.get("current_state")
+            changed = device_state.get("last_state_change_t", 0.0)
+            if (isinstance(current, str) and current in _DURABLE_DEVICE_STATES
+                    and isinstance(changed, (int, float)) and not isinstance(changed, bool)):
+                restored[device_id] = device_state
+            else:
+                log.warning("perception state: dropping invalid saved entry for %s", device_id)
+        return restored
+
+    def _persist_state(self) -> None:
+        if self._state_path is None:
+            return
+        try:
+            self._state_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self._state_path.with_name(f".{self._state_path.name}.tmp")
+            durable_state = {
+                device_id: {
+                    "current_state": device_state["current_state"],
+                    "last_state_change_t": device_state.get(
+                        "last_state_change_t", 0.0
+                    ),
+                }
+                for device_id, device_state in self.state.items()
+                if isinstance(device_state.get("current_state"), str)
+                and device_state["current_state"]
+            }
+            temporary.write_text(
+                json.dumps(durable_state, separators=(",", ":")),
+                encoding="utf-8",
+            )
+            os.replace(temporary, self._state_path)
+        except OSError as exc:
+            log.warning("failed to persist perception state: %s", exc)
+
+    def prune_ephemeral(self, *, now: float | None = None) -> list[str]:
+        """Drop test / automation devices idle for longer than
+        PERCEPTION_EPHEMERAL_TTL_SEC (state, recent ring, durable copy).
+
+        Real devices are never expired here: their persisted mutex state is
+        what #21 relies on across restarts. Returns the dropped ids."""
+        wall = now if now is not None else time.time()
+        dropped = [
+            device_id
+            for device_id, device_state in self.state.items()
+            if is_ephemeral_device(device_id)
+            and wall - _last_activity_t(device_state)
+            > PERCEPTION_EPHEMERAL_TTL_SEC
+        ]
+        for device_id in dropped:
+            self.state.pop(device_id, None)
+            self._recent.pop(device_id, None)
+        if dropped:
+            log.info("expired ephemeral perception devices: %s", dropped)
+            self._persist_state()
+        return dropped
 
     # ------------------------------------------------------------------
     # Bus
@@ -191,6 +312,7 @@ class PerceptionState:
                     state["dance_active"] = True
                 elif state.get("dance_active"):
                     state["dance_active"] = False
+                self._persist_state()
         elif name == "dance_started":
             state["dance_active"] = True
             state["last_dance_started_t"] = ts
@@ -201,6 +323,10 @@ class PerceptionState:
             listening = bool(data.get("listening"))
             state["listening"] = listening
             state["last_chat_status_t"] = ts
+            # Both edges are conversation activity: stop/listening-off often
+            # precedes Dotty's own TTS. Preserve PurrPlayer's future reservation
+            # and never move the quiet-after-chat clock backwards.
+            state["last_chat_t"] = max(ts, state.get("last_chat_t", 0.0))
         elif name == "face_recognized":
             identity = (data.get("identity") or "").strip()
             if identity:
@@ -318,12 +444,14 @@ class PerceptionState:
     def annotate_for_introspection(
         self, devices: Iterable[str] | None = None, *, now: float | None = None
     ) -> dict[str, dict[str, Any]]:
-        """Snapshot of self.state with `sensor_age_s` + `sensor_stale`
-        annotations, shaped the way `/api/perception/state` returns.
+        """Snapshot of self.state with `sensor_age_s`, `sensor_stale` and
+        `sensor_seen` annotations, shaped the way `/api/perception/state`
+        returns. Expires idle ephemeral devices first.
 
         ``devices`` selects specific device_ids; None means all known.
         """
         wall = now if now is not None else time.time()
+        self.prune_ephemeral(now=wall)
 
         def _annotate(raw: dict[str, Any]) -> dict[str, Any]:
             out = dict(raw)
@@ -334,6 +462,9 @@ class PerceptionState:
                 age = max(0.0, wall - last_t)
             out["sensor_age_s"] = age
             out["sensor_stale"] = age > PERCEPTION_STALE_THRESHOLD_SEC
+            # False for a device restored from disk that has sent nothing
+            # since this daemon started: its sensors cannot be judged hung.
+            out["sensor_seen"] = last_t is not None
             return out
 
         if devices is None:

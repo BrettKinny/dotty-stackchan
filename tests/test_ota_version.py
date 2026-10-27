@@ -53,8 +53,8 @@ _download_host = _mod._download_host
 class TestOtaVersion(unittest.TestCase):
 
     def test_download_host_uses_configured_websocket_host(self):
-        config = {"server": {"websocket": "ws://192.168.1.67:8000/xiaozhi/v1/"}}
-        self.assertEqual(_download_host(config, "172.21.0.2"), "192.168.1.67")
+        config = {"server": {"websocket": "ws://192.0.2.10:8000/xiaozhi/v1/"}}
+        self.assertEqual(_download_host(config, "172.21.0.2"), "192.0.2.10")
 
     def test_download_host_falls_back_for_placeholder(self):
         config = {"server": {"websocket": "ws://你的局域网IP:8000/xiaozhi/v1/"}}
