@@ -15,6 +15,12 @@ spec = importlib.util.spec_from_file_location("dotty_overnight_states", SCRIPTS 
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
+
+@pytest.fixture(autouse=True)
+def plenty_of_disk(monkeypatch):
+    # CI runners can have less free disk than space_ok's 10 GiB floor.
+    monkeypatch.setattr(runner, "space_ok", lambda session: True)
+
 CATALOGUE = {c["id"]: c for c in json.loads((SCRIPTS / "dotty-av-cases.json").read_text())["cases"]}
 CLOCK = {"offset_seconds": 0, "uncertainty_seconds": 0}
 CONFIG = {"host": "unused", "device": "robot"}
