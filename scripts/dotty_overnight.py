@@ -1359,6 +1359,13 @@ def record_attempt(checkpoint, case, result):
         checkpoint["completed"].append(case["id"])
     if counts["failures"] >= case.get("max_failures", 3) and case["id"] not in checkpoint["quarantined"]:
         checkpoint["quarantined"].append(case["id"])
+    # 2026-10-28: a pass clears the inconclusive count and a slip breaks the
+    # streak, so a case that alternates (V02's reference mic mishearing every
+    # other try) never finished and held the queue. Cap the attempts too.
+    if (counts["attempts"] >= case.get("max_attempts", 9)
+            and case["id"] not in checkpoint["completed"] + checkpoint["quarantined"]
+            and case["id"] not in checkpoint.setdefault("unresolved", [])):
+        checkpoint["unresolved"].append(case["id"])
 
 
 def eligible_cases(bank, checkpoint):

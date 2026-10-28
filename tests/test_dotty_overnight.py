@@ -1018,6 +1018,26 @@ def test_a_pass_clears_the_inconclusive_count(tmp_path):
     assert checkpoint["unresolved"] == []
 
 
+
+def test_a_case_alternating_pass_and_slip_is_set_aside_after_max_attempts(tmp_path):
+    checkpoint = runner.restore_checkpoint(tmp_path)
+    good = dict.fromkeys(("capture", "playback", "interaction", "recovery"), "PASS")
+    murky = {**good, "interaction": "INCONCLUSIVE"}
+    for attempt in [murky, good] * 4:
+        runner.record_attempt(checkpoint, {"id": "repeat"}, attempt)
+    assert checkpoint["unresolved"] == [] and checkpoint["completed"] == []
+    runner.record_attempt(checkpoint, {"id": "repeat"}, murky)
+    assert checkpoint["unresolved"] == ["repeat"]
+    assert checkpoint["quarantined"] == [] and checkpoint["counts"]["repeat"]["failures"] == 0
+
+
+def test_attempt_cap_leaves_a_completed_case_alone(tmp_path):
+    checkpoint = runner.restore_checkpoint(tmp_path)
+    good = dict.fromkeys(("capture", "playback", "interaction", "recovery"), "PASS")
+    for _ in range(12):
+        runner.record_attempt(checkpoint, {"id": "soak"}, good)
+    assert checkpoint["completed"] == ["soak"] and checkpoint["unresolved"] == []
+
 def test_cold_wake_settles_after_the_robot_just_went_idle(monkeypatch):
     # 2026-10-23: a wake word played 4 s after the conversation timed out (the
     # robot was still reconnecting) was missed; the next one, 80 s later, woke.
