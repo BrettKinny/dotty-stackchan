@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [server-v0.2.0] - 2026-10-29
+
+`server-v0.2.0-rc.1` promoted to a final release with no server code changes; the full list of changes is under `[server-v0.2.0-rc.1]` below. Pair it with `fw-v1.3.4`. Drafted with AI assistance (Claude Opus 5.5).
+
+### Verified
+- **Overnight A/V regression** on a physical StackChan with `fw-v1.3.4` (2026-10-28/29): every case passed its full pass except K02 (the known "12 plus 10 room" answer accepted for rc.1). No task watchdog resets and no microphone-buffer build-up over seven hours.
+
+### Changed
+- **A/V harness** (#198, test code only): a case that alternates pass and evaluator slip is set aside after 9 attempts; the runner waits up to 150 s for the robot to reconnect before blocking a case; K04 passes a safe refusal that names the hazard; a joke may run to 80 words.
+- **Versions**: dotty-pi-ext and the dotty-behaviour `VERSION` stamp are `0.2.0`.
+
 ## [fw-v1.3.4] - 2026-10-28
 
 Firmware only (`BrettKinny/StackChan@dotty`, submodule `5b361e5`). Source-only: the server address is compiled in, so build it yourself with your own `CONFIG_OTA_URL` (SETUP.md §2). Drafted with AI assistance (Claude Opus 5.5) and bench-tested on a physical StackChan.
