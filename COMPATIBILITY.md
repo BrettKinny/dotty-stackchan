@@ -13,15 +13,16 @@ For protocol wire formats see `docs/protocols.md`.
 
 | Component | Current Version | Protocol / Interface | Breaking Change Policy |
 |---|---|---|---|
-| StackChan firmware (`BrettKinny/StackChan@dotty`) | `fw-v1.3.3` release; submodule `969c2b2` | Xiaozhi WebSocket protocol, MCP over WS (JSON-RPC 2.0), StateManager event contract | Build the pinned submodule; do not substitute the official upstream tree or OTA-update without coordinated verification |
+| StackChan firmware (`BrettKinny/StackChan@dotty`) | `fw-v1.3.4` release; submodule `5b361e5` | Xiaozhi WebSocket protocol, MCP over WS (JSON-RPC 2.0), StateManager event contract | Build the pinned submodule; do not substitute the official upstream tree or OTA-update without coordinated verification |
 | xiaozhi-esp32-server (local build) | `xiaozhi-esp32-server-piper:local` | Custom LLM provider API, `.config.yaml` schema, Xiaozhi WS server | Rebuild image only after checking upstream changelog for provider API or config schema changes |
 | dotty-pi (pi agent) | `dotty-pi:0.1.0` | pi RPC (JSONL over stdio), the seven `dotty-pi-ext` voice tools | Pin the image tag; pi-version or model changes need end-to-end cutover testing |
 | dotty-behaviour | `dotty-behaviour:0.1.0` | HTTP API (`/api/perception/*`, `/api/vision/*`, `/api/audio/*`, `/health`) | Endpoint signatures stable; perception event-schema changes require firmware + xiaozhi review |
 | bridge.py (dashboard) | `dotty-bridge:0.1.0` image from repo HEAD | `/ui` dashboard, `/admin/*`, `/health` | Dashboard/admin service only post-#36; admin route changes require updating dashboard callers |
 
-The public `fw-v1.3.3` superproject tag (commit `24a009c`, 2026-07-12) is the
-current coordinated release pointer. It pins firmware submodule `969c2b2` and
-the matching server-side patches. Draft PRs and a dirty submodule are not a
+The public `fw-v1.3.4` superproject tag (2026-10-28) is the current
+coordinated release pointer. It pins firmware submodule `5b361e5` and the
+matching server-side patches. It is source-only: build it with your own
+`CONFIG_OTA_URL` (SETUP.md §2). Draft PRs and a dirty submodule are not a
 released compatibility set.
 
 ## What counts as a breaking change
@@ -116,4 +117,4 @@ versions work with which firmware versions.
 
 ---
 
-Last verified against the repository and `fw-v1.3.3` pin: 2026-07-16.
+Last verified against the repository and `fw-v1.3.4` pin: 2026-10-28.
