@@ -84,7 +84,7 @@ def test_current_docs_do_not_claim_the_firmware_submodule_lacks_state_manager() 
 
 def test_compatibility_doc_matches_the_current_public_contract() -> None:
     compatibility = (ROOT / "COMPATIBILITY.md").read_text(encoding="utf-8")
-    assert "`fw-v1.3.3`" in compatibility
+    assert "`fw-v1.3.4`" in compatibility
     assert "the seven `dotty-pi-ext` voice tools" in compatibility
     assert "No formal versioning is adopted yet" not in compatibility
     assert "scripts/backup.sh" not in compatibility

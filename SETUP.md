@@ -88,7 +88,8 @@ Point the firmware at your xiaozhi-server for OTA. Edit
 CONFIG_OTA_URL="http://<XIAOZHI_HOST>:8003/xiaozhi/ota/"
 ```
 
-Trailing slash matters — that's the path the server exposes.
+Trailing slash matters — that's the path the server exposes. The build stops
+with an error while the `<XIAOZHI_HOST>` placeholder is still there.
 
 `sdkconfig.defaults` seeds a newly generated `sdkconfig`; it does not overwrite
 an existing one. On a repeat build, either make the same change through

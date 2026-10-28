@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [fw-v1.3.4] - 2026-10-28
+
+Firmware only (`BrettKinny/StackChan@dotty`, submodule `5b361e5`). Source-only: the server address is compiled in, so build it yourself with your own `CONFIG_OTA_URL` (SETUP.md §2). Drafted with AI assistance (Claude Opus 5.5) and bench-tested on a physical StackChan.
+
+### Fixed
+- **No crash when the server closes the connection** (#193): after a server-side close (the 180 s idle timeout, or an admin end-session), `~EspTcp()` skipped waiting for the receive task and deleted its event group under it, corrupting the heap (`StoreProhibited` panics about once per 50–60 closes). It now waits for the receive task to exit. Bench: 150 close/reconnect cycles with 0 panics.
+- **Stays on while on USB power** (#194): the 10-minute power-save shutdown was only turned off on a battery-to-USB change, so a robot that booted on USB powered itself off 600 s after boot whenever the voice server was down. It now follows the power source from the first battery reading.
+- **Servo reads no longer starve CPU 1** (#193): `SCSerial::readSCS` slept with `vTaskDelay(1 / portTICK_PERIOD_MS)`, which is `vTaskDelay(0)` at the 100 Hz tick, so polling a servo that didn't answer spun for minutes and set off the task watchdog every 10 s. It now blocks in the UART read until its timeout.
+- **No power-off on a failed PMIC read**: an I2C timeout could make the power-button status read return `0xFF`, which looked like a long press and powered the robot off. Failed PMIC reads are now ignored, including in the register read-modify-writes.
+- **Security sweep runs reliably** (#166): the yaw sweep ran in its own task whose stack allocation was never checked and could fail under camera + AFE memory pressure. It now runs in the motion update loop.
+- **Calm when the server is down** (#180): a stopped voice server is a normal resting state, not an error with an alert sound and growing retries. The robot now stays quietly offline and retries every 120 s.
+- **Head pats**: light fingertip pats register (mid level for 100 ms instead of high for 150 ms; 8 of 10 pats on the bench, up from 4), and a failed touch-sensor read counts as no touch instead of repeating the last reading.
+- **Camera and wake fixes**: camera uploads own their JPEG buffer and fail cleanly when the receive task can't be allocated; a wake word is accepted on an already-open ambient channel; first speech from idle claims the talk state.
+
+### Changed
+- **The build refuses the placeholder server address**: `sdkconfig.defaults` sets `CONFIG_OTA_URL` to `http://<XIAOZHI_HOST>:8003/xiaozhi/ota/` and the build stops until you replace it, so nobody flashes firmware that can't reach a server.
+- **Audio diagnostics** (#179): the boot log shows the effective AFE configuration and wake volume.
+
 ## [server-v0.2.0-rc.1] - 2026-10-24
 
 ### Added
