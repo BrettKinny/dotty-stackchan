@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 # Version stamp surfaced on /health and in startup logs.
-VERSION: str = "0.2.0-rc.1"
+VERSION: str = "0.2.0"
 
 # Local timezone — used for NDJSON daily filenames and timestamps.
 # Falls back to UTC if the TZ env var names a zone Python can't find.
