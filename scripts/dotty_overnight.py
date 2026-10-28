@@ -832,6 +832,19 @@ def case_cleanup(session, config, case, clock=None):
 # Just after its conversation times out the robot reconnects its WebSocket,
 # and a wake word in that window is missed (2026-10-23 A/V run, W01).
 COLD_SETTLE_SECONDS = 15
+# 2026-10-29: between soak cases xiaozhi idle-closes the robot WS (180 s) and
+# the robot reopens it up to its 137 s channel timeout later; soak cases kept
+# landing in that gap and blocked as device_disconnected.
+DEVICE_RECONNECT_SECONDS = 150
+
+
+def await_device(config, snap, seconds=DEVICE_RECONNECT_SECONDS, poll=5):
+    """Wait for the robot to reconnect after xiaozhi's idle close. Changes nothing."""
+    end = time.monotonic() + seconds
+    while config["device"] not in snap.get("devices", []) and time.monotonic() < end:
+        time.sleep(poll)
+        snap = snapshot(config["host"])
+    return snap
 
 
 def await_cold(config, seconds, poll=3):
@@ -967,6 +980,9 @@ def run_case(session, config, case):
         write_json(directory / "before.json", before)
         if before["errors"] or not before.get("services_running"):
             raise RuntimeError("infrastructure_down_or_device_disconnected")
+        if config["device"] not in before.get("devices", []):
+            before = await_device(config, before)
+            write_json(directory / "before.json", before)
         if config["device"] not in before.get("devices", []):
             # Services up, robot not connected: usually xiaozhi's 180 s idle
             # close or a power loss. Retry it like a stale listening state
