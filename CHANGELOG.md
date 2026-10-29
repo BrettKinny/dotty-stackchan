@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [fw-v1.3.5] - 2026-10-29
+
+Firmware only (`BrettKinny/StackChan@dotty`, submodule `c074907`). Source-only: the server address is compiled in, so build it yourself with your own `CONFIG_OTA_URL` (SETUP.md §2). Drafted with AI assistance (Claude Opus 5.5) and smoke-tested on a physical StackChan.
+
+### Fixed
+- **No reboot when the audio codec fails to open** (#196): one failed I2C read from the speaker amp while it powered up made opening the codec fail, and an `ESP_ERROR_CHECK` rebooted the robot mid-reply. Opening the speaker or microphone now tries three times, 20 ms apart. If all three fail, that audio is dropped and the next attempt to use it retries after 500 ms. While the microphone is off it reads silence, not the last buffer, and volume, gain and close errors are logged instead of rebooting. Bench (2026-10-29): the robot booted, rejoined WiFi, connected with all 15 tools, woke to the wake word and played a full spoken reply. This was one smoke test, not a soak; the I2C error is rare and did not happen during it.
+
 ## [server-v0.2.0] - 2026-10-29
 
 `server-v0.2.0-rc.1` promoted to a final release with no server code changes; the full list of changes is under `[server-v0.2.0-rc.1]` below. Pair it with `fw-v1.3.4`. Drafted with AI assistance (Claude Opus 5.5).
