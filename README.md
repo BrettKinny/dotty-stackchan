@@ -42,7 +42,7 @@ Full policy: [`AI_TRANSPARENCY.md`](./AI_TRANSPARENCY.md).
 
 Behaviour is **one of six states** (`idle / talk / story_time / security / sleep / dance`) plus two independent toggles (`kid_mode`, `smart_mode`), all owned by the firmware StateManager. Voice phrases, camera events and dashboard controls all go through it. Bench checks are tracked in [#38](https://github.com/BrettKinny/dotty-stackchan/issues/38).
 
-> Note: `firmware/` is a release pointer, not the active development checkout. The pinned build (`fw-v1.3.4`, `5b361e5`) includes the StateManager, but later fixes may only be on the active fork, so check your actual revision. See "Firmware iteration" in [`CLAUDE.md`](./CLAUDE.md) and the submodule note in [`docs/modes.md`](./docs/modes.md).
+> Note: `firmware/` is a release pointer, not the active development checkout. The pinned build (`fw-v1.3.5`, `c074907`) includes the StateManager, but later fixes may only be on the active fork, so check your actual revision. See "Firmware iteration" in [`CLAUDE.md`](./CLAUDE.md) and the submodule note in [`docs/modes.md`](./docs/modes.md).
 
 The 12-pixel LED ring shows the current state at a glance. **Left ring pixels 0-5 are the state arc.** All six show the state colour, matching the dashboard's state buttons:
 
