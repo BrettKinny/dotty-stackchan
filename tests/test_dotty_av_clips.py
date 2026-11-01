@@ -175,7 +175,7 @@ def test_rotated_synthetic_landscape_fills_portrait_frame(tmp_path):
         pytest.skip("ffmpeg missing")
     folder = tmp_path / "cases" / "rot-1"
     folder.mkdir(parents=True)
-    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=1920x1080:rate=10:duration=2",
+    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=c=white:size=1920x1080:rate=10:duration=2",
                     "-f", "lavfi", "-i", "sine=duration=2", "-shortest", "-pix_fmt", "yuv420p", str(folder / "raw.mp4")], check=True)
     (folder / "result.json").write_text(json.dumps({"verdict": "PASS"}))
     destination = clips.export(tmp_path, "rot-1", name="rot", rotate=90)
