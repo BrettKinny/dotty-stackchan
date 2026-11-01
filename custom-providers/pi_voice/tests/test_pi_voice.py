@@ -8,6 +8,7 @@ required — uses a fake PiClient.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -282,6 +283,61 @@ class TestLatestUtteranceWins(unittest.TestCase):
         self.assertTrue(list(provider.response("s", [{"role": "user", "content": "a"}])))
         self.assertTrue(list(provider.response("s", [{"role": "user", "content": "b"}])))
         self.assertEqual(provider._latest_turn, {})
+
+
+class TestPrewarm(unittest.TestCase):
+    """#181: wake the voice model when a device connects."""
+
+    def _provider(self, config=None):
+        return LLMProvider(config or {}, client=FakeClient())  # type: ignore[arg-type]
+
+    def test_posts_a_one_token_completion_to_the_configured_url(self):
+        calls = []
+        done = threading.Event()
+
+        class Resp:
+            def close(self):
+                done.set()
+
+        def fake_urlopen(req, timeout=None):
+            calls.append((req.full_url, json.loads(req.data), timeout))
+            return Resp()
+
+        provider = self._provider({"prewarm_url": "http://llm.test/v1/chat/completions"})
+        with patch("pi_voice.pi_voice.urllib.request.urlopen", fake_urlopen):
+            self.assertTrue(provider.prewarm())
+            self.assertTrue(done.wait(timeout=2))
+        url, body, _ = calls[0]
+        self.assertEqual(url, "http://llm.test/v1/chat/completions")
+        self.assertEqual(body["model"], "qwen3.5:4b")
+        self.assertEqual(body["max_tokens"], 1)
+
+    def test_rate_limited(self):
+        provider = self._provider({"prewarm_url": "http://llm.test/v1/chat/completions"})
+        with patch("pi_voice.pi_voice.urllib.request.urlopen"):
+            self.assertTrue(provider.prewarm())
+            self.assertFalse(provider.prewarm())
+
+    def test_off_without_url_or_when_disabled(self):
+        with patch.dict(os.environ, {"BRIDGE_URL": "", "VISION_BRIDGE_URL": "",
+                                     "DOTTY_PREWARM_URL": ""}):
+            self.assertFalse(self._provider().prewarm())
+        off = self._provider({"prewarm": False, "prewarm_url": "http://x/v1"})
+        self.assertFalse(off.prewarm())
+
+    def test_url_derived_from_sibling_host(self):
+        with patch.dict(os.environ, {"VISION_BRIDGE_URL": "http://10.0.0.5:8090",
+                                     "BRIDGE_URL": "", "DOTTY_PREWARM_URL": ""}):
+            self.assertEqual(
+                self._provider()._prewarm_url,
+                "http://10.0.0.5:8080/v1/chat/completions",
+            )
+
+    def test_failure_never_raises(self):
+        provider = self._provider({"prewarm_url": "http://llm.test/x"})
+        with patch("pi_voice.pi_voice.urllib.request.urlopen", side_effect=OSError("down")):
+            self.assertTrue(provider.prewarm())
+            time.sleep(0.1)
 
 
 class TestNewSessionLifecycle(unittest.TestCase):

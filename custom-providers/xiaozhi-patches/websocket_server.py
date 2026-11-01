@@ -163,6 +163,15 @@ class WebSocketServer:
                 self.logger.bind(tag=TAG).info(
                     f"restored device state {_restored!r} for {_dotty_dev_id}"
                 )
+        # DOTTY-PATCH: wake the voice model as soon as a device connects, so a
+        # model llama-swap unloaded is loading while the person is still
+        # talking (#181). Never lets a warm-up problem touch the connection.
+        try:
+            _prewarm = getattr(self._llm, "prewarm", None)
+            if callable(_prewarm):
+                _prewarm()
+        except Exception as e:
+            self.logger.bind(tag=TAG).warning(f"LLM prewarm skipped: {e}")
         try:
             await handler.handle_connection(websocket)
         except Exception as e:

@@ -173,6 +173,31 @@ def _dashboard_url() -> str:
     return f"{parsed.scheme or 'http'}://{parsed.hostname}:{_DASHBOARD_PORT}"
 
 
+_LLM_PORT = 8080
+_DEFAULT_PREWARM_MODEL = "qwen3.5:4b"
+_PREWARM_MIN_INTERVAL_S = 300.0
+
+
+def _prewarm_url(config: dict) -> str:
+    """Chat-completions URL used to wake the voice model, or "" when off.
+
+    Config key `prewarm_url` / env `DOTTY_PREWARM_URL` win; `prewarm: false`
+    switches it off. Otherwise llama-swap is assumed to sit on the sibling
+    host's :8080 (where dotty-pi reaches it)."""
+    if str(config.get("prewarm", "true")).strip().lower() in ("0", "false", "no", "off"):
+        return ""
+    explicit = str(
+        config.get("prewarm_url") or os.environ.get("DOTTY_PREWARM_URL", "")
+    ).strip()
+    if explicit:
+        return explicit
+    sibling = os.environ.get("BRIDGE_URL") or os.environ.get("VISION_BRIDGE_URL", "")
+    parsed = urlparse(sibling)
+    if not parsed.hostname:
+        return ""
+    return f"{parsed.scheme or 'http'}://{parsed.hostname}:{_LLM_PORT}/v1/chat/completions"
+
+
 def _report_to_dashboard(path: str, payload: dict) -> None:
     """Fire-and-forget POST to the bridge dashboard.
 
@@ -352,11 +377,52 @@ class LLMProvider(LLMProviderBase):
         self._turn_seq = 0
         self._latest_turn: dict[object, int] = {}
         self._first_turn = True
+        self._prewarm_url = _prewarm_url(config)
+        self._prewarm_model = str(config.get("prewarm_model") or _DEFAULT_PREWARM_MODEL)
+        self._last_prewarm = float("-inf")
         msg = f"PiVoiceLLM ready (container={self._container} kid_mode={self._kid_mode})"
         try:
             logger.bind(tag=TAG).info(msg)  # type: ignore[attr-defined]
         except AttributeError:
             logger.info(msg)
+
+    def prewarm(self) -> bool:
+        """Wake the voice model before the first turn (#181).
+
+        llama-swap can unload the 4B between conversations and the first
+        reply then takes ~12 s, with the mic open the whole time. The device
+        WebSocket opening (wake word, touch, face) is the earliest signal, so
+        the server calls this then. Fire-and-forget on a daemon thread; at
+        most once per few minutes. Returns True when a warm-up was started."""
+        if not self._prewarm_url:
+            return False
+        now = time.monotonic()
+        with self._turn_seq_lock:
+            if now - self._last_prewarm < _PREWARM_MIN_INTERVAL_S:
+                return False
+            self._last_prewarm = now
+        url, model = self._prewarm_url, self._prewarm_model
+
+        def _post() -> None:
+            started = time.monotonic()
+            try:
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps({
+                        "model": model,
+                        "messages": [{"role": "user", "content": "hi"}],
+                        "max_tokens": 1,
+                    }).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                urllib.request.urlopen(req, timeout=90).close()
+                logger.info(f"PiVoiceLLM prewarm ok in {time.monotonic() - started:.1f}s")
+            except Exception as exc:
+                logger.warning(f"PiVoiceLLM prewarm failed (non-fatal): {exc}")
+
+        threading.Thread(target=_post, name="dotty-prewarm", daemon=True).start()
+        return True
 
     # xiaozhi-server's voice loop calls this as a sync generator.
     # Each yielded string becomes a TTS chunk.
