@@ -187,6 +187,18 @@ def wake_events(log_text):
 # The reference mic's Whisper hears "Dotty" as "Daddy"/"Tati"; bias it to the
 # name the way the robot's own WhisperLocal does (#164). Reply transcripts only.
 RESPONSE_HOTWORDS = "Dotty"
+
+
+def wants_name_hotword(case):
+    """Bias the reply transcript toward the name only when the case expects it.
+
+    The bias turns a one-word reply ("19") into "Dotty" (V03, 2026-10-29), so a
+    case whose expected reply never contains the name must not get it."""
+    if case.get("expect_silence"):
+        return False
+    target = normalize(RESPONSE_HOTWORDS)
+    return any(normalize(option) == target
+               for group in case.get("reply", []) for option in group)
 NOVAD_MAX_NO_SPEECH = .5
 
 
@@ -1121,7 +1133,7 @@ def run_case(session, config, case):
                               if label == "response" else []),
                             # The name bias invents a lone "Dotty" in a silent crop.
                             *(["--hotwords", RESPONSE_HOTWORDS]
-                              if label == "response" and not case.get("expect_silence") else [])],
+                              if label == "response" and wants_name_hotword(case) else [])],
                             directory / f"{label}-transcribe.log", session, 120,
                             deadline=datetime.fromisoformat(config["finish_at"]).timestamp())
             analysis = load(directory / f"{label}.json")
@@ -1151,7 +1163,7 @@ def run_case(session, config, case):
             guarded_process([config["python"], ROOT / "scripts/dotty_av_media.py", "transcribe",
                             directory / "response.wav", "--model", config["model"],
                             "--output", directory / "response-novad.json", "--normalize", "--no-vad",
-                             "--hotwords", RESPONSE_HOTWORDS],
+                             *(["--hotwords", RESPONSE_HOTWORDS] if wants_name_hotword(case) else [])],
                             directory / "response-novad-transcribe.log", session, 120,
                             deadline=datetime.fromisoformat(config["finish_at"]).timestamp())
             # Stricter: without VAD the name bias can invent a lone "Dotty" in
