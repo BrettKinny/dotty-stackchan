@@ -60,9 +60,15 @@ def latest_tool_names(frames):
 
 
 def reply_for(frames, session_id, request_id):
-    """The result/error payload for one request, or None while not yet logged."""
+    """The result/error payload for one request, or None while not yet logged.
+
+    Request ids restart at 1 per connection, so they collide with xiaozhi's own
+    early tools/list replies; those are skipped, and callers pass only log lines
+    newer than the call."""
     for frame in frames:
         payload = frame.get("payload") or {}
+        if "tools" in (payload.get("result") or {}):
+            continue
         if frame.get("session_id") == session_id and payload.get("id") == request_id and (
                 "result" in payload or "error" in payload):
             return payload
