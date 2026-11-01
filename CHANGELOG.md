@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Voice model pre-warm on connect** (#181): when a device WebSocket opens, PiVoiceLLM sends llama-swap a one-token request for `qwen3.5:4b` (at most once per 5 minutes, off the connection's path, failures only logged) so a model that was unloaded is loading while the person is still speaking, not after. URL comes from `LLM.PiVoiceLLM.prewarm_url` / `DOTTY_PREWARM_URL`, else the `VISION_BRIDGE_URL` host on :8080; `prewarm: false` turns it off.
+
+### Fixed
+- **Room noise closes the session** (#105): after 3 noise-like ASR turns in a row (empty or dropped transcripts, `no_speech` >= 0.45 or `avg_logprob` < -1.0, each within 90 s of the last), WhisperLocal ends the listening session as the no-voice timeout does; touch or the wake word reopens it. A real turn resets the run. Config keys under `ASR.WhisperLocal`: `noise_turn_limit` (default 3, `0` disables), `noise_no_speech`, `noise_avg_logprob`. Clearly articulated TV speech still passes these signals; only a wake word or voiceprint can separate it. The threshold of 3 is awaiting the maintainer's confirmation.
+- **Latest utterance wins** (#105): a turn queued behind the #175 turn lock is skipped when the same session said something newer while it waited.
+
 ## [fw-v1.3.5] - 2026-10-29
 
 Firmware only (`BrettKinny/StackChan@dotty`, submodule `c074907`). Source-only: the server address is compiled in, so build it yourself with your own `CONFIG_OTA_URL` (SETUP.md §2). Drafted with AI assistance (Claude Opus 5.5) and smoke-tested on a physical StackChan.

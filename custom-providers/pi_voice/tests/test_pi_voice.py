@@ -8,6 +8,7 @@ required — uses a fake PiClient.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -211,6 +212,132 @@ class TestEmptyTurn(unittest.TestCase):
         out = list(provider.response("sess-1", [{"role": "system", "content": "..."}]))
         self.assertEqual(out, [f"{textUtils.FALLBACK_EMOJI} (empty turn)"])
         self.assertEqual(client.prompts, [], "PiClient must not be called for empty dialogue")
+
+
+class TestLatestUtteranceWins(unittest.TestCase):
+    """#105: a turn queued behind the turn lock is dropped when the same
+    session said something newer while it waited."""
+
+    def _run(self, texts_by_session):
+        class GatedClient(FakeClient):
+            def __init__(self):
+                super().__init__()
+                self.first_started = threading.Event()
+                self.release_first = threading.Event()
+
+            def iter_turn_text(self, prompt: str) -> Iterator[str]:
+                self.prompts.append(prompt)
+                if len(self.prompts) == 1:
+                    self.first_started.set()
+                    self.release_first.wait(timeout=2)
+                yield "😊 ok"
+
+        os.environ["DOTTY_KID_MODE"] = "false"
+        client = GatedClient()
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        outputs: dict[str, list[str]] = {}
+
+        def run(session, text):
+            outputs[text] = list(provider.response(
+                session, [{"role": "user", "content": text}],
+            ))
+
+        threads = []
+        for i, (session, text) in enumerate(texts_by_session):
+            t = threading.Thread(target=run, args=(session, text))
+            t.start()
+            threads.append(t)
+            if i == 0:
+                self.assertTrue(client.first_started.wait(timeout=1))
+            time.sleep(0.05)  # let it claim its place in the queue
+        client.release_first.set()
+        for t in threads:
+            t.join(timeout=2)
+        return client, outputs
+
+    def test_older_queued_turn_is_skipped(self):
+        client, outputs = self._run(
+            [("s", "running"), ("s", "stale"), ("s", "latest")])
+        self.assertEqual(outputs["stale"], [])
+        self.assertTrue(outputs["latest"])
+        self.assertEqual(len(client.prompts), 2)
+        self.assertNotIn("stale", "".join(client.prompts))
+
+    def test_other_sessions_are_not_affected(self):
+        client, outputs = self._run([("a", "running"), ("a", "queued-a"), ("b", "queued-b")])
+        self.assertTrue(outputs["queued-a"])
+        self.assertTrue(outputs["queued-b"])
+        self.assertEqual(len(client.prompts), 3)
+
+    def test_empty_turn_does_not_supersede_a_real_one(self):
+        client, outputs = self._run([("s", "running"), ("s", "real"), ("s", "   ")])
+        self.assertTrue(outputs["real"])
+        self.assertEqual(len(client.prompts), 2)
+
+    def test_sequential_turns_all_run(self):
+        os.environ["DOTTY_KID_MODE"] = "false"
+        client = FakeClient()
+        client.script_turn(["😊 a"])
+        client.script_turn(["😊 b"])
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        self.assertTrue(list(provider.response("s", [{"role": "user", "content": "a"}])))
+        self.assertTrue(list(provider.response("s", [{"role": "user", "content": "b"}])))
+        self.assertEqual(provider._latest_turn, {})
+
+
+class TestPrewarm(unittest.TestCase):
+    """#181: wake the voice model when a device connects."""
+
+    def _provider(self, config=None):
+        return LLMProvider(config or {}, client=FakeClient())  # type: ignore[arg-type]
+
+    def test_posts_a_one_token_completion_to_the_configured_url(self):
+        calls = []
+        done = threading.Event()
+
+        class Resp:
+            def close(self):
+                done.set()
+
+        def fake_urlopen(req, timeout=None):
+            calls.append((req.full_url, json.loads(req.data), timeout))
+            return Resp()
+
+        provider = self._provider({"prewarm_url": "http://llm.test/v1/chat/completions"})
+        with patch("pi_voice.pi_voice.urllib.request.urlopen", fake_urlopen):
+            self.assertTrue(provider.prewarm())
+            self.assertTrue(done.wait(timeout=2))
+        url, body, _ = calls[0]
+        self.assertEqual(url, "http://llm.test/v1/chat/completions")
+        self.assertEqual(body["model"], "qwen3.5:4b")
+        self.assertEqual(body["max_tokens"], 1)
+
+    def test_rate_limited(self):
+        provider = self._provider({"prewarm_url": "http://llm.test/v1/chat/completions"})
+        with patch("pi_voice.pi_voice.urllib.request.urlopen"):
+            self.assertTrue(provider.prewarm())
+            self.assertFalse(provider.prewarm())
+
+    def test_off_without_url_or_when_disabled(self):
+        with patch.dict(os.environ, {"BRIDGE_URL": "", "VISION_BRIDGE_URL": "",
+                                     "DOTTY_PREWARM_URL": ""}):
+            self.assertFalse(self._provider().prewarm())
+        off = self._provider({"prewarm": False, "prewarm_url": "http://x/v1"})
+        self.assertFalse(off.prewarm())
+
+    def test_url_derived_from_sibling_host(self):
+        with patch.dict(os.environ, {"VISION_BRIDGE_URL": "http://10.0.0.5:8090",
+                                     "BRIDGE_URL": "", "DOTTY_PREWARM_URL": ""}):
+            self.assertEqual(
+                self._provider()._prewarm_url,
+                "http://10.0.0.5:8080/v1/chat/completions",
+            )
+
+    def test_failure_never_raises(self):
+        provider = self._provider({"prewarm_url": "http://llm.test/x"})
+        with patch("pi_voice.pi_voice.urllib.request.urlopen", side_effect=OSError("down")):
+            self.assertTrue(provider.prewarm())
+            time.sleep(0.1)
 
 
 class TestNewSessionLifecycle(unittest.TestCase):
