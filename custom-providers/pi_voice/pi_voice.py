@@ -211,6 +211,10 @@ def _last_user_text(dialogue: list[dict]) -> str:
     return ""
 
 
+def _normalise_user_text_for_claim(dialogue: list[dict]) -> str:
+    return split_room_view(_last_user_text(dialogue))[1].strip()
+
+
 def _normalise_user_content(content: object) -> str:
     """Extract xiaozhi's user text without leaking its JSON envelope to pi.
 
@@ -341,6 +345,12 @@ class LLMProvider(LLMProviderBase):
         # agent_end transaction exclusive; per-write locking cannot prevent one
         # caller from consuming another caller's response frames.
         self._turn_lock = threading.Lock()
+        # Latest utterance wins (#105): a turn that waited behind the lock is
+        # dropped if the same session said something newer meanwhile, instead
+        # of being answered late and out of date.
+        self._turn_seq_lock = threading.Lock()
+        self._turn_seq = 0
+        self._latest_turn: dict[object, int] = {}
         self._first_turn = True
         msg = f"PiVoiceLLM ready (container={self._container} kid_mode={self._kid_mode})"
         try:
@@ -351,8 +361,40 @@ class LLMProvider(LLMProviderBase):
     # xiaozhi-server's voice loop calls this as a sync generator.
     # Each yielded string becomes a TTS chunk.
     def response(self, session_id, dialogue, **kwargs) -> Iterator[str]:
-        with self._turn_lock:
-            yield from self._response_serialized(session_id, dialogue, **kwargs)
+        seq = self._claim_turn(session_id, dialogue)
+        try:
+            with self._turn_lock:
+                if seq is not None and self._is_superseded(session_id, seq):
+                    logger.info(
+                        "PiVoiceLLM: skipping queued turn; a newer utterance "
+                        "arrived while it waited (#105)"
+                    )
+                    return
+                yield from self._response_serialized(session_id, dialogue, **kwargs)
+        finally:
+            self._release_turn(session_id, seq)
+
+    def _claim_turn(self, session_id, dialogue) -> int | None:
+        """Number this turn before it waits for the lock. Turns with no user
+        words are not numbered: they must not supersede a real one."""
+        if not _normalise_user_text_for_claim(dialogue):
+            return None
+        with self._turn_seq_lock:
+            self._turn_seq += 1
+            self._latest_turn[session_id] = self._turn_seq
+            return self._turn_seq
+
+    def _is_superseded(self, session_id, seq: int) -> bool:
+        with self._turn_seq_lock:
+            return self._latest_turn.get(session_id, seq) != seq
+
+    def _release_turn(self, session_id, seq: int | None) -> None:
+        # Forget the session once its newest turn is done so the map cannot grow.
+        if seq is None:
+            return
+        with self._turn_seq_lock:
+            if self._latest_turn.get(session_id) == seq:
+                del self._latest_turn[session_id]
 
     def _response_serialized(self, session_id, dialogue, **kwargs) -> Iterator[str]:
         """Run one complete Pi RPC transaction while ``_turn_lock`` is held."""

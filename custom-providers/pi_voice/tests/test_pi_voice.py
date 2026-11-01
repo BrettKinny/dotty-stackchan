@@ -213,6 +213,77 @@ class TestEmptyTurn(unittest.TestCase):
         self.assertEqual(client.prompts, [], "PiClient must not be called for empty dialogue")
 
 
+class TestLatestUtteranceWins(unittest.TestCase):
+    """#105: a turn queued behind the turn lock is dropped when the same
+    session said something newer while it waited."""
+
+    def _run(self, texts_by_session):
+        class GatedClient(FakeClient):
+            def __init__(self):
+                super().__init__()
+                self.first_started = threading.Event()
+                self.release_first = threading.Event()
+
+            def iter_turn_text(self, prompt: str) -> Iterator[str]:
+                self.prompts.append(prompt)
+                if len(self.prompts) == 1:
+                    self.first_started.set()
+                    self.release_first.wait(timeout=2)
+                yield "😊 ok"
+
+        os.environ["DOTTY_KID_MODE"] = "false"
+        client = GatedClient()
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        outputs: dict[str, list[str]] = {}
+
+        def run(session, text):
+            outputs[text] = list(provider.response(
+                session, [{"role": "user", "content": text}],
+            ))
+
+        threads = []
+        for i, (session, text) in enumerate(texts_by_session):
+            t = threading.Thread(target=run, args=(session, text))
+            t.start()
+            threads.append(t)
+            if i == 0:
+                self.assertTrue(client.first_started.wait(timeout=1))
+            time.sleep(0.05)  # let it claim its place in the queue
+        client.release_first.set()
+        for t in threads:
+            t.join(timeout=2)
+        return client, outputs
+
+    def test_older_queued_turn_is_skipped(self):
+        client, outputs = self._run(
+            [("s", "running"), ("s", "stale"), ("s", "latest")])
+        self.assertEqual(outputs["stale"], [])
+        self.assertTrue(outputs["latest"])
+        self.assertEqual(len(client.prompts), 2)
+        self.assertNotIn("stale", "".join(client.prompts))
+
+    def test_other_sessions_are_not_affected(self):
+        client, outputs = self._run([("a", "running"), ("a", "queued-a"), ("b", "queued-b")])
+        self.assertTrue(outputs["queued-a"])
+        self.assertTrue(outputs["queued-b"])
+        self.assertEqual(len(client.prompts), 3)
+
+    def test_empty_turn_does_not_supersede_a_real_one(self):
+        client, outputs = self._run([("s", "running"), ("s", "real"), ("s", "   ")])
+        self.assertTrue(outputs["real"])
+        self.assertEqual(len(client.prompts), 2)
+
+    def test_sequential_turns_all_run(self):
+        os.environ["DOTTY_KID_MODE"] = "false"
+        client = FakeClient()
+        client.script_turn(["😊 a"])
+        client.script_turn(["😊 b"])
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        self.assertTrue(list(provider.response("s", [{"role": "user", "content": "a"}])))
+        self.assertTrue(list(provider.response("s", [{"role": "user", "content": "b"}])))
+        self.assertEqual(provider._latest_turn, {})
+
+
 class TestNewSessionLifecycle(unittest.TestCase):
     def test_first_turn_skips_new_session(self):
         os.environ["DOTTY_KID_MODE"] = "true"
