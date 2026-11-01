@@ -32,6 +32,94 @@ def _no_speech_threshold(config: dict) -> float:
     return value if 0.0 <= value <= 1.0 else DEFAULT_NO_SPEECH_THRESHOLD
 
 
+# #105: room noise (TV, podcast, a busy kitchen) keeps a session open and feeds
+# Whisper fake turns. The maintainer's direction is to close the session after
+# a run of noise-like turns and let touch wake it. Level alone cannot tell this
+# noise from a quiet child (rms 0.002-0.014 vs 0.007-0.017), so the signals are
+# Whisper's own confidence. Real close-talk on the robot scored no_speech <=
+# 0.32 and avg_logprob >= -0.9; the room-noise run scored no_speech up to 0.59.
+DEFAULT_NOISE_TURN_LIMIT = 3  # 0 disables; Brett to confirm
+DEFAULT_NOISE_NO_SPEECH = 0.45
+DEFAULT_NOISE_LOGPROB = -1.0  # Whisper's own "failed decode" line
+# Noise turns further apart than this are separate episodes, not a run.
+NOISE_RUN_WINDOW_S = 90.0
+
+
+def _float_option(config: dict, key: str, default: float) -> float:
+    try:
+        return float(config.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _int_option(config: dict, key: str, default: int) -> int:
+    try:
+        return max(0, int(config.get(key, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _is_noise_like(content: str, no_speech: float, avg_logprob: float,
+                   no_speech_cutoff: float, logprob_cutoff: float) -> bool:
+    """A turn that is probably not someone talking to Dotty.
+
+    An empty transcript counts: VAD opened on sound that Whisper (or the
+    no-speech gate) would not turn into words. Otherwise the transcript needs
+    to be a weak decode or likely non-speech."""
+    if not content.strip():
+        return True
+    return no_speech >= no_speech_cutoff or avg_logprob < logprob_cutoff
+
+
+class NoiseRunTracker:
+    """Counts consecutive noise-like turns per session."""
+
+    def __init__(self, limit: int, window_s: float = NOISE_RUN_WINDOW_S):
+        self.limit = limit
+        self.window_s = window_s
+        self._runs: dict = {}  # session_id -> (count, last_time)
+
+    def record(self, session_id, noise_like: bool, now: float) -> bool:
+        """Note one turn. True when the run has reached the limit (the run is
+        then reset so the caller closes the session once)."""
+        if self.limit <= 0:
+            return False
+        if not noise_like:
+            self._runs.pop(session_id, None)
+            return False
+        count, last = self._runs.get(session_id, (0, now))
+        if now - last > self.window_s:
+            count = 0
+        count += 1
+        if count >= self.limit:
+            self._runs.pop(session_id, None)
+            return True
+        self._runs[session_id] = (count, now)
+        # Forget long-dead sessions so the map cannot grow without bound.
+        if len(self._runs) > 64:
+            self._runs = {k: v for k, v in self._runs.items()
+                          if now - v[1] <= self.window_s}
+        return False
+
+
+async def _close_session_for_noise(session_id, count: int) -> None:
+    """End the device session (touch/wake word reopens it). Never raises."""
+    try:
+        from core.portal_bridge import active_connections
+        from core.utils import device_command
+
+        conn = next((c for c in list(active_connections.values())
+                     if getattr(c, "session_id", None) == session_id), None)
+        if conn is None:
+            logger.bind(tag=TAG).warning(
+                f"ASR-NOISE-CLOSE no live connection for session {session_id!r}")
+            return
+        await device_command.end_session(
+            conn, reason=f"{count} noise-like turns in a row (#105)")
+    except Exception as e:
+        logger.bind(tag=TAG).warning(f"ASR-NOISE-CLOSE failed (non-fatal): {e}")
+
+
 def _hotwords(config: dict) -> Optional[str]:
     """Decoder bias for rare words such as the wake-name (#164). None = off."""
     value = config.get("hotwords")
@@ -90,6 +178,12 @@ class ASRProvider(ASRProviderBase):
         self.initial_prompt = config.get("initial_prompt", None)
         self.hotwords = _hotwords(config)
         self.no_speech_threshold = _no_speech_threshold(config)
+        self.noise_no_speech = _float_option(
+            config, "noise_no_speech", DEFAULT_NOISE_NO_SPEECH)
+        self.noise_logprob = _float_option(
+            config, "noise_avg_logprob", DEFAULT_NOISE_LOGPROB)
+        self.noise_runs = NoiseRunTracker(
+            _int_option(config, "noise_turn_limit", DEFAULT_NOISE_TURN_LIMIT))
         self.delete_audio_file = delete_audio_file
 
         if self.output_dir:
@@ -213,6 +307,10 @@ class ASRProvider(ASRProviderBase):
                 except Exception as _e:
                     logger.bind(tag=TAG).warning(f"ASR-METRICS log failed (non-fatal): {_e}")
 
+                if self._note_turn_for_noise(session_id, content, segments):
+                    # The run's last noise turn is not answered either.
+                    text = {"content": ""}
+
                 return text, artifacts.file_path
 
             except OSError as e:
@@ -232,6 +330,29 @@ class ASRProvider(ASRProviderBase):
                 return "", None
 
         return "", None
+
+    def _note_turn_for_noise(self, session_id, content: str, segments) -> bool:
+        """#105: close the session after a run of noise-like turns. Never
+        raises: this must not cost a real turn. True when the session is
+        being closed."""
+        try:
+            if segments:
+                nsp = sum(s.no_speech_prob for s in segments) / len(segments)
+                alp = sum(s.avg_logprob for s in segments) / len(segments)
+            else:
+                nsp, alp = 1.0, 0.0
+            noise = _is_noise_like(
+                content, nsp, alp, self.noise_no_speech, self.noise_logprob)
+            if self.noise_runs.record(session_id, noise, time.monotonic()):
+                logger.bind(tag=TAG).info(
+                    f"ASR-NOISE-CLOSE {self.noise_runs.limit} noise-like turns "
+                    f"in a row; ending session {session_id!r}")
+                asyncio.get_running_loop().create_task(
+                    _close_session_for_noise(session_id, self.noise_runs.limit))
+                return True
+        except Exception as e:
+            logger.bind(tag=TAG).warning(f"noise tracking failed (non-fatal): {e}")
+        return False
 
     def _transcribe_blocking(self, audio: np.ndarray):
         """Run inside asyncio.to_thread. Eagerly consume the segment iterator
