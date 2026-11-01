@@ -253,3 +253,13 @@ def test_sleep_hold_is_judged_before_cleanup_wakes_robot(tmp_path, monkeypatch, 
     assert result["failure"] == failure
     assert result["interaction"] == ("FAIL" if woke else "PASS")
     assert result["state_after_capture"] == ("idle" if woke else "sleep")
+
+
+@pytest.mark.parametrize("case_id, wanted", [
+    ("V01-identity", True), ("W01-cold-wake", True),
+    # 2026-10-29: the bias turned a one-word "19" into "Dotty" (V03) and
+    # is suspected in V02's "banana" misreads.
+    ("V03-arithmetic", False), ("V02-repeat", False), ("S05-sleep-ignores-voice", False),
+])
+def test_name_hotword_only_when_reply_expects_the_name(case_id, wanted):
+    assert runner.wants_name_hotword(CATALOGUE[case_id]) is wanted

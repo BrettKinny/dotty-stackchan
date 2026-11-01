@@ -139,6 +139,29 @@ class TestCallTool(unittest.TestCase):
         asyncio.run(go())
 
 
+class TestValidateMcpCall(unittest.TestCase):
+    def test_allowed_and_refused_calls(self):
+        v = dc.validate_mcp_call
+        self.assertIsNone(v("self.get_device_status", {}))
+        self.assertIsNone(v("self.audio_speaker.set_volume", {"volume": 55}))
+        # Out-of-range is passed on: the device's own rejection is what we observe.
+        self.assertIsNone(v("self.robot.set_led_multi", {"index": 6, "red": 1, "green": 1, "blue": 1}))
+        self.assertIsNone(v("self.robot.create_reminder", {"duration_seconds": 120, "message": "x"}))
+        for tool, args in [
+            ("self.reboot", {}), ("self.robot.set_state", {"state": "idle"}),
+            ("self.audio_speaker.set_volume", {}),
+            ("self.audio_speaker.set_volume", {"volume": True}),
+            ("self.audio_speaker.set_volume", {"volume": "5"}),
+            ("self.screen.set_theme", {"theme": "dark", "x": 1}),
+            ("self.robot.create_reminder", {"duration_seconds": 59}),
+            ("self.robot.create_reminder", {"duration_seconds": 120, "repeat": True}),
+            ("self.robot.create_reminder", {"message": "m" * 81}),
+            ("self.robot.stop_reminder", {}),
+            ("self.get_device_status", []),
+        ]:
+            self.assertIsNotNone(v(tool, args), (tool, args))
+
+
 class TestHttpServerWiring(unittest.TestCase):
     """The admin MCP handlers route through the seam: monotonic ids on
     the wire, shared conn resolution, fire-and-forget HTTP semantics."""
@@ -218,6 +241,27 @@ class TestHttpServerWiring(unittest.TestCase):
                 [f["payload"]["params"]["arguments"]["state"] for f in frames],
                 ["sleep", "idle"],
             )
+        asyncio.run(go())
+
+    def test_mcp_call_sends_allowed_tool_and_returns_correlation_ids(self):
+        async def go():
+            conn = _FakeConn()
+            conn.headers = {"device-id": "dev-1"}
+            conn.session_id = "sess-1"
+            type(self).active["dev-1"] = conn
+            srv = self._server()
+            ok = await srv._dotty_mcp_call(self._request(
+                {"tool": "self.screen.set_theme", "arguments": {"theme": "dark"}}))
+            body = json.loads(ok.text)
+            self.assertEqual((ok.status, body["request_id"], body["session_id"]), (200, 1, "sess-1"))
+            frame = json.loads(conn.websocket.sent[0])
+            self.assertEqual(frame["payload"]["params"],
+                             {"name": "self.screen.set_theme", "arguments": {"theme": "dark"}})
+            for bad in ({"tool": "self.reboot", "arguments": {}},
+                        {"tool": "self.robot.create_reminder", "arguments": {"duration_seconds": 5}}):
+                refused = await srv._dotty_mcp_call(self._request(bad))
+                self.assertEqual(refused.status, 400)
+            self.assertEqual(len(conn.websocket.sent), 1)  # refusals send nothing
         asyncio.run(go())
 
     def test_resolve_conn_falls_back_to_first_device_and_503s_when_empty(self):

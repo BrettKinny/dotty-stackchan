@@ -412,7 +412,8 @@ def test_response_vad_threshold_does_not_change_prompt_transcription(tmp_path, m
     response = transcriptions["response"]
     assert float(response[response.index("--vad-threshold") + 1]) == expected
     assert "--vad-threshold" not in transcriptions["prompt-heard"]
-    assert response[response.index("--hotwords") + 1] == "Dotty"
+    # The expected reply ("nineteen") has no name: no name bias (2026-10-29).
+    assert "--hotwords" not in response
     assert "--hotwords" not in transcriptions["prompt-heard"]
     assert result["response_vad_threshold"] == expected
     assert result["transcription_analysis"]["response"]["vad_parameters"] == {"threshold": expected}
