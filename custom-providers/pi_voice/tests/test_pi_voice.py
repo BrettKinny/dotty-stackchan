@@ -340,6 +340,27 @@ class TestPrewarm(unittest.TestCase):
             time.sleep(0.1)
 
 
+class TestShortJokeHint(unittest.TestCase):
+    """#191 (held until robot-ops' baseline shows the drift is still there)."""
+
+    def _prompt(self, text):
+        os.environ["DOTTY_KID_MODE"] = "true"
+        client = FakeClient()
+        client.script_turn(["😊 ha"])
+        provider = LLMProvider({}, client=client)  # type: ignore[arg-type]
+        list(provider.response("s", [{"role": "user", "content": text}]))
+        return client.prompts[0]
+
+    def test_joke_ask_gets_the_one_line_reminder(self):
+        p = self._prompt("Tell me one short joke about being a very small robot.")
+        self.assertTrue(p.startswith("Tell me one short joke"))
+        self.assertIn("not a story", p)
+
+    def test_story_and_other_asks_are_untouched(self):
+        self.assertEqual(self._prompt("Tell me a story about a joke"), "Tell me a story about a joke")
+        self.assertEqual(self._prompt("What is your name?"), "What is your name?")
+
+
 class TestNewSessionLifecycle(unittest.TestCase):
     def test_first_turn_skips_new_session(self):
         os.environ["DOTTY_KID_MODE"] = "true"

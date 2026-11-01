@@ -36,6 +36,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 import urllib.request
@@ -317,6 +318,22 @@ _CAMERA_DENIED = "(Camera access is disabled in Kid Mode)"
 _THINKING_PREAMBLE = ProviderText("\U0001F914 Let me think hard about that. ")
 
 
+# #191: "Tell me one short joke" came back as a 53-65 word story in about one
+# kid-mode turn in three; the standing length rule permits 6 sentences for
+# "open-ended asks" and the 4B reads a joke as one. A one-line reminder next to
+# the words (not the long rules, which stopped tool calls when appended) names
+# the shape wanted.
+_JOKE_ASK_RE = re.compile(r"\bjokes?\b|\bpun\b|\bknock[- ]knock\b", re.IGNORECASE)
+_STORY_ASK_RE = re.compile(r"\bstor(?:y|ies)\b", re.IGNORECASE)
+_SHORT_JOKE_HINT = "\n\n(Reply with just the joke: one or two sentences, not a story.)"
+
+
+def _short_ask_hint(user_text: str) -> str:
+    if _JOKE_ASK_RE.search(user_text) and not _STORY_ASK_RE.search(user_text):
+        return _SHORT_JOKE_HINT
+    return ""
+
+
 def _turn_rules(kid_mode: bool) -> str:
     """Voice tool routing plus the shared textUtils.build_turn_suffix HARD
     CONSTRAINTS — emoji-prefix rule, English-only, length caps, kid-mode
@@ -582,7 +599,7 @@ class LLMProvider(LLMProviderBase):
             context = _CAMERA_CONTEXT.format(view=result)
         if room_view and intent is None:
             context = _ROOM_VIEW_CONTEXT.format(view=room_view)
-        prompt = user_text + context
+        prompt = user_text + context + _short_ask_hint(user_text)
 
         # Reset pi state between voice turns. First turn skips this —
         # the freshly-spawned process is already clean.
