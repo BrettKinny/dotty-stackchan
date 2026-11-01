@@ -140,3 +140,50 @@ def test_crop_must_be_a_portrait_source_region(case, crop):
         clips.export(session, "funny-1", name="bad-crop", start=9, end=14, crop=crop)
     assert commands == []
     assert not list((session / "clips").glob("*/bad-crop"))
+
+
+# --- rotated camera. AI-assisted: Claude. ---
+
+@pytest.mark.parametrize("degrees,expected", [(90, "transpose=1"), (270, "transpose=2"), (180, "hflip,vflip")])
+def test_rotate_turns_sideways_frames_upright_before_fitting(case, degrees, expected):
+    session, _folder, commands = case
+    destination = clips.export(session, "funny-1", name=f"rot{degrees}", start=9, end=14, rotate=degrees)
+    video_filter = commands[0][commands[0].index("-vf") + 1]
+    assert video_filter.startswith(expected + ",scale=1080:1920")
+    manifest = clips.load(destination / "manifest.json")
+    assert manifest["rotate_degrees"] == degrees
+    assert f"rotating source {degrees} degrees clockwise" in manifest["layout"]
+
+
+def test_rotate_then_crop_uses_rotated_coordinates(case):
+    session, _folder, commands = case
+    clips.export(session, "funny-1", name="rotcrop", start=9, end=14, rotate=90, crop="405:720:0:0")
+    assert commands[0][commands[0].index("-vf") + 1].startswith("transpose=1,crop=405:720:0:0,scale=")
+
+
+def test_invalid_rotation_creates_no_export(case):
+    session, _folder, commands = case
+    with pytest.raises(ValueError):
+        clips.export(session, "funny-1", name="badrot", start=9, end=14, rotate=45)
+    assert commands == []
+    assert not list((session / "clips").glob("*/badrot"))
+
+
+def test_rotated_synthetic_landscape_fills_portrait_frame(tmp_path):
+    import subprocess
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg missing")
+    folder = tmp_path / "cases" / "rot-1"
+    folder.mkdir(parents=True)
+    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=c=white:size=1920x1080:rate=10:duration=2",
+                    "-f", "lavfi", "-i", "sine=duration=2", "-shortest", "-pix_fmt", "yuv420p", str(folder / "raw.mp4")], check=True)
+    (folder / "result.json").write_text(json.dumps({"verdict": "PASS"}))
+    destination = clips.export(tmp_path, "rot-1", name="rot", rotate=90)
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                          "-of", "json", str(destination / "clean.mp4")], capture_output=True, text=True, check=True)
+    stream = json.loads(out.stdout)["streams"][0]
+    assert (stream["width"], stream["height"]) == (1080, 1920)
+    # 16:9 rotated is 9:16, so nothing is letterboxed: the corner pixel is picture, not black padding.
+    frame = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-i", str(destination / "clean.mp4"), "-frames:v", "1",
+                            "-vf", "crop=16:16:0:0,format=gray", "-f", "rawvideo", "-"], capture_output=True, check=True).stdout
+    assert frame[0] > 16

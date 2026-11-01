@@ -135,8 +135,11 @@ def crop_region(value):
     return value
 
 
+ROTATE_FILTERS = {90: "transpose=1", 180: "hflip,vflip", 270: "transpose=2"}
+
+
 def export(session, case_id, *, start=0, end=None, name=None, title=None, reviewed=(),
-           include_captions=True, crop=None):
+           include_captions=True, crop=None, rotate=0):
     session = session.resolve(strict=True)
     case = inside(session / "cases" / identifier(case_id), session / "cases")
     source = inside(case / "raw.mp4", session)
@@ -148,6 +151,8 @@ def export(session, case_id, *, start=0, end=None, name=None, title=None, review
         raise ValueError("clip interval must be within source duration")
     if crop is not None:
         crop = crop_region(crop)
+    if rotate not in (0, *ROTATE_FILTERS):
+        raise ValueError("rotate must be 0, 90, 180 or 270 degrees clockwise")
     acknowledged = set(reviewed)
     if acknowledged - GATES:
         raise ValueError("unknown review gate")
@@ -168,13 +173,16 @@ def export(session, case_id, *, start=0, end=None, name=None, title=None, review
                          "result_file": str(result_path.relative_to(session)),
                          "sha256": file_digest(source), "start_seconds": start, "end_seconds": end,
                          "case_started": result.get("started"), "duration_seconds": duration},
-              "layout": (f"1080x1920 cropped from source region {crop}" if crop
-                         else "1080x1920 fitted; entire source frame retained"),
+              "layout": ((f"1080x1920 cropped from source region {crop}" if crop
+                          else "1080x1920 fitted; entire source frame retained")
+                         + (f" (after rotating source {rotate} degrees clockwise)" if rotate else "")),
+              "rotate_degrees": rotate,
               "audio": "original audio with loudness normalization; no replacement soundtrack",
               "captions": {"state": "absent", "source": "local response.json transcription"}}
     try:
         execute(["ffmpeg", "-nostdin", "-n", "-v", "error", "-ss", str(start), "-i", str(source),
                  "-t", str(end - start), "-map", "0:v:0", "-map", "0:a:0", "-vf",
+                 (ROTATE_FILTERS[rotate] + "," if rotate else "") +
                  (f"crop={crop},scale=1080:1920:flags=lanczos,setsar=1" if crop else
                   "scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2,"
                   "pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1"),
@@ -225,6 +233,9 @@ def main():
     p.add_argument("--title")
     p.add_argument("--reviewed", choices=sorted(GATES), action="append", default=[])
     p.add_argument("--no-captions", action="store_true")
+    p.add_argument("--rotate", type=int, default=0, choices=[0, 90, 180, 270],
+                   help="rotate source clockwise before crop/fit, for a physically turned camera "
+                        "(crop coordinates then refer to the rotated frame)")
     p.add_argument("--crop", help="W:H:X:Y portrait source region to fill the 9:16 frame "
                                   "(default: fit the whole frame with padding)")
     p = sub.add_parser("index")
@@ -235,7 +246,7 @@ def main():
     else:
         print(export(args.session, args.case_id, start=args.start, end=args.end, name=args.name,
                      title=args.title, reviewed=args.reviewed, include_captions=not args.no_captions,
-                     crop=args.crop))
+                     crop=args.crop, rotate=args.rotate))
 
 
 if __name__ == "__main__":
