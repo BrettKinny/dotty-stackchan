@@ -441,6 +441,39 @@ class SimpleHttpServer:
             "question": question,
         })
 
+    async def _dotty_mcp_call(self, request: "web.Request") -> "web.Response":
+        """POST /xiaozhi/admin/mcp-call
+        Body: {"device_id": "<optional>", "tool": "self.x.y", "arguments": {...}}
+
+        Allow-listed firmware MCP tools that have no dedicated admin route
+        (device status, volume, brightness, theme, LEDs, reminders). Fire and
+        forget like the other routes: the response carries `request_id` and
+        `session_id`, and the device's reply is logged by xiaozhi's MCP
+        handler as an `id`-matched result frame that scripts/dotty_mcp_check.py
+        reads back. See device_command.MCP_CALL_TOOLS for the allow-list.
+        """
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        tool = data.get("tool")
+        arguments = data.get("arguments", {})
+        problem = _dotty_device_command.validate_mcp_call(tool, arguments)
+        if problem:
+            return web.json_response({"error": problem}, status=400)
+        device_id = (data.get("device_id") or "").strip()
+        conn, err = _dotty_resolve_conn(device_id)
+        if err is not None:
+            return err
+        request_id = await _dotty_device_command.call_tool(conn, tool, arguments)
+        return web.json_response({
+            "ok": True,
+            "device_id": _dotty_conn_device_id(conn, device_id),
+            "tool": tool,
+            "request_id": request_id,
+            "session_id": getattr(conn, "session_id", ""),
+        })
+
     async def _dotty_list_songs(self, request: "web.Request") -> "web.Response":
         """GET /xiaozhi/admin/songs — list audio files mounted at
         /opt/xiaozhi-esp32-server/config/assets/songs/.
@@ -820,6 +853,9 @@ class SimpleHttpServer:
                         web.post(
                             "/xiaozhi/admin/play-asset",
                             self._dotty_play_asset,
+                        ),
+                        web.post(
+                            "/xiaozhi/admin/mcp-call", self._dotty_mcp_call
                         ),
                         web.get(
                             "/xiaozhi/admin/songs",

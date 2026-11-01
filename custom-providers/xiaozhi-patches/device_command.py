@@ -83,6 +83,69 @@ async def send_serialized(conn, message) -> None:
         await conn.websocket.send(message)
 
 
+# ---------------------------------------------------------------------------
+# Allow-list for the generic /xiaozhi/admin/mcp-call route (coverage checks).
+#
+# Only the ordinary firmware tools that have no dedicated admin route. Never
+# reboot/upgrade/image tools. The firmware re-validates ranges from its own
+# input schema; the server-side limits below are the safety floor for an
+# unattended caller (a reminder shorter than 60 s or a repeating one would
+# leave a sticky popup nobody can dismiss).
+# ---------------------------------------------------------------------------
+
+MCP_CALL_TOOLS = {
+    "self.get_device_status": {},
+    "self.robot.get_head_angles": {},
+    "self.robot.get_reminders": {},
+    "self.audio_speaker.set_volume": {"volume": int},
+    "self.screen.set_brightness": {"brightness": int},
+    "self.screen.set_theme": {"theme": str},
+    "self.robot.set_led_color": {"red": int, "green": int, "blue": int},
+    "self.robot.set_led_multi": {"index": int, "red": int, "green": int, "blue": int},
+    "self.robot.create_reminder": {"duration_seconds": int, "message": str, "repeat": bool},
+    "self.robot.stop_reminder": {"id": int},
+}
+_MCP_CALL_REQUIRED = {
+    "self.audio_speaker.set_volume": ("volume",),
+    "self.screen.set_brightness": ("brightness",),
+    "self.screen.set_theme": ("theme",),
+    "self.robot.stop_reminder": ("id",),
+}
+MIN_REMINDER_SECONDS = 60
+MAX_REMINDER_MESSAGE = 80
+
+
+def validate_mcp_call(tool, arguments):
+    """Return None if `tool(arguments)` may be sent, else an error string.
+
+    Types are exact (a bool is not an int). Out-of-range values for the
+    firmware's own bounds are deliberately passed through so the device's
+    rejection can be observed; only the unattended-safety floors are enforced.
+    """
+    spec = MCP_CALL_TOOLS.get(tool)
+    if spec is None:
+        return f"tool not allowed: {tool!r}"
+    if not isinstance(arguments, dict):
+        return "arguments must be an object"
+    for key, value in arguments.items():
+        want = spec.get(key)
+        if want is None:
+            return f"unknown argument {key!r} for {tool}"
+        if type(value) is not want:
+            return f"argument {key!r} must be {want.__name__}"
+    for key in _MCP_CALL_REQUIRED.get(tool, ()):
+        if key not in arguments:
+            return f"argument {key!r} required for {tool}"
+    if tool == "self.robot.create_reminder":
+        if arguments.get("duration_seconds", 60) < MIN_REMINDER_SECONDS:
+            return f"reminder must be at least {MIN_REMINDER_SECONDS} s"
+        if arguments.get("repeat", False):
+            return "repeating reminders are not allowed"
+        if len(arguments.get("message", "")) > MAX_REMINDER_MESSAGE:
+            return "reminder message too long"
+    return None
+
+
 async def call_tool(conn, tool: str, arguments: dict) -> int:
     """Build + send one MCP tools/call. Returns the request id.
 
