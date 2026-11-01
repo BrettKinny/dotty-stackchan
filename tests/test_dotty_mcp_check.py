@@ -28,7 +28,9 @@ def frame(request_id, text, error=False):
 
 
 class FakeRobot:
-    def __init__(self, tools=None, refuse_theme=True, drop_reminder_stop=False):
+    def __init__(self, tools=None, refuse_theme=True, drop_reminder_stop=False,
+                 create_reply="json", fail_next_list=False):
+        self.create_reply, self.fail_next_list = create_reply, fail_next_list
         self.volume, self.brightness, self.theme, self.yaw = 40, 60, "dark", 0
         self.reminders, self.next_id, self.request, self.lines = {}, 7, 0, []
         self.tools = tools if tools is not None else sorted(mc.EXPECTED_TOOLS)
@@ -56,6 +58,8 @@ class FakeRobot:
         elif tool == "self.robot.create_reminder":
             self.reminders[self.next_id] = args["message"]
             self.next_id += 1
+            if self.create_reply == "prose":  # 2026-11-01: the real reply had no parseable id
+                return "Reminder created", False
             return json.dumps({"id": self.next_id - 1}), False
         elif tool == "self.robot.get_reminders":
             return json.dumps([{"id": i, "message": m} for i, m in self.reminders.items()]), False
@@ -72,6 +76,9 @@ class FakeRemote:
         if route == "set-head-angles":
             self.robot.yaw = body["yaw"]
             return {"status": 200, "body": {"ok": True, **body}, "token_configured": True}
+        if body["tool"] == "self.robot.get_reminders" and self.robot.fail_next_list and self.robot.reminders:
+            self.robot.fail_next_list = False
+            raise RuntimeError("connection lost mid-check")
         self.robot.request += 1
         text, error = self.robot.reply(body["tool"], body["arguments"])
         self.robot.lines.append(frame(self.robot.request, text, error))
@@ -129,3 +136,26 @@ def test_parsers_tolerate_noise():
     assert mc.parse_mcp_frames("noise\nx收到mcp消息：{not json\n") == []
     assert mc.reminder_ids('[{"id": 3}, {"id": 4}]') == {3, 4}
     assert mc.reminder_ids("reminder id: 12") == {12}
+
+
+def test_reminder_is_stopped_even_when_the_create_reply_has_no_id():
+    # 2026-11-01 22:26: the id was not parsed, stop was never sent, and the
+    # popup covered the face for two hours.
+    robot = FakeRobot(create_reply="prose")
+    by, checks = rows(robot)
+    assert robot.reminders == {}
+    assert by["M13/M14/M15"]["status"] == "PASS", checks.table()
+
+
+def test_reminder_is_stopped_when_the_check_dies_partway():
+    robot = FakeRobot(fail_next_list=True)
+    remote = FakeRemote(robot)
+    by = {r["check"].split()[0]: r for r in mc.run_checks(remote, "robot").rows}
+    assert robot.reminders == {}  # the sweep ran from the finally block
+    assert by["M13/M14/M15"]["status"] == "FAIL"
+
+
+def test_a_reminder_that_cannot_be_stopped_is_reported_loudly():
+    by, _ = rows(FakeRobot(drop_reminder_stop=True))
+    row = by["M13/M14/M15"]
+    assert row["status"] == "FAIL" and "dismiss it by hand" in row["detail"]

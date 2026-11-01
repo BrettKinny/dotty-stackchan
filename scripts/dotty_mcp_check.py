@@ -33,7 +33,8 @@ EXPECTED_TOOLS = {
     "self.robot.create_reminder", "self.robot.get_reminders", "self.robot.stop_reminder",
 }
 MARKER = "收到mcp消息"
-REMINDER_SECONDS = 120
+REMINDER_SECONDS = 300  # long enough to stop it, even after a slow retry
+REMINDER_MARKER = "dotty-coverage-"
 
 
 def parse_mcp_frames(log_text):
@@ -144,6 +145,20 @@ def reminder_ids(text):
     return found
 
 
+def marked_reminder_ids(text, marker):
+    """Ids of reminders in a get_reminders reply whose message starts with `marker`."""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return set()
+    found = set()
+    for item in data if isinstance(data, list) else [data]:
+        if isinstance(item, dict) and isinstance(item.get("id"), int) \
+                and str(item.get("message", "")).startswith(marker):
+            found.add(item["id"])
+    return found
+
+
 class Caller:
     def __init__(self, remote, device):
         self.remote, self.device = remote, device
@@ -246,22 +261,47 @@ def run_checks(remote, device, skip_leds=False):
         checks.run("M08/M09 LED calls (right ring refused)", leds)
 
     def reminders():
-        message = f"dotty-coverage-{int(time.time())}"
-        ok, text = caller.call("self.robot.create_reminder", {
-            "duration_seconds": REMINDER_SECONDS, "message": message, "repeat": False})
-        if not ok:
-            return "FAIL", "create refused: " + text[:80]
-        created = reminder_ids(text)
+        # A popup that fires cannot be dismissed remotely (no tool), so nothing
+        # here may leave a reminder behind: ids come from get_reminders by our
+        # unique message (the create reply format is not relied on), and a
+        # finally block sweeps every reminder carrying our marker.
+        message = f"{REMINDER_MARKER}{int(time.time())}"
+        created, listed, stop_error = set(), False, None
+
+        def sweep():
+            ids = set(created)
+            try:
+                ids |= marked_reminder_ids(caller.call("self.robot.get_reminders")[1], REMINDER_MARKER)
+            except Exception:
+                pass
+            for rid in sorted(ids):
+                try:
+                    caller.call("self.robot.stop_reminder", {"id": rid})
+                except Exception as exc:
+                    nonlocal stop_error
+                    stop_error = exc
+            return ids
         try:
-            listed = reminder_ids(caller.call("self.robot.get_reminders")[1])
-            found = bool(created and created <= listed)
+            ok, text = caller.call("self.robot.create_reminder", {
+                "duration_seconds": REMINDER_SECONDS, "message": message, "repeat": False})
+        except BaseException:
+            sweep()  # the create may have reached the device before the reply was lost
+            raise
+        try:
+            if not ok:
+                return "FAIL", "create refused: " + text[:80]
+            created |= reminder_ids(text.replace(message, ""))
+            found = marked_reminder_ids(caller.call("self.robot.get_reminders")[1], REMINDER_MARKER)
+            created |= found
+            listed = bool(found)
         finally:
-            for rid in created:
-                caller.call("self.robot.stop_reminder", {"id": rid})
-        after = reminder_ids(caller.call("self.robot.get_reminders")[1])
-        gone = not (created & after)
-        return ("PASS" if created and found and gone else "FAIL"), (
-            f"created {sorted(created)}; listed={found}; removed after stop={gone}; not left to fire")
+            swept = sweep()
+        after = marked_reminder_ids(caller.call("self.robot.get_reminders")[1], REMINDER_MARKER)
+        gone = not after and stop_error is None
+        if after:
+            return "FAIL", f"reminder {sorted(after)} STILL ACTIVE and will fire in under {REMINDER_SECONDS}s: dismiss it by hand"
+        return ("PASS" if swept and listed and gone else "FAIL"), (
+            f"created {sorted(swept)}; listed={listed}; removed after stop={gone}; not left to fire")
     checks.run("M13/M14/M15 reminder create, list, stop", reminders)
     return checks
 
@@ -273,6 +313,8 @@ def main():
     parser.add_argument("--json", help="also write the rows to this file")
     parser.add_argument("--skip-leds", action="store_true")
     args = parser.parse_args()
+    import signal
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(SystemExit("terminated")))
     remote = Remote(args.host)
     device = args.device
     if not device:
