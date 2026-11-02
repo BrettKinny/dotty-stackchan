@@ -85,3 +85,42 @@ def test_adult_physical_capture_preserves_result(policy, monkeypatch):
     # requests is imported by the real function, but its client must not run.
     monkeypatch.setitem(__import__("sys").modules, "requests", types.SimpleNamespace(get=None))
     asyncio.run(run())
+
+
+def _room_conn():
+    return types.SimpleNamespace(logger=MagicMock(), headers={"device-id": "fixture"})
+
+
+def _capture_room(dispatch, conn=None):
+    with patch.object(_module, "_mcp_call_tool", dispatch):
+        asyncio.run(_module._capture_room_description_async(conn or _room_conn()))
+
+
+@pytest.fixture
+def room_view(policy):
+    policy.write_text("false")
+    _module._room_view_last_capture.clear()
+    yield policy
+    _module._room_view_last_capture.clear()
+
+
+def test_kid_mode_blocks_background_room_capture(room_view):
+    room_view.write_text("true")
+    dispatch = AsyncMock(side_effect=AssertionError("camera dispatch must not happen"))
+    _capture_room(dispatch)
+    dispatch.assert_not_awaited()
+
+
+def test_room_capture_cooldown_survives_reconnect(room_view):
+    dispatch = AsyncMock(side_effect=RuntimeError("stop after dispatch"))
+    _capture_room(dispatch, _room_conn())
+    _capture_room(dispatch, _room_conn())
+    assert dispatch.await_count == 1
+
+
+def test_room_capture_runs_again_after_cooldown(room_view):
+    dispatch = AsyncMock(side_effect=RuntimeError("stop after dispatch"))
+    _capture_room(dispatch)
+    _module._room_view_last_capture["fixture"] -= _module._ROOM_VIEW_MIN_INTERVAL_SEC
+    _capture_room(dispatch)
+    assert dispatch.await_count == 2

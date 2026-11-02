@@ -20,7 +20,7 @@ from ._fakes import FakeXiaozhi
 _UTC = ZoneInfo("UTC")
 
 
-def _consumer(td: Path, state, xiaozhi, *, jaccard=0.7) -> IdlePhotographer:
+def _consumer(td: Path, state, xiaozhi, *, jaccard=0.7, camera_denied=lambda: False) -> IdlePhotographer:
     return IdlePhotographer(
         state, xiaozhi,
         NdjsonWriter(td, "perception", _UTC),
@@ -29,6 +29,7 @@ def _consumer(td: Path, state, xiaozhi, *, jaccard=0.7) -> IdlePhotographer:
         result_wait_sec=0.05,
         notable_jaccard=jaccard,
         question="Describe what you see.",
+        camera_denied=camera_denied,
     )
 
 
@@ -189,3 +190,16 @@ def test_skips_when_take_photo_returns_false() -> None:
             await _drive(consumer, body)
 
     asyncio.run(go())
+
+
+def test_kid_mode_takes_no_photo():
+    async def scenario():
+        with tempfile.TemporaryDirectory() as td:
+            state = PerceptionState()
+            state.state["dev"] = {"current_state": "idle"}
+            xiaozhi = FakeXiaozhi()
+            consumer = _consumer(Path(td), state, xiaozhi, camera_denied=lambda: True)
+            await consumer._one_cycle()
+            assert xiaozhi.take_photo_calls == []
+
+    asyncio.run(scenario())

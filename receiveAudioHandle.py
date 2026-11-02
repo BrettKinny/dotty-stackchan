@@ -483,6 +483,13 @@ _ROOM_VIEW_VLM_QUESTION = "__ROOM_VIEW_V1__"
 # constant of the same name.
 _ROOM_VIEW_NO_PERSON = "no one in view"
 
+# dotty-behaviour's 120 s cooldown only runs after the robot has captured and
+# uploaded the frame, and its "no one in view" reply leaves the cache empty, so
+# every later face_detected captured again (about 270 an hour). Check here
+# first; the margin stops a capture landing just inside that window.
+_ROOM_VIEW_MIN_INTERVAL_SEC = 130.0
+_room_view_last_capture: dict[str, float] = {}
+
 
 async def _capture_room_description_async(
     conn: "ConnectionHandler",
@@ -496,7 +503,7 @@ async def _capture_room_description_async(
     a failure leaves the cache empty and the next voice turn proceeds
     without `[Room view]`.
     """
-    if not VISION_BRIDGE_URL:
+    if not VISION_BRIDGE_URL or _camera_access_denied():
         return
     device_id = "unknown"
     try:
@@ -508,6 +515,12 @@ async def _capture_room_description_async(
     # a second capture on top of an active one. Cleared in finally.
     if getattr(conn, "_room_description_in_flight", False):
         return
+    # Per device, not per conn: the robot reconnects within a session.
+    now = time.monotonic()
+    last_capture = _room_view_last_capture.get(device_id)
+    if last_capture is not None and now - last_capture < _ROOM_VIEW_MIN_INTERVAL_SEC:
+        return
+    _room_view_last_capture[device_id] = now
     conn._room_description_in_flight = True
     try:
         import requests
