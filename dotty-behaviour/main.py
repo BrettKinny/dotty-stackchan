@@ -237,6 +237,7 @@ async def lifespan(app: FastAPI):
                 result_wait_sec=config.IDLE_PHOTOGRAPHER_RESULT_WAIT_SEC,
                 notable_jaccard=config.IDLE_PHOTOGRAPHER_NOTABLE_JACCARD,
                 question=config.IDLE_WANDER_PROMPT,
+                camera_denied=config.kid_mode_on,
             )
         )
     else:

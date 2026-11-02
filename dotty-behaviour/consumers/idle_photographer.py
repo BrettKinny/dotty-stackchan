@@ -4,8 +4,9 @@ Loop shape (per bridge.py's _perception_idle_photographer):
   1. Sleep a jittered SLEEP_MIN..SLEEP_MAX seconds.
   2. Pick a target device (most-recent vision_cache device, else first
      known).
-  3. Skip if device is not in idle state, listening, or has a face
-     present (room-view path covers those scenarios).
+  3. Skip if Kid Mode denies the camera, or the device is not in idle
+     state, listening, or has a face present (room-view path covers
+     those scenarios).
   4. Snapshot the current vision_cache wall_ts so we can detect
      freshness later.
   5. Dispatch take_photo and wait RESULT_WAIT seconds for the firmware
@@ -24,6 +25,7 @@ import asyncio
 import logging
 import random
 import time
+from typing import Callable
 
 from dispatch import XiaozhiAdminClient
 from logs import NdjsonWriter
@@ -44,6 +46,7 @@ class IdlePhotographer:
         result_wait_sec: float,
         notable_jaccard: float,
         question: str,
+        camera_denied: Callable[[], bool],
     ) -> None:
         self._state = state
         self._xiaozhi = xiaozhi
@@ -53,6 +56,7 @@ class IdlePhotographer:
         self._result_wait_sec = result_wait_sec
         self._notable_jaccard = notable_jaccard
         self._question = question
+        self._camera_denied = camera_denied
 
     async def run(self) -> None:
         log.info(
@@ -75,6 +79,8 @@ class IdlePhotographer:
             log.exception("idle photographer crashed")
 
     async def _one_cycle(self) -> None:
+        if self._camera_denied():
+            return
         device_id = self._state.pick_idle_device()
         if not device_id:
             return
