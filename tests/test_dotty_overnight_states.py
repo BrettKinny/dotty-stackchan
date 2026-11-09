@@ -263,3 +263,9 @@ def test_sleep_hold_is_judged_before_cleanup_wakes_robot(tmp_path, monkeypatch, 
 ])
 def test_name_hotword_only_when_reply_expects_the_name(case_id, wanted):
     assert runner.wants_name_hotword(CATALOGUE[case_id]) is wanted
+
+
+def test_hotword_args_prefers_the_cases_own_words():
+    assert runner.hotword_args(CATALOGUE["V02-repeat"]) == ["--hotwords", "purple, robot, seven, window, banana"]
+    assert runner.hotword_args(CATALOGUE["V03-arithmetic"]) == []
+    assert runner.hotword_args({"reply": [["dotty"]]}) == ["--hotwords", runner.RESPONSE_HOTWORDS]

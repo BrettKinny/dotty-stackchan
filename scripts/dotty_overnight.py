@@ -199,6 +199,16 @@ def wants_name_hotword(case):
     target = normalize(RESPONSE_HOTWORDS)
     return any(normalize(option) == target
                for group in case.get("reply", []) for option in group)
+
+
+def hotword_args(case):
+    """Transcriber flags for a reply: a case's own word list, else the name.
+
+    A bare word list gives Whisper no context ("purple" came back as "Apple",
+    "Huckle", "Couple"). The bias also fills in a clipped first word, so these
+    cases cannot detect under about 0.5 s of lost reply audio (#200)."""
+    hotwords = case.get("reply_hotwords") or (RESPONSE_HOTWORDS if wants_name_hotword(case) else None)
+    return ["--hotwords", hotwords] if hotwords else []
 NOVAD_MAX_NO_SPEECH = .5
 
 
@@ -1132,8 +1142,7 @@ def run_case(session, config, case):
                             *(["--normalize", "--vad-threshold", str(result["response_vad_threshold"])]
                               if label == "response" else []),
                             # The name bias invents a lone "Dotty" in a silent crop.
-                            *(["--hotwords", RESPONSE_HOTWORDS]
-                              if label == "response" and wants_name_hotword(case) else [])],
+                            *(hotword_args(case) if label == "response" else [])],
                             directory / f"{label}-transcribe.log", session, 120,
                             deadline=datetime.fromisoformat(config["finish_at"]).timestamp())
             analysis = load(directory / f"{label}.json")
@@ -1163,7 +1172,7 @@ def run_case(session, config, case):
             guarded_process([config["python"], ROOT / "scripts/dotty_av_media.py", "transcribe",
                             directory / "response.wav", "--model", config["model"],
                             "--output", directory / "response-novad.json", "--normalize", "--no-vad",
-                             *(["--hotwords", RESPONSE_HOTWORDS] if wants_name_hotword(case) else [])],
+                             *hotword_args(case)],
                             directory / "response-novad-transcribe.log", session, 120,
                             deadline=datetime.fromisoformat(config["finish_at"]).timestamp())
             # Stricter: without VAD the name bias can invent a lone "Dotty" in
