@@ -1,3 +1,10 @@
+> [!WARNING]
+> ## 🧊 This project is on ice
+>
+> **Development is paused because my StackChan has developed a battery/power issue.** I may pick it back up if I can fix the hardware.
+>
+> **Dotty is in pretty good shape as it stands**, and I hope it's a useful starting point for anyone building their own self-hosted StackChan assistant. Fork away. Issues and PRs may go unanswered while the project is on hold.
+
 <p align="center">
   <img src="bridge/assets/dotty-hero.svg" alt="Dotty mascot" width="200">
 </p>
